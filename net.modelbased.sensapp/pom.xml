@@ -1,0 +1,66 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" 
+	 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+	 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>net.modelbased</groupId>
+  <artifactId>net.modelbased.sensapp</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>SensApp</name>
+  <description>
+    SensApp, the ultimate platform to collect sensor network data
+  </description>
+  <inceptionYear>2011</inceptionYear>
+  
+  <licenses>
+    <license>
+      <name>LGPL</name>
+      <url>http://www.gnu.org/licenses/lgpl-3.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+  
+  <organization>
+  	<name>SINTEF IKT / MOD team</name>
+  	<url>http://modelbased.net</url>
+  </organization>
+  
+  <properties>
+    <maven.compiler.source>1.6</maven.compiler.source>
+    <maven.compiler.target>1.6</maven.compiler.target>
+    <encoding>UTF-8</encoding>
+    <scala.version>2.9.1</scala.version>
+  </properties>
+  
+  <repositories>
+    <repository>
+      <id>scala-tools.org</id> 
+      <name>releases</name> 
+      <url>http://scala-tools.org/repo-releases</url> 
+    </repository>  
+  </repositories>
+  
+  <dependencies>
+    <dependency>
+      <groupId>org.scala-lang</groupId>
+      <artifactId>scala-library</artifactId>
+      <version>${scala.version}</version>
+    </dependency>
+    <!-- Test -->
+    <dependency>
+      <groupId>org.specs2</groupId> 
+      <artifactId>specs2_${scala.version}</artifactId> 
+      <version>1.6.1</version> 
+    </dependency>
+    <dependency>
+      <groupId>org.specs2</groupId> 
+      <artifactId>specs2-scalaz-core_${scala.version}</artifactId> 
+      <version>6.0.1</version> 
+    </dependency>
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>4.9</version>
+    </dependency>
+  </dependencies>
+</project>
