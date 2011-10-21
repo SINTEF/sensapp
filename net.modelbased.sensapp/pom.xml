@@ -21,7 +21,7 @@
   </licenses>
   
   <organization>
-  	<name>SINTEF IKT / MOD team</name>
+  	<name>SINTEF ICT / MOD team</name>
   	<url>http://modelbased.net</url>
   </organization>
   
@@ -40,27 +40,70 @@
     </repository>  
   </repositories>
   
+  
   <dependencies>
     <dependency>
       <groupId>org.scala-lang</groupId>
       <artifactId>scala-library</artifactId>
       <version>${scala.version}</version>
     </dependency>
-    <!-- Test -->
+    
     <dependency>
+      <!-- Specifications Unit Tests -->
       <groupId>org.specs2</groupId> 
       <artifactId>specs2_${scala.version}</artifactId> 
       <version>1.6.1</version> 
     </dependency>
-    <dependency>
-      <groupId>org.specs2</groupId> 
-      <artifactId>specs2-scalaz-core_${scala.version}</artifactId> 
-      <version>6.0.1</version> 
-    </dependency>
-    <dependency>
-      <groupId>junit</groupId>
-      <artifactId>junit</artifactId>
-      <version>4.9</version>
-    </dependency>
   </dependencies>
+  
+  <build>
+    <sourceDirectory>src/main/scala</sourceDirectory>
+    <testSourceDirectory>src/test/scala</testSourceDirectory>
+    <plugins>
+      <plugin>
+	    <inherited>true</inherited>
+	    <groupId>com.mycila.maven-license-plugin</groupId>
+	    <artifactId>maven-license-plugin</artifactId>
+	    <version>1.9.0</version>
+	    <configuration>
+	        <strictCheck>true</strictCheck>
+	        <header>${project.parent.basedir}/../LICENCE_HEADER.txt</header>
+	        <failIfMissing>true</failIfMissing>
+	        <aggregate>true</aggregate>
+	        <properties>
+	        	<projectname>SensApp</projectname>
+	        	<projecturl>http://sensapp.modelbased.net</projecturl>
+	        	<organization>SINTEF ICT</organization>
+	            <owner>Sebastien Mosser</owner>
+	            <year>${project.inceptionYear}</year>
+	            <email>sebastien.mosser@sintef.no</email>
+	        </properties>
+	        <mapping>
+	          <scala>JAVADOC_STYLE</scala>
+	        </mapping>
+	        <excludes>
+	            <exclude>.gitignore</exclude>
+	            <exclude>.cache</exclude>
+	            <exclude>*.txt</exclude>
+	            <exclude>**/src/test/resources/**</exclude>
+	            <exclude>**/src/test/data/**</exclude>
+	        </excludes>
+	    </configuration>
+	    <executions>
+	        <execution>
+	            <id>check-headers</id>
+	            <phase>verify</phase>
+	            <goals>
+	                <goal>check</goal>
+	            </goals>
+	        </execution>
+	    </executions>
+	  </plugin>
+    </plugins>
+  </build>
+  
+  <modules>
+  	<module>../net.modelbased.sensapp.core</module>
+  </modules>
+  
 </project>
