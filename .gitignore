@@ -1,2 +1,4 @@
 .metadata/
 net.modelbased.sensapp.core/.cache
+net.modelbased.sensapp.restful/.cache
+sandbox.services/
