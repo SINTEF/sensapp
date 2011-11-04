@@ -1,9 +1,10 @@
 /**
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
- * Module: ${project.artifactId}
  * Copyright (C) 2011-  SINTEF ICT
  * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
+ *
+ * Module: net.modelbased.sensapp.restful
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
