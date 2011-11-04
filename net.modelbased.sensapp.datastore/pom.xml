@@ -1,0 +1,32 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>net.modelbased.sensapp</groupId>
+  <artifactId>net.modelbased.sensapp.datastore</artifactId>
+  <name>SensApp Datastore API</name>
+  <description>This module implements the Datastore API used in SensApp</description>
+  
+    <dependencies>
+	  <dependency>
+			<groupId>com.mongodb.casbah</groupId>
+			<artifactId>casbah-query_2.9.1</artifactId>
+			<version>2.1.5-1</version>
+		</dependency>
+		<dependency>
+			<groupId>com.mongodb.casbah</groupId>
+			<artifactId>casbah-core_2.9.1</artifactId>
+			<version>2.1.5-1</version>
+		</dependency>
+		<dependency>
+			<groupId>com.mongodb.casbah</groupId>
+			<artifactId>casbah-commons_2.9.1</artifactId>
+			<version>2.1.5-1</version>
+		</dependency>
+  </dependencies>
+  
+  <parent>
+  	<groupId>net.modelbased</groupId>
+  	<artifactId>net.modelbased.sensapp</artifactId>
+  	<version>0.0.1-SNAPSHOT</version>
+  	<relativePath>../net.modelbased.sensapp</relativePath>
+  </parent>
+</project>
