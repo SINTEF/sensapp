@@ -2,3 +2,6 @@
 net.modelbased.sensapp.core/.cache
 net.modelbased.sensapp.restful/.cache
 sandbox.services/
+.DS_Store
+LICENCE_HEADER.txt~
+net.modelbased.sensapp.datastore/.cache

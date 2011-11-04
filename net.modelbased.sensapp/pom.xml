@@ -34,12 +34,16 @@
   
   <repositories>
     <repository>
-      <id>scala-tools.org</id> 
+      <id>scala-tools.org-Releases</id> 
       <name>releases</name> 
       <url>http://scala-tools.org/repo-releases</url> 
+    </repository>
+    <repository>
+      <id>scala-tools.org-Snapshots</id> 
+      <name>snapshots</name> 
+      <url>http://scala-tools.org/repo-snapshots</url> 
     </repository>  
   </repositories>
-  
   
   <dependencies>
     <dependency>
@@ -79,7 +83,7 @@
 	    <configuration>
 	        <strictCheck>true</strictCheck>
 	        <header>${project.basedir}/../LICENCE_HEADER.txt</header>
-	        <failIfMissing>false</failIfMissing>
+	        <failIfMissing>true</failIfMissing>
 	        <aggregate>true</aggregate>
 	        <properties>
 	        	<projectname>SensApp</projectname>
@@ -88,6 +92,7 @@
 	            <owner>Sebastien Mosser</owner>
 	            <year>${project.inceptionYear}</year>
 	            <email>sebastien.mosser@sintef.no</email>
+	            <artid>${project.artifactId}</artid>
 	        </properties>
 	        <mapping>
 	          <scala>JAVADOC_STYLE</scala>
@@ -150,6 +155,9 @@
   
   <modules>
   	<module>../net.modelbased.sensapp.restful</module>
+  	
+  	<module>../net.modelbased.sensapp.registry</module>
+  	<module>../net.modelbased.sensapp.datastore</module>
   </modules>
 
 </project>
