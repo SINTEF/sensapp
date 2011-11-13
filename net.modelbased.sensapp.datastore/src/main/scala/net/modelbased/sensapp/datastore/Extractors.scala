@@ -48,16 +48,32 @@ trait Extractors[T] extends DataSpecific[T] {
     }
   }
   
-   /**
+  /**
     * Extract in a given DBObject a list of DBObject stored in a given field
     * 
     * @param obj the DBObject used as extraction basis 
     * @param name the field name
+    * @param f the function to be used to transform an AnyRef data into T
     * @return the list of retrieved objects
     */
   @MongoDBSpecific
-  protected def extractList(obj: DBObject, name: String): List[DBObject] = {
-    val tmp = obj.as[BasicDBList](name)
-    tmp.toList map { _.asInstanceOf[DBObject] }
+  protected def extractListAs[T](obj: DBObject, name: String, f: AnyRef => T): List[T] = {
+    obj.as[BasicDBList](name).toList map { f(_) }
   }
+    
+   /**
+    * Extract in a given DBObject a list of T stored in a given field
+    * 
+    * <strong>Remark</strong>: this method implements syntactic sugar for "asInstanceOf" casts
+    * 
+    * @param obj the DBObject used as extraction basis 
+    * @param name the field name
+    * @return the list of retrieved objects, CASTED as T instances 
+    */
+  @MongoDBSpecific
+  protected def extractListAs[T](obj: DBObject, name: String): List[T] = {
+    val caster: (AnyRef => T) = { _.asInstanceOf[T] }
+    extractListAs[T](obj, name, caster)
+  }
+  
 }

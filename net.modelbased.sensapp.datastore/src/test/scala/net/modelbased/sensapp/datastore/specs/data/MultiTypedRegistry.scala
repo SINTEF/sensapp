@@ -20,28 +20,23 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.datastore.specs
+package net.modelbased.sensapp.datastore.specs.data
 
-import net.modelbased.sensapp.datastore._
 import com.mongodb.casbah.Imports._
 
-abstract class DataModelRegistry[T <: DataModel] extends DataStore[T] {
-  override final val databaseName = "sensapp_datastore_test"  
-  override def identify(data: T) = ("n", data.n)
-}
-
-
+/**
+ * This Registry handle very simple persistent objects.
+ * @author Sebastien Mosser
+ */
 class MultiTypedRegistry extends DataModelRegistry[MultiTypedData] {
   
   override val collectionName = "multi_typed"
   
-  protected def serialize(obj: MultiTypedData): DBObject = {
+  override def serialize(obj: MultiTypedData): DBObject = {
     MongoDBObject("n" -> obj.n, "v" -> obj.v)
   }
   
-  protected def deserialize(dbObj: DBObject): MultiTypedData = {
+  override def deserialize(dbObj: DBObject): MultiTypedData = {
     MultiTypedData(dbObj.as[String]("n"), dbObj.as[Int]("v"))
   }
- 
 }
-

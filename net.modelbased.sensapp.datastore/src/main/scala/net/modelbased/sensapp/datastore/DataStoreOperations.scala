@@ -71,7 +71,7 @@ trait DataStoreOperations[T] extends DataSpecific[T] {
    * The retrieve method is used to perform a criteria-based query
    * 
    * @param criteria a list of expected criterion (AND semantics)
-   * @return a list of objects that actually matched these criteria
+   * @return a list of objects that EXACTLY matched these criteria
    */
   def retrieve(criteria: List[(String, Any)]): List[T] = {
     val prototype = MongoDBObject.newBuilder
