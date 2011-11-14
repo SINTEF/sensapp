@@ -54,6 +54,8 @@ class URIPattern(val schema: String) {
    * extract the parameters contained in a request according to the declared schema
    */
   def extract(request: String): Map[String, String] = {
+    if(_parameters.isEmpty)
+      return Map()
     val data = (_regexp unapplySeq request) match {
       case Some(list) => list
       case None => throw new IllegalArgumentException("request does not match")
