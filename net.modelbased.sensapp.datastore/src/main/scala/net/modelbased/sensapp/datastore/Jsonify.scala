@@ -41,7 +41,10 @@ trait Jsonify[T] extends DataSpecific[T] {
    */
   @MongoDBSpecific
   def fromJSON(json: String): T = {
-    val dbObj = JSON.parse(json).asInstanceOf[BasicDBObject].asDBObject
+    val raw = JSON.parse(json)
+    if (null == raw)
+      throw new RuntimeException("Unable to parse JSON data") // FIXME (DataStoreException)
+    val dbObj = raw.asInstanceOf[BasicDBObject].asDBObject
     deserialize(dbObj)
   }
   
