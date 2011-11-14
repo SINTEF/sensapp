@@ -6,3 +6,4 @@ sandbox.services/
 LICENCE_HEADER.txt~
 net.modelbased.sensapp.datastore/.cache
 sandbox.*
+net.modelbased.sensapp.registry/.cache
