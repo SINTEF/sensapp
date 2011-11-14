@@ -96,6 +96,7 @@
 	        </properties>
 	        <mapping>
 	          <scala>JAVADOC_STYLE</scala>
+	          <conf>SCRIPT_STYLE</conf>
 	        </mapping>
 	        <excludes>
 	            <exclude>.gitignore</exclude>
