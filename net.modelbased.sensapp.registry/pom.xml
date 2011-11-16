@@ -4,7 +4,7 @@
   <artifactId>net.modelbased.sensapp.registry</artifactId>
   <name>SensApp Registry</name>
   <description>SensApp Registry, used to store sensor and services</description>
-
+  <packaging>war</packaging>
   <repositories>
     <!-- Jetty container -->
     <repository>
@@ -25,20 +25,13 @@
   		<artifactId>net.modelbased.sensapp.restful</artifactId>
   		<version>0.0.1-SNAPSHOT</version>
   	</dependency>
-  	<!-- Only Jetty >8 supports servlet v3.0 (async/Mist) -->
-  	<dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-webapp</artifactId>
-      <version>8.0.0.M2</version>
-    </dependency>
-    <!-- Servlet 3.0 dependency -->
-    <dependency>
-    	<groupId>org.mortbay.jetty</groupId>
-    	<artifactId>servlet-api-3.0</artifactId>
-    	<version>7.0.0pre2</version>
-    </dependency>
+  	<dependency> <!-- FIXME -->
+  		<groupId>org.eclipse.jetty</groupId>
+  		<artifactId>example-jetty-embedded</artifactId>
+  		<version>8.0.4.v20111024</version>
+  	</dependency>
   </dependencies>
-  
+
   <build>
     <plugins>
       <plugin>
