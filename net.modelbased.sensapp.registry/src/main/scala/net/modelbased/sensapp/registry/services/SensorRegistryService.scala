@@ -38,8 +38,9 @@ class SensorRegistryService(p: URIPattern, r: String) extends ResourceHandler(p,
   private val _registry = new SensorRegistry()
   
   // The bindings expected as a ResourceHandler 
-  override val _bindings = Map("GET"  -> { getSensor(_) }, 
-		  					   "POST" -> { addSensor(_) })
+  override val _bindings = Map("GET" -> { getSensor(_) },
+		  					   "PUT" -> { updateSensor(_) },
+		  					   "DELETE" -> { delSensor(_) })
   
   /**
    * Retrieve a sensor from the registry, exposed as JSON
@@ -48,7 +49,7 @@ class SensorRegistryService(p: URIPattern, r: String) extends ResourceHandler(p,
    * 
    * @param req the received request
    */
-  private def getSensor(req: RequestMethod) = { 
+  private def getSensor(req: RequestMethod): Boolean = { 
     val identifier = _params("id")
     req.response.setContentType(MediaType.APPLICATION_JSON)
     _registry pull ("id", identifier) match {
@@ -57,25 +58,40 @@ class SensorRegistryService(p: URIPattern, r: String) extends ResourceHandler(p,
     }  
   }
   
+  
   /**
-   * Add a sensor into the registry, provided as JSON
-   * 
-   * <strong>Remark</strong>: 
-   * <ul>
-   * <li>The sensor is described using JSON</li>
-   * <li>The description is provided through the <code>descriptor</code> parameter</li>
-   * <li> A conflict (409) is returned if the descriptot ID does not match the URL one
-   * </ul>
+   * Update an existing sensor
+   * @param req the received request
    */
-  private def addSensor(req: RequestMethod) = {
+  private def updateSensor(req: RequestMethod): Boolean = { 
+    val identifier = _params("id")
     val json = req.getParameterOrElse("descriptor", _ => "{}")
     val sensor = _registry.fromJSON(json)
-    req.response.setContentType(MediaType.TEXT_PLAIN)
-    if (_params("id") != sensor.id){
-     req Conflict ("Url refers to id ["+_params("id")+"], but descriptor uses ["+sensor.id+"]")
+    if(sensor.id != identifier) {
+      req Conflict "Descriptor id ["+sensor.id+"] does not match URL ones ["+identifier+"]"
     } else {
-      _registry push sensor
-      req OK "true"
+      _registry.pull(_registry.identify(sensor)) match {
+        case None => req NotFound "Sensor ["+sensor.id+"] does not exist"
+        case Some(_) => {
+          _registry push sensor
+          req OK "Sensor descriptor ["+sensor.id+"] updated"
+        }
+      }
     }
+  }
+ 
+  /**
+   * Delete a Sensor
+   * @param req the received request
+   */
+  private def delSensor(req: RequestMethod): Boolean = { 
+    val identifier = _params("id")
+    _registry pull ("id", identifier) match {
+      case Some(sensor) => {
+        _registry drop sensor
+        req OK "deleted"
+      }
+      case None => req NotFound ("Sensor ["+identifier+"] not found")
+    }  
   }
 }

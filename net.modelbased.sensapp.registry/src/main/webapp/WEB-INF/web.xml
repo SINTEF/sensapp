@@ -38,5 +38,5 @@
   <servlet-mapping>
     <servlet-name>AkkaMistServlet</servlet-name>
     <url-pattern>/sensapp-registry/*</url-pattern>
-  </servlet-mapping>
+  </servlet-mapping> 
 </web-app>

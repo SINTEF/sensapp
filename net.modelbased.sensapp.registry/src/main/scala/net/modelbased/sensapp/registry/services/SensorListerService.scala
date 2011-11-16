@@ -32,16 +32,52 @@ import javax.ws.rs.core.MediaType
  */
 class SensorListerService(p: URIPattern, r: String) extends ResourceHandler(p,r) {
  
-  override val _bindings = Map("GET" -> { getSensorList(_) })
+  override val _bindings = Map("GET"  -> { getSensorList(_) },
+		  				       "POST" -> { addSensor(_) } )
+  
+  private val _registry = new SensorRegistry()
   
   /**
    * Return a list of URLs to the registered sensors
    */
   private def getSensorList(req: RequestMethod): Boolean = {
-    val _registry = new SensorRegistry()
-    val jsonList = _registry.retrieve(List()) map { "\"" + req.request.getRequestURL() +"/" + _.id + "\""}
+    val jsonList = _registry.retrieve(List()) map { "\"" + buildSensorURI(req,_) + "\""}
     req.response.setContentType(MediaType.APPLICATION_JSON)
-    req OK "[" + (jsonList mkString ",") + "]"
+    req OK "[" + (jsonList mkString ", ") + "]"
   } 
   
+  /**
+   * Add a sensor into the registry, provided as JSON
+   * 
+   * <strong>Remark</strong>: 
+   * <ul>
+   * <li>The sensor is described using JSON</li>
+   * <li>The description is provided through the <code>descriptor</code> parameter</li>
+   * <li> A conflict (409) is returned if the descriptor ID is already used
+   * <li> A Created (201) is returned, and location is set to the sensor URI
+   * </ul>
+   */
+  private def addSensor(req: RequestMethod) = {
+    req.response.setContentType(MediaType.TEXT_PLAIN)
+    val json = req.getParameterOrElse("descriptor", _ => "{}")
+    val sensor = _registry.fromJSON(json)
+    _registry.pull(_registry.identify(sensor)) match {
+      case Some(s) => req Conflict ("Sensor id is already used ["+sensor.id+"]")
+      case None => {
+        _registry push sensor
+        req.response.setHeader("Location", buildSensorURI(req,sensor))
+        req Created "true"
+      }
+    }
+  }
+
+  /**
+   * Build the URI associated to a sensor, using the requestURL as prefix
+   * 
+   * @param req the received request
+   * @param s the sensor
+   */
+  private def buildSensorURI(req: RequestMethod, s: Sensor): String = {
+    req.request.getRequestURL() +"/" + s.id 
+  }
 }
