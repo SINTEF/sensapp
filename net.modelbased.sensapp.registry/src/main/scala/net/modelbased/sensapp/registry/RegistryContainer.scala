@@ -25,6 +25,8 @@ package net.modelbased.sensapp.registry
 import net.modelbased.sensapp.restful._
 import net.modelbased.sensapp.registry.services._
 
+class Boot extends AbstractBoot[RegistryContainer]
+
 class RegistryContainer extends Container {
 
   val sensorRegistryPattern = new URIPattern("/sensapp-registry/sensors/{id:string}")

@@ -28,7 +28,7 @@
 		 xsi:schemaLocation="http://java.sun.com/xml/ns/javaee http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd"
 		 version="3.0">
   <listener>
-	<listener-class>net.modelbased.sensapp.registry.Initializer</listener-class>
+	<listener-class>net.modelbased.sensapp.restful.Initializer</listener-class>
   </listener>
   <servlet>
     <servlet-name>AkkaMistServlet</servlet-name>
