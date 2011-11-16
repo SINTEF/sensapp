@@ -1,0 +1,72 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>net.modelbased.sensapp</groupId>
+  <artifactId>net.modelbased.sensapp.rrd</artifactId>
+  <name>SensApp RRD Data Storage</name>
+  <description>
+  	This module implements a RESTful API to store and retrieve data from a Round Robin Database (RRD)
+  </description>
+ 
+ 
+  <repositories>
+  	<!-- Akka: Actors and Mist-->
+    <repository>
+  	  <id>typesafe</id>
+      <name>Typesafe Repository</name>
+      <url>http://repo.typesafe.com/typesafe/releases/</url>
+    </repository>
+    <!-- Jetty: Servlet 3.0 API -->
+    <repository>
+  	  <id>jetty</id>
+      <name>Jetty Repository</name>
+      <url>http://oss.sonatype.org/content/groups/jetty/</url>
+    </repository>
+  </repositories>
+  
+  <dependencies>
+	<dependency>
+  		<groupId>net.modelbased.sensapp</groupId>
+  		<artifactId>net.modelbased.sensapp.datastore</artifactId>
+  		<version>0.0.1-SNAPSHOT</version>
+  	</dependency>
+  	<dependency>
+  		<groupId>net.modelbased.sensapp</groupId>
+  		<artifactId>net.modelbased.sensapp.restful</artifactId>
+  		<version>0.0.1-SNAPSHOT</version>
+  	</dependency>
+    <dependency>
+        <groupId>org.rrd4j</groupId>
+        <artifactId>rrd4j</artifactId>
+        <version>2.0.7</version>
+    </dependency>
+  	<!-- Only Jetty >8 supports servlet v3.0 (async/Mist) -->
+  	<dependency>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>jetty-webapp</artifactId>
+      <version>8.0.0.M2</version>
+    </dependency>
+    <!-- Servlet 3.0 dependency -->
+    <dependency>
+    	<groupId>org.mortbay.jetty</groupId>
+    	<artifactId>servlet-api-3.0</artifactId>
+    	<version>7.0.0pre2</version>
+    </dependency>
+  </dependencies>
+
+   <build>
+    <plugins>
+      <plugin>
+  	    <groupId>org.mortbay.jetty</groupId>
+ 	    <artifactId>jetty-maven-plugin</artifactId>
+ 	    <version>8.0.0.RC0</version>
+	  </plugin>
+    </plugins>
+  </build>
+ 
+  <parent>
+  	<groupId>net.modelbased</groupId>
+  	<artifactId>net.modelbased.sensapp</artifactId>
+  	<version>0.0.1-SNAPSHOT</version>
+  	<relativePath>../net.modelbased.sensapp</relativePath>
+  </parent>
+</project>
