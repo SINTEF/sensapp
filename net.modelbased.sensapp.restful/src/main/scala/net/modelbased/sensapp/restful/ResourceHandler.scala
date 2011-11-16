@@ -93,9 +93,7 @@ abstract class ResourceHandler(val pattern: URIPattern, val request: String)
    * @param method the receive request
    */
   private def handleRequest(lambda: Handler, method: RequestMethod): Boolean = {
-    try { 
-      lambda(method) 
-    } 
+    try { lambda(method) } 
     catch { 
       case e: Exception => { 
         method.response.setContentType(MediaType.TEXT_PLAIN)
