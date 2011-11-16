@@ -45,6 +45,35 @@
     </repository>  
   </repositories>
   
+  <profiles>
+    <profile>
+      <id>deployer</id>
+      <activation>
+        <activeByDefault>false</activeByDefault>
+      </activation>
+      <build>
+      <plugins>
+        <plugin>
+          <artifactId>maven-antrun-plugin</artifactId>
+          <executions>
+            <execution>
+              <phase>package</phase>
+                <configuration>
+                  <tasks>
+                    <copy todir="${jetty.deploy.dir}" file="target/${project.artifactId}-${project.version}.war" />
+                  </tasks>
+                </configuration>
+                <goals>
+                  <goal>run</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+  
   <dependencies>
     <dependency>
       <groupId>org.scala-lang</groupId>
@@ -61,7 +90,7 @@
     <dependency>
    	  <groupId>org.specs2</groupId> 
       <artifactId>specs2-scalaz-core_${scala.version}</artifactId> 
-      <version>6.0.1</version> 
+      <version>6.0.1</version>
     </dependency>
     <dependency>
     	<groupId>junit</groupId>
@@ -129,7 +158,7 @@
             </goals>
             <configuration>
               <args>
-                <arg>-make:transitive</arg>
+                <arg>-deprecation</arg>
                 <arg>-dependencyfile</arg>
                 <arg>${project.build.directory}/.scala_dependencies</arg>
               </args>
@@ -156,7 +185,6 @@
   
   <modules>
   	<module>../net.modelbased.sensapp.restful</module>
-  	
   	<module>../net.modelbased.sensapp.registry</module>
   	<module>../net.modelbased.sensapp.datastore</module>
   </modules>
