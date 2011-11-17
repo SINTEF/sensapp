@@ -45,8 +45,9 @@ object HelloRRD {
       rrdDef.addArchive(ConsolFun.AVERAGE, 0.5, 6, 700) // 6 steps, 700 rows
       rrdDef.addArchive(ConsolFun.MAX, 0.5, 1, 600);
 
-      var f = new RrdMongoDBBackendFactory()
-     f.
+
+    //  var f = new RrdMongoDBBackendFactory()
+
 
 
 

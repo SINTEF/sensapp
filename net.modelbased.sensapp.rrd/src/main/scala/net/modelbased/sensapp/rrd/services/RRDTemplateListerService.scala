@@ -23,19 +23,25 @@
 package net.modelbased.sensapp.rrd.services
 
 import net.modelbased.sensapp.restful._
+import net.modelbased.sensapp.rrd.datamodel._
 import akka.http._
 import javax.ws.rs.core.MediaType
 
 /**
  * List all registered sensors in the registry
  */
-class HelloWorld(p: URIPattern, r: String) extends ResourceHandler(p,r) {
+class RRDTemplateListerService(p: URIPattern, r: String) extends ResourceHandler(p,r) {
  
-  override val _bindings = Map("GET" -> { hello(_) })
-
-   private def hello(req: RequestMethod): Boolean = {
-    req.response.setContentType(MediaType.TEXT_PLAIN)
-    req OK "World!"
-  }
+  override val _bindings = Map("GET" -> { getRRDTemplateList(_) })
+  
+  /**
+   * Return a list of URLs to the registered sensors
+   */
+  private def getRRDTemplateList(req: RequestMethod): Boolean = {
+    val _registry = new RRDTemplateRegistry()
+    val jsonList = _registry.retrieve(List()) map { "\"" + req.request.getRequestURL() +"/" + _.id + "\""}
+    req.response.setContentType(MediaType.APPLICATION_JSON)
+    req OK "[" + (jsonList mkString ",") + "]"
+  } 
   
 }

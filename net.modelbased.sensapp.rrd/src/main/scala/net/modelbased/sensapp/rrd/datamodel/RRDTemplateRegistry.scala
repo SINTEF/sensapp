@@ -20,7 +20,7 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.rrd
+package net.modelbased.sensapp.rrd.datamodel
 
 /**
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
@@ -44,23 +44,27 @@ package net.modelbased.sensapp.rrd
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-import net.modelbased.sensapp.restful._
-import net.modelbased.sensapp.rrd.services._
-
-class RegistryContainer extends Container {
-
-  val helloPattern = new URIPattern("/sensapp-rrd/hello")
-  val helloFactory = { req: String => new HelloWorld(helloPattern, req) }
-
-  val templateRegistryPattern = new URIPattern("/sensapp-rrd/rrd-templates/{id:string}")
-  val templateRegistryFactory = { req: String => new RRDTemplateRegistryService(templateRegistryPattern, req) }
-
-  val templateListerPattern = new URIPattern("/sensapp-rrd/rrd-templates")
-  val templateListerFactory = { req: String => new RRDTemplateListerService(templateListerPattern, req) }
-
-  override val _registered = List(
-      bind(helloPattern, helloFactory),
-      bind(templateListerPattern, templateListerFactory),
-      bind(templateRegistryPattern, templateRegistryFactory)
-      )
+import net.modelbased.sensapp.datastore._
+import com.mongodb.casbah.Imports._
+import com.mongodb.casbah.commons.MongoDBObjectBuilder
+import com.mongodb.util.JSON
+class RRDTemplateRegistry extends DataStore[RRDTemplate] {
+  
+  override val databaseName = "sensapp_db"
+  override val collectionName = "rrdtemplates"
+    
+  override def identify(t: RRDTemplate) = ("id", t.id)
+  
+  override def deserialize(dbObj: DBObject): RRDTemplate = {
+    val id: String = dbObj.as[String]("id")
+    val template: String = dbObj.as[String]("template")
+    new RRDTemplate(id, template)
+  }
+ 
+  override def serialize(obj: RRDTemplate): DBObject = {
+    val builder = MongoDBObject.newBuilder
+    builder += ("id" -> obj.id)
+    builder += ("template" -> obj.template)
+    builder.result
+  }
 }
