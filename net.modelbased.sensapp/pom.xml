@@ -42,6 +42,11 @@
       <id>scala-tools.org-Snapshots</id> 
       <name>snapshots</name> 
       <url>http://scala-tools.org/repo-snapshots</url> 
+    </repository>
+    <repository>
+      <id>SensApp</id>
+      <name>snapshots</name>
+      <url>https://repository-mosser.forge.cloudbees.com/snapshot/</url>
     </repository>  
   </repositories>
   
