@@ -62,16 +62,19 @@
       <groupId>org.specs2</groupId> 
       <artifactId>specs2_${scala.version}</artifactId> 
       <version>1.6.1</version> 
+      <scope>test</scope>
     </dependency>
     <dependency>
    	  <groupId>org.specs2</groupId> 
       <artifactId>specs2-scalaz-core_${scala.version}</artifactId> 
       <version>6.0.1</version>
+      <scope>test</scope>
     </dependency>
     <dependency>
     	<groupId>junit</groupId>
     	<artifactId>junit</artifactId>
     	<version>4.10</version>
+    	<scope>test</scope>
     </dependency>
   </dependencies>
   
