@@ -35,6 +35,21 @@ import com.mongodb.casbah.commons.MongoDBObjectBuilder
 trait DataStoreOperations[T] extends DataSpecific[T] {
   
   /**
+   * the exists method check if an object exists in the datastore based on a criterion
+   * 
+   * Assumption: the given criterion identify only ONE object, or none. 
+   * 
+   * @param id the criterion used to identify the object
+   *  @return False if no match found, True if 'id' matched an object.
+   */
+  def exists(id: Criterion): Boolean = {
+    pull(id) match {
+      case Some(_) => true
+      case None => false
+    }
+  }
+  
+  /**
    * The pull method retrieve an object from the DataStore based on a criterion.
    * 
    * Assumption: the given criterion identify only ONE object, or none. 
