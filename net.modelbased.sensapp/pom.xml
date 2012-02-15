@@ -12,6 +12,13 @@
   </description>
   <inceptionYear>2011</inceptionYear>
   
+  <properties>
+    <maven.compiler.source>1.6</maven.compiler.source>
+    <maven.compiler.target>1.6</maven.compiler.target>
+    <encoding>UTF-8</encoding>
+    <scala.version>2.9.1</scala.version>
+  </properties>
+  
   <licenses>
     <license>
       <name>LGPL</name>
@@ -24,13 +31,6 @@
   	<name>SINTEF ICT / MOD team</name>
   	<url>http://modelbased.net</url>
   </organization>
-  
-  <properties>
-    <maven.compiler.source>1.6</maven.compiler.source>
-    <maven.compiler.target>1.6</maven.compiler.target>
-    <encoding>UTF-8</encoding>
-    <scala.version>2.9.1</scala.version>
-  </properties>
   
   <repositories>
     <repository>
@@ -49,36 +49,7 @@
       <url>https://repository-mosser.forge.cloudbees.com/snapshot/</url>
     </repository>  
   </repositories>
-  
-  <profiles>
-    <profile>
-      <id>deployer</id>
-      <activation>
-        <activeByDefault>false</activeByDefault>
-      </activation>
-      <build>
-      <plugins>
-        <plugin>
-          <artifactId>maven-antrun-plugin</artifactId>
-          <executions>
-            <execution>
-              <phase>package</phase>
-                <configuration>
-                  <tasks>
-                    <copy todir="${jetty.deploy.dir}" file="target/${project.artifactId}-${project.version}.war" />
-                  </tasks>
-                </configuration>
-                <goals>
-                  <goal>run</goal>
-                </goals>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-  </profiles>
-  
+    
   <dependencies>
     <dependency>
       <groupId>org.scala-lang</groupId>
@@ -188,10 +159,9 @@
     </plugins>
   </build>
   
-  <modules>
-  	<module>../net.modelbased.sensapp.restful</module>
-  	<module>../net.modelbased.sensapp.registry</module>
-  	<module>../net.modelbased.sensapp.datastore</module>
-  </modules>
 
+  <modules>
+  	<module>../net.modelbased.sensapp.datastore</module>
+  	<module>../net.modelbased.sensapp.metamodel.repository</module>
+  </modules>
 </project>
