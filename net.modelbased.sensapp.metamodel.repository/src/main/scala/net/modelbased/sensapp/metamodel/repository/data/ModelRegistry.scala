@@ -20,21 +20,28 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.repository.model.data
+package net.modelbased.sensapp.metamodel.repository.data
 
-import cc.spray.json._
+import net.modelbased.sensapp.datastore._
+import com.mongodb.casbah.Imports._
+import com.mongodb.casbah.commons.MongoDBObjectBuilder
 
-/**
- * Case class implementing the domain model
- */
-case class Model (val name: String, val content: String)
+class ModelRegistry extends DataStore[Model] {
 
-
-/**
- * implicit function to marshal a Model into a JSON object
- */
-object ModelJsonProtocol extends DefaultJsonProtocol {
-  implicit val modelFormat = jsonFormat(Model, "name", "content")
+  override val databaseName = "sensapp_db"
+  override val collectionName = "models.registry" 
+    
+  override def identify(m: Model) = ("name", m.name)
+  
+  override def deserialize(dbObj: DBObject): Model = {
+    Model(dbObj.as[String]("name"), dbObj.as[String]("content"))
+  }
+ 
+  override def serialize(obj: Model): DBObject = {
+    val builder = MongoDBObject.newBuilder
+    builder += ("name" -> obj.name)
+    builder += ("content" -> obj.content)
+    builder.result
+  }
+    
 }
-
-

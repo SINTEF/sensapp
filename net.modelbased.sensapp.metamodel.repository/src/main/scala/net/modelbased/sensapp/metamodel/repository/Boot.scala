@@ -20,28 +20,30 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.repository.model.data
+package net.modelbased.sensapp.metamodel.repository
 
-import net.modelbased.sensapp.datastore._
-import com.mongodb.casbah.Imports._
-import com.mongodb.casbah.commons.MongoDBObjectBuilder
+import akka.config.Supervision._
+import akka.actor.Supervisor
+import akka.actor.Actor._
+import cc.spray._
 
-class ModelRegistry extends DataStore[Model] {
-
-  override val databaseName = "sensapp_db"
-  override val collectionName = "models.registry" 
-    
-  override def identify(m: Model) = ("name", m.name)
+class Boot {
   
-  override def deserialize(dbObj: DBObject): Model = {
-    Model(dbObj.as[String]("name"), dbObj.as[String]("content"))
-  }
- 
-  override def serialize(obj: Model): DBObject = {
-    val builder = MongoDBObject.newBuilder
-    builder += ("name" -> obj.name)
-    builder += ("content" -> obj.content)
-    builder.result
-  }
-    
+  val lister = new ModelLister {}
+  val repository = new ModelRepository {}
+
+  val listerService = actorOf(new HttpService(lister.service))
+  val repositoryService = actorOf(new HttpService(repository.service))
+  val rootService = actorOf(new RootService(listerService, repositoryService))
+
+  Supervisor(
+    SupervisorConfig(
+      OneForOneStrategy(List(classOf[Exception]), 3, 100),
+      List(
+        Supervise(listerService, Permanent),
+        Supervise(repositoryService, Permanent),
+        Supervise(rootService, Permanent)
+      )
+    )
+  )
 }

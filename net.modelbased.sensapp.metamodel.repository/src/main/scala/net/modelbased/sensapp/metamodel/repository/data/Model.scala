@@ -20,30 +20,21 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.repository.model
+package net.modelbased.sensapp.metamodel.repository.data
 
-import akka.config.Supervision._
-import akka.actor.Supervisor
-import akka.actor.Actor._
-import cc.spray._
+import cc.spray.json._
 
-class Boot {
-  
-  val lister = new ModelLister {}
-  val repository = new ModelRepository {}
+/**
+ * Case class implementing the domain model
+ */
+case class Model (val name: String, val content: String)
 
-  val listerService = actorOf(new HttpService(lister.service))
-  val repositoryService = actorOf(new HttpService(repository.service))
-  val rootService = actorOf(new RootService(listerService, repositoryService))
 
-  Supervisor(
-    SupervisorConfig(
-      OneForOneStrategy(List(classOf[Exception]), 3, 100),
-      List(
-        Supervise(listerService, Permanent),
-        Supervise(repositoryService, Permanent),
-        Supervise(rootService, Permanent)
-      )
-    )
-  )
+/**
+ * implicit function to marshal a Model into a JSON object
+ */
+object ModelJsonProtocol extends DefaultJsonProtocol {
+  implicit val modelFormat = jsonFormat(Model, "name", "content")
 }
+
+
