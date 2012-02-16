@@ -1,0 +1,830 @@
+{
+    "name": "language",
+    "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<ecore:EPackage xmi:version=\"2.0\"
+    xmlns:xmi=\"http://www.omg.org/XMI\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"
+    xmlns:ecore=\"http://www.eclipse.org/emf/2002/Ecore\" name=\"language\"
+    nsURI=\"http://www.w3.org/2001/SMIL20/Language\" nsPrefix=\"language\">
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"AnimateColorType\" eSuperTypes=\"smil20.ecore#//AnimateColorPrototype\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"animateColorType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"group\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"group:8\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"any\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\"
+        volatile=\"true\" transient=\"true\" derived=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"elementWildcard\"/>
+        <details key=\"wildcards\" value=\"##other\"/>
+        <details key=\"name\" value=\":9\"/>
+        <details key=\"processing\" value=\"lax\"/>
+        <details key=\"group\" value=\"#group:8\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"alt\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"alt\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"begin\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"begin\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"calcMode\" eType=\"ecore:EEnum smil20.ecore#//CalcModeType\"
+        defaultValueLiteral=\"linear\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"calcMode\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"class\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"class\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"dur\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"dur\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"end\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"end\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"fill\" eType=\"ecore:EEnum smil20.ecore#//FillTimingAttrsType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"fill\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"fillDefault\" eType=\"ecore:EEnum smil20.ecore#//FillDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"fillDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"id\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//ID\"
+        iD=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"id\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"lang\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Language\">
+      <eAnnotations source=\"http://www.eclipse.org/emf/2002/GenModel\">
+        <details key=\"documentation\" value=\"In due course, we should install the relevant ISO 2- and 3-letter&#xD;&#xA;                codes as the enumerated possible values . . .\"/>
+      </eAnnotations>
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"lang\"/>
+        <details key=\"namespace\" value=\"http://www.w3.org/XML/1998/namespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"longdesc\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//AnyURI\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"longdesc\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"max\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"max\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"min\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"min\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeat\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//NonNegativeInteger\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeat\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeatCount\" eType=\"ecore:EDataType smil20.ecore#//NonNegativeDecimalType\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeatCount\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeatDur\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeatDur\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"restart\" eType=\"ecore:EEnum smil20.ecore#//RestartTimingType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"restart\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"restartDefault\" eType=\"ecore:EEnum smil20.ecore#//RestartDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"restartDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"skipContent\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Boolean\"
+        defaultValueLiteral=\"true\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"skip-content\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncBehavior\" eType=\"ecore:EEnum smil20.ecore#//SyncBehaviorType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncBehavior\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncBehaviorDefault\" eType=\"ecore:EEnum smil20.ecore#//SyncBehaviorDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncBehaviorDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncTolerance\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncTolerance\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncToleranceDefault\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncToleranceDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"targetElement\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//IDREF\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"targetElement\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"anyAttribute\" unique=\"false\"
+        upperBound=\"-1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attributeWildcard\"/>
+        <details key=\"wildcards\" value=\"##any\"/>
+        <details key=\"name\" value=\":34\"/>
+        <details key=\"processing\" value=\"strict\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"AnimateMotionType\" eSuperTypes=\"smil20.ecore#//AnimateMotionPrototype\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"animateMotionType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"group\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"group:7\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"any\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\"
+        volatile=\"true\" transient=\"true\" derived=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"elementWildcard\"/>
+        <details key=\"wildcards\" value=\"##other\"/>
+        <details key=\"name\" value=\":8\"/>
+        <details key=\"processing\" value=\"lax\"/>
+        <details key=\"group\" value=\"#group:7\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"alt\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"alt\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"begin\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"begin\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"calcMode\" eType=\"ecore:EEnum smil20.ecore#//CalcModeType\"
+        defaultValueLiteral=\"linear\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"calcMode\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"class\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"class\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"dur\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"dur\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"end\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"end\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"fill\" eType=\"ecore:EEnum smil20.ecore#//FillTimingAttrsType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"fill\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"fillDefault\" eType=\"ecore:EEnum smil20.ecore#//FillDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"fillDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"id\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//ID\"
+        iD=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"id\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"lang\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Language\">
+      <eAnnotations source=\"http://www.eclipse.org/emf/2002/GenModel\">
+        <details key=\"documentation\" value=\"In due course, we should install the relevant ISO 2- and 3-letter&#xD;&#xA;                codes as the enumerated possible values . . .\"/>
+      </eAnnotations>
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"lang\"/>
+        <details key=\"namespace\" value=\"http://www.w3.org/XML/1998/namespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"longdesc\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//AnyURI\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"longdesc\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"max\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"max\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"min\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"min\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeat\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//NonNegativeInteger\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeat\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeatCount\" eType=\"ecore:EDataType smil20.ecore#//NonNegativeDecimalType\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeatCount\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeatDur\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeatDur\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"restart\" eType=\"ecore:EEnum smil20.ecore#//RestartTimingType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"restart\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"restartDefault\" eType=\"ecore:EEnum smil20.ecore#//RestartDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"restartDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"skipContent\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Boolean\"
+        defaultValueLiteral=\"true\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"skip-content\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncBehavior\" eType=\"ecore:EEnum smil20.ecore#//SyncBehaviorType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncBehavior\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncBehaviorDefault\" eType=\"ecore:EEnum smil20.ecore#//SyncBehaviorDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncBehaviorDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncTolerance\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncTolerance\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncToleranceDefault\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncToleranceDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"targetElement\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//IDREF\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"targetElement\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"anyAttribute\" unique=\"false\"
+        upperBound=\"-1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attributeWildcard\"/>
+        <details key=\"wildcards\" value=\"##any\"/>
+        <details key=\"name\" value=\":33\"/>
+        <details key=\"processing\" value=\"strict\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"AnimateType\" eSuperTypes=\"smil20.ecore#//AnimatePrototype\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"animateType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"group\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"group:8\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"any\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\"
+        volatile=\"true\" transient=\"true\" derived=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"elementWildcard\"/>
+        <details key=\"wildcards\" value=\"##other\"/>
+        <details key=\"name\" value=\":9\"/>
+        <details key=\"processing\" value=\"lax\"/>
+        <details key=\"group\" value=\"#group:8\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"alt\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"alt\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"begin\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"begin\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"calcMode\" eType=\"ecore:EEnum smil20.ecore#//CalcModeType\"
+        defaultValueLiteral=\"linear\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"calcMode\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"class\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"class\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"dur\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"dur\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"end\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"end\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"fill\" eType=\"ecore:EEnum smil20.ecore#//FillTimingAttrsType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"fill\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"fillDefault\" eType=\"ecore:EEnum smil20.ecore#//FillDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"fillDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"id\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//ID\"
+        iD=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"id\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"lang\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Language\">
+      <eAnnotations source=\"http://www.eclipse.org/emf/2002/GenModel\">
+        <details key=\"documentation\" value=\"In due course, we should install the relevant ISO 2- and 3-letter&#xD;&#xA;                codes as the enumerated possible values . . .\"/>
+      </eAnnotations>
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"lang\"/>
+        <details key=\"namespace\" value=\"http://www.w3.org/XML/1998/namespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"longdesc\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//AnyURI\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"longdesc\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"max\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"max\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"min\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"min\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeat\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//NonNegativeInteger\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeat\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeatCount\" eType=\"ecore:EDataType smil20.ecore#//NonNegativeDecimalType\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeatCount\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeatDur\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeatDur\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"restart\" eType=\"ecore:EEnum smil20.ecore#//RestartTimingType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"restart\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"restartDefault\" eType=\"ecore:EEnum smil20.ecore#//RestartDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"restartDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"skipContent\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Boolean\"
+        defaultValueLiteral=\"true\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"skip-content\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncBehavior\" eType=\"ecore:EEnum smil20.ecore#//SyncBehaviorType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncBehavior\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncBehaviorDefault\" eType=\"ecore:EEnum smil20.ecore#//SyncBehaviorDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncBehaviorDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncTolerance\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncTolerance\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncToleranceDefault\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncToleranceDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"targetElement\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//IDREF\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"targetElement\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"anyAttribute\" unique=\"false\"
+        upperBound=\"-1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attributeWildcard\"/>
+        <details key=\"wildcards\" value=\"##any\"/>
+        <details key=\"name\" value=\":34\"/>
+        <details key=\"processing\" value=\"strict\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"DocumentRoot\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"\"/>
+      <details key=\"kind\" value=\"mixed\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"mixed\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"elementWildcard\"/>
+        <details key=\"name\" value=\":mixed\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"xMLNSPrefixMap\" upperBound=\"-1\"
+        eType=\"ecore:EClass http://www.eclipse.org/emf/2002/Ecore#//EStringToStringMapEntry\"
+        transient=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"xmlns:prefix\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"xSISchemaLocation\" upperBound=\"-1\"
+        eType=\"ecore:EClass http://www.eclipse.org/emf/2002/Ecore#//EStringToStringMapEntry\"
+        transient=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"xsi:schemaLocation\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"animate\" upperBound=\"-2\"
+        eType=\"#//AnimateType\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"animate\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"animateColor\" upperBound=\"-2\"
+        eType=\"#//AnimateColorType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"animateColor\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"animateMotion\" upperBound=\"-2\"
+        eType=\"#//AnimateMotionType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"animateMotion\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"set\" upperBound=\"-2\" eType=\"#//SetType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"set\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"SetType\" eSuperTypes=\"smil20.ecore#//SetPrototype\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"setType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"group\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"group:3\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"any\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\"
+        volatile=\"true\" transient=\"true\" derived=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"elementWildcard\"/>
+        <details key=\"wildcards\" value=\"##other\"/>
+        <details key=\"name\" value=\":4\"/>
+        <details key=\"processing\" value=\"lax\"/>
+        <details key=\"group\" value=\"#group:3\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"alt\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"alt\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"begin\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"begin\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"class\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"class\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"dur\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"dur\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"end\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"end\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"fill\" eType=\"ecore:EEnum smil20.ecore#//FillTimingAttrsType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"fill\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"fillDefault\" eType=\"ecore:EEnum smil20.ecore#//FillDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"fillDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"id\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//ID\"
+        iD=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"id\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"lang\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Language\">
+      <eAnnotations source=\"http://www.eclipse.org/emf/2002/GenModel\">
+        <details key=\"documentation\" value=\"In due course, we should install the relevant ISO 2- and 3-letter&#xD;&#xA;                codes as the enumerated possible values . . .\"/>
+      </eAnnotations>
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"lang\"/>
+        <details key=\"namespace\" value=\"http://www.w3.org/XML/1998/namespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"longdesc\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//AnyURI\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"longdesc\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"max\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"max\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"min\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"min\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeat\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//NonNegativeInteger\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeat\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeatCount\" eType=\"ecore:EDataType smil20.ecore#//NonNegativeDecimalType\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeatCount\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"repeatDur\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"repeatDur\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"restart\" eType=\"ecore:EEnum smil20.ecore#//RestartTimingType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"restart\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"restartDefault\" eType=\"ecore:EEnum smil20.ecore#//RestartDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"restartDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"skipContent\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Boolean\"
+        defaultValueLiteral=\"true\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"skip-content\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncBehavior\" eType=\"ecore:EEnum smil20.ecore#//SyncBehaviorType\"
+        defaultValueLiteral=\"default\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncBehavior\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncBehaviorDefault\" eType=\"ecore:EEnum smil20.ecore#//SyncBehaviorDefaultType\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncBehaviorDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncTolerance\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncTolerance\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"syncToleranceDefault\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\"
+        defaultValueLiteral=\"inherit\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"syncToleranceDefault\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"targetElement\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//IDREF\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"targetElement\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"anyAttribute\" unique=\"false\"
+        upperBound=\"-1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attributeWildcard\"/>
+        <details key=\"wildcards\" value=\"##any\"/>
+        <details key=\"name\" value=\":28\"/>
+        <details key=\"processing\" value=\"strict\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+</ecore:EPackage>"
+}

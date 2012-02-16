@@ -1,0 +1,1608 @@
+{
+    "name": "ogc",
+    "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<ecore:EPackage xmi:version=\"2.0\"
+    xmlns:xmi=\"http://www.omg.org/XMI\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"
+    xmlns:ecore=\"http://www.eclipse.org/emf/2002/Ecore\" name=\"ogc\"
+    nsURI=\"http://www.opengis.net/ogc\" nsPrefix=\"ogc\">
+  <eAnnotations source=\"http://www.eclipse.org/emf/2002/GenModel\">
+    <details key=\"documentation\" value=\"&#xD;&#xA;         This XML Schema defines OGC query filter capabilities documents.&#xD;&#xA;         filter is an OGC Standard.&#xD;&#xA;&#xD;&#xA;         Copyright (c) 2002,2003,2004,2010 Open Geospatial Consortium, Inc.&#xD;&#xA;         All Rights Reserved.&#xD;&#xA;&#xD;&#xA;         To obtain additional rights of use, visit:&#xD;&#xA;         http://www.opengeospatial.org/legal/ .&#xD;&#xA;&#xD;&#xA;         Updated: 2011-02-04&#xD;&#xA;      &#xD;&#xA;&#xD;&#xA;         This XML Schema defines OGC query filter capabilities documents.&#xD;&#xA;         &#xD;&#xA;         filter is an OGC Standard.&#xD;&#xA;         Copyright (c) 2002,2003,2004,2010 Open Geospatial Consortium, Inc. All Rights Reserved.&#xD;&#xA;         To obtain additional rights of use, visit http://www.opengeospatial.org/legal/ .&#xD;&#xA;         &#xD;&#xA;         Updated: 2010-01-22&#xD;&#xA;      &#xD;&#xA;&#xD;&#xA;&#x9;&#x9;&#x9;GML is an OGC Standard.&#xD;&#xA;&#x9;&#x9;&#x9;Copyright (c) 2001,2005,2010 Open Geospatial Consortium, Inc. All Rights Reserved.&#xD;&#xA;&#x9;&#x9;&#x9;To obtain additional rights of use, visit http://www.opengeospatial.org/legal/ .&#xD;&#xA;&#x9;&#x9;&#xD;&#xA;&#xD;&#xA;&#x9;&#x9;&#x9;GML is an OGC Standard.&#xD;&#xA;&#x9;&#x9;&#x9;Copyright (c) 2001,2005,2010 Open Geospatial Consortium, Inc. All Rights Reserved.&#xD;&#xA;&#x9;&#x9;&#x9;To obtain additional rights of use, visit http://www.opengeospatial.org/legal/ .&#xD;&#xA;&#x9;&#x9;&#xD;&#xA;&#xD;&#xA;&#x9;&#x9;&#x9;GML is an OGC Standard.&#xD;&#xA;&#x9;&#x9;&#x9;Copyright (c) 2001,2005,2010 Open Geospatial Consortium, Inc. All Rights Reserved.&#xD;&#xA;&#x9;&#x9;&#x9;To obtain additional rights of use, visit http://www.opengeospatial.org/legal/ .&#xD;&#xA;&#x9;&#x9;&#xD;&#xA;&#xD;&#xA;&#x9;&#x9;&#x9;GML is an OGC Standard.&#xD;&#xA;&#x9;&#x9;&#x9;Copyright (c) 2001,2005,2010 Open Geospatial Consortium, Inc. All Rights Reserved.&#xD;&#xA;&#x9;&#x9;&#x9;To obtain additional rights of use, visit http://www.opengeospatial.org/legal/ .&#xD;&#xA;&#x9;&#x9;&#xD;&#xA;Extends the units.xsd and basicTypes.xsd schemas with types for recording measures using specific types of units, especially the measures and units needed for coordinate reference systems and coordinate operations. The specific unit types encoded are length, angle, scale factor, time, area, volume, speed, and grid length. This schema allows angle values to be recorded as single numbers or in degree-minute-second format. &#xD;&#xA;&#x9;&#x9;Parts of this schema are based on Subclause 6.5.7 of ISO/CD 19103 Geographic information - Conceptual schema language, on Subclause A.5.2.2.3 of ISO/CD 19118 Geographic information - Encoding, and on Subclause 4.7 of OpenGIS Recommendation Paper OGC 02-007r4 Units of Measure Use and Definition Recommendations.&#xD;&#xA;&#x9;&#x9;&#xD;&#xA;&#x9;&#x9;GML is an OGC Standard.&#xD;&#xA;&#x9;&#x9;Copyright (c) 2001,2005,2010 Open Geospatial Consortium, Inc. All Rights Reserved.&#xD;&#xA;&#x9;&#x9;To obtain additional rights of use, visit http://www.opengeospatial.org/legal/ .&#xD;&#xA;&#x9;&#x9;&#xD;&#xA;Builds on gmlBase.xsd to encode units of measure (or uom), including definitions of units of measure and dictionaries of such definitions. GML 3.0 candidate schema, primary editor: Arliss Whiteside.&#x9;&#x9;&#x9;&#xD;&#xA;&#x9;Parts of this schema are based on Subclause 6.5.7 of ISO/CD 19103 Geographic information - Conceptual schema language, on Subclause A.5.2.2.3 of ISO/CD 19118 Geographic information - Encoding, and on most of OpenGIS Recommendation Paper OGC 02-007r4 Units of Measure Use and Definition Recommendations.&#xD;&#xA;&#x9;&#x9;&#xD;&#xA;&#x9;&#x9;GML is an OGC Standard.&#xD;&#xA;&#x9;&#x9;Copyright (c) 2001,2005,2010 Open Geospatial Consortium, Inc. All Rights Reserved.&#xD;&#xA;&#x9;&#x9;To obtain additional rights of use, visit http://www.opengeospatial.org/legal/ .&#xD;&#xA;&#x9;&#x9;&#xD;&#xA;&#xD;&#xA;&#x9;&#x9;&#x9;Dictionary schema for GML 3.1.1 &#xD;&#xA;&#x9;&#x9;&#x9;Components to support the lists of definitions.&#xD;&#xA;&#x9;&#x9;&#x9;&#xD;&#xA;&#x9;&#x9;&#x9;GML is an OGC Standard.&#xD;&#xA;&#x9;&#x9;&#x9;Copyright (c) 2001,2005,2010 Open Geospatial Consortium, Inc. All Rights Reserved.&#xD;&#xA;&#x9;&#x9;&#x9;To obtain additional rights of use, visit http://www.opengeospatial.org/legal/ .&#xD;&#xA;&#x9;&#x9;&#xD;&#xA;GML base schema for GML 3&#xD;&#xA;&#x9;&#x9;&#x9;Components to support the GML encoding model.&#xD;&#xA;&#x9;&#x9;&#x9;The abstract Schematron rules can be used by any schema that includes gmlBase.&#xD;&#xA;&#x9;&#x9;&#x9;&#xD;&#xA;&#x9;&#x9;&#x9;GML is an OGC Standard.&#xD;&#xA;&#x9;&#x9;&#x9;Copyright (c) 2001,2005,2010 Open Geospatial Consortium, Inc. All Rights Reserved.&#xD;&#xA;&#x9;&#x9;&#x9;To obtain additional rights of use, visit http://www.opengeospatial.org/legal/ .&#xD;&#xA;&#x9;&#x9;&#xD;&#xA;&#xD;&#xA;    Generic simpleContent components for use in GML&#xD;&#xA;    &#xD;&#xA;    GML is an OGC Standard.&#xD;&#xA;    Copyright (c) 2001,2005,2010 Open Geospatial Consortium, Inc. All Rights Reserved.&#xD;&#xA;    To obtain additional rights of use, visit http://www.opengeospatial.org/legal/ .&#xD;&#xA;    &#xD;&#xA;&#xD;&#xA;&#x9;&#x9;&#x9;GML 3.0 candidate xlinks schema. Copyright (c) 2001 OGC, All Rights Reserved.&#xD;&#xA;&#x9;&#x9;\"/>
+  </eAnnotations>
+  <eAnnotations source=\"urn:opengis:specification:gml:schema-xsd:geometryAggregates:3.1.1\">
+    <details key=\"appinfo\" value=\"geometryAggregates.xsd\"/>
+  </eAnnotations>
+  <eAnnotations source=\"urn:opengis:specification:gml:schema-xsd:geometryPrimitives:3.1.1\">
+    <details key=\"appinfo\" value=\"geometryPrimitives.xsd\"/>
+  </eAnnotations>
+  <eAnnotations source=\"urn:opengis:specification:gml:schema-xsd:geometryBasic2d:3.1.1\">
+    <details key=\"appinfo\" value=\"geometryBasic2d.xsd\"/>
+  </eAnnotations>
+  <eAnnotations source=\"urn:opengis:specification:gml:schema-xsd:geometryBasic0d1d:v3.1.1\">
+    <details key=\"appinfo\" value=\"geometryBasic0d1d.xsd&#xD;&#xA;&#xD;&#xA;&#x9;&#x9;&#x9;&lt;sch:title xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;>Schematron validation&lt;/sch:title>&#xD;&#xA;&#x9;&#x9;&#x9;&lt;sch:pattern name=&quot;Check SRS tags&quot; xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;sch:rule abstract=&quot;true&quot; id=&quot;CRSLabels&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:report test=&quot;not(@srsDimension) or @srsName&quot;>The presence of a dimension attribute implies the presence of the srsName attribute.&lt;/sch:report>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:report test=&quot;not(@axisLabels) or @srsName&quot;>The presence of an axisLabels attribute implies the presence of the srsName attribute.&lt;/sch:report>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:report test=&quot;not(@uomLabels) or @srsName&quot;>The presence of an uomLabels attribute implies the presence of the srsName attribute.&lt;/sch:report>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:report test=&quot;(not(@uomLabels) and not(@axisLabels)) or (@uomLabels and @axisLabels)&quot;>The presence of an uomLabels attribute implies the presence of the axisLabels attribute and vice versa.&lt;/sch:report>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;/sch:rule>&#xD;&#xA;&#x9;&#x9;&#x9;&lt;/sch:pattern>&#xD;&#xA;&#x9;&#x9;&#x9;&lt;sch:pattern name=&quot;Check Dimension&quot; xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;sch:rule abstract=&quot;true&quot; id=&quot;Count&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:report test=&quot;not(@count) or @srsDimension&quot;>The presence of a count attribute implies the presence of the dimension attribute.&lt;/sch:report>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;/sch:rule>&#xD;&#xA;&#x9;&#x9;&#x9;&lt;/sch:pattern>&#xD;&#xA;&#x9;&#x9;\"/>
+  </eAnnotations>
+  <eAnnotations source=\"urn:opengis:specification:gml:schema-measures:3.1.1\">
+    <details key=\"appinfo\"/>
+  </eAnnotations>
+  <eAnnotations source=\"urn:opengis:specification:gml:schema-units:3.1.1\">
+    <details key=\"appinfo\"/>
+  </eAnnotations>
+  <eAnnotations source=\"urn:opengis:specification:gml:schema-xsd:dictionary:3.1.1\">
+    <details key=\"appinfo\"/>
+  </eAnnotations>
+  <eAnnotations source=\"urn:opengis:specification:gml:schema-xsd:gmlBase:3.1.1\">
+    <details key=\"appinfo\" value=\"&#xD;&#xA;&#x9;&#x9;&#x9;&lt;sch:title xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;>Schematron validation&lt;/sch:title>&#xD;&#xA;&#x9;&#x9;&#x9;&lt;sch:ns prefix=&quot;gml&quot; uri=&quot;http://www.opengis.net/gml&quot; xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;/>&#xD;&#xA;&#x9;&#x9;&#x9;&lt;sch:ns prefix=&quot;xlink&quot; uri=&quot;http://www.w3.org/1999/xlink&quot; xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;/>&#xD;&#xA;&#x9;&#x9;&#x9;&lt;sch:pattern name=&quot;Check either href or content not both&quot; xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;sch:rule abstract=&quot;true&quot; id=&quot;hrefOrContent&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:report test=&quot;@xlink:href and (*|text())&quot;>Property element may not carry both a reference to an object and contain an object.&lt;/sch:report>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:assert test=&quot;@xlink:href | (*|text())&quot;>Property element must either carry a reference to an object or contain an object.&lt;/sch:assert>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;/sch:rule>&#xD;&#xA;&#x9;&#x9;&#x9;&lt;/sch:pattern>&#xD;&#xA;&#x9;&#x9;\"/>
+  </eAnnotations>
+  <eAnnotations source=\"urn:opengis:specification:gml:schema-xsd:basicTypes:3.1.1\">
+    <details key=\"appinfo\" value=\"basicTypes.xsd\"/>
+  </eAnnotations>
+  <eAnnotations source=\"urn:opengis:specification:gml:schema-xlinks:v3.0c2\">
+    <details key=\"appinfo\" value=\"xlinks.xsd v3.0b2 2001-07\"/>
+  </eAnnotations>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"AbstractIdType\" abstract=\"true\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"AbstractIdType\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"ArithmeticOperatorsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"ArithmeticOperatorsType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"group\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"simpleArithmetic\" upperBound=\"-1\"
+        eType=\"#//SimpleArithmeticType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"SimpleArithmetic\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"#group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"functions\" upperBound=\"-1\"
+        eType=\"#//FunctionsType\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Functions\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"#group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"BBOXType\" eSuperTypes=\"#//SpatialOpsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"BBOXType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyName\" eType=\"#//PropertyNameType\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyName\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"envelopeGroup\" lowerBound=\"1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"Envelope:group\"/>
+        <details key=\"namespace\" value=\"http://www.opengis.net/gml\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"envelope\" lowerBound=\"1\"
+        eType=\"ecore:EClass gml.ecore#//EnvelopeType\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Envelope\"/>
+        <details key=\"namespace\" value=\"http://www.opengis.net/gml\"/>
+        <details key=\"group\" value=\"http://www.opengis.net/gml#Envelope:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"BinaryComparisonOpType\" eSuperTypes=\"#//ComparisonOpsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"BinaryComparisonOpType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"expressionGroup\" unique=\"false\"
+        lowerBound=\"2\" upperBound=\"2\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"expression:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"expression\" lowerBound=\"2\"
+        upperBound=\"2\" eType=\"#//ExpressionType\" changeable=\"false\" volatile=\"true\"
+        transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"expression\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"expression:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"matchCase\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Boolean\"
+        defaultValueLiteral=\"true\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"matchCase\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"BinaryLogicOpType\" eSuperTypes=\"#//LogicOpsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"BinaryLogicOpType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"group\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"comparisonOpsGroup\" unique=\"false\"
+        upperBound=\"-1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\"
+        volatile=\"true\" transient=\"true\" derived=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"comparisonOps:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"#group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"comparisonOps\" upperBound=\"-1\"
+        eType=\"#//ComparisonOpsType\" changeable=\"false\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"comparisonOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"comparisonOps:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"spatialOpsGroup\" unique=\"false\"
+        upperBound=\"-1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\"
+        volatile=\"true\" transient=\"true\" derived=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"spatialOps:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"#group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"spatialOps\" upperBound=\"-1\"
+        eType=\"#//SpatialOpsType\" changeable=\"false\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"spatialOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"spatialOps:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"logicOpsGroup\" unique=\"false\"
+        upperBound=\"-1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\"
+        volatile=\"true\" transient=\"true\" derived=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"logicOps:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"#group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"logicOps\" upperBound=\"-1\"
+        eType=\"#//LogicOpsType\" changeable=\"false\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"logicOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"logicOps:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"function\" upperBound=\"-1\"
+        eType=\"#//FunctionType\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Function\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"#group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"BinaryOperatorType\" eSuperTypes=\"#//ExpressionType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"BinaryOperatorType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"expressionGroup\" unique=\"false\"
+        lowerBound=\"2\" upperBound=\"2\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"expression:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"expression\" lowerBound=\"2\"
+        upperBound=\"2\" eType=\"#//ExpressionType\" changeable=\"false\" volatile=\"true\"
+        transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"expression\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"expression:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"BinarySpatialOpType\" eSuperTypes=\"#//SpatialOpsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"BinarySpatialOpType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyName\" lowerBound=\"1\"
+        eType=\"#//PropertyNameType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyName\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyName1\" eType=\"#//PropertyNameType\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyName\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"geometryGroup\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http://www.eclipse.org/emf/2002/GenModel\">
+        <details key=\"documentation\" value=\"The &quot;_Geometry&quot; element is the abstract head of the substituition group for all geometry elements of GML 3. This &#xD;&#xA;&#x9;&#x9;&#x9;includes pre-defined and user-defined geometry elements. Any geometry element must be a direct or indirect extension/restriction &#xD;&#xA;&#x9;&#x9;&#x9;of AbstractGeometryType and must be directly or indirectly in the substitution group of &quot;_Geometry&quot;.\"/>
+      </eAnnotations>
+      <eAnnotations>
+        <details key=\"appinfo\" value=\"&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;sch:pattern name=&quot;Check SRS tags&quot; xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:rule context=&quot;gml:_Geometry&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:extends rule=&quot;CRSLabels&quot;/>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;/sch:rule>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;/sch:pattern>&#xD;&#xA;&#x9;&#x9;&#x9;\"/>
+      </eAnnotations>
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"_Geometry:group\"/>
+        <details key=\"namespace\" value=\"http://www.opengis.net/gml\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"geometry\" eType=\"ecore:EClass gml.ecore#//AbstractGeometryType\"
+        changeable=\"false\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http://www.eclipse.org/emf/2002/GenModel\">
+        <details key=\"documentation\" value=\"The &quot;_Geometry&quot; element is the abstract head of the substituition group for all geometry elements of GML 3. This &#xD;&#xA;&#x9;&#x9;&#x9;includes pre-defined and user-defined geometry elements. Any geometry element must be a direct or indirect extension/restriction &#xD;&#xA;&#x9;&#x9;&#x9;of AbstractGeometryType and must be directly or indirectly in the substitution group of &quot;_Geometry&quot;.\"/>
+      </eAnnotations>
+      <eAnnotations>
+        <details key=\"appinfo\" value=\"&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;sch:pattern name=&quot;Check SRS tags&quot; xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:rule context=&quot;gml:_Geometry&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:extends rule=&quot;CRSLabels&quot;/>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;/sch:rule>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;/sch:pattern>&#xD;&#xA;&#x9;&#x9;&#x9;\"/>
+      </eAnnotations>
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"_Geometry\"/>
+        <details key=\"namespace\" value=\"http://www.opengis.net/gml\"/>
+        <details key=\"group\" value=\"http://www.opengis.net/gml#_Geometry:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"envelopeGroup\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"Envelope:group\"/>
+        <details key=\"namespace\" value=\"http://www.opengis.net/gml\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"envelope\" eType=\"ecore:EClass gml.ecore#//EnvelopeType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Envelope\"/>
+        <details key=\"namespace\" value=\"http://www.opengis.net/gml\"/>
+        <details key=\"group\" value=\"http://www.opengis.net/gml#Envelope:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"ComparisonOperatorsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"ComparisonOperatorsType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"group\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"comparisonOperator\" unique=\"false\"
+        lowerBound=\"1\" upperBound=\"-1\" eType=\"#//ComparisonOperatorType\" volatile=\"true\"
+        transient=\"true\" derived=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"ComparisonOperator\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"#group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EEnum\" name=\"ComparisonOperatorType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"ComparisonOperatorType\"/>
+    </eAnnotations>
+    <eLiterals name=\"LessThan\"/>
+    <eLiterals name=\"GreaterThan\" value=\"1\"/>
+    <eLiterals name=\"LessThanEqualTo\" value=\"2\"/>
+    <eLiterals name=\"GreaterThanEqualTo\" value=\"3\"/>
+    <eLiterals name=\"EqualTo\" value=\"4\"/>
+    <eLiterals name=\"NotEqualTo\" value=\"5\"/>
+    <eLiterals name=\"Like\" value=\"6\"/>
+    <eLiterals name=\"Between\" value=\"7\"/>
+    <eLiterals name=\"NullCheck\" value=\"8\"/>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EDataType\" name=\"ComparisonOperatorTypeObject\" instanceClassName=\"org.eclipse.emf.common.util.Enumerator\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"ComparisonOperatorType:Object\"/>
+      <details key=\"baseType\" value=\"ComparisonOperatorType\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"ComparisonOpsType\" abstract=\"true\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"ComparisonOpsType\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"DistanceBufferType\" eSuperTypes=\"#//SpatialOpsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"DistanceBufferType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyName\" lowerBound=\"1\"
+        eType=\"#//PropertyNameType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyName\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"geometryGroup\" lowerBound=\"1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http://www.eclipse.org/emf/2002/GenModel\">
+        <details key=\"documentation\" value=\"The &quot;_Geometry&quot; element is the abstract head of the substituition group for all geometry elements of GML 3. This &#xD;&#xA;&#x9;&#x9;&#x9;includes pre-defined and user-defined geometry elements. Any geometry element must be a direct or indirect extension/restriction &#xD;&#xA;&#x9;&#x9;&#x9;of AbstractGeometryType and must be directly or indirectly in the substitution group of &quot;_Geometry&quot;.\"/>
+      </eAnnotations>
+      <eAnnotations>
+        <details key=\"appinfo\" value=\"&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;sch:pattern name=&quot;Check SRS tags&quot; xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:rule context=&quot;gml:_Geometry&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:extends rule=&quot;CRSLabels&quot;/>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;/sch:rule>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;/sch:pattern>&#xD;&#xA;&#x9;&#x9;&#x9;\"/>
+      </eAnnotations>
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"_Geometry:group\"/>
+        <details key=\"namespace\" value=\"http://www.opengis.net/gml\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"geometry\" lowerBound=\"1\"
+        eType=\"ecore:EClass gml.ecore#//AbstractGeometryType\" changeable=\"false\" volatile=\"true\"
+        transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http://www.eclipse.org/emf/2002/GenModel\">
+        <details key=\"documentation\" value=\"The &quot;_Geometry&quot; element is the abstract head of the substituition group for all geometry elements of GML 3. This &#xD;&#xA;&#x9;&#x9;&#x9;includes pre-defined and user-defined geometry elements. Any geometry element must be a direct or indirect extension/restriction &#xD;&#xA;&#x9;&#x9;&#x9;of AbstractGeometryType and must be directly or indirectly in the substitution group of &quot;_Geometry&quot;.\"/>
+      </eAnnotations>
+      <eAnnotations>
+        <details key=\"appinfo\" value=\"&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;sch:pattern name=&quot;Check SRS tags&quot; xmlns:sch=&quot;http://www.ascc.net/xml/schematron&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:rule context=&quot;gml:_Geometry&quot;>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;sch:extends rule=&quot;CRSLabels&quot;/>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&#x9;&lt;/sch:rule>&#xD;&#xA;&#x9;&#x9;&#x9;&#x9;&lt;/sch:pattern>&#xD;&#xA;&#x9;&#x9;&#x9;\"/>
+      </eAnnotations>
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"_Geometry\"/>
+        <details key=\"namespace\" value=\"http://www.opengis.net/gml\"/>
+        <details key=\"group\" value=\"http://www.opengis.net/gml#_Geometry:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"distance\" lowerBound=\"1\"
+        eType=\"#//DistanceType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Distance\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"DistanceType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"DistanceType\"/>
+      <details key=\"kind\" value=\"simple\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"value\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Double\"
+        unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"name\" value=\":0\"/>
+        <details key=\"kind\" value=\"simple\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"units\" lowerBound=\"1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//AnyURI\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"units\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"DocumentRoot\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"\"/>
+      <details key=\"kind\" value=\"mixed\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"mixed\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"elementWildcard\"/>
+        <details key=\"name\" value=\":mixed\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"xMLNSPrefixMap\" upperBound=\"-1\"
+        eType=\"ecore:EClass http://www.eclipse.org/emf/2002/Ecore#//EStringToStringMapEntry\"
+        transient=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"xmlns:prefix\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"xSISchemaLocation\" upperBound=\"-1\"
+        eType=\"ecore:EClass http://www.eclipse.org/emf/2002/Ecore#//EStringToStringMapEntry\"
+        transient=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"xsi:schemaLocation\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"id\" upperBound=\"-2\" eType=\"#//AbstractIdType\"
+        changeable=\"false\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"_Id\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"add\" upperBound=\"-2\" eType=\"#//BinaryOperatorType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Add\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"expression\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"expression\" upperBound=\"-2\"
+        eType=\"#//ExpressionType\" changeable=\"false\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"expression\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"and\" upperBound=\"-2\" eType=\"#//BinaryLogicOpType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"And\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"logicOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"logicOps\" upperBound=\"-2\"
+        eType=\"#//LogicOpsType\" changeable=\"false\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"logicOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"bBOX\" upperBound=\"-2\" eType=\"#//BBOXType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"BBOX\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"spatialOps\" upperBound=\"-2\"
+        eType=\"#//SpatialOpsType\" changeable=\"false\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"spatialOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"beyond\" upperBound=\"-2\"
+        eType=\"#//DistanceBufferType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Beyond\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"comparisonOps\" upperBound=\"-2\"
+        eType=\"#//ComparisonOpsType\" changeable=\"false\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"comparisonOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"contains\" upperBound=\"-2\"
+        eType=\"#//BinarySpatialOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Contains\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"crosses\" upperBound=\"-2\"
+        eType=\"#//BinarySpatialOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Crosses\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"disjoint\" upperBound=\"-2\"
+        eType=\"#//BinarySpatialOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Disjoint\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"div\" upperBound=\"-2\" eType=\"#//BinaryOperatorType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Div\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"expression\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"dWithin\" upperBound=\"-2\"
+        eType=\"#//DistanceBufferType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"DWithin\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"eID\" upperBound=\"-2\" eType=\"#//EIDType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"EID\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"equals\" upperBound=\"-2\"
+        eType=\"#//BinarySpatialOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Equals\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"featureId\" upperBound=\"-2\"
+        eType=\"#//FeatureIdType\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"FeatureId\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"_Id\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"fID\" upperBound=\"-2\" eType=\"#//FIDType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"FID\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"filter\" upperBound=\"-2\"
+        eType=\"#//FilterType\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Filter\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"filterCapabilities\" upperBound=\"-2\"
+        eType=\"#//FilterCapabilitiesType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Filter_Capabilities\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"function\" upperBound=\"-2\"
+        eType=\"#//FunctionType\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Function\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"expression\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"gmlObjectId\" upperBound=\"-2\"
+        eType=\"#//GmlObjectIdType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"GmlObjectId\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"_Id\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"intersects\" upperBound=\"-2\"
+        eType=\"#//BinarySpatialOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Intersects\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"literal\" upperBound=\"-2\"
+        eType=\"#//LiteralType\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Literal\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"expression\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"logicalOperators\" upperBound=\"-2\"
+        eType=\"#//LogicalOperatorsType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"LogicalOperators\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"mul\" upperBound=\"-2\" eType=\"#//BinaryOperatorType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Mul\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"expression\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"not\" upperBound=\"-2\" eType=\"#//UnaryLogicOpType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Not\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"logicOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"or\" upperBound=\"-2\" eType=\"#//BinaryLogicOpType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Or\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"logicOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"overlaps\" upperBound=\"-2\"
+        eType=\"#//BinarySpatialOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Overlaps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyIsBetween\" upperBound=\"-2\"
+        eType=\"#//PropertyIsBetweenType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyIsBetween\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"comparisonOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyIsEqualTo\" upperBound=\"-2\"
+        eType=\"#//BinaryComparisonOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyIsEqualTo\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"comparisonOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyIsGreaterThan\"
+        upperBound=\"-2\" eType=\"#//BinaryComparisonOpType\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyIsGreaterThan\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"comparisonOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyIsGreaterThanOrEqualTo\"
+        upperBound=\"-2\" eType=\"#//BinaryComparisonOpType\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyIsGreaterThanOrEqualTo\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"comparisonOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyIsLessThan\" upperBound=\"-2\"
+        eType=\"#//BinaryComparisonOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyIsLessThan\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"comparisonOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyIsLessThanOrEqualTo\"
+        upperBound=\"-2\" eType=\"#//BinaryComparisonOpType\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyIsLessThanOrEqualTo\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"comparisonOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyIsLike\" upperBound=\"-2\"
+        eType=\"#//PropertyIsLikeType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyIsLike\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"comparisonOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyIsNotEqualTo\" upperBound=\"-2\"
+        eType=\"#//BinaryComparisonOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyIsNotEqualTo\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"comparisonOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyIsNull\" upperBound=\"-2\"
+        eType=\"#//PropertyIsNullType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyIsNull\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"comparisonOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyName\" upperBound=\"-2\"
+        eType=\"#//PropertyNameType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyName\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"expression\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"simpleArithmetic\" upperBound=\"-2\"
+        eType=\"#//SimpleArithmeticType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"SimpleArithmetic\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"sortBy\" upperBound=\"-2\"
+        eType=\"#//SortByType\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"SortBy\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"sub\" upperBound=\"-2\" eType=\"#//BinaryOperatorType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Sub\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"expression\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"touches\" upperBound=\"-2\"
+        eType=\"#//BinarySpatialOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Touches\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"within\" upperBound=\"-2\"
+        eType=\"#//BinarySpatialOpType\" volatile=\"true\" transient=\"true\" derived=\"true\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Within\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"affiliation\" value=\"spatialOps\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"EIDType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"EID_._type\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"ExpressionType\" abstract=\"true\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"ExpressionType\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"FeatureIdType\" eSuperTypes=\"#//AbstractIdType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"FeatureIdType\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"fid\" lowerBound=\"1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//ID\"
+        iD=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"fid\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"FIDType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"FID_._type\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"FilterCapabilitiesType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"Filter_Capabilities_._type\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"spatialCapabilities\" lowerBound=\"1\"
+        eType=\"#//SpatialCapabilitiesType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Spatial_Capabilities\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"scalarCapabilities\" lowerBound=\"1\"
+        eType=\"#//ScalarCapabilitiesType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Scalar_Capabilities\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"idCapabilities\" lowerBound=\"1\"
+        eType=\"#//IdCapabilitiesType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Id_Capabilities\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"FilterType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"FilterType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"spatialOpsGroup\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"spatialOps:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"spatialOps\" eType=\"#//SpatialOpsType\"
+        changeable=\"false\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"spatialOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"spatialOps:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"comparisonOpsGroup\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"comparisonOps:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"comparisonOps\" eType=\"#//ComparisonOpsType\"
+        changeable=\"false\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"comparisonOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"comparisonOps:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"logicOpsGroup\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"logicOps:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"logicOps\" eType=\"#//LogicOpsType\"
+        changeable=\"false\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"logicOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"logicOps:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"idGroup\" unique=\"false\"
+        upperBound=\"-1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"_Id:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"id\" upperBound=\"-1\" eType=\"#//AbstractIdType\"
+        changeable=\"false\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"_Id\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"_Id:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"FunctionNamesType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"FunctionNamesType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"group\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"functionName\" lowerBound=\"1\"
+        upperBound=\"-1\" eType=\"#//FunctionNameType\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"FunctionName\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"#group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"FunctionNameType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"FunctionNameType\"/>
+      <details key=\"kind\" value=\"simple\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"value\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"name\" value=\":0\"/>
+        <details key=\"kind\" value=\"simple\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"nArgs\" lowerBound=\"1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"nArgs\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"FunctionsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"FunctionsType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"functionNames\" lowerBound=\"1\"
+        eType=\"#//FunctionNamesType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"FunctionNames\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"FunctionType\" eSuperTypes=\"#//ExpressionType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"FunctionType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"expressionGroup\" unique=\"false\"
+        upperBound=\"-1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"expression:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"expression\" upperBound=\"-1\"
+        eType=\"#//ExpressionType\" changeable=\"false\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"expression\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"expression:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"name\" lowerBound=\"1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"name\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"GeometryOperandsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"GeometryOperandsType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"geometryOperand\" unique=\"false\"
+        lowerBound=\"1\" upperBound=\"-1\" eType=\"#//GeometryOperandType\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"GeometryOperand\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EDataType\" name=\"GeometryOperandType\" instanceClassName=\"javax.xml.namespace.QName\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"GeometryOperandType\"/>
+      <details key=\"baseType\" value=\"http://www.eclipse.org/emf/2003/XMLType#QName\"/>
+      <details key=\"enumeration\" value=\"{http://www.opengis.net/gml}Envelope {http://www.opengis.net/gml}Point {http://www.opengis.net/gml}LineString {http://www.opengis.net/gml}Polygon {http://www.opengis.net/gml}ArcByCenterPoint {http://www.opengis.net/gml}CircleByCenterPoint {http://www.opengis.net/gml}Arc {http://www.opengis.net/gml}Circle {http://www.opengis.net/gml}ArcByBulge {http://www.opengis.net/gml}Bezier {http://www.opengis.net/gml}Clothoid {http://www.opengis.net/gml}CubicSpline {http://www.opengis.net/gml}Geodesic {http://www.opengis.net/gml}OffsetCurve {http://www.opengis.net/gml}Triangle {http://www.opengis.net/gml}PolyhedralSurface {http://www.opengis.net/gml}TriangulatedSurface {http://www.opengis.net/gml}Tin {http://www.opengis.net/gml}Solid\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"GmlObjectIdType\" eSuperTypes=\"#//AbstractIdType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"GmlObjectIdType\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"id\" lowerBound=\"1\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//ID\"
+        iD=\"true\">
+      <eAnnotations source=\"http://www.eclipse.org/emf/2002/GenModel\">
+        <details key=\"documentation\" value=\"Database handle for the object.  It is of XML type ID, so is constrained to be unique in the XML document within which it occurs.  An external identifier for the object in the form of a URI may be constructed using standard XML and XPointer methods.  This is done by concatenating the URI for the document, a fragment separator, and the value of the id attribute.\"/>
+      </eAnnotations>
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"id\"/>
+        <details key=\"namespace\" value=\"http://www.opengis.net/gml\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"IdCapabilitiesType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"Id_CapabilitiesType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"group\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"eID\" upperBound=\"-1\" eType=\"#//EIDType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"EID\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"#group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"fID\" upperBound=\"-1\" eType=\"#//FIDType\"
+        volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"FID\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"#group:0\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"LiteralType\" eSuperTypes=\"#//ExpressionType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"LiteralType\"/>
+      <details key=\"kind\" value=\"mixed\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"mixed\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"elementWildcard\"/>
+        <details key=\"name\" value=\":mixed\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"any\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\"
+        volatile=\"true\" transient=\"true\" derived=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"elementWildcard\"/>
+        <details key=\"wildcards\" value=\"##any\"/>
+        <details key=\"name\" value=\":1\"/>
+        <details key=\"processing\" value=\"strict\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"LogicalOperatorsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"LogicalOperators_._type\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"LogicOpsType\" abstract=\"true\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"LogicOpsType\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"LowerBoundaryType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"LowerBoundaryType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"expressionGroup\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"expression:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"expression\" eType=\"#//ExpressionType\"
+        changeable=\"false\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"expression\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"expression:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"PropertyIsBetweenType\" eSuperTypes=\"#//ComparisonOpsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"PropertyIsBetweenType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"expressionGroup\" lowerBound=\"1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"expression:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"expression\" lowerBound=\"1\"
+        eType=\"#//ExpressionType\" changeable=\"false\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"expression\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"expression:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"lowerBoundary\" lowerBound=\"1\"
+        eType=\"#//LowerBoundaryType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"LowerBoundary\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"upperBoundary\" lowerBound=\"1\"
+        eType=\"#//UpperBoundaryType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"UpperBoundary\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"PropertyIsLikeType\" eSuperTypes=\"#//ComparisonOpsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"PropertyIsLikeType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyName\" lowerBound=\"1\"
+        eType=\"#//PropertyNameType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyName\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"literal\" lowerBound=\"1\"
+        eType=\"#//LiteralType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Literal\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"escapeChar\" lowerBound=\"1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"escapeChar\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"matchCase\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//Boolean\"
+        defaultValueLiteral=\"true\" unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"matchCase\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"singleChar\" lowerBound=\"1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"singleChar\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"wildCard\" lowerBound=\"1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2003/XMLType#//String\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"wildCard\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"PropertyIsNullType\" eSuperTypes=\"#//ComparisonOpsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"PropertyIsNullType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyName\" lowerBound=\"1\"
+        eType=\"#//PropertyNameType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyName\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"PropertyNameType\" eSuperTypes=\"#//ExpressionType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"PropertyNameType\"/>
+      <details key=\"kind\" value=\"mixed\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"mixed\" unique=\"false\" upperBound=\"-1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"elementWildcard\"/>
+        <details key=\"name\" value=\":mixed\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"ScalarCapabilitiesType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"Scalar_CapabilitiesType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"logicalOperators\" eType=\"#//LogicalOperatorsType\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"LogicalOperators\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"comparisonOperators\" eType=\"#//ComparisonOperatorsType\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"ComparisonOperators\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"arithmeticOperators\" eType=\"#//ArithmeticOperatorsType\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"ArithmeticOperators\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"SimpleArithmeticType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"SimpleArithmetic_._type\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"SortByType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"SortByType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"sortProperty\" lowerBound=\"1\"
+        upperBound=\"-1\" eType=\"#//SortPropertyType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"SortProperty\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EEnum\" name=\"SortOrderType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"SortOrderType\"/>
+    </eAnnotations>
+    <eLiterals name=\"DESC\"/>
+    <eLiterals name=\"ASC\" value=\"1\"/>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EDataType\" name=\"SortOrderTypeObject\" instanceClassName=\"org.eclipse.emf.common.util.Enumerator\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"SortOrderType:Object\"/>
+      <details key=\"baseType\" value=\"SortOrderType\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"SortPropertyType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"SortPropertyType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"propertyName\" lowerBound=\"1\"
+        eType=\"#//PropertyNameType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"PropertyName\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"sortOrder\" eType=\"#//SortOrderType\"
+        unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"SortOrder\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"SpatialCapabilitiesType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"Spatial_CapabilitiesType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"geometryOperands\" lowerBound=\"1\"
+        eType=\"#//GeometryOperandsType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"GeometryOperands\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"spatialOperators\" lowerBound=\"1\"
+        eType=\"#//SpatialOperatorsType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"SpatialOperators\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EEnum\" name=\"SpatialOperatorNameType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"SpatialOperatorNameType\"/>
+    </eAnnotations>
+    <eLiterals name=\"BBOX\"/>
+    <eLiterals name=\"Equals\" value=\"1\"/>
+    <eLiterals name=\"Disjoint\" value=\"2\"/>
+    <eLiterals name=\"Intersects\" value=\"3\"/>
+    <eLiterals name=\"Touches\" value=\"4\"/>
+    <eLiterals name=\"Crosses\" value=\"5\"/>
+    <eLiterals name=\"Within\" value=\"6\"/>
+    <eLiterals name=\"Contains\" value=\"7\"/>
+    <eLiterals name=\"Overlaps\" value=\"8\"/>
+    <eLiterals name=\"Beyond\" value=\"9\"/>
+    <eLiterals name=\"DWithin\" value=\"10\"/>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EDataType\" name=\"SpatialOperatorNameTypeObject\" instanceClassName=\"org.eclipse.emf.common.util.Enumerator\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"SpatialOperatorNameType:Object\"/>
+      <details key=\"baseType\" value=\"SpatialOperatorNameType\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"SpatialOperatorsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"SpatialOperatorsType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"spatialOperator\" lowerBound=\"1\"
+        upperBound=\"-1\" eType=\"#//SpatialOperatorType\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"SpatialOperator\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"SpatialOperatorType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"SpatialOperatorType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"geometryOperands\" eType=\"#//GeometryOperandsType\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"GeometryOperands\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"name\" eType=\"#//SpatialOperatorNameType\"
+        unsettable=\"true\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"attribute\"/>
+        <details key=\"name\" value=\"name\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"SpatialOpsType\" abstract=\"true\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"SpatialOpsType\"/>
+      <details key=\"kind\" value=\"empty\"/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"UnaryLogicOpType\" eSuperTypes=\"#//LogicOpsType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"UnaryLogicOpType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"comparisonOpsGroup\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"comparisonOps:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"comparisonOps\" eType=\"#//ComparisonOpsType\"
+        changeable=\"false\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"comparisonOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"comparisonOps:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"spatialOpsGroup\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"spatialOps:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"spatialOps\" eType=\"#//SpatialOpsType\"
+        changeable=\"false\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"spatialOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"spatialOps:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"logicOpsGroup\" eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"logicOps:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"logicOps\" eType=\"#//LogicOpsType\"
+        changeable=\"false\" volatile=\"true\" transient=\"true\" derived=\"true\" containment=\"true\"
+        resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"logicOps\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"logicOps:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"function\" eType=\"#//FunctionType\"
+        containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"Function\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type=\"ecore:EClass\" name=\"UpperBoundaryType\">
+    <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+      <details key=\"name\" value=\"UpperBoundaryType\"/>
+      <details key=\"kind\" value=\"elementOnly\"/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type=\"ecore:EAttribute\" name=\"expressionGroup\" lowerBound=\"1\"
+        eType=\"ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EFeatureMapEntry\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"group\"/>
+        <details key=\"name\" value=\"expression:group\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type=\"ecore:EReference\" name=\"expression\" lowerBound=\"1\"
+        eType=\"#//ExpressionType\" changeable=\"false\" volatile=\"true\" transient=\"true\"
+        derived=\"true\" containment=\"true\" resolveProxies=\"false\">
+      <eAnnotations source=\"http:///org/eclipse/emf/ecore/util/ExtendedMetaData\">
+        <details key=\"kind\" value=\"element\"/>
+        <details key=\"name\" value=\"expression\"/>
+        <details key=\"namespace\" value=\"##targetNamespace\"/>
+        <details key=\"group\" value=\"expression:group\"/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+</ecore:EPackage>"
+}
