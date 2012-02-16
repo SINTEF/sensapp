@@ -26,6 +26,11 @@ import net.modelbased.sensapp.datastore._
 import com.mongodb.casbah.Imports._
 import com.mongodb.casbah.commons.MongoDBObjectBuilder
 
+/**
+ * Persistence layer associated to the Model class
+ * 
+ * @author Sebastien Mosser
+ */
 class ModelRegistry extends DataStore[Model] {
 
   override val databaseName = "sensapp_db"

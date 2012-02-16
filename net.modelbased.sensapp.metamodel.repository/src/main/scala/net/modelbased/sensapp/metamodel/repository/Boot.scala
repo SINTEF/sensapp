@@ -27,6 +27,10 @@ import akka.actor.Supervisor
 import akka.actor.Actor._
 import cc.spray._
 
+/**
+ * The boot class used to reify the REST service
+ * @author Sebastien Mosser
+ */
 class Boot {
   
   val lister = new ModelLister {}

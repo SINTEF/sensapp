@@ -30,18 +30,28 @@ import net.modelbased.sensapp.metamodel.repository.data._
 import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.metamodel.repository.data.ModelJsonProtocol.modelFormat
 
+/**
+ * A meta-model lister for SensApp.
+ * 
+ * It reacts to the /meta-models/repository/elements url
+ *   - GET returns the list of URL related to the stored models
+ *   - POST store the received meta-model in the repository
+ * 
+ * @author Sebastien Mosser
+ */
 trait ModelLister extends Directives with SprayJsonSupport {
-      
-  private[this] val _registry = new ModelRegistry()
   
+  /**
+   * The service implemented in this trait
+   */
   val service = {
     path("meta-models" / "repository" / "elements") {
       get  { ctx =>
         val uris = _registry.retrieve(List()) map { model => ctx.request.path  + "/"+ model.name }
         ctx.complete(uris)
       } ~
-      content(as[Model]) { model =>
-        post { ctx =>
+      post {
+       content(as[Model]) { model => ctx =>
           if (_registry exists(("name", model.name))) {
             ctx fail(StatusCodes.Conflict, "A model named ["+model.name+"] already exists!")
           } else {
@@ -52,4 +62,7 @@ trait ModelLister extends Directives with SprayJsonSupport {
       }
     }
   }
+  
+  // The internal registry used as a storage back-end
+  private[this] val _registry = new ModelRegistry()
 }

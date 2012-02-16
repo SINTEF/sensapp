@@ -31,8 +31,21 @@ import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.metamodel.repository.data._
 import net.modelbased.sensapp.metamodel.repository.data.ModelJsonProtocol.modelFormat
 
+/**
+ * A meta-model repository for SensApp.
+ * 
+ * It reacts to the /meta-models/repository/elements/{NAME} url
+ *   - GET returns the XML description of the {NAME} meta-model
+ *   - DELETE deletes the {NAME} meta-model
+ *   - PUT update the meta-model description
+ * 
+ * @author Sebastien Mosser
+ */
 trait ModelRepository extends Directives with SprayJsonSupport {
  
+  /**
+   * The service implemented in this trait
+   */
   val service = {
     path("meta-models" / "repository" / "elements" / "[^/]+".r) { name =>
       get  { ctx =>  
@@ -41,8 +54,8 @@ trait ModelRepository extends Directives with SprayJsonSupport {
       delete { ctx =>
         handle(ctx, name, {m => _registry drop(m); ctx complete("true")})
       } ~
-      content(as[Model]) { model =>
-        put { ctx =>  
+      put { 
+        content(as[Model]) { model => ctx =>
           if (model.name != name) {
             ctx fail(StatusCodes.Conflict, "Request content does not match URL for update")
           } else {
@@ -53,8 +66,18 @@ trait ModelRepository extends Directives with SprayJsonSupport {
     }
   }
   
+  // The internal registry used as a storage back-end
   private[this] val _registry = new ModelRegistry()
 
+  /**
+   * Handle a given request
+   * 
+   * If the requested model does not exists, it answers a 404 (not found) response.
+   * 
+   * @param ctx the request context associated to this request
+   * @param name the name of the requested meta-model
+   * @param action an anonymous function than handles the retrieved model
+   */
   private def handle(ctx: RequestContext, name: String, action: Model => Unit) = {
     _registry pull(("name", name)) match {
       case None => ctx fail(StatusCodes.NotFound, "Unknown model ["+name+"]")

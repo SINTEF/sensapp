@@ -26,6 +26,7 @@ import cc.spray.json._
 
 /**
  * Case class implementing the domain model
+ * @author Sebastien Mosser
  */
 case class Model (val name: String, val content: String)
 
