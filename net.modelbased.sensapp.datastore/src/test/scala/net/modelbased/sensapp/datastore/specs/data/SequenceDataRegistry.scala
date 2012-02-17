@@ -23,6 +23,7 @@
 package net.modelbased.sensapp.datastore.specs.data
 
 import com.mongodb.casbah.Imports._
+import com.mongodb.util.JSON
 
 /**
  * This Registry handles object made by collections of scalar data
@@ -31,12 +32,13 @@ import com.mongodb.casbah.Imports._
 class SequenceDataRegistry extends DataModelRegistry[SequenceData] {
   override val collectionName = "sequence_data"
   
-  override def serialize(obj: SequenceData): DBObject = {
-    MongoDBObject("n" -> obj.n, "v" -> obj.v) 
+  override def serialize(obj: SequenceData): String = {
+    MongoDBObject("n" -> obj.n, "v" -> obj.v).toString
   }
   
-  override def deserialize(dbObj: DBObject): SequenceData = {
-    val l = extractListAs[Int](dbObj, "v")
+  override def deserialize(json: String): SequenceData = {
+    val dbObj = JSON.parse(json).asInstanceOf[BasicDBObject].asDBObject
+    val l = extractListAs[Long](dbObj, "v")
     SequenceData(dbObj.as[String]("n"), l)
   }
 }

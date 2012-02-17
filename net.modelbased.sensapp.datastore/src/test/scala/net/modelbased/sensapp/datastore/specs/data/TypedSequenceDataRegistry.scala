@@ -23,6 +23,7 @@
 package net.modelbased.sensapp.datastore.specs.data
 
 import com.mongodb.casbah.Imports._
+import com.mongodb.util.JSON
 
 /**
  * This registry handles persistent object made by collections of complex data
@@ -32,17 +33,18 @@ class TypedSequenceDataRegistry extends DataModelRegistry[TypedSequenceData]{
 
   override val collectionName = "sequence_data"
   
-  override def serialize(obj: TypedSequenceData): DBObject = {
+  override def serialize(obj: TypedSequenceData): String = {
     val builder = MongoDBObject.newBuilder
     builder += ("n" -> obj.n)
     builder += ("v" -> obj.v.map {e => MongoDBObject("n" -> e.n, "v" -> e.v)})
-    builder.result
+    builder.result.toString
   }
   
-  override def deserialize(dbObj: DBObject): TypedSequenceData = {
+  override def deserialize(json: String): TypedSequenceData = {
+    val dbObj = JSON.parse(json).asInstanceOf[BasicDBObject].asDBObject
     val caster: (AnyRef => MultiTypedData) = { any =>
       val dbObj = any.asInstanceOf[DBObject]
-      MultiTypedData(dbObj.as[String]("n"), dbObj.as[Int]("v"))
+      MultiTypedData(dbObj.as[String]("n"), dbObj.as[Long]("v"))
     }
     val l = extractListAs[MultiTypedData](dbObj, "v", caster)
     TypedSequenceData(dbObj.as[String]("n"), l)

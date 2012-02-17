@@ -2,6 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>net.modelbased.sensapp</groupId>
   <artifactId>net.modelbased.sensapp.datastore</artifactId>
+  <version>0.0.2-SNAPSHOT</version>
   <name>SensApp Datastore API</name>
   <description>This module implements the Datastore API used in SensApp</description>
   

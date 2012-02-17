@@ -23,6 +23,7 @@
 package net.modelbased.sensapp.datastore.specs.data
 
 import com.mongodb.casbah.Imports._
+import com.mongodb.util.JSON
 
 /**
  * This Registry handle very simple persistent objects.
@@ -32,11 +33,12 @@ class MultiTypedRegistry extends DataModelRegistry[MultiTypedData] {
   
   override val collectionName = "multi_typed"
   
-  override def serialize(obj: MultiTypedData): DBObject = {
-    MongoDBObject("n" -> obj.n, "v" -> obj.v)
+  override def serialize(obj: MultiTypedData): String = {
+    MongoDBObject("n" -> obj.n, "v" -> obj.v).toString
   }
   
-  override def deserialize(dbObj: DBObject): MultiTypedData = {
-    MultiTypedData(dbObj.as[String]("n"), dbObj.as[Int]("v"))
+  override def deserialize(json: String): MultiTypedData = {
+    val dbObj = JSON.parse(json).asInstanceOf[BasicDBObject].asDBObject
+    MultiTypedData(dbObj.as[String]("n"), dbObj.as[Long]("v"))
   }
 }

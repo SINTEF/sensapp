@@ -30,4 +30,4 @@ package net.modelbased.sensapp.datastore
  * @author Sebastien Mosser
  */
 
-trait DataStore[T] extends DataStoreOperations[T] with Jsonify[T] with Extractors[T]
+trait DataStore[T] extends DataStoreOperations[T] with Extractors[T]

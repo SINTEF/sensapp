@@ -58,7 +58,7 @@ abstract trait DataSpecific[T] {
    * @return the associated instance of T
    */
   @MongoDBSpecific
-  protected def deserialize(dbObj: DBObject): T
+  protected def deserialize(json: String): T
   
   /**
    * This operation serialize an instance of T into a DB Object
@@ -67,7 +67,7 @@ abstract trait DataSpecific[T] {
    * @return the associated DB Object
    */
   @MongoDBSpecific
-  protected def serialize(obj: T): DBObject
+  protected def serialize(obj: T): String
   
   /**
    * A Criterion is a (key: String, value: Any) tuple used to identify object

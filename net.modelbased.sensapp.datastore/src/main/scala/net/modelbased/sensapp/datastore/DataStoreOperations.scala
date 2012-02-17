@@ -24,6 +24,7 @@ package net.modelbased.sensapp.datastore
 
 import com.mongodb.casbah.Imports._
 import com.mongodb.casbah.commons.MongoDBObjectBuilder
+import com.mongodb.util.JSON
 
 /**
  * This trait defines manipulations used to manipulate DataStore Elements
@@ -60,7 +61,7 @@ trait DataStoreOperations[T] extends DataSpecific[T] {
   def pull(id: Criterion): Option[T] = {
     val dbResult = _collection.findOne(MongoDBObject(id._1 -> id._2))
     dbResult match {
-      case Some(dbObj) => Some(deserialize(dbObj)) 
+      case Some(dbObj) => Some(toDomainObject(dbObj)) 
       case None => None
     }
   }
@@ -79,7 +80,7 @@ trait DataStoreOperations[T] extends DataSpecific[T] {
       case Some(db) => drop(db)
       case _ => 
     }
-    _collection += serialize(obj)
+    _collection += toDatabaseObject(obj)
   }
   
   /**
@@ -91,7 +92,7 @@ trait DataStoreOperations[T] extends DataSpecific[T] {
   def retrieve(criteria: List[(String, Any)]): List[T] = {
     val prototype = MongoDBObject.newBuilder
     criteria foreach { c => prototype += (c._1 -> c._2) }
-    _collection.find(prototype.result).toList map { deserialize(_) }
+    _collection.find(prototype.result).toList map { toDomainObject(_) }
   }
   
   /**
@@ -102,7 +103,7 @@ trait DataStoreOperations[T] extends DataSpecific[T] {
    * 
    * @param obj the T instance to be dropped out
    */
-  def drop(obj: T) { _collection -= serialize(obj) }
+  def drop(obj: T) { _collection -= toDatabaseObject(obj) }
   
   /**
    * The dropAll method clear the content of the registry.
@@ -129,4 +130,28 @@ trait DataStoreOperations[T] extends DataSpecific[T] {
     val col = db(collectionName)
     col
   }
+  
+  /**
+   * Transform a domain object (T)  into an instance of DBObject (mongoDB specific)
+   * 
+   * @param obj the object to be transformed
+   * @return the associated DBObject
+   */
+  @MongoDBSpecific
+  private def toDatabaseObject(obj: T): DBObject = {
+    val raw = JSON.parse(serialize(obj))
+    if (null == raw)
+      throw new RuntimeException("Unable to parse JSON data") // FIXME (DataStoreException)
+    raw.asInstanceOf[BasicDBObject].asDBObject
+  }
+  
+  /**
+   * Transform a DBObject (MongoDB) into an instance of the domain object (T)
+   * 
+   * @param dbobj the DBObject to be transformed
+   * @return the associated domain object (T)
+   */
+  @MongoDBSpecific
+  private def toDomainObject(dbObj: DBObject): T = { deserialize(dbObj.toString) }
+  
 }

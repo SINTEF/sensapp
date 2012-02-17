@@ -37,13 +37,13 @@ sealed abstract class DataModel(val n: String)
  * MultiTypedData illustrates a persistent object made with a String and an Int.
  * @author Sebastien Mosser
  */
-case class MultiTypedData(x: String, v: Int) extends DataModel(x)
+case class MultiTypedData(x: String, v: Long) extends DataModel(x)
 
 /**
  * SequenceData illustrates how persistent collections of scalar data are handled
  * @author Sebastien Mosser
  */
-case class SequenceData(x: String, v: List[Int]) extends DataModel(x)
+case class SequenceData(x: String, v: List[Long]) extends DataModel(x)
 
 /**
  * TypedSequenceData illustrates how persistent collections of complex objects are handled
