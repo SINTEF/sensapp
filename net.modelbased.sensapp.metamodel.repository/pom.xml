@@ -60,6 +60,17 @@
   	    <groupId>org.mortbay.jetty</groupId>
  	    <artifactId>jetty-maven-plugin</artifactId>
  	    <version>8.1.0.RC5</version>
+ 	    <configuration>
+ 	      <!-- To support hot deployment while writing code -->
+ 	      <scanIntervalSeconds>5</scanIntervalSeconds>
+ 	      <connectors>
+ 	      <connector implementation="org.eclipse.jetty.server.nio.SelectChannelConnector">
+ 	        <port>8080</port>
+ 	        <!-- Mandatory to handle "large" metamodels (2097152 = 2 * 1024 * 1024 = 2Mb)-->
+ 	        <responseBufferSize>2097152</responseBufferSize>
+ 	      </connector>
+ 	      </connectors>
+ 	    </configuration>
 	  </plugin>
     </plugins>
   </build>
