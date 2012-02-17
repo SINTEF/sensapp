@@ -24,29 +24,23 @@ package net.modelbased.sensapp.metamodel.repository.data
 
 import net.modelbased.sensapp.datastore._
 import com.mongodb.casbah.Imports._
-import com.mongodb.casbah.commons.MongoDBObjectBuilder
+import cc.spray.json._
 
+import net.modelbased.sensapp.metamodel.repository.data.ModelJsonProtocol.modelFormat
 /**
  * Persistence layer associated to the Model class
  * 
  * @author Sebastien Mosser
  */
-class ModelRegistry extends DataStore[Model] {
+class ModelRegistry extends DataStore[Model]  {
 
   override val databaseName = "sensapp_db"
   override val collectionName = "models.registry" 
     
   override def identify(m: Model) = ("name", m.name)
   
-  override def deserialize(dbObj: DBObject): Model = {
-    Model(dbObj.as[String]("name"), dbObj.as[String]("content"))
-  }
+  override def deserialize(json: String): Model = { json.asJson.convertTo[Model] }
  
-  override def serialize(obj: Model): DBObject = {
-    val builder = MongoDBObject.newBuilder
-    builder += ("name" -> obj.name)
-    builder += ("content" -> obj.content)
-    builder.result
-  }
+  override def serialize(obj: Model): String = { obj.toJson.toString }
     
 }
