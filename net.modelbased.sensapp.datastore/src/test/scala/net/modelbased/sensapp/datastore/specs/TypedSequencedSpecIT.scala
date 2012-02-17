@@ -22,11 +22,15 @@
  */
 package net.modelbased.sensapp.datastore.specs
 
-//import net.modelbased.sensapp.datastore.specs.data._
-import net.modelbased.sensapp.datastore.specs.data._
-import org.specs2.mutable._
 
-class TypeSequencedSpecUnitTest extends SpecificationWithJUnit {
+import org.specs2.mutable._
+import org.junit.runner.RunWith
+import org.specs2.runner.JUnitRunner
+import net.modelbased.sensapp.datastore.specs.data._
+
+
+@RunWith(classOf[JUnitRunner])
+class TypeSequencedSpecIT extends SpecificationWithJUnit {
   
   "SequenceType data registry Specification unit".title
   

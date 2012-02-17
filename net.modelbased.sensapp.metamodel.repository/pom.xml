@@ -63,6 +63,8 @@
  	    <configuration>
  	      <!-- To support hot deployment while writing code -->
  	      <scanIntervalSeconds>5</scanIntervalSeconds>
+ 	      <stopPort>9966</stopPort>
+          <stopKey>sensapp</stopKey>
  	      <connectors>
  	      <connector implementation="org.eclipse.jetty.server.nio.SelectChannelConnector">
  	        <port>8080</port>
@@ -71,6 +73,26 @@
  	      </connector>
  	      </connectors>
  	    </configuration>
+ 	    <executions>
+          <execution>
+            <id>start-jetty</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>run</goal>
+            </goals>
+            <configuration>
+              <scanIntervalSeconds>0</scanIntervalSeconds>
+              <daemon>true</daemon>
+            </configuration>
+          </execution>
+          <execution>
+            <id>stop-jetty</id>
+            <phase>post-integration-test</phase>
+            <goals>
+              <goal>stop</goal>
+            </goals>
+          </execution>
+        </executions>
 	  </plugin>
     </plugins>
   </build>

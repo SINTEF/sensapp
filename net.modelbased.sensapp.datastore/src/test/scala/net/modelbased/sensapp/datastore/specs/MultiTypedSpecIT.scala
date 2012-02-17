@@ -22,42 +22,44 @@
  */
 package net.modelbased.sensapp.datastore.specs
 
-import net.modelbased.sensapp.datastore.specs.data._
 import org.specs2.mutable._
+import org.junit.runner.RunWith
+import org.specs2.runner.JUnitRunner
+import net.modelbased.sensapp.datastore.specs.data._
 
-
-class SequencedSpecUnitTest extends SpecificationWithJUnit {
+@RunWith(classOf[JUnitRunner])
+class MultiTypedSpecIT extends SpecificationWithJUnit {
   
-  "SequenceType data registry Specification unit".title
+  "MultiTyped data registry Specification unit".title
   
   "Push: a registry" should {
    
-    "push a data" in new EmptySequenceTypeRegistry {
+    "push a data" in new EmptyMultiTypeRegistry {
       val size = registry.size
       registry push data
       registry.size must_== (size+1)
     }
     
-    "push in an idempotent way" in new FilledSequenceTypeRegistry {
+    "push in an idempotent way" in new FilledMultiTypeRegistry {
       val size = registry.size
       registry push m1
       registry.size must_== size
     }
     
-    "support data update as simple push" in new EmptySequenceTypeRegistry {
+    "support data update as simple push" in new EmptyMultiTypeRegistry {
       registry push data
       val identifier = registry identify data
-      val dataPrime = SequenceData(data.n,List(-100,0, 100))
+      val dataPrime = MultiTypedData(data.n,-100)
       assert(identifier == (registry identify dataPrime))
       registry push dataPrime
       (registry pull identifier) must beSome.which{ _ == dataPrime }
     }
         
-    "update data in place" in new EmptySequenceTypeRegistry {
+    "update data in place" in new EmptyMultiTypeRegistry {
       registry push data
       val size = registry.size
       val identifier = registry identify data
-      val dataPrime = SequenceData(data.n,List(-100,0, 100))
+      val dataPrime = MultiTypedData(data.n,-100)
       assert(identifier == (registry identify dataPrime))
       registry push dataPrime
       registry.size must_== size
@@ -65,37 +67,37 @@ class SequencedSpecUnitTest extends SpecificationWithJUnit {
   }
   
   "Pull: a registry" should {
-    "pull an existing data" in new FilledSequenceTypeRegistry {
+    "pull an existing data" in new FilledMultiTypeRegistry {
       val identifier = registry identify m1
       (registry pull identifier) must beSome.which{ _ == m1 }
     }
-    "not pull an unregistered data" in  new FilledSequenceTypeRegistry {
+    "not pull an unregistered data" in  new FilledMultiTypeRegistry {
       val identifier = registry identify unregistered
       (registry pull identifier) must beNone
     }
   }
   
   "Retrieve: a registry" should {
-    "retrieve an empty list when nothing match" in new FilledSequenceTypeRegistry {
+    "retrieve an empty list when nothing match" in new FilledMultiTypeRegistry {
       registry retrieve(List(registry identify unregistered)) must beEmpty
     }
-    "retrieve a list of matched objects" in new FilledSequenceTypeRegistry {
+    "retrieve a list of matched objects" in new FilledMultiTypeRegistry {
       registry retrieve(List(("v", 2))) must contain(m2,m3).only
     }
   }
   
   "Drop: a registry" should {
-    "support element drop" in new FilledSequenceTypeRegistry {
+    "support element drop" in new FilledMultiTypeRegistry {
       registry drop m1
       registry pull(registry identify m1) must beNone
     }
-    "support unexisting element drop silently" in new FilledSequenceTypeRegistry {
+    "support unexisting element drop silently" in new FilledMultiTypeRegistry {
       registry drop unregistered must not (throwAn[Exception])
     }
   }
   
   "DropAll: a registry" should {
-    "be able to drop all the elements" in new FilledSequenceTypeRegistry {
+    "be able to drop all the elements" in new FilledMultiTypeRegistry {
       registry dropAll()
       registry.size must_== 0
     }
@@ -103,14 +105,14 @@ class SequencedSpecUnitTest extends SpecificationWithJUnit {
     
 }
 
-trait FilledSequenceTypeRegistry extends Before {
+trait FilledMultiTypeRegistry extends Before {
   
-  val registry = new SequenceDataRegistry()
+  val registry = new MultiTypedRegistry()
   
-  val m1 = SequenceData("m1",List(1))
-  val m2 = SequenceData("m2",List(2,3,4))
-  val m3 = SequenceData("m3",List(2,3,4))
-  val unregistered = SequenceData("unregistered", List(-1))
+  val m1 = MultiTypedData("m1",1)
+  val m2 = MultiTypedData("m2",2)
+  val m3 = MultiTypedData("m3",2)
+  val unregistered = MultiTypedData("unregistered", -1)
   
   def before {
     registry dropAll()
@@ -120,12 +122,12 @@ trait FilledSequenceTypeRegistry extends Before {
   }
 }
 
-trait EmptySequenceTypeRegistry extends Before {
+trait EmptyMultiTypeRegistry extends Before {
   
-  val data = SequenceData("primary", List(47))
-  var other = SequenceData("other", List(47))
+  val data = MultiTypedData("primary",47)
+  var other = MultiTypedData("other",47)
   
-  val registry = new SequenceDataRegistry()
+  val registry = new MultiTypedRegistry()
 
   def before { registry dropAll() }
 }
