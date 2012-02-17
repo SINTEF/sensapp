@@ -147,16 +147,18 @@
       </plugin>
       <!-- Scala Tests -->
       <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
+        <artifactId>maven-failsafe-plugin</artifactId>
         <version>2.6</version>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+        	</goals>
+          </execution>
+        </executions>
         <configuration>
           <useFile>false</useFile>
-          <disableXmlReport>true</disableXmlReport>
-          <includes>
-            <include>**/*Test.*</include>
-            <include>**/*Suite.*</include>
-          </includes>
         </configuration>
       </plugin>
     </plugins>
