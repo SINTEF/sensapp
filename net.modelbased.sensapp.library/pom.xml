@@ -10,6 +10,7 @@
   
   <modules>
     <module>../net.modelbased.sensapp.library.datastore</module>
+    <module>../net.modelbased.sensapp.library.http</module>
   </modules>
   
   <parent>
