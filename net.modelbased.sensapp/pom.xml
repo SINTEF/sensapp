@@ -13,6 +13,7 @@
   <inceptionYear>2011</inceptionYear>
   
   <modules>
+    <module>../net.modelbased.sensapp.archetype</module>
     <module>../net.modelbased.sensapp.service</module>
   	<module>../net.modelbased.sensapp.library</module>
   </modules>
