@@ -9,3 +9,5 @@ sandbox.*
 *.iws
 keystore
 /.idea/
+.settings
+target

@@ -1,0 +1,101 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>net.modelbased.sensapp</groupId>
+  <artifactId>net.modelbased.sensapp.service</artifactId>
+  <packaging>pom</packaging>
+  <name>SensApp Services</name>
+  <description>
+    Services Available in SensApp
+  </description>
+  <inceptionYear>2012</inceptionYear>
+  
+   <parent>
+  	<groupId>net.modelbased</groupId>
+  	<artifactId>net.modelbased.sensapp</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+  	<relativePath>../net.modelbased.sensapp</relativePath>
+  </parent>
+  
+  <modules>
+    <!-- <module>../net.modelbased.sensapp.service.sample</module> -->
+    <module>../net.modelbased.sensapp.service.metamodel.repository</module>
+  </modules>
+  
+  <repositories>
+  	<repository>
+  	  <id>spray</id>
+  	  <name>Spray Repository</name>
+      <url>http://repo.spray.cc/</url>
+	</repository>
+  	<repository>
+  	  <id>typesafe</id>
+  	  <name>Typesafe Repository</name>
+      <url>http://repo.typesafe.com/typesafe/releases/</url>
+	</repository>
+    <repository>
+  	  <id>jetty</id>
+      <name>Jetty Repository</name>
+      <url>http://oss.sonatype.org/content/groups/jetty/</url>
+    </repository>
+  </repositories>
+  
+  <dependencies>
+  	<dependency>
+  		<groupId>cc.spray</groupId>
+  		<artifactId>spray-server</artifactId>
+  		<version>0.9.0-RC2</version>
+  	</dependency>
+  	<dependency>
+  		<groupId>cc.spray</groupId>
+  		<artifactId>spray-client</artifactId>
+  		<version>0.9.0-RC2</version>
+  		<scope>test</scope>
+  	</dependency>
+  	<dependency>
+  		<groupId>cc.spray</groupId>
+  		<artifactId>spray-json_${scala.version}</artifactId>
+  		<version>1.1.0</version>
+  	</dependency>
+  	<dependency>
+  	  <groupId>se.scalablesolutions.akka</groupId>
+  	  <artifactId>akka-actor</artifactId>
+  	  <version>1.3.1</version>
+	</dependency>
+  </dependencies>
+  
+  <build>
+    <plugins>
+      <plugin>
+  	    <groupId>org.mortbay.jetty</groupId>
+ 	    <artifactId>jetty-maven-plugin</artifactId>
+ 	    <version>8.1.0.RC5</version>
+ 	    <configuration>
+ 	      <!-- To support hot deployment while writing code -->
+ 	      <scanIntervalSeconds>5</scanIntervalSeconds>
+ 	      <stopPort>9966</stopPort>
+          <stopKey>sensapp</stopKey>
+ 	    </configuration>
+ 	    <executions>
+          <execution>
+            <id>start-jetty</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>run</goal>
+            </goals>
+            <configuration>
+              <scanIntervalSeconds>0</scanIntervalSeconds>
+              <daemon>true</daemon>
+            </configuration>
+          </execution>
+          <execution>
+            <id>stop-jetty</id>
+            <phase>post-integration-test</phase>
+            <goals>
+              <goal>stop</goal>
+            </goals>
+          </execution>
+        </executions>
+	  </plugin>
+    </plugins>
+  </build>  
+</project>
