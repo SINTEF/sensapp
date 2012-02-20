@@ -1,10 +1,10 @@
 /**
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
- * Copyright (C) 2011-  SINTEF ICT
+ * Copyright (C) 2012-  SINTEF ICT
  * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
  *
- * Module: net.modelbased.sensapp.datastore
+ * Module: net.modelbased.sensapp.library.datastore
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -20,17 +20,14 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.datastore
+package net.modelbased.sensapp.library.datastore
 
 /**
- * This annotation made explicit elements that are strongly coupled to MongoDB
+ * The DataStore[T] trait mixes all the sub-traits necessary to provide a SensApp 
+ * data registry
  * 
- * <strong>Warning</strong>: In an ideal world, nothing should rely on the DB
- * directly! These links are mainly used to exploit the JSON capabilities of 
- * the MongoDB library, and to avoid intermediate transformation like 
- * Object -> JSON -> MongoDB. We know that it is an ugly hack, but we don't 
- * have time to make it better right now. Sorry for the inconvenience.
- * 
+ * @param T the type of the data stored in the registry
  * @author Sebastien Mosser
  */
-class MongoDBSpecific extends StaticAnnotation 
+
+trait DataStore[T] extends DataStoreOperations[T] with Extractors[T]

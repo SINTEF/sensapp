@@ -1,10 +1,10 @@
 /**
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
- * Copyright (C) 2011-  SINTEF ICT
+ * Copyright (C) 2012-  SINTEF ICT
  * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
  *
- * Module: net.modelbased.sensapp.datastore
+ * Module: net.modelbased.sensapp.library.datastore
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -20,25 +20,33 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.datastore.specs.data
+package net.modelbased.sensapp.library.datastore.specs.data
 
 import com.mongodb.casbah.Imports._
 import com.mongodb.util.JSON
 
 /**
- * This Registry handles object made by collections of scalar data
+ * This registry handles persistent object made by collections of complex data
  * @author Sebastien Mosser
  */
-class SequenceDataRegistry extends DataModelRegistry[SequenceData] {
+class TypedSequenceDataRegistry extends DataModelRegistry[TypedSequenceData]{
+
   override val collectionName = "sequence_data"
   
-  override def serialize(obj: SequenceData): String = {
-    MongoDBObject("n" -> obj.n, "v" -> obj.v).toString
+  override def serialize(obj: TypedSequenceData): String = {
+    val builder = MongoDBObject.newBuilder
+    builder += ("n" -> obj.n)
+    builder += ("v" -> obj.v.map {e => MongoDBObject("n" -> e.n, "v" -> e.v)})
+    builder.result.toString
   }
   
-  override def deserialize(json: String): SequenceData = {
+  override def deserialize(json: String): TypedSequenceData = {
     val dbObj = JSON.parse(json).asInstanceOf[BasicDBObject].asDBObject
-    val l = extractListAs[Long](dbObj, "v")
-    SequenceData(dbObj.as[String]("n"), l)
+    val caster: (AnyRef => MultiTypedData) = { any =>
+      val dbObj = any.asInstanceOf[DBObject]
+      MultiTypedData(dbObj.as[String]("n"), dbObj.as[Long]("v"))
+    }
+    val l = extractListAs[MultiTypedData](dbObj, "v", caster)
+    TypedSequenceData(dbObj.as[String]("n"), l)
   }
 }

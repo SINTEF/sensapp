@@ -1,10 +1,10 @@
 /**
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
- * Copyright (C) 2011-  SINTEF ICT
+ * Copyright (C) 2012-  SINTEF ICT
  * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
  *
- * Module: net.modelbased.sensapp.datastore
+ * Module: net.modelbased.sensapp.library.datastore
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -20,7 +20,7 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.datastore
+package net.modelbased.sensapp.library.datastore
 
 import com.mongodb.casbah.Imports._
 import com.mongodb.casbah.commons.MongoDBObjectBuilder

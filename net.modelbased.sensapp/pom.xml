@@ -12,6 +12,11 @@
   </description>
   <inceptionYear>2011</inceptionYear>
   
+  <modules>
+    <!-- <module>../net.modelbased.sensapp.services</module> -->
+  	<module>../net.modelbased.sensapp.library</module>
+  </modules>
+  
   <properties>
     <maven.compiler.source>1.6</maven.compiler.source>
     <maven.compiler.target>1.6</maven.compiler.target>
@@ -164,9 +169,4 @@
     </plugins>
   </build>
   
-
-  <modules>
-  	<module>../net.modelbased.sensapp.datastore</module>
-  	<module>../net.modelbased.sensapp.metamodel.repository</module>
-  </modules>
 </project>

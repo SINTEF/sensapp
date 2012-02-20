@@ -1,10 +1,10 @@
 /**
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
- * Copyright (C) 2011-  SINTEF ICT
+ * Copyright (C) 2012-  SINTEF ICT
  * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
  *
- * Module: net.modelbased.sensapp.datastore
+ * Module: net.modelbased.sensapp.library.datastore
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -20,11 +20,11 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.datastore.specs.data
+package net.modelbased.sensapp.library.datastore.specs.data
 
-import net.modelbased.sensapp.datastore.DataStore
+import net.modelbased.sensapp.library.datastore.DataStore
 import com.mongodb.casbah.Imports._
-
+ 
 /**
  * DataModel is the root of the test data model class hierarchy
  * 
