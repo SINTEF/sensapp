@@ -66,17 +66,16 @@
  	    <version>8.1.0.RC5</version>
  	    <configuration>
  	      <stopPort>9966</stopPort>
-          <stopKey>sensapp</stopKey>
+          <stopKey>${project.artifactId}</stopKey>
  	    </configuration>
  	    <executions>
           <execution>
             <id>start-jetty</id>
             <phase>pre-integration-test</phase>
             <goals>
-              <goal>run</goal>
+              <goal>start</goal>
             </goals>
             <configuration>
-              <scanIntervalSeconds>0</scanIntervalSeconds>
               <daemon>true</daemon>
             </configuration>
           </execution>
