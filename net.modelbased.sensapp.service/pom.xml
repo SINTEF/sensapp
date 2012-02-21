@@ -19,6 +19,7 @@
   <modules>
     <module>../net.modelbased.sensapp.service.sample</module>
     <module>../net.modelbased.sensapp.service.metamodel.repository</module>
+    <module>../net.modelbased.sensapp.service.metamodel.merger</module>
   </modules>
   
   <repositories>
@@ -64,8 +65,6 @@
  	    <artifactId>jetty-maven-plugin</artifactId>
  	    <version>8.1.0.RC5</version>
  	    <configuration>
- 	      <!-- To support hot deployment while writing code -->
- 	      <scanIntervalSeconds>5</scanIntervalSeconds>
  	      <stopPort>9966</stopPort>
           <stopKey>sensapp</stopKey>
  	    </configuration>
