@@ -15,17 +15,13 @@
   <scm>
     <connection>scm:git:git@github.com:mosser/SensApp.git</connection>
     <url>scm:git:git@github.com:mosser/SensApp.git</url>
-<!--   <developerConnection>
-    scm:git:git@github.com:mosser/SensApp.git
-  </developerConnection> -->
   </scm>
 
-  
-  
   <modules>
     <module>../net.modelbased.sensapp.archetype</module>
     <module>../net.modelbased.sensapp.service</module>
   	<module>../net.modelbased.sensapp.library</module>
+  	<module>../net.modelbased.sensapp.system</module>
   </modules>
   
   <properties>
@@ -179,5 +175,30 @@
       </plugin>
     </plugins>
   </build>
+  
+  
+  <profiles>
+    <profile>
+      <id>graph</id>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>mvnplugins.fusesource.org</id>
+          <url>http://mvnplugins.fusesource.org/repo/release</url>
+          <releases>
+            <enabled>true</enabled>
+          </releases>
+        </pluginRepository>
+      </pluginRepositories>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.fusesource.mvnplugins</groupId>
+            <artifactId>maven-graph-plugin</artifactId>
+            <version>1.4</version>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
   
 </project>
