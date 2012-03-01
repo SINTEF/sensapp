@@ -12,6 +12,7 @@
     <module>../net.modelbased.sensapp.library.datastore</module>
     <module>../net.modelbased.sensapp.library.http</module>
     <module>../net.modelbased.sensapp.library.emf</module>
+    <module>../net.modelbased.sensapp.library.system</module>
   </modules>
   
   <parent>
