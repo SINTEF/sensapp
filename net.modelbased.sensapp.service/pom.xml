@@ -34,11 +34,6 @@
   	  <name>Typesafe Repository</name>
       <url>http://repo.typesafe.com/typesafe/releases/</url>
 	</repository>
-    <repository>
-  	  <id>jetty</id>
-      <name>Jetty Repository</name>
-      <url>http://oss.sonatype.org/content/groups/jetty/</url>
-    </repository>
   </repositories>
   
   <dependencies>
@@ -59,36 +54,4 @@
 	</dependency>
   </dependencies>
   
-  <build>
-    <plugins>
-      <plugin>
-  	    <groupId>org.mortbay.jetty</groupId>
- 	    <artifactId>jetty-maven-plugin</artifactId>
- 	    <version>8.1.0.RC5</version>
- 	    <configuration>
- 	      <stopPort>9966</stopPort>
-          <stopKey>${project.artifactId}</stopKey>
- 	    </configuration>
- 	    <executions>
-          <execution>
-            <id>start-jetty</id>
-            <phase>pre-integration-test</phase>
-            <goals>
-              <goal>start</goal>
-            </goals>
-            <configuration>
-              <daemon>true</daemon>
-            </configuration>
-          </execution>
-          <execution>
-            <id>stop-jetty</id>
-            <phase>post-integration-test</phase>
-            <goals>
-              <goal>stop</goal>
-            </goals>
-          </execution>
-        </executions>
-	  </plugin>
-    </plugins>
-  </build>  
 </project>
