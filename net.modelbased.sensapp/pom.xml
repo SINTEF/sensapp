@@ -12,6 +12,16 @@
   </description>
   <inceptionYear>2011</inceptionYear>
   
+  <scm>
+    <connection>scm:git:git@github.com:mosser/SensApp.git</connection>
+    <url>scm:git:git@github.com:mosser/SensApp.git</url>
+<!--   <developerConnection>
+    scm:git:git@github.com:mosser/SensApp.git
+  </developerConnection> -->
+  </scm>
+
+  
+  
   <modules>
     <module>../net.modelbased.sensapp.archetype</module>
     <module>../net.modelbased.sensapp.service</module>

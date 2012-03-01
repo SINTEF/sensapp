@@ -26,7 +26,7 @@ import net.modelbased.sensapp.datastore._
 import com.mongodb.casbah.Imports._
 import com.mongodb.casbah.commons.MongoDBObjectBuilder
 import com.mongodb.util.JSON
-import scala.collection.mutable
+//import scala.collection.mutable
 
 class SensorRegistry extends DataStore[Sensor] {
   

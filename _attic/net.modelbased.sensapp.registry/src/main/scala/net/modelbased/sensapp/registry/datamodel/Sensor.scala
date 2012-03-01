@@ -22,13 +22,19 @@
  */
 package net.modelbased.sensapp.registry.datamodel
 
-
 /**
  * Sensor description
+ * 
+ * @param id the unique identifier associated to this sensor
+ * @param nickname an optional description for the sensor
  */
 case class Sensor(
     val id: String, 
     val nickname: Option[String])
+    
+    
+    
+    
     
 	//val quantities: List[PhysicalQuantity])
 
