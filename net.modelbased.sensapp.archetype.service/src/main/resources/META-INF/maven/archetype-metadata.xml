@@ -40,18 +40,6 @@
       </includes>
     </fileSet>
     <fileSet encoding="UTF-8">
-      <directory>src/main/resources</directory>
-      <includes>
-        <include>**/*.conf</include>
-      </includes>
-    </fileSet>
-    <fileSet encoding="UTF-8">
-      <directory>src/test/scala</directory>
-      <includes>
-        <include>**/*.scala</include>
-      </includes>
-    </fileSet>
-    <fileSet encoding="UTF-8">
       <directory>.settings</directory>
       <includes>
         <include>**/*.prefs</include>

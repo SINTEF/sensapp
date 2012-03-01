@@ -32,8 +32,9 @@ import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.service.sample.data.{Element, ElementRegistry }
 import net.modelbased.sensapp.service.sample.data.ElementJsonProtocol.format
 
+import net.modelbased.sensapp.library.system.{Service => SensAppService} 
 
-trait Service extends Directives with SprayJsonSupport {
+trait Service extends SensAppService {
   
   val service = {
     path("sample" / "elements") {
