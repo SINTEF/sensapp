@@ -46,19 +46,19 @@
   
   <repositories>
     <repository>
+      <id>repo.spray.cc</id>
+      <name>spray repo</name>
+      <url>http://repo.spray.cc</url>
+    </repository>
+     <repository>
       <id>scala-tools.org-Releases</id> 
       <name>releases</name> 
       <url>http://scala-tools.org/repo-releases</url> 
     </repository>
     <repository>
-      <id>scala-tools.org-Snapshots</id> 
-      <name>snapshots</name> 
-      <url>http://scala-tools.org/repo-snapshots</url> 
-    </repository>
-    <repository>
       <id>SensApp</id>
       <name>snapshots</name>
-      <url>https://repository-mosser.forge.cloudbees.com/snapshot/</url>
+      <url>https://repository-sintef.forge.cloudbees.com/snapshot/</url>
     </repository>  
   </repositories>
     

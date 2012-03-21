@@ -32,10 +32,7 @@ trait System {
 
   def services: List[Service]
   
-  
   def bootstrap() = {
-    println("pouet")
-    println(services)
     var actorRefs : List[ActorRef] = services map { s => actorOf(new HttpService(s.service))}
     val root = actorOf(new RootService(actorRefs.head, actorRefs.tail: _*))
     val supervisors = actorRefs map {Supervise(_,Permanent)}
