@@ -6,6 +6,13 @@
   <name>SensApp Datastore API</name>
   <description>This module implements the Datastore API used in SensApp</description>
   
+  <repositories>
+    <repository>
+      <id>sonatype-oss</id>
+      <name>SonaType OSS</name>
+      <url>http://oss.sonatype.org/content/repositories/releases/</url>
+    </repository>
+  </repositories>
     <dependencies>
 	  <dependency>
 			<groupId>com.mongodb.casbah</groupId>

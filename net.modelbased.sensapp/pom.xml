@@ -50,11 +50,6 @@
       <name>spray repo</name>
       <url>http://repo.spray.cc</url>
     </repository>
-     <repository>
-      <id>scala-tools.org-Releases</id> 
-      <name>releases</name> 
-      <url>http://scala-tools.org/repo-releases</url> 
-    </repository>
     <repository>
       <id>SensApp</id>
       <name>snapshots</name>
