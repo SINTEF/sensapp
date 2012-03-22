@@ -18,9 +18,6 @@
   
   <modules>
     <module>../net.modelbased.sensapp.service.sample</module>
-    <module>../net.modelbased.sensapp.service.metamodel.repository</module>
-    <module>../net.modelbased.sensapp.service.metamodel.merger</module>
-    <module>../net.modelbased.sensapp.service.metamodel.recommandation</module>
   </modules>
   
   <repositories>

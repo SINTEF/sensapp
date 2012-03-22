@@ -17,7 +17,6 @@
   </parent>
   
   <modules>
-    <module>../net.modelbased.sensapp.system.envision</module>
     <module>../net.modelbased.sensapp.system.sample</module>
   </modules>
   

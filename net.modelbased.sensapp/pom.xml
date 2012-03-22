@@ -46,11 +46,6 @@
   
   <repositories>
     <repository>
-      <id>repo.spray.cc</id>
-      <name>spray repo</name>
-      <url>http://repo.spray.cc</url>
-    </repository>
-    <repository>
       <id>SensApp</id>
       <name>snapshots</name>
       <url>https://repository-sintef.forge.cloudbees.com/snapshot/</url>
