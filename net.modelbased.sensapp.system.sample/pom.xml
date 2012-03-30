@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>net.modelbased.sensapp.system</groupId>
   <artifactId>net.modelbased.sensapp.system.sample</artifactId>
-  <name>SensApp Sample Service</name>
+  <name>SensApp Sample System</name>
   <description>A Prototypical SensApp Service, integrated with the others</description>
   <inceptionYear>2012</inceptionYear>
   
