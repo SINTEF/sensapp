@@ -10,4 +10,9 @@ sandbox.*
 keystore
 /.idea/
 .settings
+.directory
 target
+*/.svn/*
+**/.svn/*
+**/bin/*
+/.svn/

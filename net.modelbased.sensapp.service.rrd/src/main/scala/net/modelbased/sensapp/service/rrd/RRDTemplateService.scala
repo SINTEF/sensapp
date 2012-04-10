@@ -1,3 +1,5 @@
+package net.modelbased.sensapp.service.rrd
+
 /**
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
@@ -20,32 +22,30 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.sample
-
 import cc.spray._
 import cc.spray.http._
 import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.directives._
-import cc.spray.typeconversion.SprayJsonSupport
+
 // Application specific:
-import net.modelbased.sensapp.service.sample.data.{Element, ElementRegistry }
-import net.modelbased.sensapp.service.sample.data.ElementJsonProtocol.format
+import net.modelbased.sensapp.service.rrd.data.{RRDTemplate, RRDTemplateRegistry }
+import net.modelbased.sensapp.service.rrd.data.RRDTemplateJsonProtocol.format
 
-import net.modelbased.sensapp.library.system.{Service => SensAppService} 
+import net.modelbased.sensapp.library.system.{Service => SensAppService}
 
-trait Service extends SensAppService {
+trait RRDTemplateService extends SensAppService {
   
   val service = {
-    path("sample" / "elements") {
+    path("rrd" / "templates") {
       get { context =>
         val uris = (_registry retrieve(List())) map { buildUrl(context, _) }
         context complete uris
       } ~
       post {
-        content(as[Element]) { element => context =>
+        content(as[RRDTemplate]) { element => context =>
           if (_registry exists ("key", element.key)){
-            context fail (StatusCodes.Conflict, "An RRDTemplate identified as ["+ element.key +"] already exists!")
+            context fail (StatusCodes.Conflict, "A template identified as ["+ element.key +"] already exists!")
           } else {
             _registry push element
             context complete (StatusCodes.Created, buildUrl(context, element))
@@ -53,7 +53,7 @@ trait Service extends SensAppService {
         }
       }
     } ~
-    path("sample" / "elements" / IntNumber) { key =>
+    path("rrd" / "templates" / "[^/]+".r) { key =>
       get { context =>
         handle(context, key, { context complete _})
       } ~
@@ -61,7 +61,7 @@ trait Service extends SensAppService {
         handle(context, key, { e => _registry drop e; context complete "true"})
       } ~
       put {
-        content(as[Element]) { element => context => 
+        content(as[RRDTemplate]) { element => context =>
           if (element.key != key) {
             context fail(StatusCodes.Conflict, "Request content does not match URL for update")
           } else {
@@ -72,13 +72,13 @@ trait Service extends SensAppService {
     }
   }
   
-  private[this] val _registry = new ElementRegistry()
+  private[this] val _registry = new RRDTemplateRegistry()
   
-  private def buildUrl(ctx: RequestContext, e: Element) = { ctx.request.path  + "/"+ e.key  }
+  private def buildUrl(ctx: RequestContext, e: RRDTemplate ) = { ctx.request.path  + "/"+ e.key  }
   
-  private def handle(ctx: RequestContext, key: Int, action: Element => Unit) = {
+  private def handle(ctx: RequestContext, key: String, action: RRDTemplate => Unit) = {
     _registry pull(("key", key)) match {
-      case None => ctx fail(StatusCodes.NotFound, "Unknown element ["+key+"]")
+      case None => ctx fail(StatusCodes.NotFound, "Unknown template ["+key+"]")
       case Some(element) => action(element)
     } 
   }

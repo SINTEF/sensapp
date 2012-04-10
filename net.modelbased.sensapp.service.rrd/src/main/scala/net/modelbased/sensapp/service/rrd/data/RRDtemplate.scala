@@ -1,3 +1,5 @@
+package net.modelbased.sensapp.service.rrd.data
+
 /**
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
@@ -20,26 +22,15 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.sample.data
-
 import cc.spray.json._
-import net.modelbased.sensapp.library.datastore._
-import net.modelbased.sensapp.service.sample.data.ElementJsonProtocol.format
+
+
+case class RRDTemplate(key: String, value: String)
 
 /**
- * Persistence layer associated to the RRDTemplate class
- * 
- * @author Sebastien Mosser
+ * implicit function to marshal an element into a JSON object
  */
-class ElementRegistry extends DataStore[Element]  {
-
-  override val databaseName = "sensapp_db"
-  override val collectionName = "sample.elements" 
-    
-  override def identify(e: Element) = ("key", e.key)
-  
-  override def deserialize(json: String): Element = { json.asJson.convertTo[Element] }
- 
-  override def serialize(e: Element): String = { e.toJson.toString }
-    
+object RRDTemplateJsonProtocol extends DefaultJsonProtocol {
+  implicit val format = jsonFormat(RRDTemplate, "key", "value")
 }
+

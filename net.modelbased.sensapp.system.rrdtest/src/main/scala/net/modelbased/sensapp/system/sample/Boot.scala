@@ -4,7 +4,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
  *
- * Module: net.modelbased.sensapp.service.rrd
+ * Module: net.modelbased.sensapp.system.rrdtest
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -20,26 +20,11 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.sample.data
+package net.modelbased.sensapp.system.sample
 
-import cc.spray.json._
-import net.modelbased.sensapp.library.datastore._
-import net.modelbased.sensapp.service.sample.data.ElementJsonProtocol.format
+import net.modelbased.sensapp.service.sample.{Service => SampleService}
+import net.modelbased.sensapp.library.system._
 
-/**
- * Persistence layer associated to the RRDTemplate class
- * 
- * @author Sebastien Mosser
- */
-class ElementRegistry extends DataStore[Element]  {
-
-  override val databaseName = "sensapp_db"
-  override val collectionName = "sample.elements" 
-    
-  override def identify(e: Element) = ("key", e.key)
-  
-  override def deserialize(json: String): Element = { json.asJson.convertTo[Element] }
- 
-  override def serialize(e: Element): String = { e.toJson.toString }
-    
+class Boot extends System {
+  def services = List(new SampleService(){})
 }
