@@ -24,7 +24,8 @@ package net.modelbased.sensapp.system.sample
 
 import net.modelbased.sensapp.service.sample.{Service => SampleService}
 import net.modelbased.sensapp.library.system._
+import net.modelbased.sensapp.service.rrd.RRDTemplateService
 
 class Boot extends System {
-  def services = List(new SampleService(){})
+  def services = List(new RRDTemplateService(){})
 }

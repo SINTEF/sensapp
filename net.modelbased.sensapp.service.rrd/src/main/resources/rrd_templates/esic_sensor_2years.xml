@@ -1,0 +1,74 @@
+<!--
+
+    This file is part of SensApp [ http://sensapp.modelbased.net ]
+
+    Copyright (C) 2012-  SINTEF ICT
+    Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
+
+    Module: net.modelbased.sensapp.service.rrd
+
+    SensApp is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Lesser General Public License as
+    published by the Free Software Foundation, either version 3 of
+    the License, or (at your option) any later version.
+
+    SensApp is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+    GNU Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General
+    Public License along with SensApp. If not, see
+    <http://www.gnu.org/licenses/>.
+
+-->
+ <rrd_def>
+     <path>${PATH}</path>
+     <step>60</step>
+     <!-- Temperature and Humidity Data -->
+     <datasource>
+         <name>temperature</name>
+         <type>GAUGE</type>
+         <heartbeat>600</heartbeat>
+         <min>-50</min>
+         <max>150</max>
+     </datasource>
+     <datasource>
+         <name>humidity</name>
+         <type>GAUGE</type>
+         <heartbeat>600</heartbeat>
+         <min>0</min>
+         <max>100</max>
+     </datasource>
+     <!-- at least one archive must be supplied -->
+     <archive>
+         <cf>AVERAGE</cf>
+         <xff>0.5</xff>
+         <steps>1</steps>
+         <rows>20160</rows>
+     </archive>
+          <archive>
+         <cf>AVERAGE</cf>
+         <xff>0.5</xff>
+         <steps>5</steps>
+         <rows>25920</rows>
+     </archive>
+     <archive>
+         <cf>AVERAGE</cf>
+         <xff>0.5</xff>
+         <steps>60</steps>
+         <rows>17520</rows>
+     </archive>
+    <archive>
+         <cf>MIN</cf>
+         <xff>0.5</xff>
+         <steps>60</steps>
+         <rows>17520</rows>
+     </archive>
+     <archive>
+         <cf>MAX</cf>
+         <xff>0.5</xff>
+         <steps>60</steps>
+         <rows>17520</rows>
+     </archive>
+ </rrd_def>

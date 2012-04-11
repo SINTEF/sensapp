@@ -27,6 +27,7 @@ import cc.spray.http._
 import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.directives._
+import xml.XML
 
 // Application specific:
 import net.modelbased.sensapp.service.rrd.data.{RRDTemplate, RRDTemplateRegistry }
@@ -55,7 +56,8 @@ trait RRDTemplateService extends SensAppService {
     } ~
     path("rrd" / "templates" / "[^/]+".r) { key =>
       get { context =>
-        handle(context, key, { context complete _})
+        //handle(context, key, { context complete _})
+        handle(context, key, { m => context complete(XML.loadString(m.value)) })
       } ~
       delete { context =>
         handle(context, key, { e => _registry drop e; context complete "true"})
@@ -73,6 +75,7 @@ trait RRDTemplateService extends SensAppService {
   }
   
   private[this] val _registry = new RRDTemplateRegistry()
+  _registry.populateDB
   
   private def buildUrl(ctx: RequestContext, e: RRDTemplate ) = { ctx.request.path  + "/"+ e.key  }
   
