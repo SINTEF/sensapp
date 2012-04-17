@@ -1,0 +1,35 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>net.modelbased.sensapp.library</groupId>
+  <artifactId>net.modelbased.sensapp.library.sensors</artifactId>
+  <name>SensApp Sensor datamodel</name>
+  <description>This module implements the datamodel used by SensApp to deal with sensors</description>
+  
+  <repositories>
+  	<repository>
+  	  <id>spray</id>
+  	  <name>Spray Repository</name>
+      <url>http://repo.spray.cc/</url>
+	</repository>
+  </repositories>
+  
+  <dependencies>
+	<dependency>
+  		<groupId>cc.spray</groupId>
+  		<artifactId>spray-json_${scala.version}</artifactId>
+  		<version>1.1.0</version>
+  	</dependency>
+  	<dependency>
+  		<groupId>net.modelbased.sensapp.library</groupId>
+  		<artifactId>net.modelbased.sensapp.library.senml</artifactId>
+  		<version>0.0.1-SNAPSHOT</version>
+  	</dependency>
+  </dependencies>
+  
+  <parent>
+  	<groupId>net.modelbased.sensapp</groupId>
+  	<artifactId>net.modelbased.sensapp.library</artifactId>
+  	<version>0.0.1-SNAPSHOT</version>
+  	<relativePath>../net.modelbased.sensapp.library</relativePath>
+  </parent>
+</project>
