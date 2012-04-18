@@ -32,8 +32,7 @@ import xml.XML
 import scala.collection.JavaConversions._
 
 import net.modelbased.sensapp.service.rrd.data._
-import net.modelbased.sensapp.service.rrd.data.RRDCreateAndImportProtocol.format
-import net.modelbased.sensapp.service.rrd.data.RRDCreateFromTemplateProtocol.format2
+import net.modelbased.sensapp.service.rrd.data.RRDJsonProtocol._
 import org.rrd4j.core.Util
 import java.text.SimpleDateFormat
 
