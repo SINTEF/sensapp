@@ -31,7 +31,7 @@ import xml.XML
 
 // Application specific:
 import net.modelbased.sensapp.service.rrd.data.{RRDTemplate, RRDTemplateRegistry }
-import net.modelbased.sensapp.service.rrd.data.RRDTemplateJsonProtocol.format
+import net.modelbased.sensapp.service.rrd.data.RRDJsonProtocol._
 
 import net.modelbased.sensapp.library.system.{Service => SensAppService}
 

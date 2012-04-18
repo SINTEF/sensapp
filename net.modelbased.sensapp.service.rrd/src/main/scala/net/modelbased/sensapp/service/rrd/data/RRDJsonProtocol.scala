@@ -22,15 +22,25 @@ package net.modelbased.sensapp.service.rrd.data
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
+
 import cc.spray.json._
 
+/**
+ * Created by IntelliJ IDEA.
+ * User: franck
+ * Date: 18/04/12
+ * Time: 18:43
+ * To change this template use File | Settings | File Templates.
+ */
 
+case class RRDCreateAndImport(path: String, data_url: String)
+case class RRDCreateFromTemplate(path: String, template_url: String)
+case class RRDRequest(function : String, start : String, end: String, resolution : String)
 case class RRDTemplate(key: String, value: String)
 
-/**
- * implicit function to marshal an element into a JSON object
- */
-object RRDTemplateJsonProtocol extends DefaultJsonProtocol {
-  implicit val format = jsonFormat(RRDTemplate, "key", "value")
+object RRDJsonProtocol extends DefaultJsonProtocol {
+    implicit val formatRRDCreateAndImport = jsonFormat(RRDCreateAndImport, "path", "data_url")
+    implicit val formatRRDCreateFromTemplate = jsonFormat(RRDCreateFromTemplate, "path", "template_url")
+    implicit val formatRRDRequest = jsonFormat(RRDRequest, "function", "start", "end", "resolution")
+    implicit val formatRRDTemplate = jsonFormat(RRDTemplate, "key", "value")
 }
-
