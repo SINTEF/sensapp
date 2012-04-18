@@ -33,7 +33,6 @@ case class Root (
   /** Checkers required for standard compliance **/
   import Standard.errors._
   import Standard.checkers._
-  
   require(providedVersionIsPositiveInteger(this), VERSION_MUST_BE_POSITIVE)
   require(isValidVersion(this), UNSUPPORTED_VERSION)
   require(isKnownBaseUnits(this), UNKNOWN_BASE_UNIT)
@@ -42,7 +41,7 @@ case class Root (
   require(measurementsNotEmpty(this), EMPTY_MEASUREMENTS)
   require(allNamesDefined(this), EMPTY_NAME)
   require(allNamesValid(this), INVALID_NAME)
-  require(existsValue(this), AMBIGUOUS_VALUE_PROVIDED)
+  require(existsValue(this), AMBIGUOUS_VALUE_PROVIDED) 
 }
 
 case class MeasurementOrParameter(
@@ -54,6 +53,25 @@ case class MeasurementOrParameter(
 	val valueSum:     Option[Float],
 	val time:         Option[Long],
 	val updateTime:   Option[Int]
-	) 
+	) {
+  
+  def data: DataType = {
+    valueSum match {
+      case Some(sum) => SumDataValue(sum, value)
+      case None if value != None => FloatDataValue(value.get)
+      case None if stringValue != None => StringDataValue(stringValue.get)
+      case None if booleanValue != None =>BooleanDataValue(booleanValue.get)
+      case _ => throw new IllegalArgumentException("Invalid MeasurementOrParamameter Entry")
+    }
+  }
+}
+
+abstract class DataType
+case class SumDataValue(val d: Float, val i: Option[Float]) extends DataType
+case class FloatDataValue(val d: Float) extends DataType
+case class StringDataValue(val d: String) extends DataType
+case class BooleanDataValue(val d: Boolean) extends DataType
+//Fixme: stream chunk  
+  
 
 
