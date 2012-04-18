@@ -18,6 +18,7 @@
   
   <modules>
     <module>../net.modelbased.sensapp.system.sample</module>
+    <module>../net.modelbased.sensapp.system.sprints.first</module>
   </modules>
   
   <repositories>

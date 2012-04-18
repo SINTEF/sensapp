@@ -18,6 +18,7 @@
   
   <modules>
     <module>../net.modelbased.sensapp.service.sample</module>
+    <module>../net.modelbased.sensapp.service.database.raw</module>
   </modules>
   
   <repositories>
