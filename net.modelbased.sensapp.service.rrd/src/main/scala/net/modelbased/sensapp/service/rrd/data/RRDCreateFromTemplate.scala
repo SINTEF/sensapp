@@ -25,12 +25,12 @@ package net.modelbased.sensapp.service.rrd.data
 import cc.spray.json._
 
 
-case class RRDBase(path: String, template_location: String)
+case class RRDCreateFromTemplate(path: String, template_url: String)
 
 /**
  * implicit function to marshal an element into a JSON object
  */
-object RRDBaseJsonProtocol extends DefaultJsonProtocol {
-  implicit val format = jsonFormat(RRDBase, "path", "template_location")
+object RRDCreateFromTemplateProtocol extends DefaultJsonProtocol {
+  implicit val format2 = jsonFormat(RRDCreateFromTemplate, "path", "template_url")
 }
 

@@ -27,70 +27,94 @@ import net.modelbased.sensapp.library.datastore._
 import java.util.jar.{JarEntry, JarFile}
 import java.io._
 import java.lang.StringBuilder
-import net.modelbased.sensapp.service.rrd.data.RRDBaseJsonProtocol.format
-import com.mongodb.{DBAddress, DBCollection, DB, Mongo}
-import org.specs2.internal.scalaz.Validation
+//import org.specs2.internal.scalaz.Validation
 import java.net.{URLConnection, URLDecoder, URL}
 import org.rrd4j.core.{RrdDefTemplate, RrdMongoDBBackendFactory, RrdDb}
+import org.xml.sax.XMLReader
+import com.mongodb._
+import org.parboiled.support.Var
+import java.awt.Cursor
+
+import com.mongodb.casbah.Imports._
+import java.util.ArrayList
+
+import scala.collection.JavaConversions._
 
 /**
  * Persistence layer associated to the RRDBase class
  * 
  * @author Sebastien Mosser
  */
-class RRDBaseRegistry extends DataStore[RRDBase]  {
-
-  override val databaseName = "sensapp_db"
-  override val collectionName = "rrd.bases"
+class RRDBaseRegistry {
 
   val rrd4jDatabaseName = "sensapp_db"
-  val rrd4jCollectionName = "rrd.data"
+  val rrd4jCollectionName = "rrd.databases"
 
-  val rrd4jcollection = new Mongo( new DBAddress("localhost", "27017" ) ).getDB(rrd4jDatabaseName).getCollection(rrd4jCollectionName)
+  // TODO: Use the default Sensapp DB here
+  val rrd4jcollection = new Mongo( new com.mongodb.DBAddress("localhost", "27017" ) ).getDB(rrd4jDatabaseName).getCollection(rrd4jCollectionName)
   val rrd4jfactory = new RrdMongoDBBackendFactory(rrd4jcollection);
 
-  def createRRD4JBase(b: RRDBase) = {
+  def listRRD4JBases() : ArrayList[String] = {
+    // Had to query the DB . No method in the RRD4J APIs.
+    val result = new ArrayList[String]()
+    val q  = MongoDBObject.empty
+    val fields = MongoDBObject("path" -> 1)
+    val res = rrd4jcollection.find(q, fields)
+
+    res.toArray.foreach{o =>
+        result.add(o.get("path").toString)
+    }
+
+    return result
+  }
+
+  def deleteRRD4JBase(path : String) = {
+    // Had to query the DB . No method in the RRD4J APIs.
+    val query = MongoDBObject("path" -> path)
+    val rrdObject = rrd4jcollection.findOne(query);
+    if (rrdObject != null) {
+        rrd4jcollection.remove(rrdObject)
+    }
+  }
+
+  def createRRD4JBase(path : String, template_url : String) = {
       // TODO: catch the numerous exceptions which could be raised here
-      val xml = sendGetRequest(b.template_location, null);
+      val xml = sendGetRequest(template_url, null);
       if (xml != null) {
         val template = new RrdDefTemplate(xml)
-        template.setVariable("PATH", b.path);
-        val db = new RrdDb(template.getRrdDef, rrd4jfactory)
+        template.setVariable("PATH", path);
+        val rrddef = template.getRrdDef
+        rrddef.setPath(path)
+        val db = new RrdDb(rrddef, rrd4jfactory)
         db.close
       }
   }
 
-  def getRRD4JBase(b: RRDBase) : RrdDb = {
-    val result = new RrdDb(b.path, rrd4jfactory)
+  def importRRD4JBase(path : String, data_url : String) = {
+      // TODO: catch the numerous exceptions which could be raised here
+      val xmlfile = downloadTmpFile(data_url, null)
+      if (xmlfile != null) {
+        val db = new RrdDb(path, xmlfile.getAbsolutePath, rrd4jfactory)
+        db.close
+        xmlfile.delete
+      }
+  }
+
+  def getRRD4JBase(path : String, ro:Boolean) : RrdDb = {
+    val result = new RrdDb(path, ro, rrd4jfactory)
     return result
   }
 
   /*
   def populateDB() = {
-     // getClass.getResource("/resources/rrd_templates").g
-     println(">>>>>>>>>>>> populateDB")
-    getResourceListing(getClass, "rrd_templates/").foreach{ name : String =>
-      println(">>>>>>>>>>>> pushing template " + name)
-      var instream = getClass.getResourceAsStream("/rrd_templates/" + name)
-      var xml = readStream(instream)
-      var template = new RRDTemplate(name, xml)
-      push(template)
-    }
+
   }
     */
-
-    
-  override def identify(e: RRDBase) = ("path", e.path)
-  
-  override def deserialize(json: String): RRDBase = { json.asJson.convertTo[RRDBase] }
- 
-  override def serialize(e: RRDBase): String = { e.toJson.toString }
 
   def sendGetRequest(endpoint: String, requestParameters: String): String = {
     var result: String = null
     if (endpoint.startsWith("http://")) {
       try {
-        var data: StringBuffer = new StringBuffer
         var urlStr: String = endpoint
         if (requestParameters != null && requestParameters.length > 0) {
           urlStr += "?" + requestParameters
@@ -107,6 +131,39 @@ class RRDBaseRegistry extends DataStore[RRDBase]  {
         }
         rd.close
         result = sb.toString
+      }
+      catch {
+        case e: Exception => {
+          e.printStackTrace
+        }
+      }
+    }
+    return result
+  }
+
+    def downloadTmpFile(endpoint: String, requestParameters: String): File = {
+
+      var result: File = File.createTempFile("sensapp_", "xml")
+      result.deleteOnExit
+
+      if (endpoint.startsWith("http://")) {
+      try {
+        var bw = new BufferedWriter(new FileWriter(result));
+        var urlStr: String = endpoint
+        if (requestParameters != null && requestParameters.length > 0) {
+          urlStr += "?" + requestParameters
+        }
+        var url: URL = new URL(urlStr)
+        var conn: URLConnection = url.openConnection
+        var rd: BufferedReader = new BufferedReader(new InputStreamReader(conn.getInputStream))
+        var line: String = null
+        while ((({
+          line = rd.readLine; line
+        })) != null) {
+          bw.append(line)
+        }
+        rd.close
+        bw.close()
       }
       catch {
         case e: Exception => {
