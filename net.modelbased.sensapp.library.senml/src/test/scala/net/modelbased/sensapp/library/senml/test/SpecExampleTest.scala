@@ -56,9 +56,9 @@ class SpecExampleTest extends SpecificationWithJUnit {
   "The 'single data point example' [Section #6.1.1]" should {
     val obj = JsonParser.fromJson(SenMLSpecificationExamples.singleDatapoint)
     "contain only one measure" in { obj.measurementsOrParameters.size must_== 1 }
-    "use 'urn:dev:ow:10e2073a01080063' as the measure resource name" in { obj.measurementsOrParameters(0).name must_== Some("urn:dev:ow:10e2073a01080063") }
-    "use  23.5 as the measure value " in {  obj.measurementsOrParameters(0).value must_== Some(23.5) }
-    "use 'A' as the measure unit" in { obj.measurementsOrParameters(0).units must_== Some("A") }
+    "use 'urn:dev:ow:10e2073a01080063' as the measure resource name" in { obj.measurementsOrParameters.get(0).name must_== Some("urn:dev:ow:10e2073a01080063") }
+    "use  23.5 as the measure value " in {  obj.measurementsOrParameters.get(0).value must_== Some(23.5) }
+    "use 'A' as the measure unit" in { obj.measurementsOrParameters.get(0).units must_== Some("A") }
   }
     
 }

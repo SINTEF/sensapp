@@ -27,7 +27,7 @@ case class Root (
     val baseTime:  Option[Long],
     val baseUnits: Option[String],
     val version:   Option[Int],
-    val measurementsOrParameters: List[MeasurementOrParameter]
+    val measurementsOrParameters: Option[List[MeasurementOrParameter]]
     )  {
   
   /** Checkers required for standard compliance **/
@@ -36,12 +36,21 @@ case class Root (
   require(providedVersionIsPositiveInteger(this), VERSION_MUST_BE_POSITIVE)
   require(isValidVersion(this), UNSUPPORTED_VERSION)
   require(isKnownBaseUnits(this), UNKNOWN_BASE_UNIT)
-  require(allUnitsDefined(this), NO_UNITS_DEFINED)
+  //require(allUnitsDefined(this), NO_UNITS_DEFINED)
   require(allUnitsKnown(this), UNKNWOWN_UNIT)
-  require(measurementsNotEmpty(this), EMPTY_MEASUREMENTS)
+  //require(measurementsNotEmpty(this), EMPTY_MEASUREMENTS)
   require(allNamesDefined(this), EMPTY_NAME)
   require(allNamesValid(this), INVALID_NAME)
   require(existsValue(this), AMBIGUOUS_VALUE_PROVIDED) 
+  
+  def canonized: Root = { 
+    this.measurementsOrParameters match {
+      case None => Root(None, None, None, version, None)
+      case Some(lst) =>  Root(None, None, None, version, Some(lst map { mop => mop canonized this }))
+    }
+    val mops =  measurementsOrParameters
+    Root(None, None, None, version, mops)
+  }
 }
 
 case class MeasurementOrParameter(
@@ -62,6 +71,45 @@ case class MeasurementOrParameter(
       case None if stringValue != None => StringDataValue(stringValue.get)
       case None if booleanValue != None =>BooleanDataValue(booleanValue.get)
       case _ => throw new IllegalArgumentException("Invalid MeasurementOrParamameter Entry")
+    }
+  }
+  
+  def canonized(root: Root): MeasurementOrParameter = {
+    val name = Some(extractName(root))
+    val unit = Some(extractUnit(root))
+    val time = Some(extractTime(root))
+    data match {
+      case FloatDataValue(d)   => MeasurementOrParameter(name, unit, Some(d), None, None, None, time, None)
+      case StringDataValue(s)  => MeasurementOrParameter(name, unit, None, Some(s), None, None, time, None)
+      case BooleanDataValue(b) => MeasurementOrParameter(name, unit, None, None, Some(b), None, time, None)
+      case SumDataValue(d,i)   => MeasurementOrParameter(name, unit, i, None, None, Some(d), time, None)
+    }
+  }
+  
+  def extractName(root: Root): String = {
+    root.baseName match {
+      case None => name.get
+      case Some(prefix) => prefix + name.getOrElse("")
+    }
+  }
+  
+  def extractUnit(root: Root): String = {
+    units match {
+      case None => IANA(root.baseUnits.get).get.symbol
+      case Some(code) => IANA(code).get.symbol
+    }
+  }
+  
+  def extractTime(root: Root): Long = {
+    root.baseTime match {
+      case None => time match {
+        case None => System.currentTimeMillis / 1000 // no time provided => "roughly now" in the SenML spec
+        case Some(time) => time
+      }
+      case Some(basis) => time match {
+        case None => basis
+        case Some(time) => basis + time
+      }
     }
   }
 }

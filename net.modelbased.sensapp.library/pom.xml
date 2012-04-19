@@ -13,7 +13,6 @@
     <module>../net.modelbased.sensapp.library.http</module>
     <module>../net.modelbased.sensapp.library.system</module>
     <module>../net.modelbased.sensapp.library.senml</module>
-    <module>../net.modelbased.sensapp.library.sensor</module>
   </modules>
   
   <parent>

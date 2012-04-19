@@ -41,8 +41,8 @@ class StandardComplianceTest extends SpecificationWithJUnit with DataTables{
     "rejects a version number lesser than 0" in { check("""{"ver": -1, "e":[{ "n": "myname", "v": 0.0, "u": "m" }]}""", VERSION_MUST_BE_POSITIVE) }
     "rejects an unsupported version number " in { check("""{"ver": 0, "e":[{ "n": "myname", "v": 0.0, "u": "m" }]}""", UNSUPPORTED_VERSION) }
     "rejects an unknown baseUnit"            in { check("""{"bu": "myUnknownUnitCode", "e":[{ "n": "myname", "v": 0.0,  "u": "m" }]}""", UNKNOWN_BASE_UNIT) }
-    "rejects a measure without unit"         in { check("""{"e":[{ "n": "myname", "v": 0.0}]}""", NO_UNITS_DEFINED) }
-    "rejects an empty measurement entry"     in { check("""{"e":[]}""", EMPTY_MEASUREMENTS) }
+    //"rejects a measure without unit"         in { check("""{"e":[{ "n": "myname", "v": 0.0}]}""", NO_UNITS_DEFINED) }
+    //"rejects an empty measurement entry"     in { check("""{"e":[]}""", EMPTY_MEASUREMENTS) }
     "rejects an anonymous measurement"       in { check("""{"e":[{ "v": 0.0,  "u": "m" }]}""", EMPTY_NAME) }
     "rejects a measure with an unknown unit" in { check("""{"e":[{ "n": "myname", "v": 0.0, "u": "myUnknownUnitCode" }]}""", UNKNWOWN_UNIT) }
     "rejects a badly formed baseName"        in { check("""{"bn": "MyBaseNameName", "e":[{ "n": "", "v": 0.0, "u": "myUnknownUnitCode" }]}""", UNKNWOWN_UNIT) }
