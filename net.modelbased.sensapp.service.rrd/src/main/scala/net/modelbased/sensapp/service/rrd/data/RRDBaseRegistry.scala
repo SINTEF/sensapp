@@ -27,9 +27,12 @@ import net.modelbased.sensapp.library.datastore._
 import java.util.jar.{JarEntry, JarFile}
 import java.io._
 import java.lang.StringBuilder
+import java.text.SimpleDateFormat
+import org.rrd4j.core.{Util, RrdDefTemplate, RrdMongoDBBackendFactory, RrdDb}
+import net.modelbased.sensapp.library.senml.MeasurementOrParameter
+
 //import org.specs2.internal.scalaz.Validation
 import java.net.{URLConnection, URLDecoder, URL}
-import org.rrd4j.core.{RrdDefTemplate, RrdMongoDBBackendFactory, RrdDb}
 import org.xml.sax.XMLReader
 import com.mongodb._
 import org.parboiled.support.Var
@@ -50,9 +53,15 @@ class RRDBaseRegistry {
   val rrd4jDatabaseName = "sensapp_db"
   val rrd4jCollectionName = "rrd.databases"
 
-  // TODO: Use the default Sensapp DB here
-  val rrd4jcollection = new Mongo( new com.mongodb.DBAddress("localhost", "27017" ) ).getDB(rrd4jDatabaseName).getCollection(rrd4jCollectionName)
-  val rrd4jfactory = new RrdMongoDBBackendFactory(rrd4jcollection);
+  private  lazy val rrd4jcollection = {
+    val conn = MongoConnection()
+    val db = conn.getDB(rrd4jDatabaseName)
+    val col = db.getCollection(rrd4jCollectionName)
+    col
+  }
+
+  private  lazy val rrd4jfactory = new RrdMongoDBBackendFactory(rrd4jcollection);
+
 
   def listRRD4JBases() : ArrayList[String] = {
     // Had to query the DB . No method in the RRD4J APIs.
@@ -79,7 +88,7 @@ class RRDBaseRegistry {
 
   def createRRD4JBase(path : String, template_url : String) = {
       // TODO: catch the numerous exceptions which could be raised here
-      val xml = sendGetRequest(template_url, null);
+      val xml = IOUtils.sendGetRequest(template_url, null);
       if (xml != null) {
         val template = new RrdDefTemplate(xml)
         template.setVariable("PATH", path);
@@ -92,7 +101,7 @@ class RRDBaseRegistry {
 
   def importRRD4JBase(path : String, data_url : String) = {
       // TODO: catch the numerous exceptions which could be raised here
-      val xmlfile = downloadTmpFile(data_url, null)
+      val xmlfile = IOUtils.downloadTmpFile(data_url, null)
       if (xmlfile != null) {
         val db = new RrdDb(path, xmlfile.getAbsolutePath, rrd4jfactory)
         db.close
@@ -105,73 +114,25 @@ class RRDBaseRegistry {
     return result
   }
 
-  /*
-  def populateDB() = {
-
-  }
-    */
-
-  def sendGetRequest(endpoint: String, requestParameters: String): String = {
-    var result: String = null
-    if (endpoint.startsWith("http://")) {
-      try {
-        var urlStr: String = endpoint
-        if (requestParameters != null && requestParameters.length > 0) {
-          urlStr += "?" + requestParameters
-        }
-        var url: URL = new URL(urlStr)
-        var conn: URLConnection = url.openConnection
-        var rd: BufferedReader = new BufferedReader(new InputStreamReader(conn.getInputStream))
-        var sb: StringBuffer = new StringBuffer
-        var line: String = null
-        while ((({
-          line = rd.readLine; line
-        })) != null) {
-          sb.append(line)
-        }
-        rd.close
-        result = sb.toString
-      }
-      catch {
-        case e: Exception => {
-          e.printStackTrace
-        }
-      }
-    }
-    return result
+  def getgetRRD4JBaseDescription(db : RrdDb) : String = {
+    val result = new StringBuilder();
+    val dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+    result.append("Sensapp RRD Database " + db.getPath + " (step = " +db.getRrdDef.getStep+ ")\n")
+    result.append("Database Estimated Size: " + db.getRrdDef.getEstimatedSize + "\n")
+    result.append("Number of Data Source: " + db.getDsCount + " [ ")
+    db.getDsNames.foreach{ n => result.append(n + " ") }
+    result.append("]\n")
+    result.append("Number of Archives: " + db.getArcCount + "\n")
+    result.append("Latest Update: " + dateFormat.format(Util.getCalendar(db.getLastArchiveUpdateTime).getTime) + "\n")
+    result.append("Latest Values: [ ")
+    db.getLastDatasourceValues.foreach{ v => result.append(v + " ") }
+    result.append("]\n")
+    result.toString
   }
 
-    def downloadTmpFile(endpoint: String, requestParameters: String): File = {
+  def createDefaultGraph(path : String, start : String, end : String) = {
 
-      var result: File = File.createTempFile("sensapp_", "xml")
-      result.deleteOnExit
 
-      if (endpoint.startsWith("http://")) {
-      try {
-        var bw = new BufferedWriter(new FileWriter(result));
-        var urlStr: String = endpoint
-        if (requestParameters != null && requestParameters.length > 0) {
-          urlStr += "?" + requestParameters
-        }
-        var url: URL = new URL(urlStr)
-        var conn: URLConnection = url.openConnection
-        var rd: BufferedReader = new BufferedReader(new InputStreamReader(conn.getInputStream))
-        var line: String = null
-        while ((({
-          line = rd.readLine; line
-        })) != null) {
-          bw.append(line)
-        }
-        rd.close
-        bw.close()
-      }
-      catch {
-        case e: Exception => {
-          e.printStackTrace
-        }
-      }
-    }
-    return result
   }
 
 }

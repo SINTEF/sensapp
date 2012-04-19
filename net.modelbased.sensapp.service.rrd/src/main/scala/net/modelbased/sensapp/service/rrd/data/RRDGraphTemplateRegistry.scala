@@ -24,41 +24,33 @@ package net.modelbased.sensapp.service.rrd.data
  */
 import cc.spray.json._
 import net.modelbased.sensapp.library.datastore._
-import net.modelbased.sensapp.service.rrd.data.RRDJsonProtocol._
-import java.net.{URLDecoder, URL}
-import java.util.jar.{JarEntry, JarFile}
-import java.io._
-import org.parboiled.support.Var
-import javax.swing.text.AbstractDocument.Content
-import java.lang.StringBuilder
-
 /**
  * Persistence layer associated to the RRDTemplate class
  * 
  * @author Sebastien Mosser
  */
-class RRDTemplateRegistry extends DataStore[RRDTemplate]  {
+class RRDGraphTemplateRegistry extends DataStore[RRDGraphTemplate]  {
 
   override val databaseName = "sensapp_db"
-  override val collectionName = "rrd.templates"
+  override val collectionName = "rrd.graphtemplates"
 
   def populateDB() = {
      // getClass.getResource("/resources/rrd_templates").g
      //println(">>>>>>>>>>>> populateDB")
-    IOUtils.getResourceListing(getClass, "rrd_templates/").foreach{ name : String =>
+    IOUtils.getResourceListing(getClass, "rrd_graphtemplates/").foreach{ name : String =>
       //println(">>>>>>>>>>>> pushing template " + name)
-      var instream = getClass.getResourceAsStream("/rrd_templates/" + name)
+      var instream = getClass.getResourceAsStream("/rrd_graphtemplates/" + name)
       var xml = IOUtils.readStream(instream)
-      var template = new RRDTemplate(name, xml)
+      var template = new RRDGraphTemplate(name, xml)
       push(template)
     }
   }
 
     
-  override def identify(e: RRDTemplate) = ("key", e.key)
+  override def identify(e: RRDGraphTemplate) = ("key", e.key)
   
-  override def deserialize(json: String): RRDTemplate = { json.asJson.convertTo[RRDTemplate] }
+  override def deserialize(json: String): RRDGraphTemplate = { json.asJson.convertTo[RRDGraphTemplate] }
  
-  override def serialize(e: RRDTemplate): String = { e.toJson.toString }
+  override def serialize(e: RRDGraphTemplate): String = { e.toJson.toString }
 
 }

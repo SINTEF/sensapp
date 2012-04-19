@@ -24,6 +24,10 @@ package net.modelbased.sensapp.service.rrd.data
  */
 
 import cc.spray.json._
+import org.rrd4j.core.jrrd.ConsolidationFunctionType
+import java.text.SimpleDateFormat
+import org.rrd4j.core.Util
+import org.rrd4j.core.timespec.TimeParser
 
 /**
  * Created by IntelliJ IDEA.
@@ -35,12 +39,28 @@ import cc.spray.json._
 
 case class RRDCreateAndImport(path: String, data_url: String)
 case class RRDCreateFromTemplate(path: String, template_url: String)
-case class RRDRequest(function : String, start : String, end: String, resolution : String)
+case class RRDRequest(function : String, start : String, end: String, resolution : String) {
+
+  def getFunction() = {
+     org.rrd4j.ConsolFun.valueOf(function)
+  }
+
+  def getStart() = convertTimestampToLong(start)
+  def getEnd() = convertTimestampToLong(end)
+  def getResolution() = resolution.toLong
+
+  def convertTimestampToLong(t : String) : Long = {
+    new TimeParser(t).parse().getTimestamp
+  }
+
+}
 case class RRDTemplate(key: String, value: String)
+case class RRDGraphTemplate(key: String, value: String)
 
 object RRDJsonProtocol extends DefaultJsonProtocol {
     implicit val formatRRDCreateAndImport = jsonFormat(RRDCreateAndImport, "path", "data_url")
     implicit val formatRRDCreateFromTemplate = jsonFormat(RRDCreateFromTemplate, "path", "template_url")
     implicit val formatRRDRequest = jsonFormat(RRDRequest, "function", "start", "end", "resolution")
     implicit val formatRRDTemplate = jsonFormat(RRDTemplate, "key", "value")
+    implicit val formatRRDGraphTemplate = jsonFormat(RRDGraphTemplate, "key", "value")
 }
