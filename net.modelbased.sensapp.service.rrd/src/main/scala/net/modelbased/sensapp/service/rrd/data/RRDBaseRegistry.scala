@@ -88,7 +88,7 @@ class RRDBaseRegistry {
 
   def createRRD4JBase(path : String, template_url : String) = {
       // TODO: catch the numerous exceptions which could be raised here
-      val xml = sendGetRequest(template_url, null);
+      val xml = IOUtils.sendGetRequest(template_url, null);
       if (xml != null) {
         val template = new RrdDefTemplate(xml)
         template.setVariable("PATH", path);
@@ -101,7 +101,7 @@ class RRDBaseRegistry {
 
   def importRRD4JBase(path : String, data_url : String) = {
       // TODO: catch the numerous exceptions which could be raised here
-      val xmlfile = downloadTmpFile(data_url, null)
+      val xmlfile = IOUtils.downloadTmpFile(data_url, null)
       if (xmlfile != null) {
         val db = new RrdDb(path, xmlfile.getAbsolutePath, rrd4jfactory)
         db.close
@@ -130,74 +130,9 @@ class RRDBaseRegistry {
     result.toString
   }
 
-  /*
-  def populateDB() = {
-
-  }
-    */
+  def createDefaultGraph(path : String, start : String, end : String) = {
 
 
-  def sendGetRequest(endpoint: String, requestParameters: String): String = {
-    var result: String = null
-    if (endpoint.startsWith("http://")) {
-      try {
-        var urlStr: String = endpoint
-        if (requestParameters != null && requestParameters.length > 0) {
-          urlStr += "?" + requestParameters
-        }
-        var url: URL = new URL(urlStr)
-        var conn: URLConnection = url.openConnection
-        var rd: BufferedReader = new BufferedReader(new InputStreamReader(conn.getInputStream))
-        var sb: StringBuffer = new StringBuffer
-        var line: String = null
-        while ((({
-          line = rd.readLine; line
-        })) != null) {
-          sb.append(line)
-        }
-        rd.close
-        result = sb.toString
-      }
-      catch {
-        case e: Exception => {
-          e.printStackTrace
-        }
-      }
-    }
-    return result
-  }
-
-    def downloadTmpFile(endpoint: String, requestParameters: String): File = {
-
-      var result: File = File.createTempFile("sensapp_", "xml")
-      result.deleteOnExit
-
-      if (endpoint.startsWith("http://")) {
-      try {
-        var bw = new BufferedWriter(new FileWriter(result));
-        var urlStr: String = endpoint
-        if (requestParameters != null && requestParameters.length > 0) {
-          urlStr += "?" + requestParameters
-        }
-        var url: URL = new URL(urlStr)
-        var conn: URLConnection = url.openConnection
-        var rd: BufferedReader = new BufferedReader(new InputStreamReader(conn.getInputStream))
-        var line: String = null
-        while ((({
-          line = rd.readLine; line
-        })) != null) {
-          bw.append(line)
-        }
-        rd.close
-        bw.close()
-      }
-      catch {
-        case e: Exception => {
-          e.printStackTrace
-        }
-      }
-    }
-    return result
   }
 
 }

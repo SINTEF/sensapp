@@ -27,6 +27,7 @@ import cc.spray.json._
 import org.rrd4j.core.jrrd.ConsolidationFunctionType
 import java.text.SimpleDateFormat
 import org.rrd4j.core.Util
+import org.rrd4j.core.timespec.TimeParser
 
 /**
  * Created by IntelliJ IDEA.
@@ -49,17 +50,17 @@ case class RRDRequest(function : String, start : String, end: String, resolution
   def getResolution() = resolution.toLong
 
   def convertTimestampToLong(t : String) : Long = {
-    val dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-    val date = dateFormat.parse(t)
-    Util.getTimestamp(date)
+    new TimeParser(t).parse().getTimestamp
   }
 
 }
 case class RRDTemplate(key: String, value: String)
+case class RRDGraphTemplate(key: String, value: String)
 
 object RRDJsonProtocol extends DefaultJsonProtocol {
     implicit val formatRRDCreateAndImport = jsonFormat(RRDCreateAndImport, "path", "data_url")
     implicit val formatRRDCreateFromTemplate = jsonFormat(RRDCreateFromTemplate, "path", "template_url")
     implicit val formatRRDRequest = jsonFormat(RRDRequest, "function", "start", "end", "resolution")
     implicit val formatRRDTemplate = jsonFormat(RRDTemplate, "key", "value")
+    implicit val formatRRDGraphTemplate = jsonFormat(RRDGraphTemplate, "key", "value")
 }

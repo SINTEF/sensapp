@@ -125,7 +125,34 @@ trait RRDBaseService extends SensAppService {
       }
     } ~
     path("rrd" / "databases" / "[^/]+".r / "data") { path =>
-      get { context =>
+      get { parameters("start" ? "now", 'end ? "now", 'resolution ? "3600", 'funtion ? "AVERAGE") { (start, end, resolution, func) =>
+            val db = _registry.getRRD4JBase(path, true)
+            if (db != null) {
+              val query = RRDRequest(func, start, end, resolution)
+              println(">>>>>>>>>>>>>>query " + query.getFunction + " " + query.getStart +" "+ query.getEnd + " " + query.getResolution)
+              val dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+              val fr = db.createFetchRequest(query.getFunction, query.getStart, query.getEnd, query.getResolution)
+              val data = fr.fetchData()
+              val out = new StringBuilder()
+              val ts = data.getTimestamps
+              val vs = data.getValues
+              for (i <- 0 until data.getRowCount) {
+                out append dateFormat.format(Util.getDate(ts(i)))
+                vs.foreach{ v =>
+                  out append "\t"
+                  out append v(i).toString
+                }
+                out append "\n"
+              }
+              _.complete(out.toString)
+            }
+            else {
+               _.fail(StatusCodes.Conflict, "RRD databbase identified as ["+ path +"] was not found!")
+            }
+        }
+/*
+
+
         val db = _registry.getRRD4JBase(path, true)
           if (db != null) {
 
@@ -141,11 +168,11 @@ trait RRDBaseService extends SensAppService {
           else {
              context fail (StatusCodes.Conflict, "RRD databbase identified as ["+ path +"] was not found!")
           }
-      } ~
+     } ~
       put { content(as[Root]) { data => context =>
          //val c = data.canonize
         val c = data
-        // TODO
+*/
       } ~
       detach{
         post {
