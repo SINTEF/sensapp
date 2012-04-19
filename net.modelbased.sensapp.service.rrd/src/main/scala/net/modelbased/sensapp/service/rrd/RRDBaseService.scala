@@ -36,6 +36,8 @@ import net.modelbased.sensapp.service.rrd.data.RRDJsonProtocol._
 import org.rrd4j.core.Util
 import java.text.SimpleDateFormat
 
+import net.modelbased.sensapp.library.senml._
+
 // Application specific:
 import net.modelbased.sensapp.service.rrd.data._
 import net.modelbased.sensapp.library.system.{Service => SensAppService}
@@ -50,38 +52,40 @@ trait RRDBaseService extends SensAppService {
         val uris = _registry.listRRD4JBases().toArray().map { s => context.request.path  + "/" + s }
         context complete uris
       } ~
-      post {
-
-        content(as[RRDCreateAndImport]) { element => context =>
-          if (_registry.listRRD4JBases().contains(element.path)){
-            context fail (StatusCodes.Conflict, "A RRD database identified as ["+ element.path +"] already exists!")
-          } else {
-            _registry.importRRD4JBase(element.path, element.data_url)
-            context complete (StatusCodes.Created, buildUrl(context, element.path))
-          }
-        } ~
-        content(as[RRDCreateFromTemplate]) { element => context =>
-          if (_registry.listRRD4JBases().contains(element.path)){
-            context fail (StatusCodes.Conflict, "A RRD database identified as ["+ element.path +"] already exists!")
-          } else {
-            _registry.createRRD4JBase(element.path, element.template_url)
-            context complete (StatusCodes.Created, buildUrl(context, element.path))
+      detach {
+        post {
+          content(as[RRDCreateAndImport]) { element => context =>
+            if (_registry.listRRD4JBases().contains(element.path)){
+              context fail (StatusCodes.Conflict, "A RRD database identified as ["+ element.path +"] already exists!")
+            } else {
+              _registry.importRRD4JBase(element.path, element.data_url)
+              context complete (StatusCodes.Created, buildUrl(context, element.path))
+            }
+          } ~
+          content(as[RRDCreateFromTemplate]) { element => context =>
+            if (_registry.listRRD4JBases().contains(element.path)){
+              context fail (StatusCodes.Conflict, "A RRD database identified as ["+ element.path +"] already exists!")
+            } else {
+              _registry.createRRD4JBase(element.path, element.template_url)
+              context complete (StatusCodes.Created, buildUrl(context, element.path))
+            }
           }
         }
-
       }
     } ~
     path("rrd" / "databases" / "[^/]+".r) { path =>
       get { context =>
           val db = _registry.getRRD4JBase(path, true)
           if (db != null) {
-            val dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm")
+            /*
+            val dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
             var result =  dateFormat.format(Util.getCalendar(db.getLastArchiveUpdateTime).getTime) + " -> [ "
             db.getLastDatasourceValues.foreach{ d =>
               result += d.toString + " "
             }
             result += "]"
-             context complete (StatusCodes.OK, result)
+            */
+             context complete (StatusCodes.OK, _registry.getgetRRD4JBaseDescription(db))
           }
           else {
              context fail (StatusCodes.Conflict, "RRD databbase identified as ["+ path +"] was not found!")
@@ -99,13 +103,78 @@ trait RRDBaseService extends SensAppService {
     path("rrd" / "databases" / "[^/]+".r / "template") { path =>
       get { context =>
         val db = _registry.getRRD4JBase(path, true)
+        if (db != null) {
+           context complete(XML.loadString(db.getRrdDef.exportXmlTemplate()))
+        }
+        else {
+           context fail (StatusCodes.Conflict, "RRD databbase identified as ["+ path +"] was not found!")
+        }
+      }
+    } ~
+    path("rrd" / "databases" / "[^/]+".r / "xml") { path =>
+      detach {
+        get { context =>
+          val db = _registry.getRRD4JBase(path, true)
+            if (db != null) {
+               context complete(XML.loadString(db.getXml))
+            }
+            else {
+               context fail (StatusCodes.Conflict, "RRD databbase identified as ["+ path +"] was not found!")
+            }
+        }
+      }
+    } ~
+    path("rrd" / "databases" / "[^/]+".r / "data") { path =>
+      get { context =>
+        val db = _registry.getRRD4JBase(path, true)
           if (db != null) {
-             context complete(XML.loadString(db.getRrdDef.exportXmlTemplate()))
+
+            val dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+            var result =  dateFormat.format(Util.getCalendar(db.getLastArchiveUpdateTime).getTime) + " -> [ "
+            db.getLastDatasourceValues.foreach{ d =>
+              result += d.toString + " "
+            }
+            result += "]"
+
+             context complete (StatusCodes.OK, result)
           }
           else {
              context fail (StatusCodes.Conflict, "RRD databbase identified as ["+ path +"] was not found!")
           }
+      } ~
+      put { content(as[Root]) { data => context =>
+         //val c = data.canonize
+        val c = data
+        // TODO
+      } ~
+      detach{
+        post {
+          content(as[RRDRequest]) { query => context =>
+            val db = _registry.getRRD4JBase(path, true)
+            if (db != null) {
+              val dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+              val fr = db.createFetchRequest(query.getFunction, query.getStart, query.getEnd, query.getResolution)
+              val data = fr.fetchData()
+              val out = new StringBuilder()
+              val ts = data.getTimestamps
+              val vs = data.getValues
+              for (i <- 0 until data.getRowCount) {
+                out append dateFormat.format(Util.getDate(ts(i)))
+                vs.foreach{ v =>
+                  out append "\t"
+                  out append v(i).toString
+                }
+                out append "\n"
+              }
+              context complete (StatusCodes.OK, out.toString)
+            }
+            else {
+               context fail (StatusCodes.Conflict, "RRD databbase identified as ["+ path +"] was not found!")
+            }
+          }
+        }
       }
+
     }
   }
   

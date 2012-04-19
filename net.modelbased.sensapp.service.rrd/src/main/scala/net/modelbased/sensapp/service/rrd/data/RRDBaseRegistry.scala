@@ -27,9 +27,12 @@ import net.modelbased.sensapp.library.datastore._
 import java.util.jar.{JarEntry, JarFile}
 import java.io._
 import java.lang.StringBuilder
+import java.text.SimpleDateFormat
+import org.rrd4j.core.{Util, RrdDefTemplate, RrdMongoDBBackendFactory, RrdDb}
+import net.modelbased.sensapp.library.senml.MeasurementOrParameter
+
 //import org.specs2.internal.scalaz.Validation
 import java.net.{URLConnection, URLDecoder, URL}
-import org.rrd4j.core.{RrdDefTemplate, RrdMongoDBBackendFactory, RrdDb}
 import org.xml.sax.XMLReader
 import com.mongodb._
 import org.parboiled.support.Var
@@ -50,9 +53,15 @@ class RRDBaseRegistry {
   val rrd4jDatabaseName = "sensapp_db"
   val rrd4jCollectionName = "rrd.databases"
 
-  // TODO: Use the default Sensapp DB here
-  val rrd4jcollection = new Mongo( new com.mongodb.DBAddress("localhost", "27017" ) ).getDB(rrd4jDatabaseName).getCollection(rrd4jCollectionName)
-  val rrd4jfactory = new RrdMongoDBBackendFactory(rrd4jcollection);
+  private  lazy val rrd4jcollection = {
+    val conn = MongoConnection()
+    val db = conn.getDB(rrd4jDatabaseName)
+    val col = db.getCollection(rrd4jCollectionName)
+    col
+  }
+
+  private  lazy val rrd4jfactory = new RrdMongoDBBackendFactory(rrd4jcollection);
+
 
   def listRRD4JBases() : ArrayList[String] = {
     // Had to query the DB . No method in the RRD4J APIs.
@@ -105,11 +114,28 @@ class RRDBaseRegistry {
     return result
   }
 
+  def getgetRRD4JBaseDescription(db : RrdDb) : String = {
+    val result = new StringBuilder();
+    val dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+    result.append("Sensapp RRD Database " + db.getPath + " (step = " +db.getRrdDef.getStep+ ")\n")
+    result.append("Database Estimated Size: " + db.getRrdDef.getEstimatedSize + "\n")
+    result.append("Number of Data Source: " + db.getDsCount + " [ ")
+    db.getDsNames.foreach{ n => result.append(n + " ") }
+    result.append("]\n")
+    result.append("Number of Archives: " + db.getArcCount + "\n")
+    result.append("Latest Update: " + dateFormat.format(Util.getCalendar(db.getLastArchiveUpdateTime).getTime) + "\n")
+    result.append("Latest Values: [ ")
+    db.getLastDatasourceValues.foreach{ v => result.append(v + " ") }
+    result.append("]\n")
+    result.toString
+  }
+
   /*
   def populateDB() = {
 
   }
     */
+
 
   def sendGetRequest(endpoint: String, requestParameters: String): String = {
     var result: String = null

@@ -24,6 +24,9 @@ package net.modelbased.sensapp.service.rrd.data
  */
 
 import cc.spray.json._
+import org.rrd4j.core.jrrd.ConsolidationFunctionType
+import java.text.SimpleDateFormat
+import org.rrd4j.core.Util
 
 /**
  * Created by IntelliJ IDEA.
@@ -35,7 +38,23 @@ import cc.spray.json._
 
 case class RRDCreateAndImport(path: String, data_url: String)
 case class RRDCreateFromTemplate(path: String, template_url: String)
-case class RRDRequest(function : String, start : String, end: String, resolution : String)
+case class RRDRequest(function : String, start : String, end: String, resolution : String) {
+
+  def getFunction() = {
+     org.rrd4j.ConsolFun.valueOf(function)
+  }
+
+  def getStart() = convertTimestampToLong(start)
+  def getEnd() = convertTimestampToLong(end)
+  def getResolution() = resolution.toLong
+
+  def convertTimestampToLong(t : String) : Long = {
+    val dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+    val date = dateFormat.parse(t)
+    Util.getTimestamp(date)
+  }
+
+}
 case class RRDTemplate(key: String, value: String)
 
 object RRDJsonProtocol extends DefaultJsonProtocol {

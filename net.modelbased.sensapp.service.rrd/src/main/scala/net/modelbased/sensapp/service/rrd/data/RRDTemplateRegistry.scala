@@ -24,7 +24,7 @@ package net.modelbased.sensapp.service.rrd.data
  */
 import cc.spray.json._
 import net.modelbased.sensapp.library.datastore._
-import net.modelbased.sensapp.service.rrd.data.RRDTemplateJsonProtocol.format
+import net.modelbased.sensapp.service.rrd.data.RRDJsonProtocol._
 import java.net.{URLDecoder, URL}
 import java.util.jar.{JarEntry, JarFile}
 import java.io._
@@ -44,9 +44,9 @@ class RRDTemplateRegistry extends DataStore[RRDTemplate]  {
 
   def populateDB() = {
      // getClass.getResource("/resources/rrd_templates").g
-     println(">>>>>>>>>>>> populateDB")
+     //println(">>>>>>>>>>>> populateDB")
     getResourceListing(getClass, "rrd_templates/").foreach{ name : String =>
-      println(">>>>>>>>>>>> pushing template " + name)
+      //println(">>>>>>>>>>>> pushing template " + name)
       var instream = getClass.getResourceAsStream("/rrd_templates/" + name)
       var xml = readStream(instream)
       var template = new RRDTemplate(name, xml)
@@ -76,30 +76,30 @@ class RRDTemplateRegistry extends DataStore[RRDTemplate]  {
   def getResourceListing(clazz: Class[_], path: String): Array[String] = {
     var dirURL: URL = clazz.getClassLoader.getResource(path)
     if (dirURL != null && (dirURL.getProtocol == "file")) {
-      println(">>>>>>>>>>>> dirURL != null && (dirURL.getProtocol == \"file\")")
+      //println(">>>>>>>>>>>> dirURL != null && (dirURL.getProtocol == \"file\")")
       return new File(dirURL.toURI).list
     }
     if (dirURL == null) {
-      println(">>>>>>>>>>>> dirURL == null")
+      //println(">>>>>>>>>>>> dirURL == null")
       var me: String = clazz.getName.replace(".", "/") + ".class"
       dirURL = clazz.getClassLoader.getResource(me)
     }
     if (dirURL.getProtocol == "jar") {
-      println(">>>>>>>>>>>> dirURL.getProtocol == \"jar\"")
+      //println(">>>>>>>>>>>> dirURL.getProtocol == \"jar\"")
       var jarPath: String = dirURL.getPath.substring(5, dirURL.getPath.indexOf("!"))
       var jar: JarFile = new JarFile(URLDecoder.decode(jarPath, "UTF-8"))
       var entries: java.util.Enumeration[JarEntry] = jar.entries
       var result: java.util.Set[String] = new java.util.HashSet[String]
       while (entries.hasMoreElements) {
         var name: String = entries.nextElement.getName
-        println(">>>>>>>>>>> name = " + name)
+        //println(">>>>>>>>>>> name = " + name)
         if (name.startsWith(path)) {
           var entry: String = name.substring(path.length)
           var checkSubdir: Int = entry.indexOf("/")
           if (checkSubdir >= 0) {
             entry = entry.substring(0, checkSubdir).trim
           }
-           println(">>>>>>>>>>> ADD = " + entry)
+           //println(">>>>>>>>>>> ADD = " + entry)
           if (entry.length() > 0) result.add(entry)
         }
       }
