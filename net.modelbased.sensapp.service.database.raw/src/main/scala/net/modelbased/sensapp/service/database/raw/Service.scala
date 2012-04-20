@@ -27,14 +27,12 @@ import cc.spray.http._
 import cc.spray.json._
 import cc.spray.directives._
 import cc.spray.typeconversion.SprayJsonSupport
-// Application specific:
-import net.modelbased.sensapp.library.system.{Service => SensAppService} 
+import net.modelbased.sensapp.library.system.{Service => SensAppService}
 import net.modelbased.sensapp.library.senml.{Root => SenMLRoot, Standard => SenMLStd, JsonProtocol}
 import net.modelbased.sensapp.service.database.raw.data._
+import net.modelbased.sensapp.service.database.raw.data.NumericalStreamChunkEntry
 
 trait RawDatabaseService extends SensAppService {
-
-  println("XXXXX")
   
   import DataSetProtocols._ 
   import RequestsProtocols._
@@ -45,7 +43,6 @@ trait RawDatabaseService extends SensAppService {
   val service = {
     path("databases" / "raw" / "sensors") {
       get { context =>
-        println(_backend)
         val uris = _backend.content map { s => context.request.path  + "/"+ s }
         context complete uris
       } ~
@@ -54,41 +51,52 @@ trait RawDatabaseService extends SensAppService {
           if (_backend exists req.sensor){
             context fail (StatusCodes.Conflict, "A sensor database identified as ["+ req.sensor +"] already exists!")
           } else {
+            _backend create req
             context complete(StatusCodes.Created, context.request.path  + "/"+ req.sensor )
           }
         }
       }
     } ~
-    path("databases" / "raw" / "sensors" / SenMLStd.NAME_VALIDATOR.r) { name =>
-      get { context =>
-        handle(context, name, { s => context complete(_backend describe s) })
+    path("databases" / "raw" / "sensors" / SenMLStd.NAME_VALIDATOR.r ) { name => 
+      get { context => 
+        if (_backend exists name) { 
+          context complete (_backend describe (name,"/databases/raw/data/")) 
+        } else { 
+          context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
+        }
       } ~
       delete { context =>
-        handle(context, name, { s => _backend delete s ; context.complete("true")})
+        if (_backend exists name) { 
+          context complete "" + (_backend delete name) 
+        } else { 
+          context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
+        }
       } ~
       put {
         content(as[SenMLRoot]) { root => context => 
-          val canonised: SenMLRoot = root
-          handle(context, name, { s => _backend push(s,canonised.measurementsOrParameters); context.complete("true") })
+          println("fooba44r")
+          if (_backend exists name) { 
+            println("foobargeek")
+            _backend push(name, root)
+          } else {
+            context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
+          }
         }
-      }
+      } 
     } ~
-    path("databases" / "raw" / "sensors" / SenMLStd.NAME_VALIDATOR.r / "content") { name =>
+    path("databases" / "raw" / "data" / SenMLStd.NAME_VALIDATOR.r) { name =>
       get { context =>
-        handle(context, name, { s => context complete(_backend getAll s) })
+        if (_backend exists name) { 
+          context complete (_backend get name)
+        } else {
+          context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
+        }
       } ~
       post {
         content(as[SensorDataRequest]) { req => context =>
-          context complete(_backend getAll name)
+        
         }
-      }
-    }
-  }
-  
-  private def handle(ctx: RequestContext, sensor: String, action: String => Unit) = {
-    if (_backend exists sensor)
-      ctx fail(StatusCodes.NotFound, "Unknown sensor database ["+sensor+"]")
-    else 
-      action(sensor)
+      } 
+    } 
   }
 }

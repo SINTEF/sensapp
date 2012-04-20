@@ -29,27 +29,22 @@ import DataSetProtocols._
 
 abstract trait Backend {
 
-  def content: List[String]
-  
-  def exists(sensor: String): Boolean
-  
+  def content: List[String]  
+  def exists(sensor: String): Boolean  
   def create(request: CreationRequest): Boolean
-  
-  def describe(sensor: String): Option[SensorDatabaseDescriptor]
-  
+  def describe(sensor: String, prefix: String): Option[SensorDatabaseDescriptor]
   def delete(sensor: String): Boolean
- 
-  def push(sensor: String, dataset: List[MeasurementOrParameter]): List[MeasurementOrParameter]
- 
-  def getAll(sensor: String): String = null
-  
+  def push(sensor: String, data: Root): List[MeasurementOrParameter]
+  def get(sensor: String): Root
+  def getSchema(sensor: String): String
+    
   protected def request2json(request: CreationRequest): String = {
     val json = request.schema match { 
-	  case "Numerical" => DataSet[NumericalEntry](request.sensor, request.baseTime, List()).toJson
-	  case "String"    => DataSet[StringEntry](request.sensor, request.baseTime, List()).toJson
-	  case "Boolean"   => DataSet[BooleanEntry](request.sensor, request.baseTime, List()).toJson
-	  case "Summed"    => DataSet[SummedEntry](request.sensor, request.baseTime, List()).toJson
-	  case "NumericalStreamChunk" => DataSet[NumericalStreamChunkEntry](request.sensor, request.baseTime, List()).toJson
+	  case "Numerical" => DataSet[NumericalEntry](request.sensor, request.baseTime, List(),"Numerical").toJson
+	  case "String"    => DataSet[StringEntry](request.sensor, request.baseTime, List(), "String").toJson
+	  case "Boolean"   => DataSet[BooleanEntry](request.sensor, request.baseTime, List(), "Boolean").toJson
+	  case "Summed"    => DataSet[SummedEntry](request.sensor, request.baseTime, List(), "Summed").toJson
+	  case "NumericalStreamChunk" => DataSet[NumericalStreamChunkEntry](request.sensor, request.baseTime, List(), "NumericalStreamChunk").toJson
 	  case _ => throw new RuntimeException("Unsuported Schema") // Cannot happen!
     }
     json.toString

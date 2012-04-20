@@ -25,7 +25,7 @@ package net.modelbased.sensapp.service.database.raw.data
 import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol
 
-case class DataSet[E](val sensor: String, val baseTime: Long, val data: List[E])
+case class DataSet[E](val sensor: String, val baseTime: Long, val data: List[E], val schema: String) 
 
 abstract sealed class DataEntry
 case class NumericalEntry(val delta: Long, val data: Float, val unit: String) extends DataEntry
@@ -40,5 +40,5 @@ object DataSetProtocols extends DefaultJsonProtocol {
   implicit val booleanEntry = jsonFormat(BooleanEntry, "dt", "bd")  
   implicit val summedEntry = jsonFormat(SummedEntry, "dt", "bd", "u", "d")
   implicit val numericalStreamChunkEntry = jsonFormat(NumericalStreamChunkEntry, "dt", "num_lst")
-  implicit def dataSet[A : JsonFormat] = jsonFormat(DataSet.apply[A], "s", "bt", "e")
+  implicit def dataSet[A : JsonFormat] = jsonFormat(DataSet.apply[A], "s", "bt", "e", "k") 
 }

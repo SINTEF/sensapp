@@ -29,12 +29,12 @@ case class CreationRequest (val sensor: String, val baseTime: Long, val schema: 
   require(List("Numerical","String","Boolean", "Summed", "NumericalStreamChunk").contains(schema))
 }
 
-case class SensorDatabaseDescriptor(val sensor: String)
+case class SensorDatabaseDescriptor(val sensor: String, val schema: String, val size: Long, val url: String)
 
 case class SensorDataRequest(val start: Option[Long], val end: Option[Long])
 
 object RequestsProtocols extends DefaultJsonProtocol {
   implicit val creationRequest = jsonFormat(CreationRequest,"sensor", "baseTime", "schema")
-  implicit val sensorDatabaseDescriptor = jsonFormat(SensorDatabaseDescriptor,"sensor")
+  implicit val sensorDatabaseDescriptor = jsonFormat(SensorDatabaseDescriptor,"sensor", "schema", "size", "data_lnk")
   implicit val sensorDataRequest = jsonFormat(SensorDataRequest, "start", "end")
 }
