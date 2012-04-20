@@ -24,6 +24,7 @@ package net.modelbased.sensapp.service.rrd.data
  */
 import cc.spray.json._
 import net.modelbased.sensapp.library.datastore._
+import net.modelbased.sensapp.service.rrd.data.RRDJsonProtocol._
 /**
  * Persistence layer associated to the RRDTemplate class
  * 

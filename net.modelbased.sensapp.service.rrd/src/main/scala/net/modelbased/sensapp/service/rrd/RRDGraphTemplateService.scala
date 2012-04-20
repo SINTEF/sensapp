@@ -31,7 +31,7 @@ import cc.spray.directives._
 import xml.XML
 
 // Application specific:
-import net.modelbased.sensapp.service.rrd.data.{RRDTemplate, RRDGraphTemplateRegistry }
+import net.modelbased.sensapp.service.rrd.data.{RRDGraphTemplate, RRDGraphTemplateRegistry }
 import net.modelbased.sensapp.service.rrd.data.RRDJsonProtocol._
 
 import net.modelbased.sensapp.library.system.{Service => SensAppService}
@@ -45,7 +45,7 @@ trait RRDGraphTemplateService extends SensAppService {
         context complete uris
       } ~
       post {
-        content(as[RRDTemplate]) { element => context =>
+        content(as[RRDGraphTemplate]) { element => context =>
           if (_registry exists ("key", element.key)){
             context fail (StatusCodes.Conflict, "A template identified as ["+ element.key +"] already exists!")
           } else {
@@ -64,7 +64,7 @@ trait RRDGraphTemplateService extends SensAppService {
         handle(context, key, { e => _registry drop e; context complete "true"})
       } ~
       put {
-        content(as[RRDTemplate]) { element => context =>
+        content(as[RRDGraphTemplate]) { element => context =>
           if (element.key != key) {
             context fail(StatusCodes.Conflict, "Request content does not match URL for update")
           } else {
@@ -78,9 +78,9 @@ trait RRDGraphTemplateService extends SensAppService {
   private[this] val _registry = new RRDGraphTemplateRegistry()
   _registry.populateDB
   
-  private def buildUrl(ctx: RequestContext, e: RRDTemplate ) = { ctx.request.path  + "/"+ e.key  }
+  private def buildUrl(ctx: RequestContext, e: RRDGraphTemplate ) = { ctx.request.path  + "/"+ e.key  }
   
-  private def handle(ctx: RequestContext, key: String, action: RRDTemplate => Unit) = {
+  private def handle(ctx: RequestContext, key: String, action: RRDGraphTemplate => Unit) = {
     _registry pull(("key", key)) match {
       case None => ctx fail(StatusCodes.NotFound, "Unknown template ["+key+"]")
       case Some(element) => action(element)

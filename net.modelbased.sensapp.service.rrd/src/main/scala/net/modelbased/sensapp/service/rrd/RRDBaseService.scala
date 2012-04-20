@@ -105,6 +105,7 @@ trait RRDBaseService extends SensAppService {
         val db = _registry.getRRD4JBase(path, true)
         if (db != null) {
            context complete(XML.loadString(db.getRrdDef.exportXmlTemplate()))
+
         }
         else {
            context fail (StatusCodes.Conflict, "RRD databbase identified as ["+ path +"] was not found!")
@@ -202,6 +203,20 @@ trait RRDBaseService extends SensAppService {
         }
       }
 
+    } ~
+    path("rrd" / "databases" / "[^/]+".r / "graph") { path =>
+      get { parameters("start" ? "now", 'end ? "now", 'resolution ? "3600", 'funtion ? "AVERAGE", 'data) { (start, end, resolution, func, data) =>
+            val db = _registry.getRRD4JBase(path, true)
+            if (db != null) {
+             val img = _registry.createDefaultGraph(path, data, start, end, resolution, func)
+
+              _.complete("OK")
+            }
+            else {
+               _.fail(StatusCodes.Conflict, "RRD databbase identified as ["+ path +"] was not found!")
+            }
+        }
+      }
     }
   }
   
