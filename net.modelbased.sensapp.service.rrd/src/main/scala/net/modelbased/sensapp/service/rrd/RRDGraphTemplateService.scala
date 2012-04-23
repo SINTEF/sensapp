@@ -28,6 +28,7 @@ import cc.spray.http._
 import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.directives._
+import typeconversion.DefaultMarshallers
 import xml.XML
 
 // Application specific:
@@ -35,6 +36,7 @@ import net.modelbased.sensapp.service.rrd.data.{RRDGraphTemplate, RRDGraphTempla
 import net.modelbased.sensapp.service.rrd.data.RRDJsonProtocol._
 
 import net.modelbased.sensapp.library.system.{Service => SensAppService}
+
 
 trait RRDGraphTemplateService extends SensAppService {
   

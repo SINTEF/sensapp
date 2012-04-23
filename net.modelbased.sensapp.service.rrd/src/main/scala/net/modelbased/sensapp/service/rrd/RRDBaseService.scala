@@ -27,6 +27,8 @@ import cc.spray.http._
 import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.directives._
+//import typeconversion.DefaultMarshallers._
+import typeconversion.{MultipartMarshallers, SimpleMarshaller, DefaultMarshallers}
 import xml.XML
 
 import scala.collection.JavaConversions._
@@ -37,12 +39,52 @@ import org.rrd4j.core.Util
 import java.text.SimpleDateFormat
 
 import net.modelbased.sensapp.library.senml._
+import java.awt.image.BufferedImage
 
 // Application specific:
 import net.modelbased.sensapp.service.rrd.data._
 import net.modelbased.sensapp.library.system.{Service => SensAppService}
 
+import http._
+import MediaTypes._
+import HttpCharsets._
+
+/*
+class ImageMarshaller extends SimpleMarshaller[BufferedImage] {
+    override val canMarshalTo = ContentType(`image/jpeg`) :: Nil
+
+    override def marshal(value: BufferedImage, contentType: ContentType) = {
+      println(">>>>>>>>>>>>>> Marshal Image!")
+      val baos = new java.io.ByteArrayOutputStream()
+      javax.imageio.ImageIO.write(value, "jpg", baos)
+      baos.flush
+      val imageInByte = baos.toByteArray
+      baos.close
+      HttpContent(contentType, imageInByte)
+    }
+}
+*/
+trait ImageMarshalling extends MultipartMarshallers {
+  implicit lazy val ImageMarshaller = new  SimpleMarshaller[BufferedImage] {
+      override val canMarshalTo = ContentType(`image/jpeg`) :: Nil
+
+    override def marshal(value: BufferedImage, contentType: ContentType) = {
+      println(">>>>>>>>>>>>>> Marshal Image!")
+      val baos = new java.io.ByteArrayOutputStream()
+      javax.imageio.ImageIO.write(value, "jpg", baos)
+      baos.flush
+      val imageInByte = baos.toByteArray
+      baos.close
+      HttpContent(contentType, imageInByte)
+    }
+    }
+}
+
+object ImageMarshalling extends ImageMarshalling
+
 trait RRDBaseService extends SensAppService {
+
+  /**/
 
   private[this] val _registry = new RRDBaseRegistry()
 
@@ -206,11 +248,19 @@ trait RRDBaseService extends SensAppService {
     } ~
     path("rrd" / "databases" / "[^/]+".r / "graph") { path =>
       get { parameters("start" ? "now", 'end ? "now", 'resolution ? "3600", 'funtion ? "AVERAGE", 'data) { (start, end, resolution, func, data) =>
-            val db = _registry.getRRD4JBase(path, true)
+        import ImageMarshalling.ImageMarshaller
+        val db = _registry.getRRD4JBase(path, true)
             if (db != null) {
              val img = _registry.createDefaultGraph(path, data, start, end, resolution, func)
 
-              _.complete("OK")
+              /*
+              val baos = new java.io.ByteArrayOutputStream()
+            javax.imageio.ImageIO.write(img, "jpg", baos)
+            baos.flush
+            val imageInByte = baos.toByteArray
+            baos.close
+              */
+              _.complete(img)  (ImageMarshaller)
             }
             else {
                _.fail(StatusCodes.Conflict, "RRD databbase identified as ["+ path +"] was not found!")
