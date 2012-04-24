@@ -168,7 +168,7 @@ trait RRDBaseService extends SensAppService {
       }
     } ~
     path("rrd" / "databases" / "[^/]+".r / "data") { path =>
-      get { parameters("start" ? "now", 'end ? "now", 'resolution ? "3600", 'funtion ? "AVERAGE") { (start, end, resolution, func) =>
+      get { parameters("start" ? "now", 'end ? "now", 'resolution ? "3600", 'function ? "AVERAGE") { (start, end, resolution, func) =>
             val db = _registry.getRRD4JBase(path, true)
             if (db != null) {
               val query = RRDRequest(func, start, end, resolution)
