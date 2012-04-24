@@ -76,7 +76,7 @@ object IANA {
   object katal        extends Unit("kat",   "katal")
   object `%`          extends Unit("%",     "value of a switch (0.0 means off, 100.0 means on)")
   object count        extends Unit("count", "value of a counter")
-  object `%RH`        extends Unit("%Rh",   "Relative Humidity")
+  object `%RH`        extends Unit("%RH",   "Relative Humidity")
   object area         extends Unit("m2",    "area")
   object volume       extends Unit("l",     "volume in liters")
   object velocity     extends Unit("m/s",   "velocity")

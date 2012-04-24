@@ -63,7 +63,7 @@ object Standard{
         lst forall { 
           _.units match {
             case None => true
-            case Some(code) => IANA(code) != None
+            case Some(code) =>  IANA(code) != None
           }
         }
       }

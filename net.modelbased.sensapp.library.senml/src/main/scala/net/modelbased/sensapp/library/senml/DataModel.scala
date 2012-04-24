@@ -48,8 +48,6 @@ case class Root (
       case None => Root(None, None, None, version, None)
       case Some(lst) =>  Root(None, None, None, version, Some(lst map { mop => mop canonized this }))
     }
-    val mops =  measurementsOrParameters
-    Root(None, None, None, version, mops)
   }
 }
 
