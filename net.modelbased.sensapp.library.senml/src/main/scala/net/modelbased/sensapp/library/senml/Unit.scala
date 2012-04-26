@@ -28,7 +28,7 @@ sealed abstract case class Unit(val symbol: String, val description: String)
  * IANA Unit scheme, extracted from the <a href="http://tools.ietf.org/html/draft-jennings-senml-07#section-10.1">SenML IETF standard</a>
  * @author Sebastien Mosser
  */
-object IANA {
+object IANA { 
   
   private val _definitions = Map(
     "m" -> meter,         "kg" -> kilogram,       "s" -> second,  "A" -> ampere, 
