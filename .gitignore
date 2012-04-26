@@ -16,3 +16,4 @@ target
 **/.svn/*
 **/bin/*
 /.svn/
+net.modelbased.sensapp.backyard.weather/src/main/resources/
