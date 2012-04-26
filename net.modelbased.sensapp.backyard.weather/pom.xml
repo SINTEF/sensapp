@@ -1,0 +1,25 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>net.modelbased.sensapp.backyard</groupId>
+  <artifactId>net.modelbased.sensapp.backyard.weather</artifactId>
+  <name>Transformation: EKlima dataset  -> SenML</name>
+  <description>
+  	This project provides a DSL to address the EKlima web service and retrieve data as SenML files
+ </description>
+  <inceptionYear>2012</inceptionYear>
+  
+  <parent>
+  	<groupId>net.modelbased.sensapp</groupId>
+  	<artifactId>net.modelbased.sensapp.backyard</artifactId>
+  	<version>0.0.1-SNAPSHOT</version>
+  	<relativePath>../net.modelbased.sensapp.backyard</relativePath>
+  </parent>
+  
+  <dependencies>
+    <dependency>
+  		<groupId>net.modelbased.sensapp.library</groupId>
+  		<artifactId>net.modelbased.sensapp.library.senml</artifactId>
+  		<version>0.0.1-SNAPSHOT</version>
+  	</dependency>
+  </dependencies>
+</project>

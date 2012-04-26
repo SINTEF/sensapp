@@ -20,6 +20,7 @@
 
   <modules>
     <module>../net.modelbased.sensapp.archetype</module>
+    <module>../net.modelbased.sensapp.backyard</module>
     <module>../net.modelbased.sensapp.service</module>
   	<module>../net.modelbased.sensapp.library</module>
   	<module>../net.modelbased.sensapp.system</module>
