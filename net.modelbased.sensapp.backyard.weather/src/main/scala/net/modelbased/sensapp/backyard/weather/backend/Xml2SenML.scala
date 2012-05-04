@@ -79,7 +79,7 @@ object Xml2SenML {
       val timestamp = stringTotimestamp(d.date)
       MeasurementOrParameter(Some(d.element), Some(unit), Some(value),None, None, None, Some(timestamp), None)
     }
-    Root(Some("eklima-" + sensor+ "/"), None, None, None, Some(mop.toList))
+    Root(Some("eklima-" + sensor+ "/"), None, None, None, Some(mop.seq))
   }
   
   /**
