@@ -60,7 +60,7 @@ object Standard{
     def allUnitsKnown(root: Root) = root.measurementsOrParameters match {
       case None => true
       case Some(lst) => { 
-        lst forall { 
+        lst.par forall { 
           _.units match {
             case None => true
             case Some(code) =>  IANA(code) != None
@@ -77,7 +77,7 @@ object Standard{
     def allNamesDefined(root: Root) = root.baseName match {
       case None => root.measurementsOrParameters match {
         case None => true
-        case Some(lst) => lst forall {_.name != None }
+        case Some(lst) => lst.par forall {_.name != None }
       }
       case Some(_) => true
     }
@@ -86,13 +86,13 @@ object Standard{
       val bN = root.baseName.getOrElse("")
       root.measurementsOrParameters match {
         case None => true
-        case Some(lst) =>lst  forall { mOp => (bN + mOp.name.getOrElse("")).matches(NAME_VALIDATOR) }
+        case Some(lst) => lst.par forall { mOp => (bN + mOp.name.getOrElse("")).matches(NAME_VALIDATOR) }
       }
     }
     
     def existsValue(root: Root) = root.measurementsOrParameters match {
       case None => true
-      case Some(lst) => lst forall {
+      case Some(lst) => lst.par forall {
 	    mOp => mOp.valueSum match {
 	      case None => valueExclusivity(mOp)
 	      case Some(_) => ((mOp.value == None) && (mOp.stringValue == None) && (mOp.booleanValue == None)) || valueExclusivity(mOp)

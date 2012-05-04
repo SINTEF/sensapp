@@ -27,7 +27,7 @@ case class Root (
     val baseTime:  Option[Long],
     val baseUnits: Option[String],
     val version:   Option[Int],
-    val measurementsOrParameters: Option[List[MeasurementOrParameter]]
+    val measurementsOrParameters: Option[Seq[MeasurementOrParameter]]
     )  {
   
   /** Checkers required for standard compliance **/
@@ -100,8 +100,8 @@ case class MeasurementOrParameter(
   
   def extractTime(root: Root): Long = {
     root.baseTime match {
-      case None => time match {
-        case None => System.currentTimeMillis / 1000 // no time provided => "roughly now" in the SenML spec
+      case None | Some(0) => time match {
+        case None | Some(0) => System.currentTimeMillis / 1000 // no time provided => "roughly now" in the SenML spec
         case Some(time) => time
       }
       case Some(basis) => time match {
@@ -112,7 +112,7 @@ case class MeasurementOrParameter(
   }
 }
 
-abstract class DataType
+sealed abstract class DataType
 case class SumDataValue(val d: Float, val i: Option[Float]) extends DataType
 case class FloatDataValue(val d: Float) extends DataType
 case class StringDataValue(val d: String) extends DataType
