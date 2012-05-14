@@ -23,7 +23,7 @@
 package net.modelbased.sensapp.backyard.weather
 
 import net.modelbased.sensapp.backyard.weather.backend._
-import net.modelbased.sensapp.library.senml.JsonParser
+import net.modelbased.sensapp.library.senml.export.JsonParser
 
 /**
  * The EKlima DSL
