@@ -20,7 +20,15 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.library.senml
+package net.modelbased.sensapp.library.senml.spec
+
+
+object Standard{
+  val VERSION_NUMBER = 1 
+  val NAME_VALIDATOR = "[a-zA-Z0-9][a-zA-Z0-9-:._/\\[\\]]+"
+}
+
+/*
 
 object Standard{
   
@@ -41,47 +49,8 @@ object Standard{
   }
   
   object checkers {
-    
-    def providedVersionIsPositiveInteger(root: Root) = root.version match {
-      case None => true
-      case Some(v) => v >= 0
-    }
-    
-    def isValidVersion(root: Root) = root.version match {
-      case None => true
-      case Some(v) => v >= Standard.VERSION_NUMBER
-    }
-  
-    def isKnownBaseUnits(root: Root) = root.baseUnits match {
-      case None => true
-      case Some(code) => IANA(code) != None
-    }
-
-    def allUnitsKnown(root: Root) = root.measurementsOrParameters match {
-      case None => true
-      case Some(lst) => { 
-        lst.par forall { 
-          _.units match {
-            case None => true
-            case Some(code) =>  IANA(code) != None
-          }
-        }
-      }
-    }
-            
-    def measurementsNotEmpty(root: Root) = root.measurementsOrParameters match {
-      case None => true
-      case Some(lst) => lst.size > 0
-    }
-    
-    def allNamesDefined(root: Root) = root.baseName match {
-      case None => root.measurementsOrParameters match {
-        case None => true
-        case Some(lst) => lst.par forall {_.name != None }
-      }
-      case Some(_) => true
-    }
-    
+   
+        
     def allNamesValid(root: Root) = {
       val bN = root.baseName.getOrElse("")
       root.measurementsOrParameters match {
@@ -90,22 +59,7 @@ object Standard{
       }
     }
     
-    def existsValue(root: Root) = root.measurementsOrParameters match {
-      case None => true
-      case Some(lst) => lst.par forall {
-	    mOp => mOp.valueSum match {
-	      case None => valueExclusivity(mOp)
-	      case Some(_) => ((mOp.value == None) && (mOp.stringValue == None) && (mOp.booleanValue == None)) || valueExclusivity(mOp)
-	    }
-      }
-    }
-    
-    def valueExclusivity(mOp: MeasurementOrParameter) = {
-      (    (mOp.value != None)        && ((mOp.stringValue == None) && (mOp.booleanValue == None))
-        || (mOp.stringValue != None)  && ((mOp.value == None)       && (mOp.booleanValue == None))
-        || (mOp.booleanValue != None) && ((mOp.value == None)       && (mOp.stringValue == None) )
-      )
-    }
+
     
   }
-}
+}*/

@@ -21,6 +21,7 @@
  * <http://www.gnu.org/licenses/>.
  */
 package net.modelbased.sensapp.library.senml
+import net.modelbased.sensapp.library.senml.spec._
 
 case class Root (
     val baseName:  Option[String], 
@@ -29,20 +30,9 @@ case class Root (
     val version:   Option[Int],
     val measurementsOrParameters: Option[Seq[MeasurementOrParameter]]
     )  {
-  
-  /** Checkers required for standard compliance **/
-  import Standard.errors._
-  import Standard.checkers._
-  require(providedVersionIsPositiveInteger(this), VERSION_MUST_BE_POSITIVE)
-  require(isValidVersion(this), UNSUPPORTED_VERSION)
-  require(isKnownBaseUnits(this), UNKNOWN_BASE_UNIT)
-  //require(allUnitsDefined(this), NO_UNITS_DEFINED)
-  require(allUnitsKnown(this), UNKNWOWN_UNIT)
-  //require(measurementsNotEmpty(this), EMPTY_MEASUREMENTS)
-  require(allNamesDefined(this), EMPTY_NAME)
-  require(allNamesValid(this), INVALID_NAME)
-  require(existsValue(this), AMBIGUOUS_VALUE_PROVIDED) 
-  
+    
+  RootComplianceChecker(this) // check compliance with SENML standard
+ 
   def canonized: Root = { 
     this.measurementsOrParameters match {
       case None => Root(None, None, None, version, None)
@@ -61,6 +51,8 @@ case class MeasurementOrParameter(
 	val time:         Option[Long],
 	val updateTime:   Option[Int]
 	) {
+  
+  MoPComplianceChecker(this)  // check compliance with SENML standard
   
   def data: DataType = {
     valueSum match {

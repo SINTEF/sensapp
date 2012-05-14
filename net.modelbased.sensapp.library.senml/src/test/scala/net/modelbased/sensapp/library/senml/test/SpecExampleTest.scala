@@ -26,7 +26,7 @@ import org.specs2.mutable._
 import org.specs2.runner.JUnitRunner
 import org.junit.runner.RunWith
 
-import net.modelbased.sensapp.library.senml.JsonParser
+import net.modelbased.sensapp.library.senml.export.JsonParser
 import net.modelbased.sensapp.library.senml.test.data.SenMLSpecificationExamples
 
 @RunWith(classOf[JUnitRunner])

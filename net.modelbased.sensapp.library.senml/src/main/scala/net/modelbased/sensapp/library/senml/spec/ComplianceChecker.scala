@@ -20,21 +20,10 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.library.senml
+package net.modelbased.sensapp.library.senml.spec
 
-import cc.spray.json._
-import cc.spray.json.DefaultJsonProtocol._
-
-
-object JsonProtocol extends DefaultJsonProtocol {
-  implicit val measurementOrParameter = jsonFormat(MeasurementOrParameter, "n","u","v","sv","bv","s","t","ut")
-  implicit val root = jsonFormat(Root,"bn","bt","bu","ver","e")
+abstract class ComplianceChecker[T] {
+  type CheckerFunction =  T => Boolean
+  val checks: Map[CheckerFunction, String]
+  def validate(data: T) { checks foreach { kv => require(kv._1(data), kv._2)}} 
 }
-
-
-object JsonParser {
-  import JsonProtocol._
-  def fromJson(json: String): Root = json.asJson.convertTo[Root]
-  def toJson(r: Root): String = r.toJson.toString
-}
-
