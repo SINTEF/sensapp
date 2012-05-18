@@ -65,7 +65,7 @@
       <!-- Specifications Unit Tests -->
       <groupId>org.specs2</groupId> 
       <artifactId>specs2_${scala.version}</artifactId> 
-      <version>1.6.1</version> 
+      <version>1.10</version> 
       <scope>test</scope>
     </dependency>
     <dependency>
