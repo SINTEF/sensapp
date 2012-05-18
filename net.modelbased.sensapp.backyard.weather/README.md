@@ -38,8 +38,16 @@ Actually, this call is a wrapper to the [following invocation]([http://eklima.me
 transforming the obtained XML data into standard SenML data.
     
     http://eklima.met.no/met/MetService?invoke=getMetData&timeserietypeID=0&format=&from=2012-01-01&to=2012-01-30&stations=18700&elements=RR%2CRRTA%2CTAM&hours=&months=&username=
-    
 
+The SenML data are associated to the following sensors (where `ID` is the station ID used):
+  - `eklima-ID/RR`: Daily or monthly total of precipitation
+  - `eklima-ID/RRTA`: Daily or monthly temperature
+  - `eklima-ID/TAM`: Mean temperature
+    
+Example
+-------
+
+In the `Main.scala` file, an example is show.
 
   [Norwegian Meteorological Institute]: http://met.no/English/
   [Eklima]: http://eklima.met.no

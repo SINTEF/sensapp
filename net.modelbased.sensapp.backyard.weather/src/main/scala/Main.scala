@@ -22,23 +22,30 @@
  */
 
 import net.modelbased.sensapp.backyard.weather.EKlimaDSL
+import java.util.Date
+import java.text.SimpleDateFormat
 
 /**
  * Sample application to show how the DSL work
  * @author mosser
  */
 object Main extends App with EKlimaDSL {
-    
+  
+  val now = new Date
+  val today = (new SimpleDateFormat("yyyy-MM-dd")) format now
+  val start = (new SimpleDateFormat("yyyy-01-01")) format now
+  
+  
   // Data from Lilleaker station (id: #18980)
   (2000 to 2011).par map { y =>
     18980.between(y+"-01-01", y+"-12-31")   -> "./src/main/resources/"
   }
-  19980.between("2012-01-01", "2012-04-24") -> "./src/main/resources/"
+  18980.between(start, today) -> "./src/main/resources/"
   
   // Data from Blindern station (id: #18700)
-  (1937 to 2011).par map { y => 
+  (1970 to 2011).par map { y => 
     18700.between(y + "-01-01", y + "-12-31") -> "./src/main/resources/"
   }
-  187000.between("2012-01-01", "2012-04-24")  -> "./src/main/resources/"
+  18700.between(start, today)  -> "./src/main/resources/" 
   
 }

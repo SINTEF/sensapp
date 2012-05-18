@@ -73,6 +73,8 @@ object Xml2SenML {
    * @return a SenML Root instance
    */
   private def build(sensor: String, data: Seq[Data]): Root = {
+    if (data.isEmpty) 
+      return Root(Some("eklima-" + sensor+ "/"), None, None, None, None)
     val mop = data.par map {d => 
       val value = adapt(d.value.toFloat, d.element)
       val unit = units(d.element)
