@@ -20,9 +20,10 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.database.raw
+package net.modelbased.sensapp.service.database.raw.data
 
 import net.modelbased.sensapp.library.senml._
+import net.modelbased.sensapp.library.senml.spec.Standard
 import net.modelbased.sensapp.service.database.raw.data._
 
 object SenMLBuilder {

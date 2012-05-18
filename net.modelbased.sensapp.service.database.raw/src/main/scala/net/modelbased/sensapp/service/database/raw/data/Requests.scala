@@ -23,16 +23,36 @@
 package net.modelbased.sensapp.service.database.raw.data
 
 import cc.spray.json._
-import cc.spray.json.DefaultJsonProtocol
 
+/**
+ * Request to create a database for a given sensor
+ * @param sensor the sensor identifier to be used
+ * @param baseTime the initial time stamp (seconds since EPOCH)
+ * @param schema the data entry schema to be used (schema \in {"Numerical","String","Boolean", "Summed", "NumericalStreamChunk"})
+ */
 case class CreationRequest (val sensor: String, val baseTime: Long, val schema: String){
   require(List("Numerical","String","Boolean", "Summed", "NumericalStreamChunk").contains(schema))
 }
 
+/**
+ * Description of the database associated to a given sensor
+ * @param sensor the sensor database identifier
+ * @param schema the data schema associated to this database
+ * @param size the number of data stored in this database
+ * @param url the URL where one can retrieve the data associated to this database 
+ */
 case class SensorDatabaseDescriptor(val sensor: String, val schema: String, val size: Long, val url: String)
 
+/**
+ * Request data stored in the database between two given dates
+ * @from starting date of the period (included)
+ * @to ending date of the period (included)
+ */
 case class SensorDataRequest(val start: Option[Long], val end: Option[Long])
 
+/**
+ * Spray-Json protocols used to (un)marshal the requests
+ */
 object RequestsProtocols extends DefaultJsonProtocol {
   implicit val creationRequest = jsonFormat(CreationRequest,"sensor", "baseTime", "schema")
   implicit val sensorDatabaseDescriptor = jsonFormat(SensorDatabaseDescriptor,"sensor", "schema", "size", "data_lnk")

@@ -24,23 +24,74 @@ package net.modelbased.sensapp.service.database.raw
 
 import cc.spray._
 import cc.spray.http._
-import cc.spray.json._
-import cc.spray.directives._
 import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.library.system.{Service => SensAppService}
-import net.modelbased.sensapp.library.senml.{Root => SenMLRoot, Standard => SenMLStd, JsonProtocol}
+import net.modelbased.sensapp.library.senml.{Root => SenMLRoot}
+import net.modelbased.sensapp.library.senml.export.{JsonProtocol => SenMLProtocol}
+import net.modelbased.sensapp.library.senml.spec.{Standard => SenMLStd}
 import net.modelbased.sensapp.service.database.raw.data._
-import net.modelbased.sensapp.service.database.raw.data.NumericalStreamChunkEntry
-
+import net.modelbased.sensapp.service.database.raw.backend.Backend
+import net.modelbased.sensapp.service.database.raw.backend.impl.MongoDB
+import cc.spray.http.StatusCodes
 trait RawDatabaseService extends SensAppService {
-  
-  import DataSetProtocols._ 
-  import RequestsProtocols._
-  import JsonProtocol._
-  
+
   private[this] val _backend: Backend = new MongoDB()
   
+  import SenMLProtocol._
+  import RequestsProtocols._
+  
   val service = {
+    path("databases" / "raw" / "sensors") { 
+      get { context => 
+        val uris = _backend.content map { s => context.request.path  + "/"+ s }
+        context complete uris
+      } ~
+      post {  
+        content(as[CreationRequest]) { req => context =>
+          if (_backend exists req.sensor){
+            context fail (StatusCodes.Conflict, "A sensor database identified as ["+ req.sensor +"] already exists!")
+          } else {
+            _backend create req
+            context complete(StatusCodes.Created, context.request.path  + "/"+ req.sensor )
+          }
+        }
+      }
+    } ~
+    path("databases" / "raw" / "sensors" / SenMLStd.NAME_VALIDATOR.r ) { name => 
+      get { context => 
+        ifExists(context, name, {
+          val description = _backend describe(name, "/databases/raw/data/")
+          context complete description
+        })
+      } ~
+      delete { context => 
+        context complete (_backend delete name).toString
+      }
+    } ~
+    path("databases" / "raw" / "data" / SenMLStd.NAME_VALIDATOR.r ) { name => 
+      get { context =>
+        context.fail(new RuntimeException("Not yet implemented"))
+      } ~
+      post { context => 
+        context.fail(new RuntimeException("Not yet implemented"))
+      } ~
+      put { 
+        content(as[SenMLRoot]) { raw => context =>
+          context complete (_backend push (name, raw))
+        }
+      }
+    }
+  }
+ 
+  private def ifExists(context: RequestContext, name: String, lambda: => Unit) = {
+    if (_backend exists name)
+      lambda
+    else
+      context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
+  }
+  
+  
+  /*{
     path("databases" / "raw" / "sensors") {
       get { context =>
         val uris = _backend.content map { s => context.request.path  + "/"+ s }
@@ -98,5 +149,5 @@ trait RawDatabaseService extends SensAppService {
         }
       } 
     } 
-  }
+  }*/
 }
