@@ -156,8 +156,8 @@ class MongoDB extends Backend {
   /*************************
    ** MongoDB Collections **
    *************************/
-  private[this] def metadata = mongoConn("sensapp_db")("raw.metadata")
-  private[this] def data = mongoConn("sensapp_db")("raw.data")
-  private[this] def mongoConn = MongoConnection() 
+  private[this] lazy val metadata = mongoConn("sensapp_db")("raw.metadata")
+  private[this] lazy val data = mongoConn("sensapp_db")("raw.data")
+  private[this] lazy val mongoConn = MongoConnection() 
   
 }

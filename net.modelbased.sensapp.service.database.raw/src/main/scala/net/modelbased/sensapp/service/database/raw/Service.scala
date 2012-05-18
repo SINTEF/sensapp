@@ -33,6 +33,7 @@ import net.modelbased.sensapp.service.database.raw.data._
 import net.modelbased.sensapp.service.database.raw.backend.Backend
 import net.modelbased.sensapp.service.database.raw.backend.impl.MongoDB
 import cc.spray.http.StatusCodes
+
 trait RawDatabaseService extends SensAppService {
 
   private[this] val _backend: Backend = new MongoDB()
@@ -88,7 +89,7 @@ trait RawDatabaseService extends SensAppService {
       lambda
     else
       context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
-  }
+  } 
   
   
   /*{
