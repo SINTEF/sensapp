@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>net.modelbased.sensapp.backyard</groupId>
 	<artifactId>net.modelbased.sensapp.backyard.gatling</artifactId>
@@ -111,18 +112,15 @@
 					</execution>
 				</executions>
 				<configuration>
-          <launchers>
-            <launcher>
-              <mainClass>Engine</mainClass>
-              <args>
-                <arg>${target.server}</arg>
-          	  </args>
-            </launcher>
-          </launchers>
-	  <configuration>
-	    <argLine>-Xmx1024m</argLine>
-	  </configuration>
-        </configuration>
+					<launchers>
+						<launcher>
+							<mainClass>Engine</mainClass>
+							<args>
+								<arg>${target.server}</arg>
+							</args>
+						</launcher>
+					</launchers>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>

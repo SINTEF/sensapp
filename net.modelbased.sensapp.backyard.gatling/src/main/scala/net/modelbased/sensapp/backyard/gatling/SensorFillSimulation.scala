@@ -2,23 +2,21 @@ package net.modelbased.sensapp.backyard.gatling
 
 import com.excilys.ebi.gatling.core.Predef._
 import com.excilys.ebi.gatling.http.Predef._
-import com.excilys.ebi.gatling.jdbc.Predef._
 
 
-class SensorPushSimulation extends Simulation {
+class SensorFillSimulation  extends Simulation {
   
   val numberOfUsers: Int = 10
-  val timeframe: Int = 10
-  val numberOfData: Int = 200
-  val maxDelayBetweenPush: Int = 400
+  val timeframe: Int = 100
+  val numberOfData = 500
   
-  def apply = { List(sensorPush.configure.users(numberOfUsers).ramp(timeframe)) }
+  def apply = { List(sensorFilling.configure.users(numberOfUsers).ramp(timeframe)) }
   
   val headers = Map("Content-Type" -> "application/json", "Accept" -> "text/plain,application/json")
   
-  val sensorPush = 
-    scenario("Sensor pushing Data")
-  	  .exec { (session: Session) => // Preparing the session
+  val sensorFilling = 
+    scenario("Filling the database with random data")
+    .exec { (session: Session) => // Preparing the session
   		session.setAttribute("sensorId", RandomSensor())
   		  .setAttribute("stamp", (System.currentTimeMillis / 1000)) 
   	  }
@@ -43,10 +41,8 @@ class SensorPushSimulation extends Simulation {
 		  	.headers(headers).body("${data}")
 		}.exec { (session: Session) => 
 		  session.setAttribute("stamp", session.getAttribute("stamp").asInstanceOf[Long] + 1)
-		}.pause(100, maxDelayBetweenPush, MILLISECONDS)
+		}.pause(100, 400, MILLISECONDS)
   	  }.times(numberOfData)
-  	  .exec { // 3. Eventually deleting the database
-  	    http("Deleting the database") 
-  	      .delete("http://"+Target.serverName+"/databases/raw/sensors/${sensorId}")
-  	  }	  				
-}
+  
+  
+} 
