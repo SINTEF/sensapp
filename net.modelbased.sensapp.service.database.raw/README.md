@@ -118,34 +118,48 @@ Query example:
     Status Code: 200
     Params: {}
 
+### Sensor Data Querying: /databases/raw/data
+
+Data are exchanged as SENML documents. The server expects a `SearchRequest`to be posted, _i.e._, a set of sensors and a time interval (upper and lower boundaries are _included_ in the time interval):
+
+    Request Url: http://localhost:8080/databases/raw/data
+    Request Method: POST
+    Status Code: 200
+    
+    {
+      "sensors": ["unknown", "my-pretty-little-sensor", "another-sensor"],
+      "from": "2012-05-19T10:42:09", "to": "2012-05-19T10:42:10"
+    }  
+
+The unknown sensors are simply ignored. The `from` and `to` parameters can take the following values: 
+
+  - "now": will be translated into current server time
+  - "yyyy-MM-ddTHH:mm:ss": a human readable date (_e.g._, `"2012-05-19T10:42:09"`)
+  - "[0-9]+": number of seconds since EPOCH (_e.g._, `1337416929`, equivalent to the previous date)
+
+The server will answers a canonized representation of a SENML document containing all the stored values, as a set (the order is not ensured):
+
+    Status Code: 200
+    Content-Length: 589
+    Server: Jetty(8.1.2.v20120308)
+    Content-Type: application/json; charset=ISO-8859-1
+
+    {"e": 
+      [ { "n": "my-pretty-little-sensor", "u": "m", "v": 0.6263050436973572, "t": 1337416929}, 
+        { "n": "my-pretty-little-sensor", "u": "m", "v": 0.007966578006744385, "t": 1337416930}, 
+        { "n": "my-pretty-little-sensor", "u": "m", "v": 0.4822378158569336, "t": 1337416931}, 
+        { "n": "another-sensor", "u": "m", "v": 0.7687988877296448, "t": 1337416929 }, 
+        { "n": "another-sensor", "u": "m", "v": 0.9017250537872314, "t": 1337416930 }, 
+        { "n": "another-sensor", "u": "m", "v": 0.9753862023353577, "t": 1337416931 }  ]
+    }
 
 ### Sensor data handling: /databases/raw/data/%NAME
 
-Data are exchanged as SENML document. The server will systematically reject malformed document received as input with a `BadRequest` code:
-
-Bad query example: 
-
-    Request Url: http://localhost:8080/databases/raw/data/my-pretty-little-sensor
-    Request Method: PUT
-    Status Code: 400
-    Params: {}
-    
-    { "e": [{}] }
-
-
-Obtained response:
-
-    Status Code: 400
-    Content-Length: 125
-    Server: Jetty(8.1.2.v20120308)
-    Content-Type: text/plain
-    
-    The request content was malformed:
-    requirement failed: As 'baseName' is not provided, all measurements must provides a 'name'
+Data are exchanged as SENML documents. 
 
 #### GET /databases/raw/data/%NAME
 
-Return **all** the data stored for this sensor
+By default, return **all** the data stored for this sensor
 
 Obtained response:
  
@@ -166,9 +180,6 @@ Obtained response:
     
 One can use parameters (`from`, `to`) to restrict the retrieved data to a given interval. The parameter `to` is optional (default value: `"now"`). These parameters can take the following values:
 
-  - "now": will be translated into current server time
-  - "yyyy-MM-ddTHH:mm:ss": a human readable date (_e.g._, `"2012-05-19T10:42:09"`)
-  - "[0-9]+": number of seconds since EPOCH (_e.g._, `1337416929`, equivalent to the previous date)
 
 Examples:
 
@@ -179,7 +190,7 @@ Examples:
     
 #### PUT /databases/raw/data/%NAME
 
-Push data to be stored for this sensor. Data must be represented as a SENML document. The elements that are not relevant for this sensor (_i.e._, associated to a sensor ­ `%NAME`) are ignored. The list of ignored elements is returned to the user.
+Push data to be stored for this sensor. Data must be represented as a SENML document. The elements that are not relevant for this sensor (_i.e._, associated to a sensor ­ `%NAME`) are ignored. The list of ignored elements is returned to the user. If a data is already in the database, it will be updated with the new value.
 
 Query example:
 
@@ -202,6 +213,25 @@ Obtained response
     
     [{"n": "unknown", "u": "m", "v": 1.2, "t": 1337438916 }]
 
+The server will systematically reject malformed document received as input with a `BadRequest` code:
+
+Bad query example: 
+
+    Request Url: http://localhost:8080/databases/raw/data/my-pretty-little-sensor
+    Request Method: PUT
+    Status Code: 400
+    Params: {}
+    
+    { "e": [{}] }
 
 
+Obtained response:
+
+    Status Code: 400
+    Content-Length: 125
+    Server: Jetty(8.1.2.v20120308)
+    Content-Type: text/plain
+    
+    The request content was malformed:
+    requirement failed: As 'baseName' is not provided, all measurements must provides a 'name'
   

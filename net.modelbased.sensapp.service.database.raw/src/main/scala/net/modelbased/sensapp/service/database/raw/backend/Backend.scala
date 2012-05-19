@@ -75,7 +75,7 @@ abstract trait Backend extends BackendStructure {
    * @param data the data to be pushed
    * @return a list of ignored data (that are not related to this sensor)
    */
-  def push(sensor: String, data: Root): List[MeasurementOrParameter]
+  def push(sensor: String, data: Root): Seq[MeasurementOrParameter]
   
   /**
    * Retrieve **ALL** the data associated to a given sensor

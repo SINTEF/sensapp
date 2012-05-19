@@ -77,7 +77,8 @@ trait RawDatabaseService extends SensAppService {
 	        content(as[SearchRequest]) { request => context =>
 	          val from = buildTimeStamp(request.from)
 	          val to = buildTimeStamp(request.to)
-	          context complete (_backend get(request.sensors, from, to))
+	          val existing = request.sensors.par.filter{ _backend exists(_) }
+	          context complete (_backend get(existing.seq, from, to))
 	        }
 	      }
 	    } ~

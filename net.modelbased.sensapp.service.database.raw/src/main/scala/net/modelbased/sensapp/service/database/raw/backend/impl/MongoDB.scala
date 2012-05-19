@@ -74,7 +74,7 @@ class MongoDB extends Backend {
     }
   }
   
-  def push(sensor: String, root: Root): List[MeasurementOrParameter] = {
+  def push(sensor: String, root: Root): Seq[MeasurementOrParameter] = {
     val canon = root.canonized
     val ref = getReferenceTime(sensor)
     canon.measurementsOrParameters match {
@@ -87,15 +87,15 @@ class MongoDB extends Backend {
           legacy match { case Some(old) => data -= old; case None => }
           data += data2dbobj(sensor, mop2data(ref, mop))
         }
-        rejected.toList
+        rejected.seq
       }
     }
   }
   
   def get(sensor: String): Root = {
     val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
-    val sensorData = data.find(MongoDBObject("s" -> sensor)).map{ dbobj2data(sensorMetaData.schema,_) }.toList
-    buildSenML(sensorMetaData, sensorData)
+    val sensorData = data.find(MongoDBObject("s" -> sensor)).map{ dbobj2data(sensorMetaData.schema,_) }
+    buildSenML(sensorMetaData, sensorData.toList)
   }
   
   def get(sensor: String, from: Long, to: Long): Root = {
@@ -103,8 +103,8 @@ class MongoDB extends Backend {
     val shiftedFrom = from - sensorMetaData.timestamp
     val shiftedTo = to - sensorMetaData.timestamp
     val query: DBObject = ("t" $lte shiftedTo $gte shiftedFrom) ++ ("s" -> sensor)
-    val sensorData = data.find(query).map{ dbobj2data(sensorMetaData.schema,_) }.toList
-    buildSenML(sensorMetaData, sensorData)
+    val sensorData = data.find(query).map{ dbobj2data(sensorMetaData.schema,_) }
+    buildSenML(sensorMetaData, sensorData.toList)
   }
   
   def get(sensors: Seq[String], from: Long, to: Long): Root = { 

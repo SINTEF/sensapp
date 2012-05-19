@@ -45,14 +45,14 @@ trait BackendStructure {
     case strm: NumericalStreamChunkData => throw new RuntimeException("Not yet implemented")
   }
   
-  protected def buildSenML(metadata: SensorMetaData, data: List[SensorData]): Root = {
+  protected def buildSenML(metadata: SensorMetaData, data: Seq[SensorData]): Root = {
     val baseName = Some(metadata.name)
     val baseTime = Some(metadata.timestamp)
     val result = if (data.isEmpty) {
       Root(baseName, baseTime, None, None, None)
     } else {
       val mops = data.par map { data2senml(_) }
-      Root(baseName, baseTime, None, None, Some(mops.toList))
+      Root(baseName, baseTime, None, None, Some(mops.seq))
     }
     result
   }
