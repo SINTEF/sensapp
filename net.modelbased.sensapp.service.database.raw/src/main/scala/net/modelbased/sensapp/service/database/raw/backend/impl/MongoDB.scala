@@ -93,8 +93,12 @@ class MongoDB extends Backend {
   }
   
   def get(sensor: String): Root = {
-    ???
+    val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
+    val sensorData = data.find(MongoDBObject("s" -> sensor)).map{ dbobj2data(sensorMetaData.schema,_) }.toList
+    buildSenML(sensorMetaData, sensorData)
   }
+  
+
   
   def getSchema(sensor: String): String = {
     val obj = metadata.findOne(MongoDBObject("s" -> sensor)).get
@@ -145,7 +149,7 @@ class MongoDB extends Backend {
   private def dbobj2data(schema: RawSchemas.Value, dbobj: MongoDBObject): SensorData = {
     val delta: Long = dbobj.getAs[Long]("t").get
     schema match {
-      case RawSchemas.Numerical => NumericalData(delta, dbobj.getAs[Float]("d").get, dbobj.getAs[String]("u").get)
+      case RawSchemas.Numerical => NumericalData(delta, dbobj.getAs[Double]("d").get.floatValue, dbobj.getAs[String]("u").get)
       case RawSchemas.String    => StringData(delta, dbobj.getAs[String]("d").get, dbobj.getAs[String]("u").get)
       case RawSchemas.Boolean   => BooleanData(delta, dbobj.getAs[Boolean]("d").get)
       case RawSchemas.Summed    => SummedData(delta, dbobj.getAs[Float]("d").get, dbobj.getAs[String]("u").get, dbobj.getAs[Option[Float]]("i").get)

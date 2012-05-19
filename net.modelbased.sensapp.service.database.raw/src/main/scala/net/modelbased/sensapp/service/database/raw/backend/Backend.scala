@@ -94,45 +94,7 @@ abstract trait Backend extends BackendStructure {
   /**
    * List of supported schemas
    */
-  def schemas: List[String] = RawSchemas.values.toList map { _.toString }
-
-  
-  /**
-   * transform a CreationRequest into the associated DataSet[X], returned as plain JSON
-   * @param request the creation request to be transformed
-   * @return a JSON string representing the DataSet[X] associated to the given request
-   */
-  /*protected def request2json(request: CreationRequest): String = {
-    val json = request.schema match { 
-	  case "Numerical" => DataSet[NumericalEntry](request.sensor, request.baseTime, List(),"Numerical").toJson
-	  case "String"    => DataSet[StringEntry](request.sensor, request.baseTime, List(), "String").toJson
-	  case "Boolean"   => DataSet[BooleanEntry](request.sensor, request.baseTime, List(), "Boolean").toJson
-	  case "Summed"    => DataSet[SummedEntry](request.sensor, request.baseTime, List(), "Summed").toJson
-	  case "NumericalStreamChunk" => DataSet[NumericalStreamChunkEntry](request.sensor, request.baseTime, List(), "NumericalStreamChunk").toJson
-	  case _ => throw new RuntimeException("Unsuported Schema") // Cannot happen!
-    }
-    json.toString
-  } */
-  
-  
-  /**
-   * Transform a SenML MeasurementOrParameter into a JSON string compliant with the sensor database schema
-   * @param baseTime the reference time stamp (defined in the Root object)
-   * @param mop the MeasurementOrParameter to be transformed
-   * @return a json string representing mop as a consistent DataEntry, serialized as JSON
-   */
-  /*protected def data2json(baseTime: Long, mop: MeasurementOrParameter): String = {
-    val delta = mop.time.get - baseTime
-    val unit = mop.units.get
-    val json = mop.data match {
-        case FloatDataValue(f)   => NumericalEntry(delta, f, unit).toJson
-        case StringDataValue(s)  => StringEntry(delta, s, unit).toJson
-        case BooleanDataValue(b) => BooleanEntry(delta, b).toJson
-        case SumDataValue(d,i)   => SummedEntry(delta, d, unit, i).toJson
-    }
-    json.toString
-  }*/
- 
+  def schemas: List[String] = RawSchemas.values.toList map { _.toString } 
 }
 
 

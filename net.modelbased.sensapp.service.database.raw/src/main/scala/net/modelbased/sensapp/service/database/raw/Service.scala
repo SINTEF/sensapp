@@ -71,7 +71,10 @@ trait RawDatabaseService extends SensAppService {
     } ~
     path("databases" / "raw" / "data" / SenMLStd.NAME_VALIDATOR.r ) { name => 
       get { context =>
-        context.fail(new RuntimeException("Not yet implemented"))
+       ifExists(context, name, {
+          val dataset = _backend get(name)
+          context complete dataset
+        })
       } ~
       post { context => 
         context.fail(new RuntimeException("Not yet implemented"))
