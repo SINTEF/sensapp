@@ -30,10 +30,10 @@ trait BackendStructure {
   protected case class SensorMetaData(val name: String, val timestamp: Long, val schema: RawSchemas.Value) 
   
   abstract sealed protected class SensorData
-  protected case class NumericalData(val delta: Long, val data: Float, val unit: String) extends SensorData
+  protected case class NumericalData(val delta: Long, val data: Double, val unit: String) extends SensorData
   protected case class StringData(val delta: Long, val data: String, val unit: String) extends SensorData
   protected case class BooleanData(val delta: Long, val data: Boolean) extends SensorData
-  protected case class SummedData(val delta: Long, val data: Float, val unit: String, val instant: Option[Float]) extends SensorData
+  protected case class SummedData(val delta: Long, val data: Double, val unit: String, val instant: Option[Double]) extends SensorData
   protected case class NumericalStreamChunkData(val delta: Long, val update: Int, val data: List[Option[Float]]) extends SensorData 
   
   
@@ -63,7 +63,7 @@ trait BackendStructure {
       val delta = mop.time.get - reference
       val unit = mop.units
       mop.data match {
-        case FloatDataValue(d)   => NumericalData(delta, d, unit.get)
+        case DoubleDataValue(d)   => NumericalData(delta, d, unit.get)
         case StringDataValue(s)  => StringData(delta, s, unit.get)
         case BooleanDataValue(b) => BooleanData(delta, b)
         case SumDataValue(d,i)   => SummedData(delta, d, unit.get, i)

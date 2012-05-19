@@ -49,7 +49,7 @@ abstract sealed class DataEntry
  * @param data the float value to be stored
  * @param unit the IANA unit associated to the value
  */
-case class NumericalEntry(val delta: Long, val data: Float, val unit: String) extends DataEntry
+case class NumericalEntry(val delta: Long, val data: Double, val unit: String) extends DataEntry
 
 /**
  * String entry 
@@ -72,7 +72,7 @@ case class BooleanEntry(val delta: Long, val data: Boolean) extends DataEntry
  * @param data the float value to be stored, implementing a summed data
  * @param unit the IANA unit associated to the value
  */
-case class SummedEntry(val delta: Long, val data: Float, val unit: String, val instant: Option[Float]) extends DataEntry
+case class SummedEntry(val delta: Long, val data: Double, val unit: String, val instant: Option[Double]) extends DataEntry
 
 /**
  * Numerical stream chunk

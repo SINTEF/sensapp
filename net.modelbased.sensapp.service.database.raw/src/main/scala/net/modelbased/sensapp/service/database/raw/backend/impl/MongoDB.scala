@@ -34,9 +34,6 @@ import net.modelbased.sensapp.service.database.raw.backend._
  */
 class MongoDB extends Backend {
   
-  
-  def ???(): Nothing = throw new RuntimeException("Not yet implemented") 
-  
   def content: List[String]  = {
     val data = metadata.find(MongoDBObject.empty, MongoDBObject("s" -> 1))
     val it = data map {e => e.getAs[String]("s").get }
@@ -98,6 +95,33 @@ class MongoDB extends Backend {
     buildSenML(sensorMetaData, sensorData)
   }
   
+  def get(sensor: String, from: Long, to: Long): Root = {
+    val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
+    val shiftedFrom = from - sensorMetaData.timestamp
+    val shiftedTo = to - sensorMetaData.timestamp
+    val query: DBObject = ("t" $lte shiftedTo $gte shiftedFrom) ++ ("s" -> sensor)
+    val sensorData = data.find(query).map{ dbobj2data(sensorMetaData.schema,_) }.toList
+    buildSenML(sensorMetaData, sensorData)
+  }
+  
+  def get(sensors: Seq[String], from: Long, to: Long): Root = { 
+    val all = sensors.par.map { s => this get(s,from, to) }
+    val data = all.map{r => r.canonized.measurementsOrParameters}
+          		  .filter{ mop => mop != None }
+          		  .map{ _.get }.flatten
+    if (data.isEmpty) {
+      Root(None, None, None, None, None)
+    } else {
+      Root(None, None, None, None, Some(data.toList))
+    }
+    /*
+    val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
+    val shiftedFrom = from - sensorMetaData.timestamp
+    val shiftedTo = to - sensorMetaData.timestamp
+    val query: DBObject = ("t" $lte shiftedTo $gte shiftedFrom) ++ ("s" -> sensor)
+    val sensorData = data.find(query).map{ dbobj2data(sensorMetaData.schema,_) }.toList
+    buildSenML(sensorMetaData, sensorData) */
+  }
 
   
   def getSchema(sensor: String): String = {
@@ -105,14 +129,16 @@ class MongoDB extends Backend {
     obj.getAs[String]("k").get
   }
   
-  def getReferenceTime(sensor: String): Long = {
-    val obj = metadata.findOne(MongoDBObject("s" -> sensor)).get
-    obj.getAs[Long]("t").get
-  }
-  
   /**********************
    ** Private Elements **
    **********************/
+  
+  def ???(): Nothing = throw new RuntimeException("Not yet implemented") 
+  
+  private def getReferenceTime(sensor: String): Long = {
+    val obj = metadata.findOne(MongoDBObject("s" -> sensor)).get
+    obj.getAs[Long]("t").get
+  }
   
   private def metadata2dbobj(md: SensorMetaData): MongoDBObject  = { 
     MongoDBObject("s" -> md.name, 
@@ -149,10 +175,10 @@ class MongoDB extends Backend {
   private def dbobj2data(schema: RawSchemas.Value, dbobj: MongoDBObject): SensorData = {
     val delta: Long = dbobj.getAs[Long]("t").get
     schema match {
-      case RawSchemas.Numerical => NumericalData(delta, dbobj.getAs[Double]("d").get.floatValue, dbobj.getAs[String]("u").get)
+      case RawSchemas.Numerical => NumericalData(delta, dbobj.getAs[Double]("d").get, dbobj.getAs[String]("u").get)
       case RawSchemas.String    => StringData(delta, dbobj.getAs[String]("d").get, dbobj.getAs[String]("u").get)
       case RawSchemas.Boolean   => BooleanData(delta, dbobj.getAs[Boolean]("d").get)
-      case RawSchemas.Summed    => SummedData(delta, dbobj.getAs[Float]("d").get, dbobj.getAs[String]("u").get, dbobj.getAs[Option[Float]]("i").get)
+      case RawSchemas.Summed    => SummedData(delta, dbobj.getAs[Double]("d").get, dbobj.getAs[String]("u").get, dbobj.getAs[Option[Double]]("i").get)
       case RawSchemas.NumericalStreamChunk => ???
     }
   }

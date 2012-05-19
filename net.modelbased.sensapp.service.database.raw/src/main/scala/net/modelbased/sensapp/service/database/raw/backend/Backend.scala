@@ -85,6 +85,25 @@ abstract trait Backend extends BackendStructure {
   def get(sensor: String): Root
   
   /**
+   * Retrieve the data associated to a given sensor for a given interval
+   * @param sensor the sensor identifier to be used
+   * @param from lower bound time stamp (seconds since EPOCH) 
+   * @param to upper bound time stamp (seconds since EPOCH) 
+   * @return a SenML Root object
+   */
+  def get(sensor: String, from: Long, to: Long): Root
+  
+  /**
+   * Retrieve the data associated to a set of sensors for a given interval
+   * @param sensors the sensor identifiers to be used
+   * @param from lower bound time stamp (seconds since EPOCH) 
+   * @param to upper bound time stamp (seconds since EPOCH) 
+   * @return a SenML Root object
+   */
+  def get(sensor: Seq[String], from: Long, to: Long): Root
+  
+  
+  /**
    * return the raw database schema associated to a given sensor
    * 
    * schema \in {"Numerical", "String", "Boolean", "Summed", "NumericalStreamChunk"}

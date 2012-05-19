@@ -33,6 +33,8 @@ import net.modelbased.sensapp.service.database.raw.data._
 import net.modelbased.sensapp.service.database.raw.backend.Backend
 import net.modelbased.sensapp.service.database.raw.backend.impl.MongoDB
 import cc.spray.http.StatusCodes
+import java.lang.System
+import data.SearchRequest
 
 trait RawDatabaseService extends SensAppService {
 
@@ -69,89 +71,62 @@ trait RawDatabaseService extends SensAppService {
         context complete (_backend delete name).toString
       }
     } ~
-    path("databases" / "raw" / "data" / SenMLStd.NAME_VALIDATOR.r ) { name => 
-      get { context =>
-       ifExists(context, name, {
-          val dataset = _backend get(name)
-          context complete dataset
-        })
-      } ~
-      post { context => 
-        context.fail(new RuntimeException("Not yet implemented"))
-      } ~
-      put { 
-        content(as[SenMLRoot]) { raw => context =>
-          context complete (_backend push (name, raw))
-        }
-      }
+    detach {
+      path ("databases" / "raw" / "data") {
+	      post { 
+	        content(as[SearchRequest]) { request => context =>
+	          val from = buildTimeStamp(request.from)
+	          val to = buildTimeStamp(request.to)
+	          context complete (_backend get(request.sensors, from, to))
+	        }
+	      }
+	    } ~
+	    path("databases" / "raw" / "data" / SenMLStd.NAME_VALIDATOR.r ) { name => 
+	      get { 
+	        parameters("from", "to" ? "now") { (from, to) => context =>
+	          ifExists(context, name, {
+	            val dataset = _backend get(name, buildTimeStamp(from), buildTimeStamp(to))
+	            context complete dataset
+	          })
+	        } 
+	      } ~
+	      get { context =>
+	        ifExists(context, name, {
+	          val dataset = _backend get(name)
+	          context complete dataset
+	        })
+	      } ~
+	      put { 
+	        content(as[SenMLRoot]) { raw => context =>
+	          ifExists(context, name, { context complete (_backend push (name, raw)) })
+	        }
+	      }
+	    }
     }
   }
  
+  private def buildTimeStamp(str: String): Long = {
+    import java.text.SimpleDateFormat
+    import java.util.Date
+    val TimeStamp = """(\d+)""".r
+    val LiteralDate = """(\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d)""".r
+    val Now = "now"
+    str match {
+      case Now => (System.currentTimeMillis() / 1000)
+      case TimeStamp(x) => x.toLong
+      case LiteralDate(lit)   => {
+        val format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss")
+        val date = format.parse(lit)
+        date.getTime() / 1000
+      }
+      case _ => throw new RuntimeException("Unable to parse date ["+str+"]!")
+    }  
+  }
+  
   private def ifExists(context: RequestContext, name: String, lambda: => Unit) = {
     if (_backend exists name)
       lambda
     else
       context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
   } 
-  
-  
-  /*{
-    path("databases" / "raw" / "sensors") {
-      get { context =>
-        val uris = _backend.content map { s => context.request.path  + "/"+ s }
-        context complete uris
-      } ~
-      post {
-        content(as[CreationRequest]) { req => context =>
-          if (_backend exists req.sensor){
-            context fail (StatusCodes.Conflict, "A sensor database identified as ["+ req.sensor +"] already exists!")
-          } else {
-            _backend create req
-            context complete(StatusCodes.Created, context.request.path  + "/"+ req.sensor )
-          }
-        }
-      }
-    } ~
-    path("databases" / "raw" / "sensors" / SenMLStd.NAME_VALIDATOR.r ) { name => 
-      get { context => 
-        if (_backend exists name) { 
-          context complete (_backend describe (name,"/databases/raw/data/")) 
-        } else { 
-          context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
-        }
-      } ~
-      delete { context =>
-        if (_backend exists name) { 
-          context complete "" + (_backend delete name) 
-        } else { 
-          context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
-        }
-      } ~
-      put {
-        content(as[SenMLRoot]) { root => context => 
-          println("fooba44r")
-          if (_backend exists name) { 
-            println("foobargeek")
-            _backend push(name, root)
-          } else {
-            context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
-          }
-        }
-      } 
-    } ~
-    path("databases" / "raw" / "data" / SenMLStd.NAME_VALIDATOR.r) { name =>
-      get { context =>
-        if (_backend exists name) { 
-          context complete (_backend get name)
-        } else {
-          context fail(StatusCodes.NotFound, "Unknown sensor database [" + name + "]") 
-        }
-      } ~
-      post {
-        content(as[SensorDataRequest]) { req => context =>
-        
-        }
-      } 
-    } 
-  }*/
 }

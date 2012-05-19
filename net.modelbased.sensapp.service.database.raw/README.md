@@ -119,10 +119,9 @@ Query example:
     Params: {}
 
 
-### Sensor data retrieval: /databases/raw/data/%NAME
+### Sensor data handling: /databases/raw/data/%NAME
 
-Data are exchanged as SENML document. By construction, the server will always return _canonized_ SENML document, _i.e._, a SENML document that only contains a list of _MeasurementOrParameter_, 
-without any factorized information. The server will sysltematically reject malformed document received as input with a `BadRequest` code:
+Data are exchanged as SENML document. The server will systematically reject malformed document received as input with a `BadRequest` code:
 
 Bad query example: 
 
@@ -144,36 +143,65 @@ Obtained response:
     The request content was malformed:
     requirement failed: As 'baseName' is not provided, all measurements must provides a 'name'
 
-
 #### GET /databases/raw/data/%NAME
 
-#### POST /databases/raw/data/%NAME
+Return **all** the data stored for this sensor
 
+Obtained response:
+ 
+    Status Code: 200
+    Content-Length: 31574
+    Server: Jetty(8.1.2.v20120308)
+    Content-Type: application/json; charset=ISO-8859-1
+
+    {
+      "bn": "my-pretty-little-sensor",
+      "bt": 1337416727,
+      "e": [{
+        "u": "m",
+        "v": 0.14098352193832397,
+        "t": 0
+      }, ... ]
+    }
+    
+One can use parameters (`from`, `to`) to restrict the retrieved data to a given interval. The parameter `to` is optional (default value: `"now"`). These parameters can take the following values:
+
+  - "now": will be translated into current server time
+  - "yyyy-MM-ddTHH:mm:ss": a human readable date (_e.g._, `"2012-05-19T10:42:09"`)
+  - "[0-9]+": number of seconds since EPOCH (_e.g._, `1337416929`, equivalent to the previous date)
+
+Examples:
+
+  - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?from=2012-05-19T10:42:09
+  - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?from=2012-05-19T10:42:09&to=2012-05-19T10:42:11
+  - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?from=1337416929&to=1337416931
+  - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?from=1337416929
+    
 #### PUT /databases/raw/data/%NAME
 
+Push data to be stored for this sensor. Data must be represented as a SENML document. The elements that are not relevant for this sensor (_i.e._, associated to a sensor ­ `%NAME`) are ignored. The list of ignored elements is returned to the user.
+
+Query example:
+
+    Request Url: http://localhost:8080/databases/raw/data/my-pretty-little-sensor
+    Request Method: PUT
+    Status Code: 200
+    
+    {
+      "bn": "my-pretty-little-",
+      "e": [ {"n": "sensor",  "u": "m", "v": 1.2, "t": 1337438916 }, 
+             {"n": "unknown", "u": "m", "v": 1.2, "t": 1337438916 } ]
+    }  
+
+Obtained response
+
+    Status Code: 200
+    Content-Length: 87
+    Server: Jetty(8.1.2.v20120308)
+    Content-Type: application/json; charset=ISO-8859-1
+    
+    [{"n": "unknown", "u": "m", "v": 1.2, "t": 1337438916 }]
 
 
-
-
-
-
-
-
-
-Endpoints available with the RAW database:
-
-
-$SERVER/databases/raw/sensors
-  - GET: return the list of stored sensors
-  - POST: create a raw database associated to the posted request
-
-$SERVER/databases/raw/sensors/$NAME
-  - GET: return a description of the sensor
-  - DEL: delete this database
-
-$SERVER/databases/raw/data/$NAME
-  - GET: return sensor data (additional parameters ---)
-  - PUT: push data associated to this sensor
-  - POST: return sensor data according to the posted request
 
   
