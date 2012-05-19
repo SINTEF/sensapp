@@ -4,8 +4,14 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>net.modelbased.sensapp.backyard</groupId>
 	<artifactId>net.modelbased.sensapp.backyard.gatling</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
 
+  <parent>
+  	<groupId>net.modelbased.sensapp</groupId>
+  	<artifactId>net.modelbased.sensapp.backyard</artifactId>
+  	<version>0.0.1-SNAPSHOT</version>
+  	<relativePath>../net.modelbased.sensapp.backyard</relativePath>
+  </parent>
+  
 	<repositories>
 		<repository>
 			<id>excilys</id>
