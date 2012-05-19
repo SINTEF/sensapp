@@ -25,7 +25,6 @@ package net.modelbased.sensapp.service.database.raw.backend
 import net.modelbased.sensapp.service.database.raw.data._
 import net.modelbased.sensapp.library.senml._
 import cc.spray.json._
-import DataSetProtocols._
 
 /**
  * Trait to define the "interface" a raw backend database must implement
@@ -70,7 +69,8 @@ abstract trait Backend extends BackendStructure {
   def delete(sensor: String): Boolean
   
   /**
-   * push a data set (as a SenML message) into the database
+   * push a data set (as a SenML message) into the database. If a data for the same time stamp already exists,
+   * the pushed data is considered as an update of the legacy one (i.e., the legacy one is replaced)
    * @param sensor the sensor identifier to be used
    * @param data the data to be pushed
    * @return a list of ignored data (that are not related to this sensor)

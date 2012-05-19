@@ -22,7 +22,7 @@
  */
 package net.modelbased.sensapp.service.database.raw.backend
 import net.modelbased.sensapp.library.senml._
-import net.modelbased.sensapp.service.database.raw.data.SummedEntry
+
 
 
 trait BackendStructure {
@@ -57,8 +57,19 @@ trait BackendStructure {
     result
   }
   
+  protected def mop2data(reference: Long, mop: MeasurementOrParameter): SensorData = {
+    val delta = mop.time.get - reference
+    val unit = mop.units
+    mop.data match {
+      case DoubleDataValue(d)   => NumericalData(delta, d, unit.get)
+      case StringDataValue(s)  => StringData(delta, s, unit.get)
+      case BooleanDataValue(b) => BooleanData(delta, b)
+      case SumDataValue(d,i)   => SummedData(delta, d, unit.get, i)
+    }
+  }
+  
   // assumed as canonized, i.e., self-contained Mop
-  protected def mop2data(reference: Long, mops: List[MeasurementOrParameter]): List[SensorData] = {
+  /*protected def mop2data(reference: Long, mops: List[MeasurementOrParameter]): List[SensorData] = {
     val r = mops.par map { mop => 
       val delta = mop.time.get - reference
       val unit = mop.units
@@ -70,7 +81,7 @@ trait BackendStructure {
       }
     }
     r.toList
-  }
+  }*/
 }
 
 /**

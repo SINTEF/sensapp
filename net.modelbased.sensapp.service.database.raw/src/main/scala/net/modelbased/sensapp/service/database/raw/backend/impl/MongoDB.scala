@@ -80,10 +80,13 @@ class MongoDB extends Backend {
     canon.measurementsOrParameters match {
       case None => List()
       case Some(lst) => {
-        //println(sensor + " " + lst)
         val (accepted, rejected) = lst.par partition { mop => mop.name == Some(sensor) }
-        val elements = mop2data(ref, accepted.toList)
-        elements.par foreach { data += data2dbobj(sensor, _)  }
+        accepted.foreach { mop =>
+          val localStamp = mop.time.get - ref
+          val legacy = data.findOne(MongoDBObject("s" -> sensor, "t" -> localStamp))
+          legacy match { case Some(old) => data -= old; case None => }
+          data += data2dbobj(sensor, mop2data(ref, mop))
+        }
         rejected.toList
       }
     }
@@ -114,13 +117,6 @@ class MongoDB extends Backend {
     } else {
       Root(None, None, None, None, Some(data.toList))
     }
-    /*
-    val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
-    val shiftedFrom = from - sensorMetaData.timestamp
-    val shiftedTo = to - sensorMetaData.timestamp
-    val query: DBObject = ("t" $lte shiftedTo $gte shiftedFrom) ++ ("s" -> sensor)
-    val sensorData = data.find(query).map{ dbobj2data(sensorMetaData.schema,_) }.toList
-    buildSenML(sensorMetaData, sensorData) */
   }
 
   
