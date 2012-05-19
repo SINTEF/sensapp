@@ -44,10 +44,10 @@ case class Root (
 case class MeasurementOrParameter(
 	val name:         Option[String],
 	val units:        Option[String],
-	val value:        Option[Float],
+	val value:        Option[Double],
 	val stringValue:  Option[String],
 	val booleanValue: Option[Boolean],
-	val valueSum:     Option[Float],
+	val valueSum:     Option[Double],
 	val time:         Option[Long],
 	val updateTime:   Option[Int]
 	) {
@@ -57,7 +57,7 @@ case class MeasurementOrParameter(
   def data: DataType = {
     valueSum match {
       case Some(sum) => SumDataValue(sum, value)
-      case None if value != None => FloatDataValue(value.get)
+      case None if value != None => DoubleDataValue(value.get)
       case None if stringValue != None => StringDataValue(stringValue.get)
       case None if booleanValue != None =>BooleanDataValue(booleanValue.get)
       case _ => throw new IllegalArgumentException("Invalid MeasurementOrParamameter Entry")
@@ -69,7 +69,7 @@ case class MeasurementOrParameter(
     val unit = Some(extractUnit(root))
     val time = Some(extractTime(root))
     data match {
-      case FloatDataValue(d)   => MeasurementOrParameter(name, unit, Some(d), None, None, None, time, None)
+      case DoubleDataValue(d)   => MeasurementOrParameter(name, unit, Some(d), None, None, None, time, None)
       case StringDataValue(s)  => MeasurementOrParameter(name, unit, None, Some(s), None, None, time, None)
       case BooleanDataValue(b) => MeasurementOrParameter(name, unit, None, None, Some(b), None, time, None)
       case SumDataValue(d,i)   => MeasurementOrParameter(name, unit, i, None, None, Some(d), time, None)
@@ -105,8 +105,8 @@ case class MeasurementOrParameter(
 }
 
 sealed abstract class DataType
-case class SumDataValue(val d: Float, val i: Option[Float]) extends DataType
-case class FloatDataValue(val d: Float) extends DataType
+case class SumDataValue(val d: Double, val i: Option[Double]) extends DataType
+case class DoubleDataValue(val d: Double) extends DataType
 case class StringDataValue(val d: String) extends DataType
 case class BooleanDataValue(val d: Boolean) extends DataType
 //Fixme: stream chunk  
