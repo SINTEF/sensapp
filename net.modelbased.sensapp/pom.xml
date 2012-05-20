@@ -52,7 +52,17 @@
       <id>SensApp</id>
       <name>snapshots</name>
       <url>https://repository-sintef.forge.cloudbees.com/snapshot/</url>
-    </repository>  
+    </repository> 
+    <repository>
+  	  <id>spray</id>
+  	  <name>Spray Repository</name>
+      <url>http://repo.spray.cc/</url>
+	</repository>
+	<repository>
+  	  <id>typesafe</id>
+  	  <name>Typesafe Repository</name>
+      <url>http://repo.typesafe.com/typesafe/releases/</url>
+	</repository> 
   </repositories>
     
   <dependencies>

@@ -5,14 +5,6 @@
   <name>SensApp SenML API</name>
   <description>This module implements the SenML standard</description>
   
-  <repositories>
-  	<repository>
-  	  <id>spray</id>
-  	  <name>Spray Repository</name>
-      <url>http://repo.spray.cc/</url>
-	</repository>
-  </repositories>
-  
   <dependencies>
 	<dependency>
   		<groupId>cc.spray</groupId>

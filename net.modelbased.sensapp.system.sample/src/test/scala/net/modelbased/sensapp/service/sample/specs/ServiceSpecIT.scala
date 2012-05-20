@@ -32,7 +32,7 @@ import cc.spray.http._
 import cc.spray.http.HttpMethods._
 import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.typeconversion.SprayJsonSupport
-import net.modelbased.sensapp.library.http.HttpSpraySupport
+import net.modelbased.sensapp.library.system.HttpSpraySupport
 // Service-specific
 import net.modelbased.sensapp.service.sample.data.{Element}
 import net.modelbased.sensapp.service.sample.data.ElementJsonProtocol.format

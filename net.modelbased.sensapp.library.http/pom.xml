@@ -4,31 +4,8 @@
   <artifactId>net.modelbased.sensapp.library.http</artifactId>
   <name>SensApp HTTP API</name>
   <description>This module implements the HTTP API used in SensApp</description>
-  
-  <repositories>
-  	<repository>
-  	  <id>spray</id>
-  	  <name>Spray Repository</name>
-      <url>http://repo.spray.cc/</url>
-	</repository>
-	<repository>
-  	  <id>typesafe</id>
-  	  <name>Typesafe Repository</name>
-      <url>http://repo.typesafe.com/typesafe/releases/</url>
-	</repository>
-  </repositories>
-  
+    
   <dependencies>
-	<dependency>
-  		<groupId>cc.spray</groupId>
-  		<artifactId>spray-client</artifactId>
-  		<version>0.9.0</version>
-  	</dependency>  
-  	<dependency>
-  	  <groupId>se.scalablesolutions.akka</groupId>
-  	  <artifactId>akka-actor</artifactId>
-  	  <version>1.3.1</version>
-	</dependency>
 	<dependency>
       <groupId>org.apache.httpcomponents</groupId>
       <artifactId>httpclient</artifactId>

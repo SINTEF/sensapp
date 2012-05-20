@@ -4,7 +4,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
  *
- * Module: net.modelbased.sensapp.library.http
+ * Module: net.modelbased.sensapp.library.system
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -20,9 +20,7 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.library.http
-
-
+package net.modelbased.sensapp.library.system
 
 import cc.spray.can.HttpClient
 import akka.config.Supervision._

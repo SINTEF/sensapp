@@ -29,6 +29,13 @@
     </repository>
   </repositories>
   
+  <dependencies>
+    <dependency>
+  		<groupId>net.modelbased.sensapp.library</groupId>
+  		<artifactId>net.modelbased.sensapp.library.system</artifactId>
+  		<version>0.0.1-SNAPSHOT</version>
+  	</dependency>
+ </dependencies>
   
   <build>
     <plugins>

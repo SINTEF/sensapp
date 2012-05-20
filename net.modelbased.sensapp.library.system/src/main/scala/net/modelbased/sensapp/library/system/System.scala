@@ -28,14 +28,12 @@ import akka.actor.Actor._
 import akka.actor.ActorRef
 import cc.spray._
 
-import net.modelbased.sensapp.library.http.HttpSpraySupport
-
 /**
  * Initialize a SensApp System (register the actors, ...)
  * 
  * @remark the user must implement the "services" method
  * @author Sebastien Mosser
- */
+ */ 
 trait System extends HttpSpraySupport {
 
   /**

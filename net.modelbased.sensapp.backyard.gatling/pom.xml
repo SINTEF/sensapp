@@ -4,6 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>net.modelbased.sensapp.backyard</groupId>
 	<artifactId>net.modelbased.sensapp.backyard.gatling</artifactId>
+	<name> Gatling stress tool </name>
 
   <parent>
   	<groupId>net.modelbased.sensapp</groupId>

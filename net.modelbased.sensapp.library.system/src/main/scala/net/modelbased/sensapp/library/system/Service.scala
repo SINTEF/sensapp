@@ -24,12 +24,10 @@ package net.modelbased.sensapp.library.system
 
 import cc.spray._
 import cc.spray.http._
-import cc.spray.json._
-import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.directives._
 import cc.spray.typeconversion.SprayJsonSupport
 
-/**
+/** 
  * A SensApp service 
  * @author Sebastien Mosser
  */
