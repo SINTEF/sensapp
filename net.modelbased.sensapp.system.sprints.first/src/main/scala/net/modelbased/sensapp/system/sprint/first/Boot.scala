@@ -25,13 +25,15 @@ package net.modelbased.sensapp.system.sprint.first
 import akka.actor.ActorSystem
 import net.modelbased.sensapp.service.database.raw.RawDatabaseService
 import net.modelbased.sensapp.service.registry.{ Service => RegistryService }
+import net.modelbased.sensapp.service.dispatch.{ Service => DispatchService }
 import net.modelbased.sensapp.library.system._
 
 class Boot(override val system: ActorSystem) extends System {
   
   def services = {
     List(new RawDatabaseService() { implicit def actorSystem = system }, 
-         new RegistryService() { implicit def actorSystem = system })
+         new RegistryService() { implicit def actorSystem = system },
+         new DispatchService() { implicit def actorSystem = system })
   }
   
 }

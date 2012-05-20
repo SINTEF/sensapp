@@ -20,6 +20,7 @@
     <module>../net.modelbased.sensapp.service.sample</module>
     <module>../net.modelbased.sensapp.service.database.raw</module>
     <module>../net.modelbased.sensapp.service.registry</module>
+    <module>../net.modelbased.sensapp.service.dispatch</module>
   </modules>
     
   <dependencies>
