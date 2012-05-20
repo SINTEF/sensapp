@@ -23,8 +23,11 @@
 package net.modelbased.sensapp.system.sprint.first
 
 import net.modelbased.sensapp.service.database.raw.RawDatabaseService
+import net.modelbased.sensapp.service.registry.{ Service => RegistryService }
 import net.modelbased.sensapp.library.system._
 
 class Boot extends System {
-  def services = List(new RawDatabaseService(){})
+  def services = {
+    List(new RawDatabaseService() {}, new RegistryService() {})
+  }
 }

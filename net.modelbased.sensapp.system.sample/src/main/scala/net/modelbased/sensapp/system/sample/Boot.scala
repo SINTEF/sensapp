@@ -26,5 +26,6 @@ import net.modelbased.sensapp.service.sample.{Service => SampleService}
 import net.modelbased.sensapp.library.system._
 
 class Boot extends System {
+  def _partners = Map()
   def services = List(new SampleService(){})
 }
