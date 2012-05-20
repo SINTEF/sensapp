@@ -36,6 +36,8 @@ import net.modelbased.sensapp.library.system.{Service => SensAppService}
 
 trait Service extends SensAppService {
   
+  override val name = "service.sample"
+  
   val service = {
     path("sample" / "elements") {
       get { context =>
