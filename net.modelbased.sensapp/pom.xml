@@ -30,7 +30,8 @@
     <maven.compiler.source>1.6</maven.compiler.source>
     <maven.compiler.target>1.6</maven.compiler.target>
     <encoding>UTF-8</encoding>
-    <scala.version>2.9.1</scala.version>
+    <scala.version>2.9.1</scala.version> <!-- MongoDB driver relies on scala 2.9.1  -->
+    <!--  <scala.version>2.9.2</scala.version> -->
   </properties>
   
   <licenses>

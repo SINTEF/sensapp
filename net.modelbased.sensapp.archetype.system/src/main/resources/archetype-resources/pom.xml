@@ -31,7 +31,6 @@
   		<groupId>net.modelbased.sensapp.library</groupId>
   		<artifactId>net.modelbased.sensapp.library.http</artifactId>
   		<version>0.0.1-SNAPSHOT</version>
-  		<scope>test</scope>
   	</dependency>
   </dependencies>
   
