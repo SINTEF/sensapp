@@ -60,14 +60,17 @@ Contact: Sebastien Mosser <Sebastien.Mosser@sintef.no>
 """
   println(headers)  
   
-  val actors = services map { s =>
-      system.actorOf(props = Props(new HttpService(s.service)), name = s.name)
-    }
-  
+  val actors = (services.par map { s: Service =>
+      val ref = system.actorOf(props = Props(new HttpService(s.service)), name = s.name)
+      system.log.info("Service {} -> {}", Array(s.name, ref.toString))
+      ref
+  }).seq
+ 
   val rootService = system.actorOf(
         props = Props(new RootService(actors.head, actors.tail: _*)),
         name = "spray-root-service")
-   
+  system.log.info("RootService -> {}", Array(rootService.toString))
+ 
   system.registerOnTermination(println("Shutting down SensApp"))
   
 }
