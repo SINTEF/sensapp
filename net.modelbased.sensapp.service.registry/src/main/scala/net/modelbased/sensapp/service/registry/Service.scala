@@ -104,7 +104,7 @@ trait Service extends SensAppService {
     if (_registry exists ("id", id))
       lambda
     else
-      context fail(StatusCodes.NotFound, "Unknown sensor database [" + id + "]") 
+      context fail(StatusCodes.NotFound, "Unknown sensor [" + id + "]") 
   } 
   
 }
