@@ -26,7 +26,7 @@ import akka.dispatch.Await
 import akka.util.duration._
 import cc.spray.client._
 import cc.spray.json._
-import cc.spray.json.DefaultJsonProtocol._
+//import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.typeconversion.SprayJsonSupport
 import cc.spray.typeconversion.DefaultUnmarshallers._
 import net.modelbased.sensapp.library.system.{HttpSpraySupport, PartnerHandler}
@@ -41,6 +41,29 @@ object Dispatch extends HttpSpraySupport with SprayJsonSupport {
     val (dataUrl, backend) = getBackend(partners("registry"), sensor)
     val root = buildRootMessage(mops)
     sendData(partners, root, dataUrl, backend)
+    notifyListeners(partners("registry"), sensor, root)
+  }
+  
+  private[this] def notifyListeners(notifier: (String, Int), sensor: String, root: Root) {
+    case class Notif(s: String, hooks: List[String])
+    implicit def notif = jsonFormat(Notif, "sensor", "hooks")
+    val conduit = new HttpConduit(httpClient, notifier._1, notifier._2) {
+      val pipeline = simpleRequest ~> sendReceive ~> unmarshal[Notif]
+    }
+    val future = conduit.pipeline(Get("/notification/registered/"+sensor, None))
+    try {
+      val n = Await.result(future, 5 seconds)
+      n.hooks.par foreach { url =>
+        val c = new HttpConduit(httpClient, url.split("/")(0).split(":")(0), url.split("/")(0).split(":")(1).toInt) {
+          val pipe = simpleRequest[Root] ~> sendReceive ~> unmarshal[String]
+        }
+        val f = c.pipe(Put(url.substring(url.indexOf("/"), url.length), Some(root)))
+        try { Await.result(f, 5 seconds) } 
+        catch { case e: Exception => system.log.debug( url + ":" + e.toString()) }
+        c.close
+      }
+    } catch { case e: Exception => system.log.debug( sensor + ":" + e.toString()) } // Nothing to notify, silently ignore
+    conduit.close()
   }
   
   private[this] def sendData(partners: PartnerHandler, data: Root, url: String, kind: String) {
