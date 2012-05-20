@@ -103,6 +103,8 @@ Returns a description of the sensor. This descriptions contains:
   - a creation timestamp (seconds since EPOCH)
   - some additional informations (a tags key-value object, an optional updateRate and an optional localization)
 
+The following request is an example of the expected document
+
     Status Code: 200
     Content-Length: 281
     Server: Jetty(8.1.3.v20120416)
