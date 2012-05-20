@@ -35,7 +35,7 @@ import net.modelbased.sensapp.service.sample.data.ElementJsonProtocol.format
 import net.modelbased.sensapp.library.system.{Service => SensAppService} 
 
 trait Service extends SensAppService {
-  
+  override val name = "sample"
   val service = {
     path("sample" / "elements") {
       get { context =>

@@ -38,6 +38,8 @@ import data.SearchRequest
 
 trait RawDatabaseService extends SensAppService {
 
+  override val name = "database.raw"
+    
   private[this] val _backend: Backend = new MongoDB()
   
   import SenMLProtocol._
