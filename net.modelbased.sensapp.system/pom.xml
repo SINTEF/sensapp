@@ -46,6 +46,11 @@
  	    <configuration>
  	      <stopPort>9966</stopPort>
           <stopKey>${project.artifactId}</stopKey>
+          <connectors>
+	 	      <connector implementation="org.eclipse.jetty.server.nio.SelectChannelConnector">
+	 	      <port>8080</port>
+	 	      </connector>
+ 	      </connectors>
  	    </configuration>
  	    <executions>
           <execution>
