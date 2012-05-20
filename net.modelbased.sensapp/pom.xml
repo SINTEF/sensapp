@@ -59,9 +59,9 @@
       <url>http://repo.spray.cc/</url>
 	</repository>
 	<repository>
-  	  <id>typesafe</id>
-  	  <name>Typesafe Repository</name>
-      <url>http://repo.typesafe.com/typesafe/releases/</url>
+  	  <id>Akka</id>
+  	  <name>Akka Repository</name>
+      <url>http://repo.akka.io/releases/</url>
 	</repository> 
   </repositories>
     

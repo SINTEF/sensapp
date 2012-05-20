@@ -22,10 +22,8 @@
  */
 package net.modelbased.sensapp.library.system
 
-import akka.config.Supervision._
-import akka.actor.Supervisor
-import akka.actor.Actor._
-import akka.actor.ActorRef
+
+import akka.actor.{Props, ActorSystem}
 import cc.spray._
 
 /**
@@ -34,25 +32,14 @@ import cc.spray._
  * @remark the user must implement the "services" method
  * @author Sebastien Mosser
  */ 
-trait System extends HttpSpraySupport {
+trait System {
 
+  val system: ActorSystem
+  
   /**
    * The list of SensApp service to be used in this system
    */
   def services: List[Service]
-  
-  /**
-   * bootstrap the Spray backend (Akka layer)
-   */
-  private[this] def bootstrap() = {
-    var actorRefs : List[ActorRef] = services map { s => actorOf(new HttpService(s.service))}
-    val root = actorOf(new RootService(actorRefs.head, actorRefs.tail: _*))
-    val supervisors = actorRefs map {Supervise(_,Permanent)}
-    Supervisor(
-      SupervisorConfig(
-        OneForOneStrategy(List(classOf[Exception]), 3, 100),
-        Supervise(root, Permanent) :: supervisors))
-  }
   
   // Headers to be printed while starting up SensApp
   private[this] val headers = """
@@ -71,8 +58,16 @@ License: GNU Lesser General Public License, v3
 Website: http://sensapp.modelbased.net 
 Contact: Sebastien Mosser <Sebastien.Mosser@sintef.no>
 """
-    
-  bootstrap
-  load
-  println(headers)
+  println(headers)  
+  
+  val actors = services map { s =>
+      system.actorOf(props = Props(new HttpService(s.service)), name = s.name)
+    }
+  
+  val rootService = system.actorOf(
+        props = Props(new RootService(actors.head, actors.tail: _*)),
+        name = "spray-root-service")
+   
+  system.registerOnTermination(println("Shutting down SensApp"))
+  
 }

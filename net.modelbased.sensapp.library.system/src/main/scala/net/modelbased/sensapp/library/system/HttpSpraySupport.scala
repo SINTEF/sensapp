@@ -22,22 +22,17 @@
  */
 package net.modelbased.sensapp.library.system
 
-import cc.spray.can.HttpClient
-import akka.config.Supervision._
-import akka.actor._
+//import cc.spray.can.HttpClient
+//import akka.config.Supervision._
+import akka.actor.{Props, ActorSystem}
+import cc.spray.can.client.HttpClient
+import cc.spray.io.IoWorker
 
 trait HttpSpraySupport {
-
-  private[this] val actor = Actor.actorOf(new HttpClient())
+  def httpClientName: String
   
-  def load() {
-    Supervisor(
-        SupervisorConfig(
-            OneForOneStrategy(
-                List(classOf[Exception]), 3, 100), 
-                List(Supervise(actor, Permanent))))
-  }
- 
-  def unload() { actor ! PoisonPill }
- 
+  implicit val system = ActorSystem()
+  protected lazy val ioWorker = new IoWorker(system).start()
+  protected lazy val httpClient = system.actorOf(props = Props(new HttpClient(ioWorker)), name = httpClientName)
+  
 }

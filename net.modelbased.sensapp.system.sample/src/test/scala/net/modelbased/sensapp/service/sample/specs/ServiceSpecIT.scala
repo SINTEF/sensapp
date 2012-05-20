@@ -30,9 +30,11 @@ import org.specs2.runner.JUnitRunner
 import cc.spray.client._
 import cc.spray.http._
 import cc.spray.http.HttpMethods._
-import cc.spray.json.DefaultJsonProtocol._
+import cc.spray.json.DefaultJsonProtocol.listFormat
 import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.library.system.HttpSpraySupport
+import akka.dispatch.Await
+import akka.util.duration.intToDurationInt
 // Service-specific
 import net.modelbased.sensapp.service.sample.data.{Element}
 import net.modelbased.sensapp.service.sample.data.ElementJsonProtocol.format
@@ -40,23 +42,29 @@ import net.modelbased.sensapp.service.sample.data.ElementJsonProtocol.format
 
 @RunWith(classOf[JUnitRunner])
 class ServiceSpecIT extends SpecificationWithJUnit with SprayJsonSupport with HttpSpraySupport {
-
-  "Service Specification Unit (Integration)".title
+  
+  override def httpClientName = "raw-database-helper"
     
-  step(load) // Load the HttpSpraySupport in the context of this test suite
+  // Solve an implicit conflict between Akka 2.0 and Specs2
+  override def intToRichLong(v: Int) = new RichLong(v.toLong)
+  override def longToRichLong(v: Long) = new RichLong(v)
+    
+    "Service Specification Unit (Integration)".title
+    
+  //step(load) // Load the HttpSpraySupport in the context of this test suite
   
   "GET(/sample/elements)" should {
-    val conduit = new HttpConduit("localhost",8080) {
+    val conduit = new HttpConduit(httpClient, "localhost",8080) {
       val pipeline = { simpleRequest ~> sendReceive ~> unmarshal[List[Element]] }
     }
     "Retrieve an empty list when no elements are stored" in new EmptyRegistry {
       val future = conduit.pipeline(Get("/sample/elements"))
-      val response = future.get
+      val response = Await.result(future, (5 seconds) )
       response must_== List()
     }   
   }
  
-  step(unload) // Unload the HttpSpraySupport
+  //step(unload) // Unload the HttpSpraySupport
 }
 
 trait EmptyRegistry extends Before {

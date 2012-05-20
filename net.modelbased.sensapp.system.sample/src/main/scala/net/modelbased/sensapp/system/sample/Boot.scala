@@ -22,10 +22,17 @@
  */
 package net.modelbased.sensapp.system.sample
 
+import akka.actor.{Props, ActorSystem}
+import cc.spray._
+
 import net.modelbased.sensapp.service.sample.{Service => SampleService}
 import net.modelbased.sensapp.library.system._
 
-class Boot extends System {
-  def _partners = Map()
-  def services = List(new SampleService(){})
-}
+class Boot(override val system: ActorSystem) extends System {
+  def services: List[Service] = List(new SampleService(){ implicit def actorSystem = system })
+} 
+
+
+
+
+
