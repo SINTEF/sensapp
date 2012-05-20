@@ -11,6 +11,7 @@
   <modules>
     <module>../net.modelbased.sensapp.backyard.weather</module>
     <module>../net.modelbased.sensapp.backyard.gatling</module>
+    <module>../net.modelbased.sensapp.backyard.echo</module>
   </modules>
   
   <parent>
