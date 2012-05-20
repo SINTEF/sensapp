@@ -22,25 +22,32 @@
  */
 package net.modelbased.sensapp.library.system
 
-import cc.spray._
-import cc.spray.http._
-import cc.spray.json._
-import cc.spray.json.DefaultJsonProtocol._
-import cc.spray.directives._
-import cc.spray.typeconversion.SprayJsonSupport
-
 /**
- * A SensApp service 
+ * Mechanism to handle external partnerships
  * @author Sebastien Mosser
  */
-trait Service extends Directives with SprayJsonSupport {
-  
-  // By default, we consider all the service on the same server
-  val partners: PartnerHandler = Monolith
-  
-  // the name of the service (to be used in the PartnerHandler)
-  val name: String
-  
-  // The actual service, described with the Spray DSL
-  val service: RequestContext => Unit
+trait PartnerHandler {
+  /**
+   * return the partner (server, port) associated to a given key (i.e., a service name)
+   */
+  def apply(key: String): (String, Int)
 }
+
+/**
+ * This default partner handler consider that everything is deployed on localhost:8080
+ */
+object Monolith extends PartnerHandler {
+  def apply(key: String): (String, Int) = ("localhost", 8080)
+}
+
+/**
+ * This partner handler uses a Map to declare partnerships
+ */
+trait DistributedPartners extends PartnerHandler {
+  protected val _partners: Map[String, (String, Int)]
+  def apply(key: String): (String, Int)  = {
+    _partners.getOrElse(key, ("localhost", 8080))
+  }
+}
+
+

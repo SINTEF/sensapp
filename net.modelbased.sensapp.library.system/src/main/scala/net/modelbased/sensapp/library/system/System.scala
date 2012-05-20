@@ -28,11 +28,25 @@ import akka.actor.Actor._
 import akka.actor.ActorRef
 import cc.spray._
 
-trait System {
+import net.modelbased.sensapp.library.http.HttpSpraySupport
 
+/**
+ * Initialize a SensApp System (register the actors, ...)
+ * 
+ * @remark the user must implement the "services" method
+ * @author Sebastien Mosser
+ */
+trait System extends HttpSpraySupport {
+
+  /**
+   * The list of SensApp service to be used in this system
+   */
   def services: List[Service]
   
-  def bootstrap() = {
+  /**
+   * bootstrap the Spray backend (Akka layer)
+   */
+  private[this] def bootstrap() = {
     var actorRefs : List[ActorRef] = services map { s => actorOf(new HttpService(s.service))}
     val root = actorOf(new RootService(actorRefs.head, actorRefs.tail: _*))
     val supervisors = actorRefs map {Supervise(_,Permanent)}
@@ -42,5 +56,25 @@ trait System {
         Supervise(root, Permanent) :: supervisors))
   }
   
+  // Headers to be printed while starting up SensApp
+  private[this] val headers = """
+                     _____                 ___                               
+                    / ___/___  ____  _____/   |  ____  ____                  
+                    \__ \/ _ \/ __ \/ ___/ /| | / __ \/ __ \                 
+                   ___/ /  __/ / / (__  ) ___ |/ /_/ / /_/ /                 
+                  /____/\___/_/ /_/____/_/  |_/ .___/ .___/                  
+                                             /_/   /_/                       
+
+Copyright (C) 2011-  SINTEF ICT ~ NSS Department ~ MOD Group
+This program comes with ABSOLUTELY NO WARRANTY; This is free software, 
+and you are welcome to redistribute it under certain conditions; 
+
+License: GNU Lesser General Public License, v3
+Website: http://sensapp.modelbased.net 
+Contact: Sebastien Mosser <Sebastien.Mosser@sintef.no>
+"""
+    
   bootstrap
+  load
+  println(headers)
 }
