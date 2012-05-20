@@ -21,6 +21,7 @@
     <module>../net.modelbased.sensapp.service.database.raw</module>
     <module>../net.modelbased.sensapp.service.registry</module>
     <module>../net.modelbased.sensapp.service.dispatch</module>
+    <module>../net.modelbased.sensapp.service.notifier</module>
   </modules>
     
   <dependencies>
