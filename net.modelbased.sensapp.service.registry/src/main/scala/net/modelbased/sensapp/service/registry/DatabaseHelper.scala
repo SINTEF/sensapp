@@ -75,36 +75,48 @@ object BackendHelper {
   /**
    * Database Helper for the Raw database
    */
-  private object Raw extends DatabaseHelper with HttpSpraySupport {
+  private object Raw extends DatabaseHelper with HttpSpraySupport with SprayJsonSupport {
     
     override val httpClientName = "raw-database-helper"
     
 	case class CreationRequest (val sensor: String, val baseTime: Long, val schema: String)
 	implicit val creationRequest = jsonFormat(CreationRequest, "sensor", "baseTime", "schema")
 	
-	def createDatabase(id: String, schema: Schema, partners: PartnerHandler): (String, String) = {
-	  val request = schema.baseTime match {
+	private def buildRequest(id: String, schema: Schema): CreationRequest = {
+	  schema.baseTime match {
 	    case None => CreationRequest(id, (System.currentTimeMillis / 1000), schema.template)
 	    case Some(bT) => CreationRequest(id, bT, schema.template)
 	  }
-	  val partner = partners("database.raw") 
+	}
+	
+	def createDatabase(id: String, schema: Schema, partners: PartnerHandler): (String, String) = {
+	  val partner = partners("database.raw").get
 	  val conduit = new HttpConduit(httpClient, partner._1, partner._2) {
 	    val pipeline = simpleRequest[CreationRequest] ~> sendReceive ~> unmarshal[String]
 	  }
-	  val response = conduit.pipeline(Post("/databases/raw/sensors", Some(request)))
-	  val data = Await.result(response, 5 seconds)
+	  val response = conduit.pipeline(Post("/databases/raw/sensors", Some(buildRequest(id, schema))))
+	  val descriptorUrl = Await.result(response, 5 seconds) // synchronous call
 	  conduit.close()
-	  ( "/databases/raw/sensors/" + id, "/databases/raw/data/" + id ) 
+	  (descriptorUrl, getDataBackend(descriptorUrl, partner))
+	}
+	
+	private def getDataBackend(descrUrl: String, partner: (String, Int)): String = {
+	  val conduit = new HttpConduit(httpClient, partner._1, partner._2) {
+	    val pipeline = simpleRequest ~> sendReceive ~> unmarshal[String]
+	  }
+	  val response = conduit.pipeline(Get(descrUrl, None))
+	  val description = Await.result(response, 5 seconds) // synchronous call
+	  description.asJson.asJsObject().getFields("data_lnk")(0).convertTo[String]
 	}
 	
 	def deleteDatabase(backend: Backend, partners: PartnerHandler) {
-	  val partner = partners("database.raw")
+	  val partner = partners("database.raw").get
 	  val conduit = new HttpConduit(httpClient, partner._1,partner._2) {
 	    val pipeline = simpleRequest ~> sendReceive ~> unmarshal[String]
 	  }
-	  val response = conduit.pipeline(Delete(backend.descriptor))
-	  val data = Await.result(response, 5 seconds)
-	  conduit.close()
+	  conduit.pipeline(Delete(backend.descriptor))
+	  .onSuccess{ case s => conduit.close }
+	  .onFailure{ case e => {conduit.close; throw e }}
 	}
   } 
 }

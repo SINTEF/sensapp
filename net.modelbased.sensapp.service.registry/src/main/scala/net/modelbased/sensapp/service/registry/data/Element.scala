@@ -84,7 +84,7 @@ case class SensorInformation(
  */
 case class SensorDescription(
   val id: String,
-  val description: String,
+  var description: String,
   val backend: Backend,
   val creationDate: Long,
   var infos: SensorInformation

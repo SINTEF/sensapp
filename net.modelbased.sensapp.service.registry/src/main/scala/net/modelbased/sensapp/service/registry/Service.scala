@@ -28,7 +28,7 @@ import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.directives._
 import cc.spray.typeconversion.SprayJsonSupport
-import net.modelbased.sensapp.library.system.{Service => SensAppService}
+import net.modelbased.sensapp.library.system.{Service => SensAppService, URLHandler}
 import net.modelbased.sensapp.library.senml.spec.{Standard => SenMLStd}
 import net.modelbased.sensapp.service.registry.data._
 import net.modelbased.sensapp.service.registry.data.ElementJsonProtocol._
@@ -37,15 +37,22 @@ import net.modelbased.sensapp.service.registry.data.Backend
 
 trait Service extends SensAppService {
   
-  override val name = "registry"
+  override lazy val name = "registry"
   
+  override lazy val partnersNames = List("database.raw")
+    
   val service = {
     path("registry" / "sensors") {
-      get { context =>
-        val list = _registry.retrieve(List()).par map {
-          context.request.path  + "/"+ _.id
-        }
-        context complete list.seq
+      get { 
+        parameter("flatten" ? false) { flatten =>  context =>
+          val descriptors =  _registry.retrieve(List()).par
+          if (flatten) {
+            context complete descriptors.seq
+          } else {
+            val uris = descriptors map { s => URLHandler.build(context, context.request.path  + "/"+ s.id).toString }
+            context complete uris.seq
+          }
+        } 
       } ~ 
       post {
         content(as[CreationRequest]) { request => context =>
@@ -56,7 +63,7 @@ trait Service extends SensAppService {
             val backend = createDatabase(request.id, request.schema)
             // Store the descriptor
             _registry push (request.toDescription(backend))
-            context complete (context.request.path  + "/" + request.id)
+            context complete URLHandler.build(context, context.request.path  + "/" + request.id).toString
           }
         }
       }
@@ -78,6 +85,14 @@ trait Service extends SensAppService {
           ifExists(context, name, {
             val sensor = (_registry pull ("id", name)).get
             sensor.infos = info
+            _registry push sensor
+            context complete sensor
+          })
+        } ~
+        content(as[String]) { descr => context =>
+          ifExists(context, name, {
+            val sensor = (_registry pull ("id", name)).get
+            sensor.description = descr
             _registry push sensor
             context complete sensor
           })
