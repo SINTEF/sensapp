@@ -29,7 +29,13 @@ import net.modelbased.sensapp.service.sample.{Service => SampleService}
 import net.modelbased.sensapp.library.system._
 
 class Boot(override val system: ActorSystem) extends System {
-  def services: List[Service] = List(new SampleService(){ implicit def actorSystem = system })
+  
+  trait iod { 
+    lazy val partners = new Monolith { implicit val actorSystem = system }
+    implicit def actorSystem = system 
+  }
+  
+  def services: List[Service] = List(new SampleService with iod {} )
 } 
 
 
