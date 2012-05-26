@@ -1,0 +1,9 @@
+This folder contains the flight data for a short 2min flight with a remote controlled flying wing.
+
+WingFlight1.log : Raw data extracted from the APM board (altitute has been re-calibrated)
+WingFlight1.gpx : GPX export of the data (from the APM Planner software)
+WingFlight1.kmz : KMZ export of the trace of the flight (opens with Google Earth)
+WingFlight1_sim.kmz : Animation of the flight (opens with Google Earth)
+
+The onbard video corresponding to these data is available at: http://youtu.be/oCEJIac2W6M
+
