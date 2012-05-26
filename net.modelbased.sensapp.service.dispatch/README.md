@@ -1,6 +1,6 @@
 # SensApp Dispatch Service
 
-This service implement a data dispatcher for SensApp
+This service implements a data dispatcher for SensApp
 
 ## Using the service
 
