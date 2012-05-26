@@ -25,16 +25,15 @@ package net.modelbased.sensapp.service.database.raw
 import cc.spray._
 import cc.spray.http._
 import cc.spray.typeconversion.SprayJsonSupport
-import net.modelbased.sensapp.library.system.{Service => SensAppService}
+import net.modelbased.sensapp.library.system.{Service => SensAppService, URLHandler}
 import net.modelbased.sensapp.library.senml.{Root => SenMLRoot}
 import net.modelbased.sensapp.library.senml.export.{JsonProtocol => SenMLProtocol}
 import net.modelbased.sensapp.library.senml.spec.{Standard => SenMLStd}
 import net.modelbased.sensapp.service.database.raw.data._
+import net.modelbased.sensapp.service.database.raw.data._
 import net.modelbased.sensapp.service.database.raw.backend.Backend
 import net.modelbased.sensapp.service.database.raw.backend.impl.MongoDB
-import cc.spray.http.StatusCodes
-import java.lang.System
-import data.SearchRequest
+import data._
 
 trait RawDatabaseService extends SensAppService {
 
@@ -47,9 +46,16 @@ trait RawDatabaseService extends SensAppService {
   
   val service = {
     path("databases" / "raw" / "sensors") { 
-      get { context => 
-        val uris = _backend.content map { s => context.request.path  + "/"+ s }
-        context complete uris
+      get { 
+        parameter("flatten" ? false) { flatten => context =>
+            if (!flatten) {
+              val uris = _backend.content map { s => URLHandler.build(context, context.request.path  + "/"+ s).toString }
+	          context complete uris
+            } else {
+              val dataset = _backend.content map { s => _backend.describe(s, URLHandler.build(context,"/databases/raw/data/").toString).get }
+              context complete dataset
+            }
+        }
       } ~
       post {  
         content(as[CreationRequest]) { req => context =>
@@ -57,7 +63,7 @@ trait RawDatabaseService extends SensAppService {
             context fail (StatusCodes.Conflict, "A sensor database identified as ["+ req.sensor +"] already exists!")
           } else {
             _backend create req
-            context complete(StatusCodes.Created, context.request.path  + "/"+ req.sensor )
+            context complete(StatusCodes.Created, URLHandler.build(context,context.request.path  + "/"+ req.sensor).toString )
           }
         }
       }
@@ -65,7 +71,7 @@ trait RawDatabaseService extends SensAppService {
     path("databases" / "raw" / "sensors" / SenMLStd.NAME_VALIDATOR.r ) { name => 
       get { context => 
         ifExists(context, name, {
-          val description = _backend describe(name, "/databases/raw/data/")
+          val description = _backend describe(name, URLHandler.build(context,"/databases/raw/data/").toString)
           context complete description
         })
       } ~
