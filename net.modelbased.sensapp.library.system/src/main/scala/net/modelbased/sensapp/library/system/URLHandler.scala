@@ -22,35 +22,21 @@
  */
 package net.modelbased.sensapp.library.system
 
-import cc.spray._
-import cc.spray.http._
-import cc.spray.directives._
-import cc.spray.typeconversion.SprayJsonSupport
+import cc.spray.RequestContext
 
-/** 
- * A SensApp service 
- * @author Sebastien Mosser
- */
-trait Service extends Directives with SprayJsonSupport {
-  
-  // By default, we consider all the service on the same server
-  val partners: PartnerHandler
-  
-  // the name of the service (to be used in the PartnerHandler)
-  val name: String
-  
-  // The actual service, described with the Spray DSL
-  val service: RequestContext => Unit
-  
-  // the partners required by this service
-  lazy val partnersNames: List[String] = List()
-  
-  private[this] def loadPartners() {
-    partnersNames.foreach { n =>
-      val p = partners(n)
-      require(p != None, "Unknowm partner: [" + n + "] for service ["+name+"]")
-      println("  # %s/%s --> %s:%s".format(name, n, p.get._1, p.get._2))
-    }
+object URLHandler {
+
+  def build(ctx: RequestContext, path: String): java.net.URL = {
+    val host = ctx.request.host
+    val port = ctx.request.port.getOrElse(8080)
+    new java.net.URL("http", host, port, path)
   }
-  loadPartners()  
+  
+  def extract(str: String): ((String, Int),String) = {
+    val url = new java.net.URL(str)
+    val host = url.getHost
+    val port = url.getPort
+    val path = url.getPath
+    ((host, port), path)
+  }
 }
