@@ -28,23 +28,37 @@ import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.directives._
 import cc.spray.typeconversion.SprayJsonSupport
-// Application specific:
 import net.modelbased.sensapp.service.notifier.data.{Subscription, SubscriptionRegistry }
 import net.modelbased.sensapp.service.notifier.data.SubscriptionJsonProtocol.format
 import net.modelbased.sensapp.library.senml.Root
+import net.modelbased.sensapp.library.senml.export.{JsonProtocol => SenMLProtocol}
 import net.modelbased.sensapp.library.senml.spec.Standard
-
 import net.modelbased.sensapp.library.system.{Service => SensAppService} 
+import net.modelbased.sensapp.library.system.URLHandler
 
 trait Service extends SensAppService {
   
-  override val name = "notifier"
+  import SenMLProtocol._
+  
+  override lazy val name = "notifier"
     
   val service = {
+    path("notifier") {
+      detach {
+        put {
+          content(as[Root]) {root => context =>
+            root.dispatch.par foreach {
+              case (sensor, data) => Helper.doNotify(data, sensor, _registry) 
+            }
+            context complete "done"
+          }
+        }
+      }
+    } ~ 
     path("notification" / "registered" ) {
       get { context =>
         val uris = (_registry retrieve(List())) map { s => 
-          "/notification/registered/" + s.sensor
+          URLHandler.build(context, "/notification/registered/" + s.sensor).toString
         }
         context complete uris
       } ~
@@ -54,7 +68,7 @@ trait Service extends SensAppService {
             context fail (StatusCodes.Conflict, "A Subscription identified by ["+ subscription.sensor +"] already exists!")
           } else {
             _registry push subscription
-            context complete (StatusCodes.Created, "/notification/registered/" + subscription.sensor)
+            context complete (StatusCodes.Created, URLHandler.build(context, "/notification/registered/" + subscription.sensor).toString)
           }
         }
       }
@@ -75,7 +89,7 @@ trait Service extends SensAppService {
           if (subscription.sensor != name) {
             context fail(StatusCodes.Conflict, "Request content does not match URL for update")
           } else {
-            ifExists(context, name, { _registry push(subscription); context complete("true") })
+            ifExists(context, name, { _registry push(subscription); context complete subscription })
 	      } 
         }
       }
@@ -88,7 +102,7 @@ trait Service extends SensAppService {
     if (_registry exists ("sensor", id))
       lambda
     else
-      context fail(StatusCodes.NotFound, "Unknown sensor database [" + id + "]") 
+      context fail(StatusCodes.NotFound, "Unknown sensor identifier for notification [" + id + "]") 
   } 
   
 }
