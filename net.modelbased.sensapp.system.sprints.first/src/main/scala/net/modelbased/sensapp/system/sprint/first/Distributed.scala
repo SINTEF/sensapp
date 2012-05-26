@@ -27,21 +27,27 @@ import net.modelbased.sensapp.service.database.raw.RawDatabaseService
 import net.modelbased.sensapp.service.registry.{ Service => RegistryService }
 import net.modelbased.sensapp.service.dispatch.{ Service => DispatchService }
 import net.modelbased.sensapp.service.notifier.{ Service => NotifierService }
-import net.modelbased.sensapp.library.system._
+import net.modelbased.sensapp.library.system._ 
 
-class Boot(override val system: ActorSystem) extends System {
-     
-  // "injection of dependency" to propagate the current actorSystem
+class BackEnd(override val system: ActorSystem) extends System {
   trait iod { 
-    lazy val partners = new Monolith { implicit val actorSystem = system }
+    lazy val partners = new TopologyFileBasedDistribution { implicit val actorSystem = system }
     implicit def actorSystem = system 
   }
   
   def services = {
-    List(new RawDatabaseService with iod {} , 
-         new RegistryService    with iod {},
-         new DispatchService    with iod {}, 
-         new NotifierService    with iod {})
+    List(new RawDatabaseService with iod {}, new DispatchService with iod {})
   }  
-  
 }
+
+class FrontEnd(override val system: ActorSystem) extends System {
+  trait iod { 
+    lazy val partners = new TopologyFileBasedDistribution { implicit val actorSystem = system }
+    implicit def actorSystem = system 
+  }
+  
+  def services = {
+    List(new RegistryService with iod {}, new NotifierService with iod {})
+  }  
+}
+

@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    { "name": "local", "srv": "localhost", "port": 8080 },
+    { "name": "front", "srv": "ec2-79-125-77-157.eu-west-1.compute.amazonaws.com", "port": 8080},
+    { "name": "back",  "srv": "ec2-46-51-166-95.eu-west-1.compute.amazonaws.com",  "port": 8080}
+  ],
+  "deployment": [
+  	{ "service": "database.raw", "node": "back" },
+  	{ "service": "dispatch",     "node": "back" },
+  	{ "service": "notifier",     "node": "front" },
+  	{ "service": "registry",     "node": "front" }
+  ]
+}
