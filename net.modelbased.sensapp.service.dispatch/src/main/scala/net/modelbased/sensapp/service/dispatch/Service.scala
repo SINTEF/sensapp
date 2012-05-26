@@ -30,30 +30,26 @@ import net.modelbased.sensapp.library.senml.export.{JsonProtocol => SenMLProtoco
 import net.modelbased.sensapp.library.system.{Service => SensAppService} 
 
 trait Service extends SensAppService {
-import SenMLProtocol._
   
-  override val name = "dispatch"
+  import SenMLProtocol._
+  
+  override lazy val name = "dispatch"
+  override lazy val partnersNames = List("database.raw", "registry", "notifier")
     
   val service = {
     path("dispatch") {
       detach {
         put { 
           content(as[SenMLRoot]) { data => context =>
-            val canonized = data.canonized
-            canonized.measurementsOrParameters match {
-              case None => context complete "done"
-              case Some(mops) => {
-                val targets = (mops.par map { _.name.get }).toSet
-                val dispatched = targets map { t => 
-                  val data = mops.par filter { _.name.get == t }
-                  try {
-                    Dispatch(partners, t, data.seq)
-                    None
-                  } catch { case e: Exception => Some(t) }
-                }
-                context complete dispatched.filter{ _.isDefined }.toList
+            val handled = data.dispatch.par map {
+              case (target, data) => {
+                try {
+                  Dispatch(partners, target, data.measurementsOrParameters.get)
+                  None
+                } catch { case e => Some(target) }
               }
             }
+            context complete handled.filter{ _.isDefined }.toList
           }
         }
       }

@@ -29,7 +29,7 @@ import cc.spray.json._
 //import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.typeconversion.SprayJsonSupport
 import cc.spray.typeconversion.DefaultUnmarshallers._
-import net.modelbased.sensapp.library.system.{HttpSpraySupport, PartnerHandler}
+import net.modelbased.sensapp.library.system._
 import net.modelbased.sensapp.library.senml._
 import net.modelbased.sensapp.library.senml.export.JsonProtocol._ 
 
@@ -38,12 +38,59 @@ object Dispatch extends HttpSpraySupport with SprayJsonSupport {
   def httpClientName = "dispatch-helper"
   
   def apply(partners: PartnerHandler, sensor: String, mops: Seq[MeasurementOrParameter]) {
-    val (dataUrl, backend) = getBackend(partners("registry"), sensor)
+    val (dataUrl, backend) = getBackend(partners("registry").get, sensor)
     val root = buildRootMessage(mops)
     sendData(partners, root, dataUrl, backend)
-    notifyListeners(partners("registry"), sensor, root)
+    notifyListeners(partners("notifier").get, sensor, root)
   }
   
+  private[this] def buildRootMessage(mops: Seq[MeasurementOrParameter]): Root = {
+    Root(None, None, None, None, Some(mops))
+  }
+  
+  private[this] def getBackend(registry: (String, Int), sensor: String ): (String, String) = {
+    val conduit = new HttpConduit(httpClient, registry._1, registry._2) {
+      val pipeline = simpleRequest ~> sendReceive ~> unmarshal[String]
+    }
+    val response = conduit.pipeline(Get("/registry/sensors/"+sensor, None))
+    val data = Await.result(response, 5 seconds).asJson
+	conduit.close()
+    val descr = data.asJsObject.getFields("backend")(0).asJsObject.getFields("dataset", "kind")
+    (descr(0).convertTo[String], descr(1).convertTo[String]) 
+  }  
+  
+  private[this] def sendData(partners: PartnerHandler, data: Root, url: String, kind: String) {
+    val key = kind match {
+      case "raw" => "database.raw"
+      case str => throw new RuntimeException("Unsupported backend ["+str+"]")
+    }
+    val db = partners(key).get
+    val conduit = new HttpConduit(httpClient, db._1, db._2) {
+      val pipeline = simpleRequest[Root] ~> sendReceive ~> unmarshal[String]
+    }
+    val future = conduit.pipeline(Put(url,Some(data)))
+    Await.result(future, 5 seconds)
+    conduit.close()
+  }
+  
+  private[this] def notifyListeners(notifier: (String, Int), sensor: String, root: Root) {
+    val conduit = new HttpConduit(httpClient, notifier._1, notifier._2) {
+      val pipeline = simpleRequest[Root] ~> sendReceive ~> unmarshal[String]
+    }
+    // Asynchronous notification
+    conduit.pipeline(Put("/notifier", Some(root)))
+      .onSuccess { case x => conduit.close() }
+      .onFailure { 
+        case e => {
+          conduit.close(); 
+          val url = "http://"+notifier._1 +":"+ notifier._2 + "/notifier"
+          system.log.info("Exception while notifying ["+url+"]: " + e)
+        }
+      }
+  }
+  
+  
+  /*
   private[this] def notifyListeners(notifier: (String, Int), sensor: String, root: Root) {
     case class Notif(s: String, hooks: List[String])
     implicit def notif = jsonFormat(Notif, "sensor", "hooks")
@@ -64,34 +111,5 @@ object Dispatch extends HttpSpraySupport with SprayJsonSupport {
       }
     } catch { case e: Exception => system.log.debug( sensor + ":" + e.toString()) } // Nothing to notify, silently ignore
     conduit.close()
-  }
-  
-  private[this] def sendData(partners: PartnerHandler, data: Root, url: String, kind: String) {
-    val key = kind match {
-      case "raw" => "database.raw"
-      case str => throw new RuntimeException("Unsupported backend ["+str+"]")
-    }
-    val partner = partners(key)
-    val conduit = new HttpConduit(httpClient, partner._1, partner._2) {
-      val pipeline = simpleRequest[Root] ~> sendReceive ~> unmarshal[String]
-    }
-    val future = conduit.pipeline(Put(url,Some(data)))
-    Await.result(future, 5 seconds)
-    conduit.close()
-  }
-  
-  private[this] def buildRootMessage(mops: Seq[MeasurementOrParameter]): Root = {
-    Root(None, None, None, None, Some(mops))
-  }
-  
-  private[this] def getBackend(registry: (String, Int), sensor: String ): (String, String) = {
-    val conduit = new HttpConduit(httpClient, registry._1, registry._2) {
-      val pipeline = simpleRequest ~> sendReceive ~> unmarshal[String]
-    }
-    val response = conduit.pipeline(Get("/registry/sensors/"+sensor, None))
-    val data = Await.result(response, 5 seconds).asJson
-	conduit.close()
-    val descr = data.asJsObject.getFields("backend")(0).asJsObject.getFields("dataset", "kind")
-    (descr(0).convertTo[String], descr(1).convertTo[String]) 
-  }  
+  }*/
 }
