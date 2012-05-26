@@ -33,12 +33,42 @@ case class Root (
     
   RootComplianceChecker(this) // check compliance with SENML standard
  
+  /**
+   * Return a canonized version of the SenML message contained in this
+   */
   def canonized: Root = { 
     this.measurementsOrParameters match {
       case None => Root(None, None, None, version, None)
-      case Some(lst) =>  Root(None, None, None, version, Some(lst map { mop => mop canonized this }))
+      case Some(lst) =>  {
+        if (isCanonic) { this } else { Root(None, None, None, version, Some(lst map { mop => mop canonized this }))}
+      }
     }
   }
+  
+  /**
+   * a SenML message is canonic if no base* elements are provided
+   */
+  def isCanonic: Boolean = {this.baseName == None && this.baseTime == None && this.baseUnits == None}
+  
+  /**
+   * returns canonized data classified by each sensor
+   * root message **ALWAYS** containes at leat one mop by construction
+   */
+  def dispatch: Map[String, Root] = {
+    val canonized = this.canonized
+    canonized.measurementsOrParameters match {
+      case None => Map()
+      case Some(mops) => {
+        val targets = (mops.par map { _.name.get }).toSet.toList // remove duplicates
+        val content = targets.par map { target: String =>
+          val targetMops = mops.par filter { mop => target == mop.name.get }
+          target -> Root(None, None, None, version, Some(targetMops.seq))
+        }
+        content.seq.toMap
+      }
+    }
+  }
+  
 }
 
 case class MeasurementOrParameter(
