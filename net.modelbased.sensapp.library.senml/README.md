@@ -15,7 +15,7 @@ This Scala library implements the [SENML] standard. For now, it provides:
 The following dependency is required to use this service in a SensApp system.
 
     <dependency>
-  	  <groupId>net.modelbased.sensapp.service</groupId>
+  	  <groupId>net.modelbased.sensapp.library</groupId>
   	  <artifactId>net.modelbased.sensapp.library.senml</artifactId>
   	  <version>0.0.1-SNAPSHOT</version>
     </dependency>    
