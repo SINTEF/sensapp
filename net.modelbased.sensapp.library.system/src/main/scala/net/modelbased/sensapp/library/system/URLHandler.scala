@@ -26,10 +26,13 @@ import cc.spray.RequestContext
 
 object URLHandler {
 
-  def build(ctx: RequestContext, path: String): java.net.URL = {
+  def build(ctx: RequestContext, path: String): String = {
     val host = ctx.request.host
     val port = ctx.request.port.getOrElse(8080)
-    new java.net.URL("http", host, port, path)
+    if (host == "localhost" && port == 8080)
+      path
+    else 
+      new java.net.URL("http", host, port, path).toString
   }
   
   def extract(str: String): ((String, Int),String) = {

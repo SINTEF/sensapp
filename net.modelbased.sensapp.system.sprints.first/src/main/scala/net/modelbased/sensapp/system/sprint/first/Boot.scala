@@ -27,7 +27,7 @@ import net.modelbased.sensapp.service.database.raw.RawDatabaseService
 import net.modelbased.sensapp.service.registry.{ Service => RegistryService }
 import net.modelbased.sensapp.service.dispatch.{ Service => DispatchService }
 import net.modelbased.sensapp.service.notifier.{ Service => NotifierService }
-import net.modelbased.sensapp.library.system._
+import net.modelbased.sensapp.library.system._ 
 
 class Boot(override val system: ActorSystem) extends System {
      
