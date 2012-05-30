@@ -71,7 +71,8 @@ The SENML standard defines several constraints on the way data structure can be 
 
 Serialization and deserialization mechanisms are implemented in the `JsonParser` singleton. 
 
-    import net.modelbased.sensapp.library.senml.{Root, JsonParser}
+    import net.modelbased.sensapp.library.senml.Root
+    import net.modelbased.sensapp.library.senml.export.JsonParser
     val obj: Root = JsonParser.fromJson("{ ... }")
     val json: String = JsonParser.toJson(obj)
     
@@ -79,7 +80,7 @@ Serialization and deserialization mechanisms are implemented in the `JsonParser`
 
 As SensApp (the core project) relies on the [Spray] framework for its REST layer, we also propose spray _protocols_ to allow automatic marshalling/unmarshalling in Spray. One can activate these protocols by importing the implicit functions defined in the `JsonProtocol` singleton.
 
-    import net.modelbased.sensapp.library.senml.JsonProtocol._
+    import net.modelbased.sensapp.library.senml.export.JsonProtocol._
 
 
   [SENML]: http://tools.ietf.org/html/draft-jennings-senml-08
