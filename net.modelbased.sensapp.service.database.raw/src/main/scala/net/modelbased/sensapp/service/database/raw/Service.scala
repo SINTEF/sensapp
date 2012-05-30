@@ -30,7 +30,6 @@ import net.modelbased.sensapp.library.senml.{Root => SenMLRoot}
 import net.modelbased.sensapp.library.senml.export.{JsonProtocol => SenMLProtocol}
 import net.modelbased.sensapp.library.senml.spec.{Standard => SenMLStd}
 import net.modelbased.sensapp.service.database.raw.data._
-import net.modelbased.sensapp.service.database.raw.data._
 import net.modelbased.sensapp.service.database.raw.backend.Backend
 import net.modelbased.sensapp.service.database.raw.backend.impl.MongoDB
 import data._
