@@ -27,20 +27,18 @@ import cc.spray.http._
 import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.library.system.{Service => SensAppService, URLHandler}
 import net.modelbased.sensapp.library.senml.{Root => SenMLRoot}
-import net.modelbased.sensapp.library.senml.export.{JsonProtocol => SenMLProtocol}
 import net.modelbased.sensapp.library.senml.spec.{Standard => SenMLStd}
 import net.modelbased.sensapp.service.database.raw.data._
 import net.modelbased.sensapp.service.database.raw.backend.Backend
 import net.modelbased.sensapp.service.database.raw.backend.impl.MongoDB
-import data._
+import cc.spray.json.DefaultJsonProtocol._
 
 trait RawDatabaseService extends SensAppService {
 
   override val name = "database.raw"
     
   private[this] val _backend: Backend = new MongoDB()
-  
-  import SenMLProtocol._
+   
   import RequestsProtocols._
   
   val service = {

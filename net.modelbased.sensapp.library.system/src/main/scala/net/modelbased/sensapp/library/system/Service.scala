@@ -33,15 +33,34 @@ import cc.spray.encoding._
  * A SensApp service 
  * @author Sebastien Mosser
  */
-trait Service extends Directives with SprayJsonSupport {
+trait Service extends Directives with  io.Marshaller with io.Unmarshaller with SprayJsonSupport {
+
+  /****************************************
+   ** To be filled by service developers **
+   ****************************************/
   
-  // By default, we consider all the service on the same server
-  val partners: PartnerHandler
+  val partners: PartnerHandler                  // By default, we consider all the service on the same server
+  val name: String                              // the name of the service (to be used in the PartnerHandler)
+  val service: RequestContext => Unit           // The actual service, described with the Spray DSL
+  lazy val partnersNames: List[String] = List() // the partners required by this service
   
-  // the name of the service (to be used in the PartnerHandler)
-  val name: String
+  /****************************************************************
+   *  Internal methods and value used by SensApp service library **
+   ****************************************************************/
   
+  lazy val wrappedService: RequestContext => Unit = {
+    (decodeRequest(Gzip) | decodeRequest(NoEncoding)) {
+      respondWithHeader(CustomHeader("Access-Control-Allow-Origin", "*")) {
+        jsonpWithParameter("callback") { 
+          (encodeResponse(NoEncoding) | encodeResponse(Gzip)) { service }
+        }
+      }
+    }
+  }
   
+  /**
+   * describe methods available for CORS support
+   */
   protected def cors(methods: String*) = {
     val allowed = "OPTIONS" :: methods.toList
     respondWithHeader(CustomHeader("Access-Control-Allow-Methods", allowed.mkString(", "))) {
@@ -49,24 +68,9 @@ trait Service extends Directives with SprayJsonSupport {
     }
   }
   
-  lazy val wrappedService: RequestContext => Unit = {
-    (decodeRequest(Gzip) | decodeRequest(NoEncoding)) {
-      respondWithHeader(CustomHeader("Access-Control-Allow-Origin", "*")) {
-        jsonpWithParameter("callback") { 
-          (encodeResponse(NoEncoding) | encodeResponse(Gzip)) {
-            service 
-          }
-        }
-      }
-    }
-  }
- 
-  // The actual service, described with the Spray DSL
-  val service: RequestContext => Unit
-  
-  // the partners required by this service
-  lazy val partnersNames: List[String] = List()
-  
+  /**
+   * check that all needed partner is given
+   */
   private[this] def loadPartners() {
     partnersNames.foreach { n =>
       val p = partners(n)
