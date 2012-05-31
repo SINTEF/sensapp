@@ -66,7 +66,7 @@ trait Service extends SensAppService {
             context complete URLHandler.build(context, context.request.path  + "/" + request.id).toString
           }
         }
-      }
+      } ~ cors("GET", "POST")
     } ~ 
     path("registry" / "sensors" / SenMLStd.NAME_VALIDATOR.r ) { name =>
       get { context =>
@@ -97,7 +97,7 @@ trait Service extends SensAppService {
             context complete sensor
           })
         }
-      }
+      } ~ cors("GET", "DELETE", "PUT")
     }
   }
   

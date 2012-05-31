@@ -53,7 +53,7 @@ trait Service extends SensAppService {
             context complete "done"
           }
         }
-      }
+      } ~ cors("PUT")
     } ~ 
     path("notification" / "registered" ) {
       get { context =>
@@ -71,7 +71,7 @@ trait Service extends SensAppService {
             context complete (StatusCodes.Created, URLHandler.build(context, "/notification/registered/" + subscription.sensor).toString)
           }
         }
-      }
+      } ~ cors("GET", "POST")
     } ~
     path("notification" / "registered" / Standard.NAME_VALIDATOR.r) { name =>
       get { context =>
@@ -92,7 +92,7 @@ trait Service extends SensAppService {
             ifExists(context, name, { _registry push(subscription); context complete subscription })
 	      } 
         }
-      }
+      } ~ cors("GET", "PUT", "DELETE")
     }
   }
   

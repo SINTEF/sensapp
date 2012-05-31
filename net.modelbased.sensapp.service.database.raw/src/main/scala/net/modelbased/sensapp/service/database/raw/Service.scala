@@ -65,7 +65,7 @@ trait RawDatabaseService extends SensAppService {
             context complete(StatusCodes.Created, URLHandler.build(context,context.request.path  + "/"+ req.sensor).toString )
           }
         }
-      }
+      } ~ cors("GET", "POST")
     } ~
     path("databases" / "raw" / "sensors" / SenMLStd.NAME_VALIDATOR.r ) { name => 
       get { context => 
@@ -76,7 +76,7 @@ trait RawDatabaseService extends SensAppService {
       } ~
       delete { context => 
         context complete (_backend delete name).toString
-      }
+      } ~ cors("GET", "DELETE")
     } ~
     detach {
       path ("databases" / "raw" / "data") {
@@ -87,7 +87,7 @@ trait RawDatabaseService extends SensAppService {
 	          val existing = request.sensors.par.filter{ _backend exists(_) }
 	          context complete (_backend get(existing.seq, from, to))
 	        }
-	      }
+	      } ~ cors("POST")
 	    } ~
 	    path("databases" / "raw" / "data" / SenMLStd.NAME_VALIDATOR.r ) { name => 
 	      get { 
@@ -108,7 +108,7 @@ trait RawDatabaseService extends SensAppService {
 	        content(as[SenMLRoot]) { raw => context =>
 	          ifExists(context, name, { context complete (_backend push (name, raw)) })
 	        }
-	      }
+	      } ~ cors("GET", "PUT")
 	    }
     }
   }

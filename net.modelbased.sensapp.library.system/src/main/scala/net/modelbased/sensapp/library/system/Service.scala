@@ -27,6 +27,8 @@ import cc.spray.http._
 import cc.spray.directives._
 import cc.spray.typeconversion.SprayJsonSupport
 import cc.spray.http.HttpHeaders._
+import cc.spray.encoding._
+
 /** 
  * A SensApp service 
  * @author Sebastien Mosser
@@ -39,12 +41,26 @@ trait Service extends Directives with SprayJsonSupport {
   // the name of the service (to be used in the PartnerHandler)
   val name: String
   
-  lazy val wrappedService: RequestContext => Unit = {
-    respondWithHeader(CustomHeader("Access-Control-Allow-Origin", "*")) {
-      jsonpWithParameter("callback") { service }
+  
+  protected def cors(methods: String*) = {
+    val allowed = "OPTIONS" :: methods.toList
+    respondWithHeader(CustomHeader("Access-Control-Allow-Methods", allowed.mkString(", "))) {
+      options { ctx => ctx complete "" }
     }
   }
   
+  lazy val wrappedService: RequestContext => Unit = {
+    (decodeRequest(Gzip) | decodeRequest(NoEncoding)) {
+      respondWithHeader(CustomHeader("Access-Control-Allow-Origin", "*")) {
+        jsonpWithParameter("callback") { 
+          (encodeResponse(NoEncoding) | encodeResponse(Gzip)) {
+            service 
+          }
+        }
+      }
+    }
+  }
+ 
   // The actual service, described with the Spray DSL
   val service: RequestContext => Unit
   

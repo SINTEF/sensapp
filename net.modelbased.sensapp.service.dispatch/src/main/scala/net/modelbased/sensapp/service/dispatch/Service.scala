@@ -52,7 +52,7 @@ trait Service extends SensAppService {
             context complete handled.filter{ _.isDefined }.toList
           }
         }
-      }
+      } ~ cors("PUT")
     }
   }
 }

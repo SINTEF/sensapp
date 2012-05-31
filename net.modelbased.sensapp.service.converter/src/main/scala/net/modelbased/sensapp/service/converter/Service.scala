@@ -67,15 +67,5 @@ object SensorDataMarshalling extends SenMLMarshalling
 trait Service extends SensAppService {
   import SensorDataMarshalling._
   override lazy val name = "converter"
-  
-    val service = {
-    respondWithHeader(CustomHeader("Access-Control-Allow-Origin", "*")) {
-    //respondWithHeader(){
-    path("converter") {
-      post {
-        content(as[String]) { data => context => context.complete(data) }
-      }
-    }
-    }
-  }
+  val service = path("converter") { post { content(as[String]) { data => context => context.complete(data)}} ~ cors("POST") }
 }

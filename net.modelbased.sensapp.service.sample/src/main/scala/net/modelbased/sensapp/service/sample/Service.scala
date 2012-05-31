@@ -32,11 +32,14 @@ import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.service.sample.data.{Element, ElementRegistry }
 import net.modelbased.sensapp.service.sample.data.ElementJsonProtocol.format
 
-import net.modelbased.sensapp.library.system.{Service => SensAppService} 
+import net.modelbased.sensapp.library.system.{Service => SensAppService, URLHandler} 
 
 trait Service extends SensAppService {
   override lazy val name = "sample"
-  val service = {
+  
+  
+    
+  val service = { 
     path("sample" / "elements") {
       get { context =>
         val uris = (_registry retrieve(List())) map { buildUrl(context, _) }
@@ -51,7 +54,7 @@ trait Service extends SensAppService {
             context complete (StatusCodes.Created, buildUrl(context, element))
           }
         }
-      }
+      } ~ cors("GET", "POST")
     } ~
     path("sample" / "elements" / IntNumber) { key =>
       get { context =>
@@ -68,13 +71,13 @@ trait Service extends SensAppService {
             handle(context, key, {e => _registry push(element); context complete("true") })
 	      } 
         }
-      }
+      } ~ cors("GET", "DELETE", "PUT")
     }
   }
   
   private[this] val _registry = new ElementRegistry()
   
-  private def buildUrl(ctx: RequestContext, e: Element) = { ctx.request.path  + "/"+ e.key  }
+  private def buildUrl(ctx: RequestContext, e: Element) = { URLHandler.build(ctx, ctx.request.path  + "/"+ e.key)  }
   
   private def handle(ctx: RequestContext, key: Int, action: Element => Unit) = {
     _registry pull(("key", key)) match {
