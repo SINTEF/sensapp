@@ -4,7 +4,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
  *
- * Module: net.modelbased.sensapp.service.converter
+ * Module: net.modelbased.sensapp.library.system
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -20,20 +20,13 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.converter
+package net.modelbased.sensapp.library.system.io
 
-import net.modelbased.sensapp.library.senml.Root
-import net.modelbased.sensapp.library.system.{Service => SensAppService}
+import cc.spray.http.MediaTypes._
 
-trait Service extends SensAppService {
-  
-  override lazy val name = "converter"
-    
-  val service = path("converter") { 
-    post { 
-      content(as[Root]) { data => context => 
-        context.complete(data)
-      }
-    } ~ cors("POST")
-  }
+object MediaTypes {
+  val `senml+xml` = register(CustomMediaType("application/senml+xml", "senml+xml"))
+  val `senml+json` = register(CustomMediaType("application/senml+json", "senml+json"))
+  val `gpx` = register(CustomMediaType("application/gpx+xml", "gpx+xml"))
+  val `kml` = register(CustomMediaType("application/vnd.google-earth.kml+xml", "vnd.google-earth.kml+xml"))
 }

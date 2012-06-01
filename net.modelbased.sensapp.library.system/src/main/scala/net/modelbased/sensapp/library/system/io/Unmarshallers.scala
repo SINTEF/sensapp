@@ -4,7 +4,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
  *
- * Module: net.modelbased.sensapp.service.converter
+ * Module: net.modelbased.sensapp.library.system
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -20,20 +20,23 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.converter
+package net.modelbased.sensapp.library.system.io
 
-import net.modelbased.sensapp.library.senml.Root
-import net.modelbased.sensapp.library.system.{Service => SensAppService}
+import cc.spray.typeconversion._
+import cc.spray.http._
+import cc.spray.http.MediaTypes._
+import net.modelbased.sensapp.library.senml._
+import net.modelbased.sensapp.library.senml.export._
+import net.modelbased.sensapp.library.system.io.MediaTypes._
 
-trait Service extends SensAppService {
+trait Unmarshaller {
   
-  override lazy val name = "converter"
+  implicit lazy val RootUnmarshaller = new  SimpleUnmarshaller[Root] {
+    override val canUnmarshalFrom = 
+      ContentTypeRange(`senml+json`) :: ContentTypeRange(`application/json`) :: Nil
     
-  val service = path("converter") { 
-    post { 
-      content(as[Root]) { data => context => 
-        context.complete(data)
-      }
-    } ~ cors("POST")
+    override def unmarshal(content: HttpContent) = protect {
+      JsonParser.fromJson(DefaultUnmarshallers.StringUnmarshaller(content).right.get)
+    }
   }
 }

@@ -34,5 +34,10 @@
   	  <artifactId>akka-actor</artifactId>
   	  <version>2.0.1</version>
 	</dependency>
+	<dependency>
+  		<groupId>net.modelbased.sensapp.library</groupId>
+  		<artifactId>net.modelbased.sensapp.library.senml</artifactId>
+  		<version>0.0.1-SNAPSHOT</version>
+  	</dependency>
   </dependencies>
 </project>
