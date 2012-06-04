@@ -35,6 +35,6 @@ object JsonProtocol extends DefaultJsonProtocol {
 object JsonParser {
   import JsonProtocol._
   def fromJson(json: String): Root = json.asJson.convertTo[Root]
-  def toJson(r: Root): String = r.toJson.toString
+  def toJson(r: Root): String =  r.toJson.toString 
 }
 

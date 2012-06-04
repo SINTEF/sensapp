@@ -37,12 +37,11 @@ trait Marshaller {
            ContentType(`senml+json`), ContentType(`application/json`))
            
     override def marshal(value: Root, contentType: ContentType) = {
-      println("pouet/root")
       contentType match {
-        case ContentType(`senml+json`, _) | ContentType(`application/json`,_) =>
-          HttpContent(contentType, JsonParser.toJson(value))
-        case ContentType(`senml+xml`,_) | ContentType(`text/xml`,_) => 
-          HttpContent(contentType, (new scala.xml.PrettyPrinter(80, 2)).format(XmlParser.toXml(value)))
+        case ContentType(`senml+json`, _) | ContentType(`application/json`, _) 
+        	=> HttpContent(contentType, JsonParser.toJson(value))
+        case ContentType(`senml+xml`, _) | ContentType(`text/xml`,_) 
+        	=> HttpContent(contentType, (new scala.xml.PrettyPrinter(80, 2)).format(XmlParser.toXml(value)))
       }
     }
   }
@@ -53,13 +52,12 @@ trait Marshaller {
            ContentType(`senml+json`), ContentType(`application/json`))
            
     override def marshal(value: Seq[MeasurementOrParameter], contentType: ContentType) = {
-      println("pouet/mop")
       val root = Root(None, None, None, None, Some(value))
       contentType match {
-        case ContentType(`senml+json`, _) | ContentType(`application/json`,_) =>
-          HttpContent(contentType, JsonParser.toJson(root))
-        case ContentType(`senml+xml`,_) | ContentType(`text/xml`,_) => 
-          HttpContent(contentType, (new scala.xml.PrettyPrinter(80, 2)).format(XmlParser.toXml(root)))
+        case ContentType(`senml+json`, _) | ContentType(`application/json`,_) 
+        	=> HttpContent(contentType, JsonParser.toJson(root))
+        case ContentType(`senml+xml`,_) | ContentType(`text/xml`,_) 
+        	=> HttpContent(contentType, (new scala.xml.PrettyPrinter(80, 2)).format(XmlParser.toXml(root)))
       }
     }
   }
