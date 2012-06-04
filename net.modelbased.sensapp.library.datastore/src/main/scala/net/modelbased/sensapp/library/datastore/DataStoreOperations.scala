@@ -124,7 +124,7 @@ trait DataStoreOperations[T] extends DataSpecific[T] {
    * The underlying MongoDB collection
    */
   @MongoDBSpecific
-  private  lazy val _collection = {
+  protected lazy val _collection = {
     val conn = MongoConnection()
     val db = conn(databaseName)
     val col = db(collectionName)

@@ -134,6 +134,9 @@ Delete the sensor. It transitively deletes the backend database. This operation 
     Request Url: http://localhost:8080/registry/sensors/myVeryOwnSensor
     Request Method: DELETE
     Status Code: 200
+    
+__WARNING__: External application out of SensApp control might use this sensor. It is the responsibility of the user to be sure that the deleted sensors are not used anymore in the system. For convenience purpose, we automatically propagate the deletion of the sensor to composite sensors stored in the __very same__ registry than this one.
+
 
 #### PUT /registry/sensors/%NAME
 

@@ -76,6 +76,7 @@ trait RegistryService extends SensAppService {
         ifExists(context, name, {
           val sensor = _registry pull ("id", name)
           delDatabase(name)
+          propagateDeletionToComposite(URLHandler.build(context, context.request.path  + "/"+ sensor))
           _registry drop sensor.get
           context complete "true"
         })
@@ -111,6 +112,13 @@ trait RegistryService extends SensAppService {
     val backend = (_registry pull ("id", id)).get.backend
     val helper = BackendHelper(backend)
     helper.deleteDatabase(backend, partners)
+  }
+  
+  private[this] def propagateDeletionToComposite(url: String) {
+    // TODO: implement me
+    val _compositeRegistry = new CompositeSensorDescriptionRegistry()
+    _compositeRegistry.pull(("sensors", ""))
+   
   }
   
   private[this] val _registry = new SensorDescriptionRegistry()
