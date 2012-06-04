@@ -50,7 +50,9 @@ trait Service extends Directives with  io.Marshaller with io.Unmarshaller with S
   
   lazy val wrappedService: RequestContext => Unit = {
     (decodeRequest(Gzip) | decodeRequest(NoEncoding)) {
-      respondWithHeader(CustomHeader("Access-Control-Allow-Origin", "*")) {
+      val cors = CustomHeader("Access-Control-Allow-Origin", "*") :: 
+    	  		 CustomHeader("Access-Control-Allow-Headers", "Accept, Content-Type") :: Nil
+      respondWithHeaders(cors: _*) {
         jsonpWithParameter("callback") { 
           (encodeResponse(NoEncoding) | encodeResponse(Gzip)) { service }
         }
