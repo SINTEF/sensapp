@@ -97,6 +97,24 @@ case class SensorDescription(
  */
 case class Localisation(val longitude: Double, latitude: Double)
 
+
+/**
+ * Description of a composite sensor
+ * @param identifier the identifier of the sensor
+ * @param description a short sentence to describe  the sensor
+ * @param tags a key-value pair bag to store user-given metadata
+ * @param sensors list of URLs that points to the atomic sensors contained by this composite
+ */
+case class CompositeSensorDescription(
+  val id: String,
+  var description: String,
+  var tags: Option[Map[String, String]],
+  var sensors: Seq[String]
+  )
+
+/**
+ *  Json protocols to support serialization through spray-json 
+ */
 object ElementJsonProtocol extends DefaultJsonProtocol {
   implicit val localisation = jsonFormat(Localisation, "longitude", "latitude")
   implicit val backend = jsonFormat(Backend, "kind", "descriptor", "dataset")
@@ -104,5 +122,6 @@ object ElementJsonProtocol extends DefaultJsonProtocol {
   implicit val sensorDescription = jsonFormat(SensorDescription, "id", "descr", "backend", "creation_date", "infos")
   implicit val schema = jsonFormat(Schema, "backend", "template", "baseTime")
   implicit val creationRequest = jsonFormat(CreationRequest, "id", "descr", "schema")
+  implicit val compositeSensorDescription = jsonFormat(CompositeSensorDescription, "id", "descr", "tags", "sensors")
 }
 

@@ -43,3 +43,16 @@ class SensorDescriptionRegistry extends DataStore[SensorDescription]  {
   override def serialize(e: SensorDescription): String = { e.toJson.toString }
     
 }
+
+class CompositeSensorDescriptionRegistry extends DataStore[CompositeSensorDescription]  {
+
+  override val databaseName = "sensapp_db"
+  override val collectionName = "registry.sensors.composite" 
+    
+  override def identify(e: CompositeSensorDescription) = ("id", e.id)
+  
+  override def deserialize(json: String): CompositeSensorDescription = { json.asJson.convertTo[CompositeSensorDescription] }
+ 
+  override def serialize(e: CompositeSensorDescription): String = { e.toJson.toString }
+    
+}

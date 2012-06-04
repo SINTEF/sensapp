@@ -36,6 +36,11 @@ Returns a list of stored sensors:
     Content-Type: application/json; charset=ISO-8859-1
     
     ["/registry/sensors/myVeryOwnSensor", "/registry/sensors/myOtherSensor"]
+    
+    
+One can use the `flatten` parameters to access directly to the description of the sensors (see sensor description endpoint) instead of the URL list.
+
+  - http://localhost:8080/registry/sensors?flatten=true
 
 #### POST /registry/sensors
 
@@ -165,3 +170,67 @@ The server returns the newly stored description:
         "loc": { "longitude": 10.713773299999957, "latitude": 59.9452065}
       }
     }
+    
+ By putting a simple `String`, one can use this endpoint to modify the `description` attribute of the sensor.
+
+### Composite Sensor registry: /registry/composite/sensors
+
+#### GET /registry/composite/sensors
+
+  * http://localhost:8080/regitry/composite/sensors
+
+Returns the list of stored composite sensors
+
+#### POST /registry/composite/sensors
+
+This endpoint supports the registration of composite sensors in SensApp. It accepts a JSON representation of a composite sensors, which defines: 
+
+  * the identifier of the sensor (must be a vali SenML identifier),
+  * a description of the sensor (short sentence),
+  * an optional set of tags (arbitrary key-value pairs)
+  * a list of (arbitrary) URLs pointing to the sensors that actually compose this composite
+
+For example, the following requests asks for the registration of a sensor named my-sensor, containing two sensors.
+
+    {
+      "id": "my-sensor",
+      "descr": "a sample composite sensor",
+      "tags": { "owner": "seb" },
+      "sensors": ["/registry/sensors/my-sensor/inside", "/registry/sensors/my-sensor/outside"]
+    }
+
+The server answers the URLs to be used to access to this sensor in the registry
+
+    Status Code: 200
+    Content-Length: 37
+    Server: Jetty(8.1.3.v20120416)
+    Content-Type: text/plain
+    
+    /registry/composite/sensors/my-sensor
+
+If a composite sensor with the exact same name already exists, the servers abort the request with a `Conflict` response code.
+
+### Composite Sensor Description: /registry/composite/sensors/%NAME
+
+This endpoint allows one to access to the description of the sensor registered with `%NAME` as identifier. The service returns a `NotFound` status if one try to access to an unknown sensor.
+
+#### GET /registry/composite/sensors/%NAME
+
+  - http://localhost:8080/registry/composite/sensors/my-sensor
+ 
+Returns a description of the sensor. This description is basically the same as the document used to register a composite sensor
+
+#### DELETE /registry/composite/sensors/%NAME
+
+Delete the composite sensor. This operation cannot be reversed, and only deletes the composite description. Thus, the sensors that are listed in the `sensors` attribute __are not deleted__! 
+
+
+#### PUT /registry/composite/sensors/%NAME
+
+Updates the additional information available for this sensor. The body of the request can be:
+
+  - a plain string => the `description` attribute is updated,
+  - a key-value pair structure => the `tags` attribute is updated,
+  - a list of URLs => the `sensors` attribute is updated
+  
+  

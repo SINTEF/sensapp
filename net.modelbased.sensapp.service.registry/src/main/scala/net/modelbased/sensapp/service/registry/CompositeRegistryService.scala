@@ -24,25 +24,18 @@ package net.modelbased.sensapp.service.registry
 
 import cc.spray._
 import cc.spray.http._
-import cc.spray.json._
-import cc.spray.json.DefaultJsonProtocol._
-import cc.spray.directives._
-import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.library.system.{Service => SensAppService, URLHandler}
 import net.modelbased.sensapp.library.senml.spec.{Standard => SenMLStd}
 import net.modelbased.sensapp.service.registry.data._
 import net.modelbased.sensapp.service.registry.data.ElementJsonProtocol._
-import net.modelbased.sensapp.service.registry.data.Backend
 
 
-trait Service extends SensAppService {
+trait CompositeRegistryService extends SensAppService {
   
-  override lazy val name = "registry"
-  
-  override lazy val partnersNames = List("database.raw")
+  override lazy val name = "registry.composite"
     
   val service = {
-    path("registry" / "sensors") {
+    path("registry" / "composite" / "sensors") {
       get { 
         parameter("flatten" ? false) { flatten =>  context =>
           val descriptors =  _registry.retrieve(List()).par
@@ -55,36 +48,40 @@ trait Service extends SensAppService {
         } 
       } ~ 
       post {
-        content(as[CreationRequest]) { request => context =>
+        content(as[CompositeSensorDescription]) { request => context =>
           if (_registry exists ("id", request.id)){
-            context fail (StatusCodes.Conflict, "A SensorDescription identified as ["+ request.id +"] already exists!")
+            context fail (StatusCodes.Conflict, "A CompositeSensorDescription identified as ["+ request.id +"] already exists!")
           } else {
-            // Create the database
-            val backend = createDatabase(request.id, request.schema)
-            // Store the descriptor
-            _registry push (request.toDescription(backend))
+            _registry push (request)
             context complete URLHandler.build(context, context.request.path  + "/" + request.id).toString
           }
         }
       } ~ cors("GET", "POST")
     } ~ 
-    path("registry" / "sensors" / SenMLStd.NAME_VALIDATOR.r ) { name =>
+    path("registry" / "composite" / "sensors" / SenMLStd.NAME_VALIDATOR.r ) { name =>
       get { context =>
         ifExists(context, name, {context complete (_registry pull ("id", name)).get})
       } ~
       delete { context =>
         ifExists(context, name, {
           val sensor = _registry pull ("id", name)
-          delDatabase(name)
           _registry drop sensor.get
           context complete "true"
         })
       } ~
       put {
-        content(as[SensorInformation]) { info => context =>
+        content(as[Seq[String]]) { sensors => context =>
           ifExists(context, name, {
             val sensor = (_registry pull ("id", name)).get
-            sensor.infos = info
+            sensor.sensors = sensors
+            _registry push sensor
+            context complete sensor
+          })
+        } ~
+        content(as[Map[String, String]]) { tags => context =>
+          ifExists(context, name, {
+            val sensor = (_registry pull ("id", name)).get
+            sensor.tags = Some(tags)
             _registry push sensor
             context complete sensor
           })
@@ -101,19 +98,7 @@ trait Service extends SensAppService {
     }
   }
   
-  private[this] def createDatabase(id: String, schema: Schema): Backend = {
-    val helper = BackendHelper(schema)
-    val urls = helper.createDatabase(id, schema, partners)
-    Backend(schema.backend, urls._1, urls._2) 
-  }
-  
-  private[this] def delDatabase(id: String) = {
-    val backend = (_registry pull ("id", id)).get.backend
-    val helper = BackendHelper(backend)
-    helper.deleteDatabase(backend, partners)
-  }
-  
-  private[this] val _registry = new SensorDescriptionRegistry()
+  private[this] val _registry = new CompositeSensorDescriptionRegistry()
   
   private def ifExists(context: RequestContext, id: String, lambda: => Unit) = {
     if (_registry exists ("id", id))
