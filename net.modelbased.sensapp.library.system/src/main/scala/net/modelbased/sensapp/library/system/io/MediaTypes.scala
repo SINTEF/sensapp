@@ -25,8 +25,8 @@ package net.modelbased.sensapp.library.system.io
 import cc.spray.http.MediaTypes._
 
 object MediaTypes {
-  val `senml+xml` = register(CustomMediaType("application/senml+xml", "senml+xml"))
-  val `senml+json` = register(CustomMediaType("application/senml+json", "senml+json"))
-  val `gpx` = register(CustomMediaType("application/gpx+xml", "gpx+xml"))
-  val `kml` = register(CustomMediaType("application/vnd.google-earth.kml+xml", "vnd.google-earth.kml+xml"))
+  val `senml+xml` = register(CustomMediaType("application/senml+xml", "xml"))
+  val `senml+json` = register(CustomMediaType("application/senml+json", "json"))
+  val `gpx` = register(CustomMediaType("application/gpx+xml", "gpx"))
+  val `kml` = register(CustomMediaType("application/vnd.google-earth.kml+xml", "kml"))
 }
