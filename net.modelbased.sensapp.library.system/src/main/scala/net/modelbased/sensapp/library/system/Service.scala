@@ -48,11 +48,21 @@ trait Service extends Directives with  io.Marshaller with io.Unmarshaller with S
    *  Internal methods and value used by SensApp service library **
    ****************************************************************/
   
+  /**
+   * headers to be sent for **any** response returned by SensApp services
+   */
+  private val headers: Map[String, Seq[String]] = Map(
+      "Access-Control-Allow-Origin" -> Seq("*"),
+      "Access-Control-Allow-Headers" -> Seq("Accept", "Content-Type")
+    )
+  
+  /**
+   * the actual service to be executed, handling encoding, decoding, headers, JSON-P, ... 
+   */
   lazy val wrappedService: RequestContext => Unit = {
+    val headers = this.headers.toList map { case (h,vals) => CustomHeader(h, vals.mkString(", ")) }
     (decodeRequest(Gzip) | decodeRequest(NoEncoding)) {
-      val cors = CustomHeader("Access-Control-Allow-Origin", "*") :: 
-    	  		 CustomHeader("Access-Control-Allow-Headers", "Accept, Content-Type") :: Nil
-      respondWithHeaders(cors: _*) {
+      respondWithHeaders(headers: _*) {
         jsonpWithParameter("callback") { 
           (encodeResponse(NoEncoding) | encodeResponse(Gzip)) { service }
         }
