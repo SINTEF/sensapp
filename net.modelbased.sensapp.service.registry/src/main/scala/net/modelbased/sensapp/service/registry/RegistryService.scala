@@ -90,10 +90,10 @@ trait RegistryService extends SensAppService {
             context complete sensor
           })
         } ~
-        content(as[String]) { descr => context =>
+        content(as[DescriptionUpdate]) { request => context =>
           ifExists(context, name, {
             val sensor = (_registry pull ("id", name)).get
-            sensor.description = descr
+            sensor.description = request.description
             _registry push sensor
             context complete sensor
           })
