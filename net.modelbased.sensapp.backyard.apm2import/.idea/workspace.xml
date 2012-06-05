@@ -71,7 +71,7 @@
       <file leaf-file-name="APM2Import.scala" pinned="false" current="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/APM2Import.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="65" column="32" selection-start="2216" selection-end="2216" vertical-scroll-proportion="-2.52">
+            <state line="293" column="41" selection-start="13388" selection-end="13388" vertical-scroll-proportion="-11.52">
               <folding />
             </state>
           </provider>
@@ -86,10 +86,10 @@
           </provider>
         </entry>
       </file>
-      <file leaf-file-name="AppTest.scala" pinned="false" current="false" current-in-tab="false">
+      <file leaf-file-name="AppTest.scala" pinned="false" current="true" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/src/test/scala/net/modelbased/sensapp/backyard/apm2import/AppTest.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="25" column="6" selection-start="968" selection-end="968" vertical-scroll-proportion="0.0">
+            <state line="51" column="14" selection-start="1457" selection-end="1457" vertical-scroll-proportion="0.76855123">
               <folding />
             </state>
           </provider>
@@ -113,10 +113,10 @@
           </provider>
         </entry>
       </file>
-      <file leaf-file-name="WingFlight1.scala" pinned="false" current="true" current-in-tab="true">
+      <file leaf-file-name="WingFlight1.scala" pinned="false" current="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/WingFlight1.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="50" column="38" selection-start="1693" selection-end="1693" vertical-scroll-proportion="0.4434629">
+            <state line="50" column="38" selection-start="1693" selection-end="1693" vertical-scroll-proportion="0.0">
               <folding />
             </state>
           </provider>
@@ -142,12 +142,12 @@
     <option name="changedFiles">
       <list>
         <option value="$PROJECT_DIR$/pom.xml" />
-        <option value="$PROJECT_DIR$/src/test/scala/net/modelbased/sensapp/backyard/apm2import/AppTest.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/App.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/EBike1.scala" />
-        <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/APM2Import.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/Bike1.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/WingFlight1.scala" />
+        <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/APM2Import.scala" />
+        <option value="$PROJECT_DIR$/src/test/scala/net/modelbased/sensapp/backyard/apm2import/AppTest.scala" />
       </list>
     </option>
   </component>
@@ -634,7 +634,7 @@
   </component>
   <component name="ToolWindowManager">
     <frame x="276" y="1160" width="1492" height="974" extended-state="0" />
-    <editor active="true" />
+    <editor active="false" />
     <layout>
       <window_info id="Changes" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="7" side_tool="false" content_ui="tabs" />
       <window_info id="Palette" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="3" side_tool="false" content_ui="tabs" />
@@ -646,7 +646,7 @@
       <window_info id="Structure" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.25" sideWeight="0.5" order="1" side_tool="true" content_ui="tabs" />
       <window_info id="Maven Projects" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.15276805" sideWeight="0.7466504" order="3" side_tool="false" content_ui="tabs" />
       <window_info id="Commander" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.4" sideWeight="0.5" order="0" side_tool="false" content_ui="tabs" />
-      <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.15066573" sideWeight="0.7466504" order="0" side_tool="false" content_ui="tabs" />
+      <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.23265593" sideWeight="0.7466504" order="0" side_tool="false" content_ui="tabs" />
       <window_info id="Dependency Viewer" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="7" side_tool="false" content_ui="tabs" />
       <window_info id="Run" active="true" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.25334957" sideWeight="0.5" order="2" side_tool="false" content_ui="tabs" />
       <window_info id="Cvs" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.25" sideWeight="0.5" order="4" side_tool="false" content_ui="tabs" />
@@ -708,11 +708,6 @@
         <state line="6" column="21" selection-start="432" selection-end="432" vertical-scroll-proportion="0.0" />
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/test/scala/net/modelbased/sensapp/backyard/apm2import/AppTest.scala">
-      <provider selected="true" editor-type-id="text-editor">
-        <state line="25" column="6" selection-start="968" selection-end="968" vertical-scroll-proportion="0.0" />
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/src/main/resources/WingFlight1.log">
       <provider selected="true" editor-type-id="text-editor">
         <state line="0" column="0" selection-start="0" selection-end="0" vertical-scroll-proportion="0.0" />
@@ -737,13 +732,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/APM2Import.scala">
-      <provider selected="true" editor-type-id="text-editor">
-        <state line="65" column="32" selection-start="2216" selection-end="2216" vertical-scroll-proportion="-2.52">
-          <folding />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/Bike1.scala">
       <provider selected="true" editor-type-id="text-editor">
         <state line="43" column="31" selection-start="1380" selection-end="1380" vertical-scroll-proportion="0.0">
@@ -760,7 +748,21 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/WingFlight1.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state line="50" column="38" selection-start="1693" selection-end="1693" vertical-scroll-proportion="0.4434629">
+        <state line="50" column="38" selection-start="1693" selection-end="1693" vertical-scroll-proportion="0.0">
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/APM2Import.scala">
+      <provider selected="true" editor-type-id="text-editor">
+        <state line="293" column="41" selection-start="13388" selection-end="13388" vertical-scroll-proportion="-11.52">
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/test/scala/net/modelbased/sensapp/backyard/apm2import/AppTest.scala">
+      <provider selected="true" editor-type-id="text-editor">
+        <state line="51" column="14" selection-start="1457" selection-end="1457" vertical-scroll-proportion="0.76855123">
           <folding />
         </state>
       </provider>

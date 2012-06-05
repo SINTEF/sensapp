@@ -301,7 +301,7 @@ class GPSData(line : String) {
   }
 
   def longitudeString() : String = {
-    var l = Double.parseDouble(lat)
+    var l = Double.parseDouble(long)
     val prefix = if (l > 0) "E " else "W "
     l = scala.math.abs(l)
     prefix + l.toInt + "' " + minf.format((l - l.toInt) * 60)
