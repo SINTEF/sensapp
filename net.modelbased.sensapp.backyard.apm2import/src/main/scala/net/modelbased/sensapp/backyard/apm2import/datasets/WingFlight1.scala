@@ -58,9 +58,13 @@ object WingFlight1 {
     APMDataParser.writeCSVLog(out_folder + name + "_1hz.csv", data1hz)
     APMDataParser.writeSenML(out_folder + name + "_1hz.json", data1hz, name , 0)
 
+    APMDataParser.writeIndividualSenML(out_folder + name + "_1hz", data1hz, name , 0);
+
     APMDataParser.fixAltitude(data, -ground_altitude)
     APMDataParser.writeSRTFile(out_folder + name + ".srt", data, 11000, 100)
     APMDataParser.writeSRTFile(out_folder + name + "_1hz.srt", data1hz, 11000 , 1000)
+
+
 
   }
 }

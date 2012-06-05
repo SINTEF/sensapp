@@ -61,5 +61,7 @@ object Bike1 {
     APMDataParser.writeSRTFile(out_folder + name + "_1hz.srt", data1hz, 6500 , 1000)
     APMDataParser.writeSenML(out_folder + name + "_1hz.json", data1hz, "Bike1" , 0)
 
+    APMDataParser.writeIndividualSenML(out_folder + name + "_1hz", data1hz, name , 0);
+
   }
 }

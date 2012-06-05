@@ -61,6 +61,8 @@ object EBike1 {
     APMDataParser.writeSRTFile(out_folder + name + "_1hz.srt", data1hz, 5500 , 1000)
     APMDataParser.writeSenML(out_folder + name + "_1hz.json", data1hz, name , 0)
 
+    APMDataParser.writeIndividualSenML(out_folder + name + "_1hz", data1hz, name , 0);
+
   }
 
 
