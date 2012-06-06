@@ -1,7 +1,7 @@
-Cycling data aquired with an APM2 board and the Arduplane firmware.
-The board was fixed to the bicycle handlebar.
+Data from a short trip on an electrical bicycle. 
+Data was aquired with and APM2 and by looging the power data of the electrical bicycle
 
-Video for this dataset is at: http://www.youtube.com/watch?v=kia5Vkx59nY
+Video for this dataset is at: http://www.youtube.com/watch?v=8ML2MaSPtwY
 
 The sensor data contains sensor data for: 
 fix, sats, latitute, longitude, sonar, alt, gps_alt, speed, CRS, roll, pitch, yaw
@@ -20,7 +20,14 @@ CRS	 	GPS Course	 		radian
 roll		IMU Roll Attiude (phi)		radian
 pitch		IMU Pitch Attitude (theta)	radian
 yaw		IMU Yaw Attitude (psi)		radian
+voltage		Battery Voltage			volts
+current		Current consumed		amperes
+ah		Ampere Hour			counter
+wh		Watts Hour			counter
+ctrl_temp	ESC temperature			deg C
+air_temp	Cooling air temperature		deg C
 
+NOTE: time for power and temperature data is not yet fully synchronized with other data.
 
 The json files contains the data from each individual sensor (together with time and unit) using the SenML standard.
 
