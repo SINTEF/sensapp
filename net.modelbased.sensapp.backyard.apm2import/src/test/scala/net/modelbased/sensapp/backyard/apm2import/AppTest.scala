@@ -22,7 +22,7 @@
  */
 package net.modelbased.sensapp.backyard.apm2import;
 
-import datasets.{WingFlight1, EBike1, Bike1}
+import datasets.{EBikePwr, WingFlight1, EBike1, Bike1}
 import junit.framework._;
 import Assert._;
 
@@ -49,6 +49,7 @@ class AppTest extends TestCase("app") {
       Bike1.main(null)
       EBike1.main(null)
       WingFlight1.main(null)
+      EBikePwr.main(null)
 
     }
     //def testKO() = assertTrue(false);

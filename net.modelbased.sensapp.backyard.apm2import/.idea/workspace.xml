@@ -71,7 +71,7 @@
       <file leaf-file-name="APM2Import.scala" pinned="false" current="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/APM2Import.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="293" column="41" selection-start="13388" selection-end="13388" vertical-scroll-proportion="-11.52">
+            <state line="293" column="41" selection-start="13388" selection-end="13388" vertical-scroll-proportion="0.0">
               <folding />
             </state>
           </provider>
@@ -80,7 +80,7 @@
       <file leaf-file-name="JsonParser.class" pinned="false" current="false" current-in-tab="false">
         <entry file="jar://$MAVEN_REPOSITORY$/net/modelbased/sensapp/library/net.modelbased.sensapp.library.senml/0.0.1-SNAPSHOT/net.modelbased.sensapp.library.senml-0.0.1-SNAPSHOT.jar!/net/modelbased/sensapp/library/senml/export/JsonParser.class">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="3" column="6" selection-start="239" selection-end="239" vertical-scroll-proportion="-1.8">
+            <state line="3" column="6" selection-start="239" selection-end="239" vertical-scroll-proportion="0.0">
               <folding />
             </state>
           </provider>
@@ -89,25 +89,25 @@
       <file leaf-file-name="AppTest.scala" pinned="false" current="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/src/test/scala/net/modelbased/sensapp/backyard/apm2import/AppTest.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="28" column="7" selection-start="1032" selection-end="1032" vertical-scroll-proportion="0.0">
+            <state line="51" column="17" selection-start="1484" selection-end="1484" vertical-scroll-proportion="0.0">
               <folding />
             </state>
           </provider>
         </entry>
       </file>
-      <file leaf-file-name="EBike1-Power.csv" pinned="false" current="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/src/main/resources/EBike1-Power.csv">
-          <provider selected="true" editor-type-id="text-editor">
-            <state line="2048" column="6" selection-start="68154" selection-end="68154" vertical-scroll-proportion="0.0">
-              <folding />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file leaf-file-name="EBikeImport.scala" pinned="false" current="true" current-in-tab="true">
+      <file leaf-file-name="EBikeImport.scala" pinned="false" current="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/EBikeImport.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="96" column="34" selection-start="3624" selection-end="3935" vertical-scroll-proportion="0.5660036">
+            <state line="140" column="110" selection-start="5763" selection-end="5763" vertical-scroll-proportion="0.0">
+              <folding />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name="EBikePwr.scala" pinned="false" current="true" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/EBikePwr.scala">
+          <provider selected="true" editor-type-id="text-editor">
+            <state line="48" column="69" selection-start="1538" selection-end="1538" vertical-scroll-proportion="0.5241692">
               <folding />
             </state>
           </provider>
@@ -164,9 +164,10 @@
         <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/Bike1.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/WingFlight1.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/APM2Import.scala" />
-        <option value="$PROJECT_DIR$/src/test/scala/net/modelbased/sensapp/backyard/apm2import/AppTest.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/EBike1.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/EBikeImport.scala" />
+        <option value="$PROJECT_DIR$/src/test/scala/net/modelbased/sensapp/backyard/apm2import/AppTest.scala" />
+        <option value="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/EBikePwr.scala" />
       </list>
     </option>
   </component>
@@ -249,6 +250,8 @@
       <sortByType />
     </navigator>
     <panes>
+      <pane id="Favorites" />
+      <pane id="Scope" />
       <pane id="ProjectPane">
         <subPane>
           <PATH>
@@ -412,8 +415,6 @@
         </subPane>
       </pane>
       <pane id="PackagesPane" />
-      <pane id="Favorites" />
-      <pane id="Scope" />
     </panes>
   </component>
   <component name="PropertiesComponent">
@@ -434,7 +435,7 @@
       <recent name="$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import" />
     </key>
   </component>
-  <component name="RunManager" selected="Application.WingFlight1">
+  <component name="RunManager" selected="Application.EBikePwr">
     <configuration default="false" name="Bike1" type="Application" factoryName="Application" temporary="true">
       <option name="MAIN_CLASS_NAME" value="net.modelbased.sensapp.backyard.apm2import.datasets.Bike1" />
       <option name="VM_PARAMETERS" />
@@ -469,6 +470,22 @@
     </configuration>
     <configuration default="false" name="WingFlight1" type="Application" factoryName="Application" temporary="true">
       <option name="MAIN_CLASS_NAME" value="net.modelbased.sensapp.backyard.apm2import.datasets.WingFlight1" />
+      <option name="VM_PARAMETERS" />
+      <option name="PROGRAM_PARAMETERS" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="false" />
+      <option name="ALTERNATIVE_JRE_PATH" />
+      <option name="ENABLE_SWING_INSPECTOR" value="false" />
+      <option name="ENV_VARIABLES" />
+      <option name="PASS_PARENT_ENVS" value="true" />
+      <module name="net.modelbased.sensapp.backyard.apm2import" />
+      <envs />
+      <RunnerSettings RunnerId="Run" />
+      <ConfigurationWrapper RunnerId="Run" />
+      <method />
+    </configuration>
+    <configuration default="false" name="EBikePwr" type="Application" factoryName="Application" temporary="true">
+      <option name="MAIN_CLASS_NAME" value="net.modelbased.sensapp.backyard.apm2import.datasets.EBikePwr" />
       <option name="VM_PARAMETERS" />
       <option name="PROGRAM_PARAMETERS" />
       <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
@@ -640,6 +657,7 @@
       <setting name="package" value="" />
       <setting name="vmparams" value="" />
       <setting name="params" value="" />
+      <setting name="version" value="false" />
       <setting name="workingDirectory" value="$PROJECT_DIR$" />
       <method>
         <option name="AntTarget" enabled="false" />
@@ -648,10 +666,11 @@
         <option name="Maven.BeforeRunTask" enabled="false" />
       </method>
     </configuration>
-    <list size="3">
+    <list size="4">
       <item index="0" class="java.lang.String" itemvalue="Application.Bike1" />
       <item index="1" class="java.lang.String" itemvalue="Application.EBike1" />
       <item index="2" class="java.lang.String" itemvalue="Application.WingFlight1" />
+      <item index="3" class="java.lang.String" itemvalue="Application.EBikePwr" />
     </list>
     <configuration name="&lt;template&gt;" type="WebApp" default="true" selected="false">
       <Host>localhost</Host>
@@ -685,22 +704,22 @@
     <servers />
   </component>
   <component name="ToolWindowManager">
-    <frame x="-1644" y="82" width="1492" height="974" extended-state="0" />
-    <editor active="true" />
+    <frame x="135" y="54" width="1659" height="1101" extended-state="1" />
+    <editor active="false" />
     <layout>
       <window_info id="Changes" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="7" side_tool="false" content_ui="tabs" />
       <window_info id="Palette" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="3" side_tool="false" content_ui="tabs" />
       <window_info id="Ant Build" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.25" sideWeight="0.5" order="1" side_tool="false" content_ui="tabs" />
       <window_info id="Debug" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.4" sideWeight="0.5" order="3" side_tool="false" content_ui="tabs" />
       <window_info id="Version Control" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="7" side_tool="false" content_ui="tabs" />
-      <window_info id="Messages" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.42996347" sideWeight="0.5" order="7" side_tool="false" content_ui="tabs" />
+      <window_info id="Messages" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.4293249" sideWeight="0.5" order="7" side_tool="false" content_ui="tabs" />
       <window_info id="TODO" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="6" side_tool="false" content_ui="tabs" />
       <window_info id="Structure" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.25" sideWeight="0.5" order="1" side_tool="true" content_ui="tabs" />
-      <window_info id="Maven Projects" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.15276805" sideWeight="0.7466504" order="3" side_tool="false" content_ui="tabs" />
+      <window_info id="Maven Projects" active="true" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.15683815" sideWeight="0.7478903" order="3" side_tool="false" content_ui="tabs" />
       <window_info id="Commander" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.4" sideWeight="0.5" order="0" side_tool="false" content_ui="tabs" />
-      <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.23265593" sideWeight="0.7466504" order="0" side_tool="false" content_ui="tabs" />
+      <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.23212045" sideWeight="0.7478903" order="0" side_tool="false" content_ui="tabs" />
       <window_info id="Dependency Viewer" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="7" side_tool="false" content_ui="tabs" />
-      <window_info id="Run" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.25334957" sideWeight="0.5" order="2" side_tool="false" content_ui="tabs" />
+      <window_info id="Run" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" weight="0.2521097" sideWeight="0.5" order="2" side_tool="false" content_ui="tabs" />
       <window_info id="Cvs" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.25" sideWeight="0.5" order="4" side_tool="false" content_ui="tabs" />
       <window_info id="Message" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.33" sideWeight="0.5" order="0" side_tool="false" content_ui="tabs" />
       <window_info id="Find" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" weight="0.32972324" sideWeight="0.5" order="1" side_tool="false" content_ui="tabs" />
@@ -755,42 +774,34 @@
     <option name="FILTER_TARGETS" value="false" />
   </component>
   <component name="editorHistoryManager">
-    <entry file="file://$PROJECT_DIR$/pom.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state line="6" column="21" selection-start="432" selection-end="432" vertical-scroll-proportion="0.0" />
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/src/main/resources/WingFlight1.log">
       <provider selected="true" editor-type-id="text-editor">
         <state line="0" column="0" selection-start="0" selection-end="0" vertical-scroll-proportion="0.0" />
       </provider>
     </entry>
-    <entry file="jar://$MAVEN_REPOSITORY$/net/modelbased/sensapp/library/net.modelbased.sensapp.library.senml/0.0.1-SNAPSHOT/net.modelbased.sensapp.library.senml-0.0.1-SNAPSHOT.jar!/net/modelbased/sensapp/library/senml/export/JsonParser.class">
-      <provider selected="true" editor-type-id="text-editor">
-        <state line="3" column="6" selection-start="239" selection-end="239" vertical-scroll-proportion="-1.8">
-          <folding />
-        </state>
-      </provider>
-    </entry>
     <entry file="jar://$MAVEN_REPOSITORY$/net/modelbased/sensapp/library/net.modelbased.sensapp.library.senml/0.0.1-SNAPSHOT/net.modelbased.sensapp.library.senml-0.0.1-SNAPSHOT.jar!/net/modelbased/sensapp/library/senml/MeasurementOrParameter.class">
       <provider selected="true" editor-type-id="text-editor">
-        <state line="1" column="11" selection-start="56" selection-end="56" vertical-scroll-proportion="0.028409092">
-          <folding />
-        </state>
+        <state line="1" column="11" selection-start="56" selection-end="56" vertical-scroll-proportion="0.028409092" />
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/WingFlight1.scala">
+    <entry file="file://$PROJECT_DIR$/src/main/resources/EBike1-Power.csv">
       <provider selected="true" editor-type-id="text-editor">
-        <state line="50" column="38" selection-start="1693" selection-end="1693" vertical-scroll-proportion="0.0">
-          <folding />
-        </state>
+        <state line="2048" column="6" selection-start="68154" selection-end="68154" vertical-scroll-proportion="0.0" />
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/pom.xml">
+      <provider selected="true" editor-type-id="text-editor">
+        <state line="6" column="21" selection-start="432" selection-end="432" vertical-scroll-proportion="0.0" />
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/APM2Import.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state line="293" column="41" selection-start="13388" selection-end="13388" vertical-scroll-proportion="-11.52">
-          <folding />
-        </state>
+        <state line="293" column="41" selection-start="13388" selection-end="13388" vertical-scroll-proportion="0.0" />
+      </provider>
+    </entry>
+    <entry file="jar://$MAVEN_REPOSITORY$/net/modelbased/sensapp/library/net.modelbased.sensapp.library.senml/0.0.1-SNAPSHOT/net.modelbased.sensapp.library.senml-0.0.1-SNAPSHOT.jar!/net/modelbased/sensapp/library/senml/export/JsonParser.class">
+      <provider selected="true" editor-type-id="text-editor">
+        <state line="3" column="6" selection-start="239" selection-end="239" vertical-scroll-proportion="0.0" />
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/src/main/resources/Bike1.log">
@@ -800,35 +811,36 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/Bike1.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state line="43" column="31" selection-start="1380" selection-end="1380" vertical-scroll-proportion="0.0">
-          <folding />
-        </state>
+        <state line="43" column="31" selection-start="1380" selection-end="1380" vertical-scroll-proportion="0.0" />
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/resources/EBike1-Power.csv">
+    <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/WingFlight1.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state line="2048" column="6" selection-start="68154" selection-end="68154" vertical-scroll-proportion="0.0">
+        <state line="50" column="38" selection-start="1693" selection-end="1693" vertical-scroll-proportion="0.0" />
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/EBike1.scala">
+      <provider selected="true" editor-type-id="text-editor">
+        <state line="74" column="29" selection-start="2723" selection-end="2723" vertical-scroll-proportion="0.0" />
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/EBikeImport.scala">
+      <provider selected="true" editor-type-id="text-editor">
+        <state line="140" column="110" selection-start="5763" selection-end="5763" vertical-scroll-proportion="0.0">
           <folding />
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/src/test/scala/net/modelbased/sensapp/backyard/apm2import/AppTest.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state line="28" column="7" selection-start="1032" selection-end="1032" vertical-scroll-proportion="0.0">
+        <state line="51" column="17" selection-start="1484" selection-end="1484" vertical-scroll-proportion="0.0">
           <folding />
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/EBike1.scala">
+    <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/datasets/EBikePwr.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state line="74" column="29" selection-start="2723" selection-end="2723" vertical-scroll-proportion="0.0">
-          <folding />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/net/modelbased/sensapp/backyard/apm2import/EBikeImport.scala">
-      <provider selected="true" editor-type-id="text-editor">
-        <state line="96" column="34" selection-start="3624" selection-end="3935" vertical-scroll-proportion="0.5660036">
+        <state line="48" column="69" selection-start="1538" selection-end="1538" vertical-scroll-proportion="0.5241692">
           <folding />
         </state>
       </provider>
