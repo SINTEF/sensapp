@@ -1,3 +1,5 @@
+package net.modelbased.sensapp.backyard.apm2import.datasets
+
 /**
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
@@ -20,8 +22,6 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.backyard.apm2import.datasets
-
 /**
  * Created by IntelliJ IDEA.
  * User: franck
@@ -32,36 +32,33 @@ package net.modelbased.sensapp.backyard.apm2import.datasets
 
 import net.modelbased.sensapp.backyard.apm2import._
 
-object Bike1 {
+object EBikePwr {
 
-  val log_file = "/Bike1.log"
-  val out_folder = "../net.modelbased.sensapp.data.samples/CyclingData/Bike1/"
-  val name = "Bike1"
+  val pwrlog_files = List("/ebike-20120609-020533.csv", "/ebike-20120609-040457.csv")
+
+  val out_folder = "../net.modelbased.sensapp.data.samples/CyclingData/EBikePwr/"
 
   val altitude_offset = 0
   val ground_altitude = 0
 
   def main(args : Array[String]) {
 
-    var data = APMDataParser.parseAPMLog(log_file)
-    data = APMDataParser.chopDataSet(data, 5225, 10500)
-    APMDataParser.fixAltitude(data, altitude_offset)
-    //APMDataParser.fixAltitude(data, -ground_altitude)
-    APMDataParser.fix10HzTimeIncrements(data)
-    APMDataParser.setRelativeTime(data)
-    APMDataParser.printStats(data)
 
-    APMDataParser.writeAPMLog(out_folder + name + ".log", data)
-    APMDataParser.writeCSVLog(out_folder + name + ".csv", data)
-    APMDataParser.writeSRTFile(out_folder + name + ".srt", data, 6500, 100)
+    pwrlog_files.foreach{pwrlog_file =>
 
-    val data1hz = APMDataParser.extract1HzData(data)
+      var name = pwrlog_file.replaceAll(".csv", "").replaceAll("/", "")
 
-    APMDataParser.writeCSVLog(out_folder + name + "_1hz.csv", data1hz)
-    APMDataParser.writeSRTFile(out_folder + name + "_1hz.srt", data1hz, 6500 , 1000)
-    APMDataParser.writeSenML(out_folder + name + "_1hz.json", data1hz, "Bike1" , 0)
+      var pwrdata = EBikeDataParser.parseEBikeLog(pwrlog_file)
+      //pwrdata = EBikeDataParser.chopDataSet(pwrdata, 50, 2050)
+      EBikeDataParser.writeCSVLog(out_folder + name + "_power.csv", pwrdata)
 
-    APMDataParser.writeIndividualSenML(out_folder + name + "_1hz", data1hz, name , 0);
+      var pwrdata1hz = EBikeDataParser.extract1HzData(pwrdata)
+      EBikeDataParser.writeCSVLog(out_folder + name + "_power_1hz.csv", pwrdata1hz)
 
+      val basetime = pwrdata1hz.head.time / 1000
+      EBikeDataParser.setRelativeTime(pwrdata1hz)
+
+      EBikeDataParser.writeIndividualSenML(out_folder + name + "_1hz", pwrdata1hz, name , basetime)
+    }
   }
 }

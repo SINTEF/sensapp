@@ -73,18 +73,85 @@ object APMDataParser {
   def toSenML(data : List[APMData], name : String, base_time : Long) : Root = {
     val buf = ListBuffer[MeasurementOrParameter]()
     data.foreach{ d => d.appendSenML(buf) }
-    Root(Some(name), Some(base_time), None, None, Some(buf.toSeq))
+    Root(Some(name + "/"), Some(base_time), None, None, Some(buf.toSeq))
   }
 
   def writeSenML(file : String, data : List[APMData], name : String, base_time : Long) {
-    val sb = new StringBuilder()
-    data.foreach{ d => d.appendLogLines(sb) }
+    //val sb = new StringBuilder()
+    //data.foreach{ d => d.appendLogLines(sb) }
     val out = new PrintWriter(new File(file))
     try{ out.print( JsonParser.toJson(toSenML(data, name, base_time)) )}
     finally{ out.close }
   }
 
-  def chopDataSet(data : List[APMData], start : Integer, end : Integer) : List[APMData] = {
+  def writeIndividualSenML(file : String, data : List[APMData], name : String, base_time : Long) {
+
+    val sensors = Map(  "altitude" -> ListBuffer[MeasurementOrParameter](),
+                        "ground_speed" -> ListBuffer[MeasurementOrParameter](),
+                        "heading" -> ListBuffer[MeasurementOrParameter](),
+                        "pitch" -> ListBuffer[MeasurementOrParameter](),
+                        "roll" -> ListBuffer[MeasurementOrParameter](),
+                        "gps_alt" -> ListBuffer[MeasurementOrParameter](),
+                        "sonar" -> ListBuffer[MeasurementOrParameter](),
+                        "crs" -> ListBuffer[MeasurementOrParameter](),
+                        "latitude" -> ListBuffer[MeasurementOrParameter](),
+                        "longitude" -> ListBuffer[MeasurementOrParameter](),
+                        "gpsfix" -> ListBuffer[MeasurementOrParameter](),
+                        "gpssats" -> ListBuffer[MeasurementOrParameter]())
+
+    val units = Map(    "altitude" -> Some(IANA.meter.symbol),
+                        "ground_speed" -> Some(IANA.velocity.symbol),
+                        "heading" -> Some(IANA.radian.symbol),
+                        "pitch" -> Some(IANA.radian.symbol),
+                        "roll" -> Some(IANA.radian.symbol),
+                        "gps_alt" -> Some(IANA.meter.symbol),
+                        "sonar" -> Some(IANA.meter.symbol),
+                        "crs" -> Some(IANA.meter.symbol),
+                        "latitude" -> Some(IANA.lat.symbol),
+                        "longitude" -> Some(IANA.lon.symbol),
+                        "gpsfix" -> None,
+                        "gpssats" -> Some(IANA.count.symbol))
+
+    data.foreach{ d =>
+      /*
+      sensors("altitude") += MeasurementOrParameter(Some("altitude"), Some(IANA.meter.symbol), Some(d.gps.alt),None, None, None, Some(d.gps.time/1000), None)
+      sensors("ground_speed") += MeasurementOrParameter(Some("ground_speed"), Some(IANA.velocity.symbol), Some(d.gps.speed),None, None, None, Some(d.gps.time/1000), None)
+      sensors("heading") += MeasurementOrParameter(Some("heading"), Some(IANA.radian.symbol), Some((d.imu.yaw * 0.0174532925)/100),None, None, None, Some(d.gps.time/1000), None)
+      sensors("pitch") += MeasurementOrParameter(Some("pitch"), Some(IANA.radian.symbol), Some((d.imu.pitch * 0.0174532925)/100),None, None, None, Some(d.gps.time/1000), None)
+      sensors("roll") += MeasurementOrParameter(Some("roll"), Some(IANA.radian.symbol), Some((d.imu.roll * 0.0174532925)/100),None, None, None, Some(d.gps.time/1000), None)
+      sensors("gps_alt") += MeasurementOrParameter(Some("gps_alt"), Some(IANA.meter.symbol), Some(d.gps.gps_alt),None, None, None, Some(d.gps.time/1000), None)
+      sensors("sonar") += MeasurementOrParameter(Some("sonar"), Some(IANA.meter.symbol), Some(d.gps.sonar),None, None, None, Some(d.gps.time/1000), None)
+      sensors("crs") += MeasurementOrParameter(Some("crs"), Some(IANA.meter.symbol), Some(d.gps.crs),None, None, None, Some(d.gps.time/1000), None)
+      sensors("latitude") += MeasurementOrParameter(Some("latitude"), Some(IANA.lat.symbol), None, Some(d.gps.latitudeString()), None, None, Some(d.gps.time/1000), None)
+      sensors("longitude") += MeasurementOrParameter(Some("longitude"), Some(IANA.lon.symbol), None, Some(d.gps.longitudeString()), None, None, Some(d.gps.time/1000), None)
+      sensors("gpsfix") += MeasurementOrParameter(Some("gpsfix"), None, None, None, Some(d.gps.fix), None, Some(d.gps.time/1000), None)
+      sensors("gpssats") += MeasurementOrParameter(Some("gpssats"), Some(IANA.count.symbol),  Some(d.gps.sats), None, None, None, Some(d.gps.time/1000), None)
+      */
+      sensors("altitude") += MeasurementOrParameter(None, None, Some(d.gps.alt),None, None, None, Some(d.gps.time/1000), None)
+      sensors("ground_speed") += MeasurementOrParameter(None, None, Some(d.gps.speed),None, None, None, Some(d.gps.time/1000), None)
+      sensors("heading") += MeasurementOrParameter(None, None, Some((d.imu.yaw * 0.0174532925)/100),None, None, None, Some(d.gps.time/1000), None)
+      sensors("pitch") += MeasurementOrParameter(None, None, Some((d.imu.pitch * 0.0174532925)/100),None, None, None, Some(d.gps.time/1000), None)
+      sensors("roll") += MeasurementOrParameter(None, None, Some((d.imu.roll * 0.0174532925)/100),None, None, None, Some(d.gps.time/1000), None)
+      sensors("gps_alt") += MeasurementOrParameter(None, None, Some(d.gps.gps_alt),None, None, None, Some(d.gps.time/1000), None)
+      sensors("sonar") += MeasurementOrParameter(None, None, Some(d.gps.sonar),None, None, None, Some(d.gps.time/1000), None)
+      sensors("crs") += MeasurementOrParameter(None, None, Some(d.gps.crs),None, None, None, Some(d.gps.time/1000), None)
+      sensors("latitude") += MeasurementOrParameter(None, None, None, Some(d.gps.latitudeString()), None, None, Some(d.gps.time/1000), None)
+      sensors("longitude") += MeasurementOrParameter(None, None, None, Some(d.gps.longitudeString()), None, None, Some(d.gps.time/1000), None)
+      sensors("gpsfix") += MeasurementOrParameter(None, None, None, None, Some(d.gps.fix), None, Some(d.gps.time/1000), None)
+      sensors("gpssats") += MeasurementOrParameter(None, None, Some(d.gps.sats), None, None, None, Some(d.gps.time/1000), None)
+    }
+
+    sensors.foreach{ case (k,v) =>
+      val root = Root(Some(name + "/" + k), Some(base_time), units.getOrElse(k, None), None, Some(v))
+      val out = new PrintWriter(new File(file + "_" + k + ".json"))
+      try{ out.print( JsonParser.toJson(root) )}
+      finally{ out.close }
+
+    }
+
+  }
+
+  def chopDataSet(data : List[APMData], start : java.lang.Integer, end : java.lang.Integer) : List[APMData] = {
     val result = new ListBuffer[APMData]()
     var count = 0
     data.foreach{ d =>
@@ -96,7 +163,7 @@ object APMDataParser {
 
   def extract1HzData(data : List[APMData]) : List[APMData] = {
     val result = new ListBuffer[APMData]()
-    var t = data.first.gps.time
+    var t = data.head.gps.time
     data.foreach{ d =>
       if (d.gps.time == t) {
         result.append(d)
@@ -111,12 +178,12 @@ object APMDataParser {
   }
 
   def setRelativeTime(data : List[APMData]) {
-    val offset = data.first.gps.time
+    val offset = data.head.gps.time
     data.foreach{ d => d.gps.time -= offset }
   }
 
   def fix10HzTimeIncrements(data : List[APMData]) {
-    var t = data.first.gps.time
+    var t = data.head.gps.time
     data.foreach{ d =>
       d.gps.time = t
       t += 100
@@ -133,7 +200,7 @@ object APMDataParser {
 
   def writeSRTFile(srt_file : String, data : List[APMData], offset : Long, delay : Long) {
     val sb = new StringBuilder()
-    var start = data.first.gps.time + offset
+    var start = data.head.gps.time + offset
     var num = 0
     val df = new DecimalFormat("###", new DecimalFormatSymbols(Locale.US));
     val df3 = new DecimalFormat("000", new DecimalFormatSymbols(Locale.US));
@@ -158,7 +225,7 @@ object APMDataParser {
 
   def writeCSVLog(log_file : String, data : List[APMData]) {
     val sb = new StringBuilder()
-    data.first.appendCSVHeader(sb)
+    data.head.appendCSVHeader(sb)
     data.foreach{ d => d.appendCSVLine(sb) }
     val out = new PrintWriter(new File(log_file))
     try{ out.print( sb.toString() ) }
@@ -166,7 +233,7 @@ object APMDataParser {
   }
 
   def getDuration(data : List[APMData]) : String  = {
-    val ms = data.last.gps.time - data.first.gps.time
+    val ms = data.last.gps.time - data.head.gps.time
     val h = (ms / 1000) / 3600
     val m = ((ms / 1000) / 60) % 60
     val s = (ms / 1000) % 60
@@ -223,6 +290,22 @@ class GPSData(line : String) {
   var gps_alt = Double.parseDouble(data(7).trim)    // GPS Altitude, WGS-84 (m)
   var speed = Double.parseDouble(data(8).trim)      // Ground Speed (m/s)
   var crs =  Double.parseDouble(data(9).trim)       // GPS Course (deg)
+
+  val minf = new DecimalFormat("#.###", new DecimalFormatSymbols(Locale.US));
+
+  def latitudeString() : String = {
+    var l = Double.parseDouble(lat)
+    val prefix = if (l > 0) "N " else "S "
+    l = scala.math.abs(l)
+    prefix + l.toInt + "' " + minf.format((l - l.toInt) * 60)
+  }
+
+  def longitudeString() : String = {
+    var l = Double.parseDouble(long)
+    val prefix = if (l > 0) "E " else "W "
+    l = scala.math.abs(l)
+    prefix + l.toInt + "' " + minf.format((l - l.toInt) * 60)
+  }
 
   def toLogLine() : String = {
     val sb = new StringBuilder()
@@ -306,9 +389,18 @@ class APMData(_gps : GPSData, _imu : IMUData) {
 
   def appendSenML(senml : ListBuffer[MeasurementOrParameter]) {
     senml += MeasurementOrParameter(Some("altitude"), Some(IANA.meter.symbol), Some(gps.alt),None, None, None, Some(gps.time/1000), None)
+    senml += MeasurementOrParameter(Some("gps_alt"), Some(IANA.meter.symbol), Some(gps.gps_alt),None, None, None, Some(gps.time/1000), None)
+    senml += MeasurementOrParameter(Some("sonar"), Some(IANA.meter.symbol), Some(gps.sonar),None, None, None, Some(gps.time/1000), None)
+    senml += MeasurementOrParameter(Some("crs"), Some(IANA.meter.symbol), Some(gps.crs),None, None, None, Some(gps.time/1000), None)
     senml += MeasurementOrParameter(Some("ground_speed"), Some(IANA.velocity.symbol), Some(gps.speed),None, None, None, Some(gps.time/1000), None)
     senml += MeasurementOrParameter(Some("heading"), Some(IANA.radian.symbol), Some((imu.yaw * 0.0174532925)/100),None, None, None, Some(gps.time/1000), None)
     senml += MeasurementOrParameter(Some("pitch"), Some(IANA.radian.symbol), Some((imu.pitch * 0.0174532925)/100),None, None, None, Some(gps.time/1000), None)
     senml += MeasurementOrParameter(Some("roll"), Some(IANA.radian.symbol), Some((imu.roll * 0.0174532925)/100),None, None, None, Some(gps.time/1000), None)
+    senml += MeasurementOrParameter(Some("latitude"), Some(IANA.lat.symbol), None, Some(gps.latitudeString()), None, None, Some(gps.time/1000), None)
+    senml += MeasurementOrParameter(Some("longitude"), Some(IANA.lon.symbol), None, Some(gps.longitudeString()), None, None, Some(gps.time/1000), None)
+    senml += MeasurementOrParameter(Some("gpsfix"), None, None, None, Some(gps.fix), None, Some(gps.time/1000), None)
+    senml += MeasurementOrParameter(Some("gpssats"), Some(IANA.count.symbol),  Some(gps.sats), None, None, None, Some(gps.time/1000), None)
+
   }
+
 }

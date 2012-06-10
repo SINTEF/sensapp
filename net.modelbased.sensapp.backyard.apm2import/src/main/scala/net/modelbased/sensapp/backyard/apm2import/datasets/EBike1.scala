@@ -35,6 +35,7 @@ import net.modelbased.sensapp.backyard.apm2import._
 object EBike1 {
 
   val log_file = "/EBike1.log"
+  val pwrlog_file = "/EBike1-Power.csv"
   val out_folder = "../net.modelbased.sensapp.data.samples/CyclingData/EBike1/"
   val name = "EBike1"
 
@@ -60,6 +61,22 @@ object EBike1 {
     APMDataParser.writeCSVLog(out_folder + name + "_1hz.csv", data1hz)
     APMDataParser.writeSRTFile(out_folder + name + "_1hz.srt", data1hz, 5500 , 1000)
     APMDataParser.writeSenML(out_folder + name + "_1hz.json", data1hz, name , 0)
+
+    APMDataParser.writeIndividualSenML(out_folder + name + "_1hz", data1hz, name , 0);
+
+
+    var pwrdata = EBikeDataParser.parseEBikeLog(pwrlog_file)
+    pwrdata = EBikeDataParser.chopDataSet(pwrdata, 50, 2050)
+    EBikeDataParser.writeCSVLog(out_folder + name + "_power.csv", pwrdata)
+
+    var pwrdata1hz = EBikeDataParser.extract1HzData(pwrdata)
+    EBikeDataParser.writeCSVLog(out_folder + name + "_power_1hz.csv", pwrdata1hz)
+
+    val basetime = pwrdata1hz.head.time / 1000
+    EBikeDataParser.setRelativeTime(pwrdata1hz)
+
+    EBikeDataParser.writeIndividualSenML(out_folder + name + "_1hz", pwrdata1hz, name , basetime)
+
 
   }
 
