@@ -33,12 +33,12 @@ trait Marshaller {
   
   implicit lazy val RootMarshaller = new  SimpleMarshaller[Root] {
     override val canMarshalTo = 
-      List(ContentType(`senml+xml`), ContentType(`text/xml`), 
+      List(ContentType(`text/plain`), ContentType(`senml+xml`), ContentType(`text/xml`), 
            ContentType(`senml+json`), ContentType(`application/json`))
            
     override def marshal(value: Root, contentType: ContentType) = {
       contentType match {
-        case ContentType(`senml+json`, _) | ContentType(`application/json`, _) 
+        case ContentType(`text/plain`,_) | ContentType(`senml+json`, _) | ContentType(`application/json`, _) 
         	=> HttpContent(contentType, JsonParser.toJson(value))
         case ContentType(`senml+xml`, _) | ContentType(`text/xml`,_) 
         	=> HttpContent(contentType, (new scala.xml.PrettyPrinter(80, 2)).format(XmlParser.toXml(value)))
@@ -48,13 +48,13 @@ trait Marshaller {
   
   implicit lazy val MoPMarshaller = new  SimpleMarshaller[Seq[MeasurementOrParameter]] {
     override val canMarshalTo = 
-      List(ContentType(`senml+xml`), ContentType(`text/xml`), 
+      List(ContentType(`text/plain`), ContentType(`senml+xml`), ContentType(`text/xml`), 
            ContentType(`senml+json`), ContentType(`application/json`))
            
     override def marshal(value: Seq[MeasurementOrParameter], contentType: ContentType) = {
-      val root = Root(None, None, None, None, Some(value))
+      val root = Root(None, None, None, None, if (value.isEmpty) None else Some(value))
       contentType match {
-        case ContentType(`senml+json`, _) | ContentType(`application/json`,_) 
+        case ContentType(`text/plain`,_) | ContentType(`senml+json`, _) | ContentType(`application/json`,_) 
         	=> HttpContent(contentType, JsonParser.toJson(root))
         case ContentType(`senml+xml`,_) | ContentType(`text/xml`,_) 
         	=> HttpContent(contentType, (new scala.xml.PrettyPrinter(80, 2)).format(XmlParser.toXml(root)))

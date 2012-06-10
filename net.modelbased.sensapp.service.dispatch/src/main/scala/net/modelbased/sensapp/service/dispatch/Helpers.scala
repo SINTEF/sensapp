@@ -68,9 +68,16 @@ object Dispatch extends HttpSpraySupport with SprayJsonSupport {
     val conduit = new HttpConduit(httpClient, db._1, db._2) {
       val pipeline = simpleRequest[Root] ~> sendReceive ~> unmarshal[String]
     }
+    
     val future = conduit.pipeline(Put(url,Some(data)))
-    Await.result(future, 5 seconds)
-    conduit.close()
+    try { 
+      Await.result(future, 5 seconds)
+    } catch {
+      case e: UnsuccessfulResponseException => {
+        system.log.info("Exception while sending data ["+url+"]: " + e.responseStatus)
+        throw new RuntimeException("Unable to reach sensor database ["+url+"]")
+      }
+    } finally { conduit.close() }
   }
   
   private[this] def notifyListeners(notifier: (String, Int), sensor: String, root: Root) {

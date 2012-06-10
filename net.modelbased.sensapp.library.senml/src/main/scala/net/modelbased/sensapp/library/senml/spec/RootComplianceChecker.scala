@@ -100,10 +100,12 @@ class RootComplianceChecker extends ComplianceChecker[Root] {
    * Source: "If present there must be at least one entry in the array."
    * url: http://tools.ietf.org/html/draft-jennings-senml-08#section-4 (page 4)
    */
-  private[this] val measurementsNotEmpty: CheckerFunction = _.measurementsOrParameters match {
-    case None => true
-    case Some(lst) => lst.size > 0
-  } 
+  private[this] val measurementsNotEmpty: CheckerFunction = { root =>
+    root.measurementsOrParameters match {
+      case None => true
+      case Some(lst) => lst.size > 0
+    }
+  }
         
   /**
    * Check the validity of used names

@@ -23,43 +23,7 @@
 package net.modelbased.sensapp.library.senml.spec
 
 
-object Standard{
+object Standard {
   val VERSION_NUMBER = 1 
-  val NAME_VALIDATOR = "[a-zA-Z0-9][a-zA-Z0-9-:._/\\[\\]]+"
+  val NAME_VALIDATOR = "[a-zA-Z0-9][a-zA-Z0-9-:._/\\[\\]]*"
 }
-
-/*
-
-object Standard{
-  
-  val VERSION_NUMBER = 1
-  
-  val NAME_VALIDATOR = "[a-zA-Z0-9][a-zA-Z0-9-:._/\\[\\]]+"
-  
-  object errors {
-    val VERSION_MUST_BE_POSITIVE = "If provided, 'version' MUST be a positive integer"
-    val UNSUPPORTED_VERSION = "If provided, 'version' MUST be >= " + Standard.VERSION_NUMBER
-    val UNKNOWN_BASE_UNIT = "If provided, 'baseUnits' must be defined as a IANA unit code"
-    //val NO_UNITS_DEFINED = "As 'baseUnits' is not provided, all measurements must provide an 'unit'"
-    //val EMPTY_MEASUREMENTS = "The 'measuddrementsOrParameters' entry cannot be empty"
-    val EMPTY_NAME = "As 'baseName' is not provided, all measurements must provides a 'name'"
-    val UNKNWOWN_UNIT = "If provided, 'units' must be defined as a IANA unit code"
-    val INVALID_NAME = "'baseName'+'name' must match " + NAME_VALIDATOR
-    val AMBIGUOUS_VALUE_PROVIDED = "A value ('sv', 'v', 'bv' or 's') must be provided"
-  }
-  
-  object checkers {
-   
-        
-    def allNamesValid(root: Root) = {
-      val bN = root.baseName.getOrElse("")
-      root.measurementsOrParameters match {
-        case None => true
-        case Some(lst) => lst.par forall { mOp => (bN + mOp.name.getOrElse("")).matches(NAME_VALIDATOR) }
-      }
-    }
-    
-
-    
-  }
-}*/
