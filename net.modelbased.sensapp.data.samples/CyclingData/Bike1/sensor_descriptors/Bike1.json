@@ -1,0 +1,21 @@
+{
+  "id": "Bike1",
+  "descr": "Franck's Fleurey Bike",
+  "tags": { 
+    "owner": "Franck Fleurey", "license": "LGPL"
+  },
+  "sensors": [
+    "/registry/sensors/Bike1/altitude",
+    "/registry/sensors/Bike1/crs",
+    "/registry/sensors/Bike1/gps_alt",
+    "/registry/sensors/Bike1/gps_fix",
+    "/registry/sensors/Bike1/gpssats",
+    "/registry/sensors/Bike1/heading",
+    "/registry/sensors/Bike1/latitude",
+    "/registry/sensors/Bike1/longitude",
+    "/registry/sensors/Bike1/pitch",
+    "/registry/sensors/Bike1/roll",
+    "/registry/sensors/Bike1/sonar"
+  ]
+}
+ 

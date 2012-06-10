@@ -1,0 +1,10 @@
+{
+  "id": "chicago/uic/shuttle",
+  "descr": "UIC Shuttle",
+  "tags": { 
+    "source": "http://www.cs.uic.edu/pub/Bits/Software/uic_shuttle_trips_110401_110430.zip" 
+  },
+  "sensors": ["/registry/sensors/chicago/uic/shuttle/lambda",
+              "/registry/sensors/chicago/uic/shuttle/phi"]
+}
+    

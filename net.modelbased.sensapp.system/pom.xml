@@ -49,6 +49,7 @@
           <connectors>
 	 	      <connector implementation="org.eclipse.jetty.server.nio.SelectChannelConnector">
 	 	      <port>8080</port>
+	 	      <acceptors>10</acceptors>
 	 	      </connector>
  	      </connectors>
  	    </configuration>

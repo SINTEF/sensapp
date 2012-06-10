@@ -1,0 +1,8 @@
+{
+  "id": "Bike1/gps_alt", 
+  "descr": "GPS altitude of the bike",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+} 

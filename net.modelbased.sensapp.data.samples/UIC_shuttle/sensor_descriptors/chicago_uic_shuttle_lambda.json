@@ -1,0 +1,10 @@
+{
+  "id": "chicago/uic/shuttle/lambda", 
+  "descr": "Longitude of the UIC shuttle",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical", 
+    "baseTime": 1301806255
+  }
+}  
+

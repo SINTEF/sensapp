@@ -1,0 +1,9 @@
+{
+  "id": "my-sensor/outside", 
+  "descr": "outside temperature",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+} 
+
