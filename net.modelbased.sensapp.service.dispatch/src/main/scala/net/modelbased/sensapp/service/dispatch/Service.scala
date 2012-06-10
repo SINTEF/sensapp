@@ -46,7 +46,7 @@ trait Service extends SensAppService {
                 try {
                   Dispatch(partners, target, data.measurementsOrParameters.get)
                   None
-                } catch { case e => Some(target) }
+                } catch { case e => { actorSystem.log.info(e.toString); Some(target) } }
               }
             }
             context complete handled.filter{ _.isDefined }.toList

@@ -95,8 +95,8 @@ case class MeasurementOrParameter(
   }
   
   def canonized(root: Root): MeasurementOrParameter = {
+    val unit = extractUnit(root)
     val name = Some(extractName(root))
-    val unit = Some(extractUnit(root))
     val time = Some(extractTime(root))
     data match {
       case DoubleDataValue(d)   => MeasurementOrParameter(name, unit, Some(d), None, None, None, time, None)
@@ -113,10 +113,11 @@ case class MeasurementOrParameter(
     }
   }
   
-  def extractUnit(root: Root): String = {
-    units match {
-      case None => IANA(root.baseUnits.get).get.symbol
-      case Some(code) => IANA(code).get.symbol
+  def extractUnit(root: Root): Option[String] = data match {
+    case BooleanDataValue(_) => None
+    case _ => units match {
+      case None => Some(IANA(root.baseUnits.get).get.symbol)
+      case Some(code) => Some(IANA(code).get.symbol)
     }
   }
   

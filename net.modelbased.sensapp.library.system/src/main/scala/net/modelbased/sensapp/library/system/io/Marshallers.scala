@@ -31,10 +31,13 @@ import net.modelbased.sensapp.library.system.io.MediaTypes._
 
 trait Marshaller {
   
+  private[this] val targets = 
+      ContentType(`application/json`) :: ContentType(`text/plain`) :: 
+      ContentType(`text/xml`) :: ContentType(`senml+json`) :: 
+      ContentType(`senml+xml`) :: Nil
+  
   implicit lazy val RootMarshaller = new  SimpleMarshaller[Root] {
-    override val canMarshalTo = 
-      List(ContentType(`text/plain`), ContentType(`senml+xml`), ContentType(`text/xml`), 
-           ContentType(`senml+json`), ContentType(`application/json`))
+    override val canMarshalTo = targets
            
     override def marshal(value: Root, contentType: ContentType) = {
       contentType match {
@@ -47,9 +50,7 @@ trait Marshaller {
   }
   
   implicit lazy val MoPMarshaller = new  SimpleMarshaller[Seq[MeasurementOrParameter]] {
-    override val canMarshalTo = 
-      List(ContentType(`text/plain`), ContentType(`senml+xml`), ContentType(`text/xml`), 
-           ContentType(`senml+json`), ContentType(`application/json`))
+    override val canMarshalTo = targets
            
     override def marshal(value: Seq[MeasurementOrParameter], contentType: ContentType) = {
       val root = Root(None, None, None, None, if (value.isEmpty) None else Some(value))
