@@ -34,7 +34,7 @@ import net.modelbased.sensapp.backyard.apm2import._
 
 object EBikePwr {
 
-  val pwrlog_files = List("/ebike-20120609-020533.csv", "/ebike-20120609-040457.csv")
+  val pwrlog_files = List("/ebike-20120609-020533.csv", "/ebike-20120609-040457.csv", "/ebike-20120610-011133.csv", "/ebike-20120610-123806.csv")
 
   val out_folder = "../net.modelbased.sensapp.data.samples/CyclingData/EBikePwr/"
 
