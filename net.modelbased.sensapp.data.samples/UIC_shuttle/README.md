@@ -33,4 +33,10 @@ Now, the composite sensor can be declared as the following (using the `/registry
 
 ## Loading the data into SensApp
 
+The data sets are available in the `data` directory. Each file
+corresponds to one trip of the shuttle. The script `load.sh` do the
+trick, using the Bash SensApp API. 
+
+
+
 

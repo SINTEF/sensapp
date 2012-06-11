@@ -42,10 +42,18 @@ function register_composite {
 ###             ###
 
 function db_raw_push {
-    echo -e "Pushing data into [$1]"
+    echo -e "Pushing data into SensApp [$1]"
     curl -X PUT -d "@$2" \
 	--header "Content-Type: application/json" \
 	$SENSAPP_DATABASE_RAW/databases/raw/data/$1 
+    echo -e "\n"  
+}
+
+function db_raw_import {
+    echo -e "Loading data into SensApp [$1]"
+    curl -X PUT -d "@$1" \
+	--header "Content-Type: application/json" \
+	$SENSAPP_DATABASE_RAW/databases/raw/load
     echo -e "\n"  
 }
 
