@@ -106,7 +106,8 @@ object EBikeDataParser {
     }
 
     sensors.foreach{ case (k,v) =>
-     val out = new PrintWriter(new File(file + "_" + k + ".senml.json"))
+      /*
+      val out = new PrintWriter(new File(file + "_" + k + ".senml.json"))
       try {
         v.toList.foreach{ d =>
           val root = Root(Some(name + "/" + k), Some(base_time), units.getOrElse(k, None), None, Some(Seq(d)))
@@ -114,6 +115,15 @@ object EBikeDataParser {
         }
       }
       finally{ out.close }
+      */
+
+      val out = new PrintWriter(new File(file + "_" + k + ".senml.json"))
+      try {
+        val root = Root(Some(name + "/" + k), Some(base_time), units.getOrElse(k, None), None, Some(v))
+          out.print( JsonParser.toJson(root) + "\n" )
+      }
+      finally{ out.close }
+
     }
 
 
