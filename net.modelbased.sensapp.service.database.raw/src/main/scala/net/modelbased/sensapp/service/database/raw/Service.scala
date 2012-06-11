@@ -77,6 +77,16 @@ trait RawDatabaseService extends SensAppService {
       } ~ cors("GET", "DELETE")
     } ~
     detach {
+      path ("databases" / "raw" / "load") {
+        put { 
+          content(as[SenMLRoot]) { root => context =>
+            val start = System.currentTimeMillis()
+            _backend importer root
+            val delta = System.currentTimeMillis() - start
+            context complete "processed in %sms".format(delta)
+          }
+        } ~ cors("PUT")
+      } ~
       path ("databases" / "raw" / "data") {
 	      post { 
 	        content(as[SearchRequest]) { request => context =>

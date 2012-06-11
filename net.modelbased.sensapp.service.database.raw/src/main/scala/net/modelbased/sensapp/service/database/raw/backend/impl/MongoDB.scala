@@ -92,6 +92,28 @@ class MongoDB extends Backend {
     }
   }
   
+  def importer(root: Root) {
+    val canon = root.canonized
+    var refTimes: Map[String, Long] = Map()
+    canon.measurementsOrParameters match {
+      case None =>
+      case Some(lst) => {
+        lst.par foreach { d =>
+          refTimes.get(d.name.get) match {
+            case None => {
+              val ref = getReferenceTime(d.name.get)
+              refTimes += d.name.get -> ref
+              data += data2dbobj(d.name.get, mop2data(ref, d))
+            }
+            case Some(ref) => {
+              data += data2dbobj(d.name.get, mop2data(ref, d))
+            }
+          }
+        }
+      }
+    }
+  }
+  
   def get(sensor: String): Root = {
     val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
     val sensorData = data.find(MongoDBObject("s" -> sensor)).map{ dbobj2data(sensorMetaData.schema,_) }

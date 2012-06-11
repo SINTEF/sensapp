@@ -78,6 +78,12 @@ abstract trait Backend extends BackendStructure {
   def push(sensor: String, data: Root): Seq[MeasurementOrParameter]
   
   /**
+   * Import a dataset, bypassing all control mechanisms introduced by the usual "push"
+   * @param data the data set to be loaded (constraints: unique timestamp)
+   */
+  def importer(data: Root)
+  
+  /**
    * Retrieve **ALL** the data associated to a given sensor
    * @param sensor the sensor identifier to be used
    * @return a SenML Root object
