@@ -142,9 +142,14 @@ object APMDataParser {
     }
 
     sensors.foreach{ case (k,v) =>
-      val root = Root(Some(name + "/" + k), Some(base_time), units.getOrElse(k, None), None, Some(v))
-      val out = new PrintWriter(new File(file + "_" + k + ".json"))
-      try{ out.print( JsonParser.toJson(root) )}
+
+      val out = new PrintWriter(new File(file + "_" + k + ".senml.json"))
+      try {
+        v.toList.foreach{ d =>
+          val root = Root(Some(name + "/" + k), Some(base_time), units.getOrElse(k, None), None, Some(Seq(d)))
+          out.print( JsonParser.toJson(root) + "\n" )
+        }
+      }
       finally{ out.close }
 
     }

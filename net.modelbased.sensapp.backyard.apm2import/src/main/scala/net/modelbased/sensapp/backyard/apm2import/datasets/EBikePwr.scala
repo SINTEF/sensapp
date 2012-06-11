@@ -50,15 +50,15 @@ object EBikePwr {
 
       var pwrdata = EBikeDataParser.parseEBikeLog(pwrlog_file)
       //pwrdata = EBikeDataParser.chopDataSet(pwrdata, 50, 2050)
-      EBikeDataParser.writeCSVLog(out_folder + name + "_power.csv", pwrdata)
+      EBikeDataParser.writeCSVLog(out_folder + "raw/" + name + "_power.csv", pwrdata)
 
       var pwrdata1hz = EBikeDataParser.extract1HzData(pwrdata)
-      EBikeDataParser.writeCSVLog(out_folder + name + "_power_1hz.csv", pwrdata1hz)
+      EBikeDataParser.writeCSVLog(out_folder + "raw/" + name + "_power_1hz.csv", pwrdata1hz)
 
       val basetime = pwrdata1hz.head.time / 1000
       EBikeDataParser.setRelativeTime(pwrdata1hz)
 
-      EBikeDataParser.writeIndividualSenML(out_folder + name + "_1hz", pwrdata1hz, name , basetime)
+      EBikeDataParser.writeIndividualSenML(out_folder + "data/" + name + "_1hz", pwrdata1hz, name , basetime)
     }
   }
 }

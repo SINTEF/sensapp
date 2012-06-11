@@ -51,17 +51,17 @@ object Bike1 {
     APMDataParser.setRelativeTime(data)
     APMDataParser.printStats(data)
 
-    APMDataParser.writeAPMLog(out_folder + name + ".log", data)
-    APMDataParser.writeCSVLog(out_folder + name + ".csv", data)
+    APMDataParser.writeAPMLog(out_folder + "raw/" + name + ".log", data)
+    APMDataParser.writeCSVLog(out_folder + "raw/" + name + ".csv", data)
     APMDataParser.writeSRTFile(out_folder + name + ".srt", data, 6500, 100)
 
     val data1hz = APMDataParser.extract1HzData(data)
 
-    APMDataParser.writeCSVLog(out_folder + name + "_1hz.csv", data1hz)
+    APMDataParser.writeCSVLog(out_folder + "raw/" + name + "_1hz.csv", data1hz)
     APMDataParser.writeSRTFile(out_folder + name + "_1hz.srt", data1hz, 6500 , 1000)
-    APMDataParser.writeSenML(out_folder + name + "_1hz.json", data1hz, "Bike1" , 0)
+    APMDataParser.writeSenML(out_folder + "raw/" + name + "_1hz.json", data1hz, "Bike1" , 0)
 
-    APMDataParser.writeIndividualSenML(out_folder + name + "_1hz", data1hz, name , 0);
+    APMDataParser.writeIndividualSenML(out_folder + "data/" + name + "_1hz", data1hz, name , 0);
 
   }
 }
