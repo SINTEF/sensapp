@@ -53,6 +53,14 @@ function db_raw_push {
 # Dispatcher
 ###
 
+function dispatch_data {
+    echo -e "Pushing data [$1]"
+    curl -X PUT -d "$1" \
+	--header "Content-Type: application/json" \
+	$SENSAPP_DISPATCH/dispatch
+    echo -e "\n"
+}
+
 # dispatch FILE_CONTAINING_SENML_DATA
 function dispatch {
     echo -e "Pushing data [$1]"
