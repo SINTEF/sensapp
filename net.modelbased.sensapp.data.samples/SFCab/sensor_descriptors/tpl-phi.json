@@ -1,0 +1,9 @@
+{
+  "id": "sf/cab/%NAME%/phi", 
+  "descr": "Lattiude of the %NAME% cab",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical", 
+    "baseTime": %BT%
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "sf/cab/%NAME%",
+  "descr": "San Fransisco cab #%NAME%",
+  "tags": { 
+    "source": "http://crawdad.cs.dartmouth.edu/meta.php?name=epfl/mobility"
+  },
+  "sensors": ["/registry/sensors/sf/cab/%NAME%/lambda",
+              "/registry/sensors/sf/cab/%NAME%/phi",
+	      "/registry/sensors/sf/cab/%NAME%/occupied"]
+}
