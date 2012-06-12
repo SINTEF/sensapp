@@ -80,10 +80,14 @@ trait RawDatabaseService extends SensAppService {
       path ("databases" / "raw" / "load") {
         put { 
           content(as[SenMLRoot]) { root => context =>
-            val start = System.currentTimeMillis()
-            _backend importer root
-            val delta = System.currentTimeMillis() - start
-            context complete "processed in %sms".format(delta)
+            try {
+              val start = System.currentTimeMillis()
+              _backend importer root
+              val delta = System.currentTimeMillis() - start
+              context complete "processed in %sms".format(delta)
+            } catch {
+              case e => context complete (StatusCodes.InternalServerError, "" + e.toString())
+            }
           }
         } ~ cors("PUT")
       } ~
