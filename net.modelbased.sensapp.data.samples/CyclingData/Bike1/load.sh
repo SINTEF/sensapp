@@ -24,6 +24,5 @@ register_composite "Bike1" sensor_descriptors/Bike1.json
 ## Loading data
 for file in `ls data`
 do
-    dispatch data/$file
-    sleep 5
+    db_raw_import data/$file
 done

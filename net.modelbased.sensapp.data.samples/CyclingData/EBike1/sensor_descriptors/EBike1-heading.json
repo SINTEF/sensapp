@@ -1,0 +1,8 @@
+{
+  "id": "EBike1/heading", 
+  "descr": "Heading of the bike",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+} 

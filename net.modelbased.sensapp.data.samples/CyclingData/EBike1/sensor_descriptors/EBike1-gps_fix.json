@@ -1,5 +1,5 @@
 {
-  "id": "Bike1/gpsfix", 
+  "id": "EBike1/gpsfix", 
   "descr": "GPS Fix status of the bike",
   "schema": { 
     "backend": "raw", 

@@ -1,0 +1,8 @@
+{
+  "id": "WingFlight1/crs", 
+  "descr": "CRS of the wing",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+} 

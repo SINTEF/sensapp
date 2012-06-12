@@ -1,0 +1,8 @@
+{
+  "id": "WingFlight1/pitch", 
+  "descr": "Pitch of the wing",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+} 

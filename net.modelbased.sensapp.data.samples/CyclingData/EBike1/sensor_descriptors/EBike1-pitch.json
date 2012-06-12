@@ -1,0 +1,8 @@
+{
+  "id": "EBike1/pitch", 
+  "descr": "Pitch of the bike",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+} 

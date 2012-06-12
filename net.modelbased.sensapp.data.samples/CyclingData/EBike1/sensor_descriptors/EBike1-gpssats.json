@@ -1,0 +1,8 @@
+{
+  "id": "EBike1/gpssats", 
+  "descr": "Number of stallite locked by the bike",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+} 

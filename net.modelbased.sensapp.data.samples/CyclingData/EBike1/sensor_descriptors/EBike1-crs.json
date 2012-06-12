@@ -1,0 +1,8 @@
+{
+  "id": "EBike1/crs", 
+  "descr": "CRS of the bike",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+} 

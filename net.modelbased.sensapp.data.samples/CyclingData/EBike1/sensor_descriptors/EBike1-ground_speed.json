@@ -1,5 +1,5 @@
 {
-  "id": "Bike1/ground_speed", 
+  "id": "EBike1/ground_speed", 
   "descr": "Ground speed measured on the bike",
   "schema": { 
     "backend": "raw", 

@@ -1,0 +1,8 @@
+{
+  "id": "EBike1/ah", 
+  "descr": "Ampere hours consumed by the bike (summed)",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Summed"
+  }
+} 

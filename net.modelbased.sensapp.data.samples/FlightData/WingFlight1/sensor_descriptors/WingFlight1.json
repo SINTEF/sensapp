@@ -1,0 +1,22 @@
+{
+  "id": "WingFlight1",
+  "descr": "Franck Fleurey's flying wing",
+  "tags": { 
+    "owner": "Franck Fleurey", "license": "LGPL"
+  },
+  "sensors": [
+    "/registry/sensors/WingFlight1/altitude",
+    "/registry/sensors/WingFlight1/crs",
+    "/registry/sensors/WingFlight1/gps_alt",
+    "/registry/sensors/WingFlight1/gpsfix",
+    "/registry/sensors/WingFlight1/gpssats",
+    "/registry/sensors/WingFlight1/ground_speed",
+    "/registry/sensors/WingFlight1/heading",
+    "/registry/sensors/WingFlight1/latitude",
+    "/registry/sensors/WingFlight1/longitude",
+    "/registry/sensors/WingFlight1/pitch",
+    "/registry/sensors/WingFlight1/roll",
+    "/registry/sensors/WingFlight1/sonar"
+  ]
+}
+ 
