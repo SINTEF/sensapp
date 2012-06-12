@@ -19,7 +19,7 @@ speed 		Ground Speed	 		m/s
 CRS	 	GPS Course	 		radian
 roll		IMU Roll Attiude (phi)		radian
 pitch		IMU Pitch Attitude (theta)	radian
-yaw		IMU Yaw Attitude (psi)		radian
+heading		IMU Yaw Attitude (psi)		radian
 voltage		Battery Voltage			volts
 current		Current consumed		amperes
 ah		Ampere Hour			counter
