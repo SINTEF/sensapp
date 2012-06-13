@@ -4,10 +4,6 @@
 ## Loading the SensApp Bash API
 source ../api.sh
 
-#THRESHOLD=30
-#WAIT=1
-#FILE=data/shuttle_all.senml.json 
-
 ## Registering sensors
 register_sensor "chicago/uic/shuttle/phi" \
                 sensor_descriptors/chicago_uic_shuttle_phi.json
