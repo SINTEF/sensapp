@@ -61,7 +61,11 @@ case class TypedSequenceData(x: String, v: List[MultiTypedData]) extends DataMod
 abstract class DataModelRegistry[T <: DataModel] extends DataStore[T] {
   //FIXME: this arch. does not allow to restrict a DataModelRegistry to handle only ONE type
   override final val databaseName = "sensapp_datastore_test"  
-  override def identify(data: T) = ("n", data.n)
+  override def getIdentifier(data: T) = data.n
+  
+  //override def identify(data: T) = ("n", data.n)
+  
+  override val key = "n" 
 }
 
 

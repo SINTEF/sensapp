@@ -114,33 +114,57 @@ class MongoDB extends Backend {
     }
   }
   
-  def get(sensor: String): Root = {
+  def get(sensor: String, sorted: Boolean): Root = {
     val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
-    val sensorData = data.find(MongoDBObject("s" -> sensor)).map{ dbobj2data(sensorMetaData.schema,_) }
+    val query = MongoDBObject("s" -> sensor)
+    val raw = if (sorted) {
+        data.ensureIndex("t")
+        data.find(query) $orderby(MongoDBObject("t" -> 1))
+      }
+      else
+        data.find(query)
+    val sensorData = raw.map{ dbobj2data(sensorMetaData.schema,_) }
     buildSenML(sensorMetaData, sensorData.toList)
   }
   
-  def get(sensor: String, from: Long, to: Long): Root = {
+  def get(sensor: String, from: Long, to: Long, sorted: Boolean): Root = {
     val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
     val shiftedFrom = from - sensorMetaData.timestamp
     val shiftedTo = to - sensorMetaData.timestamp
     val query: DBObject = ("t" $lte shiftedTo $gte shiftedFrom) ++ ("s" -> sensor)
-    val sensorData = data.find(query).map{ dbobj2data(sensorMetaData.schema,_) }
+    val raw = if (sorted){data.ensureIndex("t"); data.find(query) $orderby(MongoDBObject("t" -> 1))} else data.find(query)
+    val sensorData = raw.map{ dbobj2data(sensorMetaData.schema,_) }
     buildSenML(sensorMetaData, sensorData.toList)
   }
   
-  def get(sensors: Seq[String], from: Long, to: Long): Root = { 
-    val all = sensors.par.map { s => this get(s,from, to) }
+  def get(sensors: Seq[String], from: Long, to: Long, sorted: Boolean): Root = { 
+    val all = sensors.par.map { s => this get(s,from, to, sorted) }
     val data = all.map{r => r.canonized.measurementsOrParameters}
           		  .filter{ mop => mop != None }
           		  .map{ _.get }.flatten
-    if (data.isEmpty) {
-      Root(None, None, None, None, None)
-    } else {
-      Root(None, None, None, None, Some(data.toList))
-    }
+    val content = if (data.isEmpty)  None else Some(data.toList)
+    Root(None, None, None, None, content)
   }
 
+  def get(sensor: String, limit: Int): Root = {
+    val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
+    val query = MongoDBObject("s" -> sensor)
+    val raw = if (limit > 0) 
+        (data.find(query) $orderby(MongoDBObject("t" -> -1))).limit(limit)
+      else
+        data.find(query) $orderby(MongoDBObject("t" -> -1))
+    val sensorData = raw.map{ dbobj2data(sensorMetaData.schema,_) }
+    buildSenML(sensorMetaData, sensorData.toList)
+  }
+
+  def get(sensors: Seq[String], limit: Int): Root = {
+    val all = sensors.par.map { s => this get(s, limit) }
+    val data = all.map{r => r.canonized.measurementsOrParameters}
+          		  .filter{ mop => mop != None }
+          		  .map{ _.get }.flatten
+    val content = if (data.isEmpty)  None else Some(data.toList)
+    Root(None, None, None, None, content)
+  }
   
   def getSchema(sensor: String): String = {
     val obj = metadata.findOne(MongoDBObject("s" -> sensor)).get
@@ -208,4 +232,9 @@ class MongoDB extends Backend {
   private[this] lazy val data = mongoConn("sensapp_db")("raw.data")
   private[this] lazy val mongoConn = MongoConnection() 
   
+  private[this] def indexing {
+      metadata.ensureIndex(MongoDBObject("s" -> 1), "raw.metadata.idx", true)
+      data.ensureIndex(MongoDBObject("s" -> 1, "t" -> -1), "raw.data.idx", true)
+  }
+  indexing
 }

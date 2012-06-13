@@ -40,7 +40,7 @@ case class CreationRequest (val sensor: String, val baseTime: Long, val schema: 
  * @param from lower bound of the search interval 
  * @param to upper bound of the search interval 
  */
-case class SearchRequest(val sensors: Seq[String], val from: String, val to: String)
+case class SearchRequest(val sensors: Seq[String], val from: String, val to: String, val sorted: Option[Boolean])
 
 /**
  * Description of the database associated to a given sensor
@@ -52,18 +52,10 @@ case class SearchRequest(val sensors: Seq[String], val from: String, val to: Str
 case class SensorDatabaseDescriptor(val sensor: String, val schema: String, val size: Long, val url: String)
 
 /**
- * Request data stored in the database between two given dates
- * @from starting date of the period (included)
- * @to ending date of the period (included)
- */
-case class SensorDataRequest(val start: Option[Long], val end: Option[Long])
-
-/**
  * Spray-Json protocols used to (un)marshal the requests
  */
 object RequestsProtocols extends DefaultJsonProtocol {
   implicit val creationRequest = jsonFormat(CreationRequest,"sensor", "baseTime", "schema")
-  implicit val searchRequest = jsonFormat(SearchRequest, "sensors", "from", "to")
+  implicit val searchRequest = jsonFormat(SearchRequest, "sensors", "from", "to", "sorted")
   implicit val sensorDatabaseDescriptor = jsonFormat(SensorDatabaseDescriptor,"sensor", "schema", "size", "data_lnk")
-  implicit val sensorDataRequest = jsonFormat(SensorDataRequest, "start", "end")
 }

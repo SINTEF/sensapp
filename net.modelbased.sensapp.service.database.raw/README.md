@@ -152,6 +152,9 @@ The server will answers a canonized representation of a SENML document containin
         { "n": "another-sensor", "u": "m", "v": 0.9017250537872314, "t": 1337416930 }, 
         { "n": "another-sensor", "u": "m", "v": 0.9753862023353577, "t": 1337416931 }  ]
     }
+    
+    
+One can use an optional `sorted` boolean parameter in the sent document to ensure that the retrieved data is sorted according to their timestamp.
 
 ### Sensor data handling: /databases/raw/data/%NAME
 
@@ -178,15 +181,19 @@ Obtained response:
       }, ... ]
     }
     
-One can use parameters (`from`, `to`) to restrict the retrieved data to a given interval. The parameter `to` is optional (default value: `"now"`). These parameters can take the following values:
-
-
+One can use parameters (`from`, `to`) to restrict the retrieved data to a given interval. The parameter `to` is optional (default value: `"now"`). The `sorted` bollean parameter can be used to sort the data according to their timestamp (it adds a little overhead if the dataset is huge). These parameters can take the following values:
+ 
 Examples:
 
   - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?from=2012-05-19T10:42:09
   - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?from=2012-05-19T10:42:09&to=2012-05-19T10:42:11
   - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?from=1337416929&to=1337416931
   - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?from=1337416929
+
+Alternatively, one can use the `limit` integer parameter to retrieve the last `x` measure from this sensor:
+
+  - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?limit=2
+
     
 #### PUT /databases/raw/data/%NAME
 
@@ -234,4 +241,11 @@ Obtained response:
     
     The request content was malformed:
     requirement failed: As 'baseName' is not provided, all measurements must provides a 'name'
+    
+### Sensor database import: /databases/raw/load
+
+This endpoint support the __very fast__ import of a dataset into SensApp. One chould be aware that this rapidity bypass __all__ the checks introduced in the Sensapp platform to verify data consistency. Thus, it is very fast (it absorb data as fast as the database backend can, with a very little SensApp overhead), but you __must__ be sure that the imported data are consistent (existing sensor, no duplicate, ...)
+
+Data are expected  as a __single__ SenML document (even if it contains data from multiple sensors), enclosed in in `PUT` request.
+
   

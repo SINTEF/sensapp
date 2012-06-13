@@ -35,8 +35,9 @@ class ElementRegistry extends DataStore[Element]  {
 
   override val databaseName = "sensapp_db"
   override val collectionName = "sample.elements" 
+  override val key = "key"
     
-  override def identify(e: Element) = ("key", e.key)
+  override def getIdentifier(e: Element) = e.key
   
   override def deserialize(json: String): Element = { json.asJson.convertTo[Element] }
  

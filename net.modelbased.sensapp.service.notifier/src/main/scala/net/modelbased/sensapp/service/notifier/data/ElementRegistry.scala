@@ -35,8 +35,9 @@ class SubscriptionRegistry extends DataStore[Subscription]  {
 
   override val databaseName = "sensapp_db"
   override val collectionName = "notifications" 
+  override val key = "sensor"
     
-  override def identify(e: Subscription) = ("sensor", e.sensor)
+  override def getIdentifier(e: Subscription) = e.sensor
   
   override def deserialize(json: String): Subscription = { json.asJson.convertTo[Subscription] }
  

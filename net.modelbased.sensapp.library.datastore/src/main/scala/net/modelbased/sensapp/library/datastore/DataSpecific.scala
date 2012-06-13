@@ -53,6 +53,11 @@ abstract trait DataSpecific[T] {
   protected val collectionName: String
   
   /**
+   * The "colum" name to be used in the database to index the content
+   */
+  protected val key: String
+  
+  /**
    * This operation deserialize an object retrieved from the DB into an 
    * instance of T
    * 
@@ -78,6 +83,12 @@ abstract trait DataSpecific[T] {
   protected type Criterion = (String, Any)
   
   /**
+   * Compute a value that, when combined with "this.key", builds a Criteria used 
+   * to UNIQUELY IDENTIFY an object.
+   */
+  protected def getIdentifier(obj: T): Any
+  
+  /**
    * Compute a criteria used to UNIQUELY IDENTIFY an object. The DataStore
    * framework STRONGLY assumes that two different objects will return two
    *  different criteria through this method.
@@ -85,5 +96,5 @@ abstract trait DataSpecific[T] {
    *  @param obj the instance of T to be identified
    *  @return a UNIQUE criteria used to identify this object
    */
-  protected def identify(obj: T): Criterion
+   final def identify(obj: T): Criterion = (this.key, getIdentifier(obj))
 }

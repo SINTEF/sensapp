@@ -96,25 +96,28 @@ trait RawDatabaseService extends SensAppService {
 	        content(as[SearchRequest]) { request => context =>
 	          val from = buildTimeStamp(request.from)
 	          val to = buildTimeStamp(request.to)
+	          val sort = request.sorted.getOrElse(false)
 	          val existing = request.sensors.par.filter{ _backend exists(_) }
-	          context complete (_backend get(existing.seq, from, to))
+	          context complete (_backend get(existing.seq, from, to, sort))
 	        }
 	      } ~ cors("POST")
 	    } ~
 	    path("databases" / "raw" / "data" / SenMLStd.NAME_VALIDATOR.r ) { name => 
 	      get { 
-	        parameters("from", "to" ? "now") { (from, to) => context =>
+	        parameters("from", "to" ? "now", "sorted" ? false) { (from, to, sorted) => context =>
 	          ifExists(context, name, {
-	            val dataset = _backend get(name, buildTimeStamp(from), buildTimeStamp(to))
+	            val dataset = _backend get(name, buildTimeStamp(from), buildTimeStamp(to), sorted)
 	            context complete dataset
 	          })
 	        } 
 	      } ~
-	      get { context =>
-	        ifExists(context, name, {
-	          val dataset = _backend get(name)
-	          context complete dataset
-	        })
+	      get { 
+	        parameters("limit" ? -1) { limit => context => 
+	          ifExists(context, name, {
+	            val dataset = _backend get(name, limit)
+	            context complete dataset
+	          })
+	        }
 	      } ~
 	      put { 
 	        content(as[SenMLRoot]) { raw => context =>
