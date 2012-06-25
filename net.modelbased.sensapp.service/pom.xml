@@ -22,7 +22,6 @@
     <module>../net.modelbased.sensapp.service.registry</module>
     <module>../net.modelbased.sensapp.service.dispatch</module>
     <module>../net.modelbased.sensapp.service.notifier</module>
-    <module>../net.modelbased.sensapp.service.converter</module>
   </modules>
     
   <dependencies>
