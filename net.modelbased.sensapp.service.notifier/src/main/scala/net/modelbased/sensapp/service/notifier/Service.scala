@@ -56,11 +56,15 @@ trait Service extends SensAppService {
       } ~ cors("PUT")
     } ~ 
     path("notification" / "registered" ) {
-      get { context =>
-        val uris = (_registry retrieve(List())) map { s => 
-          URLHandler.build(context, "/notification/registered/" + s.sensor).toString
+      get { 
+        parameter("flatten" ? false) { flatten =>  context =>
+          val data = (_registry retrieve(List()))
+          if (flatten) {
+            context complete data
+          } else {
+            context complete (data map { s => URLHandler.build(context, "/notification/registered/" + s.sensor)})
+          }
         }
-        context complete uris
       } ~
       post {
         content(as[Subscription]) { subscription => context =>
