@@ -114,6 +114,9 @@ case class CompositeSensorDescription(
 
   
 case class DescriptionUpdate(val description: String) 
+case class SensorList(val sensors: List[String])
+case class SensorTags(val tags: Map[String, String])
+
   
 /**
  *  Json protocols to support serialization through spray-json 
@@ -127,5 +130,7 @@ object ElementJsonProtocol extends DefaultJsonProtocol {
   implicit val creationRequest = jsonFormat(CreationRequest, "id", "descr", "schema")
   implicit val compositeSensorDescription = jsonFormat(CompositeSensorDescription, "id", "descr", "tags", "sensors")
   implicit val descriptionUpdate = jsonFormat(DescriptionUpdate, "descr")
+  implicit val sensorList = jsonFormat(SensorList,"sensors")
+  implicit val sensorTags = jsonFormat(SensorTags, "tags")
 }
 

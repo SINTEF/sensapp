@@ -85,7 +85,8 @@ trait RegistryService extends SensAppService {
         content(as[SensorInformation]) { info => context =>
           ifExists(context, name, {
             val sensor = (_registry pull ("id", name)).get
-            sensor.infos = info
+            val safe = SensorInformation(info.tags.filter( t => t._1 != "" ), info.updateTime, info.localization)
+            sensor.infos = safe
             _registry push sensor
             context complete sensor
           })

@@ -70,18 +70,18 @@ trait CompositeRegistryService extends SensAppService {
         })
       } ~
       put {
-        content(as[Seq[String]]) { sensors => context =>
+        content(as[SensorList]) { sensorList => context =>
           ifExists(context, name, {
             val sensor = (_registry pull ("id", name)).get
-            sensor.sensors = sensors
+            sensor.sensors = sensorList.sensors
             _registry push sensor
             context complete sensor
           })
         } ~
-        content(as[Map[String, String]]) { tags => context =>
+        content(as[SensorTags]) { tags => context =>
           ifExists(context, name, {
             val sensor = (_registry pull ("id", name)).get
-            sensor.tags = Some(tags)
+            sensor.tags = Some(tags.tags.filter( t => t._1 != "" ))
             _registry push sensor
             context complete sensor
           })
