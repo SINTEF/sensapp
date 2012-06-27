@@ -40,7 +40,7 @@ case class CreationRequest (val sensor: String, val baseTime: Long, val schema: 
  * @param from lower bound of the search interval 
  * @param to upper bound of the search interval 
  */
-case class SearchRequest(val sensors: Seq[String], val from: String, val to: String, val sorted: Option[String])
+case class SearchRequest(val sensors: Seq[String], val from: String, val to: String, val sorted: Option[String], limit: Option[Int])
 
 /**
  * Description of the database associated to a given sensor
@@ -56,6 +56,6 @@ case class SensorDatabaseDescriptor(val sensor: String, val schema: String, val 
  */
 object RequestsProtocols extends DefaultJsonProtocol {
   implicit val creationRequest = jsonFormat(CreationRequest,"sensor", "baseTime", "schema")
-  implicit val searchRequest = jsonFormat(SearchRequest, "sensors", "from", "to", "sorted")
+  implicit val searchRequest = jsonFormat(SearchRequest, "sensors", "from", "to", "sorted", "limit")
   implicit val sensorDatabaseDescriptor = jsonFormat(SensorDatabaseDescriptor,"sensor", "schema", "size", "data_lnk")
 }
