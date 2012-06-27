@@ -73,7 +73,7 @@ object Dispatch extends HttpSpraySupport with io.Marshaller {
       val pipeline = simpleRequest[Root] ~> sendReceive ~> unmarshal[String]
     }
     // Asynchronous notification
-    conduit.pipeline(Put("/notifier", Some(root)))
+    conduit.pipeline(Put("/sensapp/notifier", Some(root)))
       .onSuccess { case x => conduit.close() }
       .onFailure { 
         case e => {

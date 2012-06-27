@@ -52,7 +52,7 @@ object LocalCache extends HttpSpraySupport with SprayJsonSupport {
     val conduit = new HttpConduit(httpClient, registry._1, registry._2) {
       val pipeline = simpleRequest ~> sendReceive ~> unmarshal[String]
     }
-    val response = conduit.pipeline(Get("/registry/sensors/"+sensor, None))
+    val response = conduit.pipeline(Get("/sensapp/registry/sensors/"+sensor, None))
     val data = Await.result(response, 5 seconds).asJson
 	conduit.close()
     val descr = data.asJsObject.getFields("backend")(0).asJsObject.getFields("dataset", "kind")

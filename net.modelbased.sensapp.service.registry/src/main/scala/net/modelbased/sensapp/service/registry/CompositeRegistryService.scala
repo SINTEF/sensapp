@@ -32,7 +32,7 @@ import net.modelbased.sensapp.service.registry.data.ElementJsonProtocol._
 
 trait CompositeRegistryService extends SensAppService {
   
-  override lazy val name = "registry.composite"
+  override implicit lazy val partnerName = "registry.composite"
     
   val service = {
     path("registry" / "composite" / "sensors") {
@@ -42,7 +42,7 @@ trait CompositeRegistryService extends SensAppService {
           if (flatten) {
             context complete descriptors.seq
           } else {
-            val uris = descriptors map { s => URLHandler.build(context, context.request.path  + "/"+ s.id).toString }
+            val uris = descriptors map { s => URLHandler.build("/registry/composite/sensors/"+ s.id) }
             context complete uris.seq
           }
         } 
@@ -53,7 +53,7 @@ trait CompositeRegistryService extends SensAppService {
             context fail (StatusCodes.Conflict, "A CompositeSensorDescription identified as ["+ request.id +"] already exists!")
           } else {
             _registry push (request)
-            context complete URLHandler.build(context, context.request.path  + "/" + request.id).toString
+            context complete URLHandler.build("/registry/composite/sensors/"+ request.id)
           }
         }
       } ~ cors("GET", "POST")

@@ -61,8 +61,8 @@ Contact: Sebastien Mosser <Sebastien.Mosser@sintef.no>
   println(headers)  
   
   val actors = (services.par map { s: Service =>
-      val ref = system.actorOf(props = Props(new HttpService(s.wrappedService)), name = s.name)
-      system.log.info("Service {} -> {}", Array(s.name, ref.toString))
+      val ref = system.actorOf(props = Props(new HttpService(s.wrappedService)), name = s.partnerName)
+      system.log.info("Service {} -> {}", Array(s.partnerName, ref.toString))
       ref
   }).seq
  

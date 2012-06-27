@@ -40,7 +40,7 @@ trait Service extends SensAppService {
   
   import SenMLProtocol._
   
-  override lazy val name = "notifier"
+  override implicit lazy val partnerName = "notifier"
     
   val service = {
     path("notifier") {
@@ -62,7 +62,7 @@ trait Service extends SensAppService {
           if (flatten) {
             context complete data
           } else {
-            context complete (data map { s => URLHandler.build(context, "/notification/registered/" + s.sensor)})
+            context complete (data map { s => URLHandler.build("/notification/registered/" + s.sensor) })
           }
         }
       } ~
@@ -72,7 +72,7 @@ trait Service extends SensAppService {
             context fail (StatusCodes.Conflict, "A Subscription identified by ["+ subscription.sensor +"] already exists!")
           } else {
             _registry push subscription
-            context complete (StatusCodes.Created, URLHandler.build(context, "/notification/registered/" + subscription.sensor).toString)
+            context complete (StatusCodes.Created, URLHandler.build("/notification/registered/" + subscription.sensor))
           }
         }
       } ~ cors("GET", "POST")

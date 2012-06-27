@@ -35,7 +35,7 @@ import net.modelbased.sensapp.service.sample.data.ElementJsonProtocol.format
 import net.modelbased.sensapp.library.system.{Service => SensAppService, URLHandler} 
 
 trait Service extends SensAppService {
-  override lazy val name = "sample"
+  override implicit lazy val partnerName = "sample"
   
   
     
@@ -77,7 +77,7 @@ trait Service extends SensAppService {
   
   private[this] val _registry = new ElementRegistry()
   
-  private def buildUrl(ctx: RequestContext, e: Element) = { URLHandler.build(ctx, ctx.request.path  + "/"+ e.key)  }
+  private def buildUrl(ctx: RequestContext, e: Element) = { URLHandler.build("sample/element/"+ e.key)  }
   
   private def handle(ctx: RequestContext, key: Int, action: Element => Unit) = {
     _registry pull(("key", key)) match {

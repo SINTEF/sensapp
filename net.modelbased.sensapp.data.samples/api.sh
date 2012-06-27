@@ -1,8 +1,8 @@
 #!/bin/bash
 
-SENSAPP_REGISTRY="http://localhost:8080"
-SENSAPP_DATABASE_RAW="http://localhost:8080"
-SENSAPP_DISPATCH="http://localhost:8080"
+SENSAPP_REGISTRY="http://localhost:8080/sensapp"
+SENSAPP_DATABASE_RAW="http://localhost:8080/sensapp"
+SENSAPP_DISPATCH="http://localhost:8080/sensapp"
 
 ###             ###
 # Sensor Registry #

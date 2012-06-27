@@ -35,7 +35,7 @@ import cc.spray.json.DefaultJsonProtocol._
 
 trait RawDatabaseService extends SensAppService {
 
-  override val name = "database.raw"
+  override implicit val partnerName = "database.raw"
     
   private[this] val _backend: Backend = new MongoDB()
    
@@ -46,10 +46,10 @@ trait RawDatabaseService extends SensAppService {
       get { 
         parameter("flatten" ? false) { flatten => context =>
             if (!flatten) {
-              val uris = _backend.content map { s => URLHandler.build(context, context.request.path  + "/"+ s).toString }
+              val uris = _backend.content map { s => URLHandler.build("/databases/raw/sensors/"+ s).toString }
 	          context complete uris
             } else {
-              val dataset = _backend.content map { s => _backend.describe(s, URLHandler.build(context,"/databases/raw/data/").toString).get }
+              val dataset = _backend.content map { s => _backend.describe(s, URLHandler.build("/databases/raw/sensors/").toString).get }
               context complete dataset
             }
         }
@@ -60,7 +60,7 @@ trait RawDatabaseService extends SensAppService {
             context fail (StatusCodes.Conflict, "A sensor database identified as ["+ req.sensor +"] already exists!")
           } else {
             _backend create req
-            context complete(StatusCodes.Created, URLHandler.build(context,context.request.path  + "/"+ req.sensor).toString )
+            context complete(StatusCodes.Created, URLHandler.build("/databases/raw/sensors/"+ req.sensor).toString )
           }
         }
       } ~ cors("GET", "POST")
@@ -68,7 +68,7 @@ trait RawDatabaseService extends SensAppService {
     path("databases" / "raw" / "sensors" / SenMLStd.NAME_VALIDATOR.r ) { name => 
       get { context => 
         ifExists(context, name, {
-          val description = _backend describe(name, URLHandler.build(context,"/databases/raw/data/").toString)
+          val description = _backend describe(name, URLHandler.build("/databases/raw/data/").toString)
           context complete description
         })
       } ~

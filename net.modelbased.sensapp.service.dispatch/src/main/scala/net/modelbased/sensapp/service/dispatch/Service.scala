@@ -33,7 +33,7 @@ trait Service extends SensAppService {
   
   import SenMLProtocol._
   
-  override lazy val name = "dispatch"
+  override lazy val partnerName = "dispatch"
   override lazy val partnersNames = List("database.raw", "registry", "notifier")
     
   val service = {

@@ -37,9 +37,9 @@ import net.modelbased.sensapp.service.registry.data.Backend
 
 trait RegistryService extends SensAppService {
   
-  override lazy val name = "registry"
+  override implicit lazy val partnerName = "registry"
   
-  override lazy val partnersNames = List("database.raw")
+  override implicit lazy val partnersNames = List("database.raw")
     
   val service = {
     path("registry" / "sensors") {
@@ -49,7 +49,7 @@ trait RegistryService extends SensAppService {
           if (flatten) {
             context complete descriptors.seq
           } else {
-            val uris = descriptors map { s => URLHandler.build(context, context.request.path  + "/"+ s.id).toString }
+            val uris = descriptors map { s => URLHandler.build("/registry/sensors/"+ s.id) }
             context complete uris.seq
           }
         } 
@@ -63,7 +63,7 @@ trait RegistryService extends SensAppService {
             val backend = createDatabase(request.id, request.schema)
             // Store the descriptor
             _registry push (request.toDescription(backend))
-            context complete URLHandler.build(context, context.request.path  + "/" + request.id).toString
+            context complete URLHandler.build("/registry/sensors/" + request.id)
           }
         }
       } ~ cors("GET", "POST")
@@ -76,7 +76,7 @@ trait RegistryService extends SensAppService {
         ifExists(context, name, {
           val sensor = _registry pull ("id", name)
           delDatabase(name)
-          propagateDeletionToComposite(URLHandler.build(context, context.request.path  + "/"+ sensor))
+          propagateDeletionToComposite(URLHandler.build("/registry/sensors/" + sensor))
           _registry drop sensor.get
           context complete "true"
         })

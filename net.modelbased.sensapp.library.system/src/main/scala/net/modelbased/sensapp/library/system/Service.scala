@@ -39,8 +39,8 @@ trait Service extends Directives with  io.Marshaller with io.Unmarshaller with S
    ** To be filled by service developers **
    ****************************************/
   
-  val partners: PartnerHandler                  // By default, we consider all the service on the same server
-  val name: String                              // the name of the service (to be used in the PartnerHandler)
+  implicit val partners: PartnerHandler                  // By default, we consider all the service on the same server
+  implicit val partnerName: String                     // the name of the service (to be used in the PartnerHandler)
   val service: RequestContext => Unit           // The actual service, described with the Spray DSL
   lazy val partnersNames: List[String] = List() // the partners required by this service
   
@@ -86,8 +86,8 @@ trait Service extends Directives with  io.Marshaller with io.Unmarshaller with S
   private[this] def loadPartners() {
     partnersNames.foreach { n =>
       val p = partners(n)
-      require(p != None, "Unknowm partner: [" + n + "] for service ["+name+"]")
-      println("  # %s/%s --> %s:%s".format(name, n, p.get._1, p.get._2))
+      require(p != None, "Unknowm partner: [" + n + "] for service ["+partnerName+"]")
+      println("  # %s/%s --> %s:%s".format(partnerName, n, p.get._1, p.get._2))
     }
   }
   loadPartners()  

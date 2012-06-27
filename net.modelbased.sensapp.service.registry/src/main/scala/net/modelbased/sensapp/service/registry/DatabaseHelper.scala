@@ -94,13 +94,14 @@ object BackendHelper {
 	  val conduit = new HttpConduit(httpClient, partner._1, partner._2) {
 	    val pipeline = simpleRequest[CreationRequest] ~> sendReceive ~> unmarshal[String]
 	  }
-	  val response = conduit.pipeline(Post("/databases/raw/sensors", Some(buildRequest(id, schema))))
+	  val response = conduit.pipeline(Post("/sensapp/databases/raw/sensors", Some(buildRequest(id, schema))))
 	  val descriptorUrl = Await.result(response, 5 seconds) // synchronous call
 	  conduit.close()
 	  (descriptorUrl, getDataBackend(descriptorUrl, partner))
 	}
 	
 	private def getDataBackend(descrUrl: String, partner: (String, Int)): String = {
+	  println("XXX\n\n" + descrUrl + "\n\nXXX")
 	  val conduit = new HttpConduit(httpClient, partner._1, partner._2) {
 	    val pipeline = simpleRequest ~> sendReceive ~> unmarshal[String]
 	  }
