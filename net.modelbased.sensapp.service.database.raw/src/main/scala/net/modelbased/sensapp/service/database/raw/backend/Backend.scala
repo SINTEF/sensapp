@@ -88,7 +88,7 @@ abstract trait Backend extends BackendStructure {
    * @param sensor the sensor identifier to be used
    * @return a SenML Root object
    */
-  def get(sensor: String, sorted: Boolean): Root
+  def get(sensor: String, sorted: String): Root
   
   /**
    * Retrieve the data associated to a given sensor for a given interval
@@ -97,7 +97,7 @@ abstract trait Backend extends BackendStructure {
    * @param to upper bound time stamp (seconds since EPOCH) 
    * @return a SenML Root object
    */
-  def get(sensor: String, from: Long, to: Long, sorted: Boolean): Root
+  def get(sensor: String, from: Long, to: Long, sorted: String): Root
   
   /**
    * Retrieve the data associated to a set of sensors for a given interval
@@ -106,7 +106,7 @@ abstract trait Backend extends BackendStructure {
    * @param to upper bound time stamp (seconds since EPOCH) 
    * @return a SenML Root object
    */
-  def get(sensor: Seq[String], from: Long, to: Long, sorted: Boolean): Root
+  def get(sensor: Seq[String], from: Long, to: Long, sorted: String): Root
   
   /**
    * Retrieve a sorted subset of the data associated to a given sensor

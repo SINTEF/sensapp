@@ -114,30 +114,36 @@ class MongoDB extends Backend {
     }
   }
   
-  def get(sensor: String, sorted: Boolean): Root = {
+  def get(sensor: String, sorted: String): Root = {
     val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
     val query = MongoDBObject("s" -> sensor)
-    val raw = if (sorted) {
-        data.ensureIndex("t")
-        data.find(query) $orderby(MongoDBObject("t" -> 1))
-      }
-      else
-        data.find(query)
+    val raw = sorted match {
+      case "none" => data.find(query)
+      case "asc"  => { data.ensureIndex("t"); data.find(query) $orderby(MongoDBObject("t" -> 1)) }
+      case "desc" => { data.ensureIndex("t"); data.find(query) $orderby(MongoDBObject("t" -> -1)) }
+    }
     val sensorData = raw.map{ dbobj2data(sensorMetaData.schema,_) }
     buildSenML(sensorMetaData, sensorData.toList)
   }
   
-  def get(sensor: String, from: Long, to: Long, sorted: Boolean): Root = {
+  def get(sensor: String, from: Long, to: Long, sorted: String): Root = {
     val sensorMetaData = dbobj2metadata(metadata.findOne(MongoDBObject("s" -> sensor)).get)
     val shiftedFrom = from - sensorMetaData.timestamp
     val shiftedTo = to - sensorMetaData.timestamp
     val query: DBObject = ("t" $lte shiftedTo $gte shiftedFrom) ++ ("s" -> sensor)
-    val raw = if (sorted){data.ensureIndex("t"); data.find(query) $orderby(MongoDBObject("t" -> 1))} else data.find(query)
+    
+    val raw = sorted match {
+      case "none" => data.find(query)
+      case "asc"  => { data.ensureIndex("t"); data.find(query) $orderby(MongoDBObject("t" -> 1)) }
+      case "desc" => { data.ensureIndex("t"); data.find(query) $orderby(MongoDBObject("t" -> -1)) }
+    }
+    
+    
     val sensorData = raw.map{ dbobj2data(sensorMetaData.schema,_) }
     buildSenML(sensorMetaData, sensorData.toList)
   }
   
-  def get(sensors: Seq[String], from: Long, to: Long, sorted: Boolean): Root = { 
+  def get(sensors: Seq[String], from: Long, to: Long, sorted: String): Root = { 
     val all = sensors.par.map { s => this get(s,from, to, sorted) }
     val data = all.map{r => r.canonized.measurementsOrParameters}
           		  .filter{ mop => mop != None }

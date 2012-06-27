@@ -40,7 +40,7 @@ case class CreationRequest (val sensor: String, val baseTime: Long, val schema: 
  * @param from lower bound of the search interval 
  * @param to upper bound of the search interval 
  */
-case class SearchRequest(val sensors: Seq[String], val from: String, val to: String, val sorted: Option[Boolean])
+case class SearchRequest(val sensors: Seq[String], val from: String, val to: String, val sorted: Option[String])
 
 /**
  * Description of the database associated to a given sensor
