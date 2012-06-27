@@ -101,7 +101,6 @@ object BackendHelper {
 	}
 	
 	private def getDataBackend(descrUrl: String, partner: (String, Int)): String = {
-	  println("XXX\n\n" + descrUrl + "\n\nXXX")
 	  val conduit = new HttpConduit(httpClient, partner._1, partner._2) {
 	    val pipeline = simpleRequest ~> sendReceive ~> unmarshal[String]
 	  }

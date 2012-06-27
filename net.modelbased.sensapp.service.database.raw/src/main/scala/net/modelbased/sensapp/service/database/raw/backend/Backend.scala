@@ -82,19 +82,14 @@ abstract trait Backend extends BackendStructure {
    * @param data the data set to be loaded (constraints: unique timestamp)
    */
   def importer(data: Root)
-  
-  /**
-   * Retrieve **ALL** the data associated to a given sensor
-   * @param sensor the sensor identifier to be used
-   * @return a SenML Root object
-   */
-  //def get(sensor: String, sorted: String): Root
+
   
   /**
    * Retrieve the data associated to a given sensor for a given interval
    * @param sensor the sensor identifier to be used
    * @param from lower bound time stamp (seconds since EPOCH) 
    * @param to upper bound time stamp (seconds since EPOCH) 
+   * @param limit the maximum number of measure
    * @return a SenML Root object
    */
   def get(sensor: String, from: Long, to: Long, sorted: String, limit: Int): Root
@@ -104,25 +99,10 @@ abstract trait Backend extends BackendStructure {
    * @param sensors the sensor identifiers to be used
    * @param from lower bound time stamp (seconds since EPOCH) 
    * @param to upper bound time stamp (seconds since EPOCH) 
+   * @param limit the maximum number of measure
    * @return a SenML Root object
    */
   def get(sensor: Seq[String], from: Long, to: Long, sorted: String, limit: Int): Root
-  
-  /**
-   * Retrieve a sorted subset of the data associated to a given sensor
-   * @param sensor the sensor identifier to be used
-   * @param limit the maximum number of measure (will return the "last" ones) 
-   * @return a SenML Root object
-   */
-  //def get(sensor: String, limit: Int): Root
-  
-  /**
-   * Retrieve a subset of the data associated to a set of sensors
-   * @param sensor the sensor identifier to be used
-   * @param limit the maximum number of measure   (will return the "last" ones) 
-   * @return a SenML Root object
-   */
-  //def get(sensor: Seq[String], limit: Int): Root
   
   /**
    * return the raw database schema associated to a given sensor
