@@ -26,23 +26,14 @@ import cc.spray.RequestContext
 
 object URLHandler {
 
-  
-  
   def build(path: String)(implicit partnerName: String, partners: PartnerHandler): String = {
     val data = partners(partnerName).get
+    if ((data._1 == "localhost" || data._1 == "127.0.0.1") && data._2 == 8080)
+      "/sensapp" + path
+    else
     new java.net.URL("http", data._1, data._2, "/sensapp" + path).toString
   }
-  
-  /*
-  def build(ctx: RequestContext, path: String): String = {
-    val host = ctx.request.host
-    val port = ctx.request.port.getOrElse(8080)
-    if (host == "localhost" && port == 8080)
-      path
-    else 
-      new java.net.URL("http", host, port, path).toString
-  }*/
-  
+    
   def extract(str: String): ((String, Int),String) = {
     val url = new java.net.URL(str)
     val host = url.getHost
