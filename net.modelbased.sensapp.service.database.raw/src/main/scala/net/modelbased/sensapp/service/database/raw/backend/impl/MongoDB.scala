@@ -122,8 +122,8 @@ class MongoDB extends Backend {
        
     val raw = sorted match {
       case "none" => data.find(query)
-      case "asc"  => { data.ensureIndex("t"); data.find(query) $orderby(MongoDBObject("t" -> 1)) }
-      case "desc" => { data.ensureIndex("t"); data.find(query) $orderby(MongoDBObject("t" -> -1)) }
+      case "asc"  => { println("asc"); data.find(query).sort(MongoDBObject("t" -> 1)) }
+      case "desc" => { println("desc"); data.find(query).sort(MongoDBObject("t" -> -1))}
     }
     
     val limited = if (limit > 0) raw.limit(limit) else raw

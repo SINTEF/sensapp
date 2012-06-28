@@ -128,6 +128,7 @@ trait DataStoreOperations[T] extends DataSpecific[T] {
     val conn = MongoConnection()
     val db = conn(databaseName)
     val col = db(collectionName)
+    col.ensureIndex(key)
     col
   }
   
