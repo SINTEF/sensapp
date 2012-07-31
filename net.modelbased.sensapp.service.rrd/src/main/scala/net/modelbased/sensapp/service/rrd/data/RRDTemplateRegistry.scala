@@ -41,6 +41,7 @@ class RRDTemplateRegistry extends DataStore[RRDTemplate]  {
 
   override val databaseName = "sensapp_db"
   override val collectionName = "rrd.templates"
+  override val key = "key"
 
   def populateDB() = {
      // getClass.getResource("/resources/rrd_templates").g
@@ -55,7 +56,9 @@ class RRDTemplateRegistry extends DataStore[RRDTemplate]  {
   }
 
     
-  override def identify(e: RRDTemplate) = ("key", e.key)
+  override def getIdentifier(e: RRDTemplate) = {
+     e.key
+  }
   
   override def deserialize(json: String): RRDTemplate = { json.asJson.convertTo[RRDTemplate] }
  

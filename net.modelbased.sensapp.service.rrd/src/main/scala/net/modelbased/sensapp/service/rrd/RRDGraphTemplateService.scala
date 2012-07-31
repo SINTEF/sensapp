@@ -39,7 +39,9 @@ import net.modelbased.sensapp.library.system.{Service => SensAppService}
 
 
 trait RRDGraphTemplateService extends SensAppService {
-  
+
+  override implicit val partnerName = "database.rrd.graph.template"
+
   val service = {
     path("rrd" / "graphtemplates") {
       get { context =>

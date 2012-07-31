@@ -36,6 +36,8 @@ import net.modelbased.sensapp.service.rrd.data.RRDJsonProtocol._
 import net.modelbased.sensapp.library.system.{Service => SensAppService}
 
 trait RRDTemplateService extends SensAppService {
+
+  override implicit val partnerName = "database.rrd.template"
   
   val service = {
     path("rrd" / "templates") {

@@ -84,7 +84,7 @@ object ImageMarshalling extends ImageMarshalling
 
 trait RRDBaseService extends SensAppService {
 
-  /**/
+  override implicit val partnerName = "database.rrd"
 
   private[this] val _registry = new RRDBaseRegistry()
 

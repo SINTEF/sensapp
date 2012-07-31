@@ -25,6 +25,8 @@ package net.modelbased.sensapp.service.rrd.data
 import cc.spray.json._
 import net.modelbased.sensapp.library.datastore._
 import net.modelbased.sensapp.service.rrd.data.RRDJsonProtocol._
+import io.BytePickle.Def
+
 /**
  * Persistence layer associated to the RRDTemplate class
  * 
@@ -34,6 +36,7 @@ class RRDGraphTemplateRegistry extends DataStore[RRDGraphTemplate]  {
 
   override val databaseName = "sensapp_db"
   override val collectionName = "rrd.graphtemplates"
+  override val key = "key"
 
   def populateDB() = {
      // getClass.getResource("/resources/rrd_templates").g
@@ -47,8 +50,9 @@ class RRDGraphTemplateRegistry extends DataStore[RRDGraphTemplate]  {
     }
   }
 
-    
-  override def identify(e: RRDGraphTemplate) = ("key", e.key)
+  override def getIdentifier(e: RRDGraphTemplate) = {
+     e.key
+  }
   
   override def deserialize(json: String): RRDGraphTemplate = { json.asJson.convertTo[RRDGraphTemplate] }
  

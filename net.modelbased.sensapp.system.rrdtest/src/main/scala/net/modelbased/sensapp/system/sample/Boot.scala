@@ -25,7 +25,19 @@ package net.modelbased.sensapp.system.sample
 import net.modelbased.sensapp.service.sample.{Service => SampleService}
 import net.modelbased.sensapp.library.system._
 import net.modelbased.sensapp.service.rrd._
+import akka.actor.ActorSystem
 
-class Boot extends System {
-  def services = List(new RRDTemplateService(){}, new RRDBaseService(){})
+class Boot(override val system: ActorSystem) extends System {
+
+  // "injection of dependency" to propagate the current actorSystem
+  trait iod {
+    lazy val partners = new Monolith { implicit val actorSystem = system }
+    implicit def actorSystem = system
+  }
+
+  def services = {
+    List(new RRDTemplateService with iod {},
+         new RRDBaseService    with iod {} )
+  }
+
 }
