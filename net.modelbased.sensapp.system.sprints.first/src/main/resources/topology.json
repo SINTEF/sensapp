@@ -1,14 +1,10 @@
 {
-  "nodes": [
-    { "name": "local", "srv": "10.218.148.121", "port": 8080 },
-    { "name": "front", "srv": "ec2-79-125-77-157.eu-west-1.compute.amazonaws.com", "port": 8080},
-    { "name": "back",  "srv": "ec2-46-51-166-95.eu-west-1.compute.amazonaws.com",  "port": 8080}
-  ],
+  "nodes": [ { "name": "sintef-aws", "srv": "54.247.172.50", "port": 80 } ],
   "deployment": [
-  	{ "service": "database.raw", "node": "local" },
-  	{ "service": "dispatch",     "node": "local" },
-  	{ "service": "notifier",     "node": "local" },
-  	{ "service": "registry",     "node": "local" },
-  	{ "service": "registry.composite",     "node": "local" }
+  	{ "service": "database.raw", "node": "sintef-aws" },
+  	{ "service": "dispatch",     "node": "sintef-aws" },
+  	{ "service": "notifier",     "node": "sintef-aws" },
+  	{ "service": "registry",     "node": "sintef-aws" },
+  	{ "service": "registry.composite",     "node": "sintef-aws" }
   ]
 }
