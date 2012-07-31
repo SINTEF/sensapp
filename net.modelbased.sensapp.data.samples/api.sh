@@ -1,8 +1,11 @@
 #!/bin/bash
 
-SENSAPP_REGISTRY="http://localhost:8080/sensapp"
-SENSAPP_DATABASE_RAW="http://localhost:8080/sensapp"
-SENSAPP_DISPATCH="http://localhost:8080/sensapp"
+SRV="54.247.172.50"
+HOST=80
+
+SENSAPP_REGISTRY="http://$SRV:$HOST/sensapp"
+SENSAPP_DATABASE_RAW="http://$SRV:$HOST/sensapp"
+SENSAPP_DISPATCH="http://$SRV:$HOST/sensapp"
 
 ###             ###
 # Sensor Registry #

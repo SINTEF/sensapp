@@ -28,7 +28,7 @@ object URLHandler {
 
   def build(path: String)(implicit partnerName: String, partners: PartnerHandler): String = {
     val data = partners(partnerName).get
-    if ((data._1 == "localhost" || data._1 == "127.0.0.1") && data._2 == 8080)
+    if (data._1 == "localhost" && data._2 == 8080)
       "/sensapp" + path
     else
     new java.net.URL("http", data._1, data._2, "/sensapp" + path).toString

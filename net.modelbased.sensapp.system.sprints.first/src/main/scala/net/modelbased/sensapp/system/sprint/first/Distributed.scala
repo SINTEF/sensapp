@@ -24,11 +24,31 @@ package net.modelbased.sensapp.system.sprint.first
 
 import akka.actor.ActorSystem
 import net.modelbased.sensapp.service.database.raw.RawDatabaseService
-import net.modelbased.sensapp.service.registry.RegistryService
+import net.modelbased.sensapp.service.registry.{ RegistryService, CompositeRegistryService }
 import net.modelbased.sensapp.service.dispatch.{ Service => DispatchService }
 import net.modelbased.sensapp.service.notifier.{ Service => NotifierService }
 import net.modelbased.sensapp.library.system._ 
 
+class Absolute(override val system: ActorSystem) extends System {
+     
+  // "injection of dependency" to propagate the current actorSystem
+  trait iod { 
+    lazy val partners = new TopologyFileBasedDistribution { implicit val actorSystem = system }
+    implicit def actorSystem = system 
+  }
+  
+  def services = {
+    List(new RawDatabaseService with iod {}, 
+         new RegistryService    with iod {},
+         new CompositeRegistryService with iod {},
+         new DispatchService    with iod {}, 
+         new NotifierService    with iod {})
+  }  
+}
+
+
+
+/*
 class BackEnd(override val system: ActorSystem) extends System {
   trait iod { 
     lazy val partners = new TopologyFileBasedDistribution { implicit val actorSystem = system }
@@ -49,5 +69,5 @@ class FrontEnd(override val system: ActorSystem) extends System {
   def services = {
     List(new RegistryService with iod {}, new NotifierService with iod {})
   }  
-}
+} */
 
