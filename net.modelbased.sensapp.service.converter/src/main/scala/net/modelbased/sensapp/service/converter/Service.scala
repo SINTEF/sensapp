@@ -58,7 +58,6 @@ trait Service extends SensAppService {
         }
       }
     }
-    
   }
   
   def parseCSV(request : CSVDescriptor) : Root = {
@@ -68,22 +67,24 @@ trait Service extends SensAppService {
       
     val dateFormat = new SimpleDateFormat(request.timestamp.format, new Locale(request.timestamp.locale))
       
-    val raw = myEntries.map{line =>
+    val raw = myEntries.toList.par.map{ line =>
       try {
         val timestamp = dateFormat.parse(line(request.timestamp.columnId)).getTime() / 1000
         println("Date: " + timestamp)
-        request.columns.map{col =>
+        val lineData = request.columns.map{col =>
           val data = line(col.columnId)
           println("  Data: " + data)
-          Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(data), None, None, Some(timestamp), None))
+          MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(data), None, None, Some(timestamp), None)
         }
+        Some(lineData)
       } catch {
-        case e : java.text.ParseException => println("Cannot parse timestamp, ignoring line")
+        case e : java.text.ParseException => {
+          println("Cannot parse timestamp, ignoring line")
           None
-      }      
-    }
+        }
+      }    
+    }.filter{ _.isDefined }.map{ _.get }.flatten
     
-    
-    Root(Some(request.name+"/"), None, None, None, None)
+    Root(Some(request.name+"/"), None, None, None, Some(raw.seq))
   }
 }
