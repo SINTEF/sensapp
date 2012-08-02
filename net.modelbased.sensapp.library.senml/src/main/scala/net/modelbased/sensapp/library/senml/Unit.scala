@@ -41,7 +41,9 @@ object IANA {
     "count" -> count,     "%RH" -> `%RH`,         "m2" -> area,   "l" -> volume, 
     "m/s" -> velocity,    "m/s2" -> acceleration, "l/s" -> flow, 
     "W/m2" -> irradiance, "cd/m2" -> luminance,   "Bspl" -> belSound,
-    "bit/s" -> bitrate,   "lat" -> lat,           "lon" -> lon, "%EL" -> `%EL`)
+    "bit/s" -> bitrate,   "lat" -> lat,           "lon" -> lon, "%EL" -> `%EL`,
+    "EL" -> EL, "beet/m" -> `beet/m`, "beets" -> beets, "g/km" -> `g/km`, "RPM" -> RPM
+  )
    
   def apply(s: String): Option[Unit] = { _definitions get(s) }  
     
@@ -89,4 +91,11 @@ object IANA {
   object lat          extends Unit("lat",   "degrees latitude, assumed to be in WGS84")
   object lon          extends Unit("lon",   "degrees longitude, assumed to be in WGS84")
   object `%EL`        extends Unit("%EL",   "remaining battery energy level in percents")
+  object EL        extends Unit("EL",   "remaining battery energy level in seconds")
+  object `beet/m`        extends Unit("beet/m",   "Heart rate in beets per minute")
+  object beets       extends Unit("beets",   "Cumulative number of heart beats")
+  
+  //The following units are not defined in SenML08. They however fall in the extension mechanism defined in SenML08.
+  object `g/km` extends Unit("g/km", "common measure for transportation pollution")
+  object RPM extends Unit("RPM", "Revolutions Per Minute")
 }

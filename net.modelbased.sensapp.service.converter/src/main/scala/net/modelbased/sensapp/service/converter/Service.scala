@@ -53,7 +53,6 @@ trait Service extends SensAppService {
       post {
         content(as[CSVDescriptor]) { request => context =>
           val status = parseCSV(request)
-          print(status)
           context complete status
         }
       }
@@ -66,34 +65,41 @@ trait Service extends SensAppService {
     val myEntries = reader.readAll();
       
     val dateFormat = new SimpleDateFormat(request.timestamp.format, new Locale(request.timestamp.locale))
-      
-    val raw = myEntries.toList.par.map{ line =>
-      println(line.mkString("[", ", ", "]"))
+         
+    val raw = myEntries.toList/*.par*/.map{ line =>
+      //println(line.mkString("[", ", ", "]"))
       try {
         val timestamp = dateFormat.parse(line(request.timestamp.columnId).trim).getTime() / 1000
-        println("Date: " + timestamp)
-        val lineData = request.columns.map{col =>
+        //println("Date: " + timestamp)
+        val lineData : List[MeasurementOrParameter] = request.columns.map{col =>
           val data = line(col.columnId)
-          println("  Data: " + data)
+          //println("  Data: " + data)
           
-          col.kind match {
-            case "number" =>  MeasurementOrParameter(Some(col.name), Some(col.unit), Some(data.toDouble), None, None, None, Some(timestamp), None)
-            case "string" =>  MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(data.trim), None, None, Some(timestamp), None)
-            case "boolean" =>  MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, Some(data.trim=="true"), None, Some(timestamp), None)
-            case "sum" =>  MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, None, Some(data.toDouble), Some(timestamp), None)
+          try {
+            col.kind match {
+              case "number" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), Some(data.toDouble), None, None, None, Some(timestamp), None))
+              case "string" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(data.trim), None, None, Some(timestamp), None))
+              case "boolean" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, Some(data.trim=="true"), None, Some(timestamp), None))
+              case "sum" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, None, Some(data.toDouble), Some(timestamp), None))
+              case _ => 
+                println("Kind does not exist, ignoring measurement " + col.name)
+                None
+            }
+          } catch {
+            case e : java.lang.NumberFormatException =>
+              println("Cannot parse value, ignoring measurement " + col.name)
+              None
           }
-          
-         
-        }
+        }.flatten
         Some(lineData)
       } catch {
-        case e : java.text.ParseException => {
-            println("Cannot parse timestamp, ignoring line")
-            None
-          }
+        case e : java.text.ParseException => 
+          println("Cannot parse timestamp, ignoring line")
+          None
       }    
-    }.filter{ _.isDefined }.map{ _.get }.flatten
+    }.flatten.flatten
     
+    println("Creating Root with " + raw.seq.size + " elements...")
     Root(Some(request.name+"/"), None, None, None, Some(raw.seq))
   }
 }
