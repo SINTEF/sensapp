@@ -20,7 +20,7 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.sample
+package net.modelbased.sensapp.service.converter
 
 import cc.spray._
 import cc.spray.http._
@@ -28,16 +28,23 @@ import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.directives._
 import cc.spray.typeconversion.SprayJsonSupport
-
+import net.modelbased.sensapp.service.converter.request._
+import net.modelbased.sensapp.service.converter.request.CSVDescriptorProtocols._
 
 import net.modelbased.sensapp.library.system.{Service => SensAppService} 
 
 trait Service extends SensAppService {
   
-  override implicit val partnerName = "service.sample"
+  override implicit val partnerName = "converter"
   
   val service = {
-    path("sample" / "elements") {
-      get { _ complete "foo" }
-    }}
+    path("converter" / "fromCSV") {
+      post {
+        content(as[CSVDescriptor]) { request => context =>
+          context complete request
+        }
+      }
+    }
+    
+  }
 }

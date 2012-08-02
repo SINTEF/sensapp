@@ -20,24 +20,22 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.sample
+package net.modelbased.sensapp.service.converter.request
 
-import cc.spray._
-import cc.spray.http._
 import cc.spray.json._
-import cc.spray.json.DefaultJsonProtocol._
-import cc.spray.directives._
-import cc.spray.typeconversion.SprayJsonSupport
+
+case class  CSVDescriptor(val sensor: String, 
+    val timestamp: TimeStampDescriptor, 
+    val columns: List[ColumnDescriptor],
+    val raw: String)
+
+case class TimeStampDescriptor(val format: String, val columnId: Int)
 
 
-import net.modelbased.sensapp.library.system.{Service => SensAppService} 
+case class ColumnDescriptor(val columnId: Int, val name: String, val unit: String)
 
-trait Service extends SensAppService {
-  
-  override implicit val partnerName = "service.sample"
-  
-  val service = {
-    path("sample" / "elements") {
-      get { _ complete "foo" }
-    }}
+object CSVDescriptorProtocols extends DefaultJsonProtocol {
+  implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "format", "colId")
+  implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit")
+  implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"sensor", "timestamp", "columns", "raw")
 }
