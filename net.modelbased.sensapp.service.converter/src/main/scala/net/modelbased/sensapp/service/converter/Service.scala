@@ -22,6 +22,7 @@
  */
 package net.modelbased.sensapp.service.converter
 
+import au.com.bytecode.opencsv.CSVReader
 import cc.spray._
 import cc.spray.http._
 import cc.spray.json._
@@ -31,7 +32,17 @@ import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.service.converter.request._
 import net.modelbased.sensapp.service.converter.request.CSVDescriptorProtocols._
 
+import java.io.StringReader
+import java.text.SimpleDateFormat
+import java.util.Locale
 import net.modelbased.sensapp.library.system.{Service => SensAppService} 
+
+import net.modelbased.sensapp.library.senml.Root
+import net.modelbased.sensapp.library.senml.MeasurementOrParameter
+import net.modelbased.sensapp.library.senml.export.JsonParser
+
+import scala.collection.JavaConversions._
+
 
 trait Service extends SensAppService {
   
@@ -41,10 +52,38 @@ trait Service extends SensAppService {
     path("converter" / "fromCSV") {
       post {
         content(as[CSVDescriptor]) { request => context =>
-          context complete request
+          val status = parseCSV(request)
+          print(status)
+          context complete status
         }
       }
     }
     
+  }
+  
+  def parseCSV(request : CSVDescriptor) : Root = {
+    
+    val reader : CSVReader = new CSVReader(new StringReader(request.raw), ',', '\\', 1);//skip headers
+    val myEntries = reader.readAll();
+      
+    val dateFormat = new SimpleDateFormat(request.timestamp.format, new Locale(request.timestamp.locale))
+      
+    val raw = myEntries.map{line =>
+      try {
+        val timestamp = dateFormat.parse(line(request.timestamp.columnId)).getTime() / 1000
+        println("Date: " + timestamp)
+        request.columns.map{col =>
+          val data = line(col.columnId)
+          println("  Data: " + data)
+          Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(data), None, None, Some(timestamp), None))
+        }
+      } catch {
+        case e : java.text.ParseException => println("Cannot parse timestamp, ignoring line")
+          None
+      }      
+    }
+    
+    
+    Root(Some(request.name+"/"), None, None, None, None)
   }
 }

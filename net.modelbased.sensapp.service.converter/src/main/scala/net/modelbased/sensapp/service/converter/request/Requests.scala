@@ -24,18 +24,18 @@ package net.modelbased.sensapp.service.converter.request
 
 import cc.spray.json._
 
-case class  CSVDescriptor(val sensor: String, 
+case class  CSVDescriptor(val name: String, 
     val timestamp: TimeStampDescriptor, 
     val columns: List[ColumnDescriptor],
     val raw: String)
 
-case class TimeStampDescriptor(val format: String, val columnId: Int)
+case class TimeStampDescriptor(val format: String, val locale : String, val columnId: Int)
 
 
 case class ColumnDescriptor(val columnId: Int, val name: String, val unit: String)
 
 object CSVDescriptorProtocols extends DefaultJsonProtocol {
-  implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "format", "colId")
+  implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "format", "locale", "colId")
   implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit")
   implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"sensor", "timestamp", "columns", "raw")
 }
