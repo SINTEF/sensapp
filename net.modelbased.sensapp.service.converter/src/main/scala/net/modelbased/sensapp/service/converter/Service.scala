@@ -68,20 +68,29 @@ trait Service extends SensAppService {
     val dateFormat = new SimpleDateFormat(request.timestamp.format, new Locale(request.timestamp.locale))
       
     val raw = myEntries.toList.par.map{ line =>
+      println(line.mkString("[", ", ", "]"))
       try {
-        val timestamp = dateFormat.parse(line(request.timestamp.columnId)).getTime() / 1000
+        val timestamp = dateFormat.parse(line(request.timestamp.columnId).trim).getTime() / 1000
         println("Date: " + timestamp)
         val lineData = request.columns.map{col =>
           val data = line(col.columnId)
           println("  Data: " + data)
-          MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(data), None, None, Some(timestamp), None)
+          
+          col.kind match {
+            case "number" =>  MeasurementOrParameter(Some(col.name), Some(col.unit), Some(data.toDouble), None, None, None, Some(timestamp), None)
+            case "string" =>  MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(data.trim), None, None, Some(timestamp), None)
+            case "boolean" =>  MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, Some(data.trim=="true"), None, Some(timestamp), None)
+            case "sum" =>  MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, None, Some(data.toDouble), Some(timestamp), None)
+          }
+          
+         
         }
         Some(lineData)
       } catch {
         case e : java.text.ParseException => {
-          println("Cannot parse timestamp, ignoring line")
-          None
-        }
+            println("Cannot parse timestamp, ignoring line")
+            None
+          }
       }    
     }.filter{ _.isDefined }.map{ _.get }.flatten
     

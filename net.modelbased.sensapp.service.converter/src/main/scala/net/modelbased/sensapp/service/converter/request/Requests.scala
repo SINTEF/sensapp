@@ -32,10 +32,12 @@ case class  CSVDescriptor(val name: String,
 case class TimeStampDescriptor(val format: String, val locale : String, val columnId: Int)
 
 
-case class ColumnDescriptor(val columnId: Int, val name: String, val unit: String)
+case class ColumnDescriptor(val columnId: Int, val name: String, val unit: String, val kind : String){
+  require(List("number", "string", "boolean", "sum").contains(kind), "invalid kind")
+}
 
 object CSVDescriptorProtocols extends DefaultJsonProtocol {
   implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "format", "locale", "colId")
-  implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit")
+  implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit", "kind")
   implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"sensor", "timestamp", "columns", "raw")
 }
