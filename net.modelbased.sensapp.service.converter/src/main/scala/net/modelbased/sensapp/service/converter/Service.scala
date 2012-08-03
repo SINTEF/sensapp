@@ -32,7 +32,10 @@ import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.service.converter.request._
 import net.modelbased.sensapp.service.converter.request.CSVDescriptorProtocols._
 
+import net.modelbased.sensapp.library.system._
+
 import java.io.StringReader
+import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 import net.modelbased.sensapp.library.system.{Service => SensAppService} 
@@ -82,19 +85,20 @@ trait Service extends SensAppService {
               case "boolean" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, Some(data.trim=="true"), None, Some(timestamp), None))
               case "sum" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, None, Some(data.toDouble), Some(timestamp), None))
               case _ => 
-                println("Kind does not exist, ignoring measurement " + col.name)
+                println("Kind " + col.kind + " does not exist, ignoring measurement " + col.name)
                 None
             }
           } catch {
-            case e : java.lang.NumberFormatException =>
-              println("Cannot parse value, ignoring measurement " + col.name)
+            case e  =>
+              println("Cannot parse value" + data +", ignoring measurement " + col.name)
               None
           }
-        }.flatten
-        Some(lineData)
+        }.flatten 
+       Some(lineData)
       } catch {
-        case e : java.text.ParseException => 
-          println("Cannot parse timestamp, ignoring line")
+        case e => 
+          println(e.getClass)
+          println("Cannot parse timestamp, ignoring line\n\t" + line.mkString("[", ", ", "]"))
           None
       }    
     }.flatten.flatten
@@ -103,3 +107,5 @@ trait Service extends SensAppService {
     Root(Some(request.name+"/"), None, None, None, Some(raw.seq))
   }
 }
+
+
