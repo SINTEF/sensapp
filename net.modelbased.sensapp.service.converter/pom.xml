@@ -3,8 +3,8 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>net.modelbased.sensapp.service</groupId>
     <artifactId>net.modelbased.sensapp.service.converter</artifactId>
-    <name>SensApp Sample Service</name>
-    <description>A Prototypical SensApp Service, integrated with the others</description>
+    <name>SensApp CSV Converter Service</name>
+    <description>A SensApp Service, to import data from CSV files</description>
     <inceptionYear>2012</inceptionYear>
  
     <parent>
