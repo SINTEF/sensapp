@@ -1,8 +1,10 @@
 {
     "sensor": "ClioTurbo",
     "timestamp": {
-        "format": "EEE MMM d HH:mm:ss z yyyy",
-        "locale": "en",
+        "format": {
+            "pattern": "EEE MMM d HH:mm:ss z yyyy",
+            "locale": "en"
+        }, 
         "colId": 0
     },
     "columns": [{

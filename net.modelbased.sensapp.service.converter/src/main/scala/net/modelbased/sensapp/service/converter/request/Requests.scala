@@ -29,15 +29,19 @@ case class  CSVDescriptor(val name: String,
     val columns: List[ColumnDescriptor],
     val raw: String)
 
-case class TimeStampDescriptor(val format: String, val locale : String, val columnId: Int)
 
+case class DateFormatDescriptor(val pattern: String, val locale : String)
+
+//case class TimeStampDescriptor(val format: String, val locale : String, val columnId: Int)
+case class TimeStampDescriptor(val columnId: Int, val format: Option[DateFormatDescriptor])
 
 case class ColumnDescriptor(val columnId: Int, val name: String, val unit: String, val kind : String){
   require(List("number", "string", "boolean", "sum").contains(kind), "invalid kind")
 }
 
 object CSVDescriptorProtocols extends DefaultJsonProtocol {
-  implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "format", "locale", "colId")
+  implicit val dateFormatFormat = jsonFormat(DateFormatDescriptor, "pattern", "locale")
+  implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "colId", "format")
   implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit", "kind")
   implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"sensor", "timestamp", "columns", "raw")
 }

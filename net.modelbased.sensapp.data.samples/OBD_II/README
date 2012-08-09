@@ -1,0 +1,10 @@
+Data acquired by Torque and an ODBII Bluetooth adapter, monitoring a car.
+
+The raw sensor data contains sensor data for: 
+latitute, longitude, altitude, Engine Revs in RPM, Speed in km/h, Instant CO2 in g/km, Instant fuel consumption in l/100km, Engine Coolant Temperature in degC, Atmospheric Pressure in mBar
+
+Torque is available on Google play at: https://play.google.com/store/apps/details?id=org.prowl.torque
+A Lite (free) version is also available.
+
+The ODBII adapter used in this experiment was a cheap (yet working) one, available at: http://www.amazon.fr/gp/product/B005NLPGYG/ref=oh_details_o00_s00_i00
+

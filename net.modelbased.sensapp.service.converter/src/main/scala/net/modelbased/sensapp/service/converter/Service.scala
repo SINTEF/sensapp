@@ -67,12 +67,23 @@ trait Service extends SensAppService {
     val reader : CSVReader = new CSVReader(new StringReader(request.raw), ',', '\\', 1);//skip headers
     val myEntries = reader.readAll();
       
-    val dateFormat = new SimpleDateFormat(request.timestamp.format, new Locale(request.timestamp.locale))
+    val getTimestamp: String => Long = {
+      request.timestamp.format match {
+      case None => (s: String) => s.toLong / 1000
+      case Some(f) => (s: String) => {
+        val dateFormat = new SimpleDateFormat(f.pattern, new Locale(f.locale))
+        dateFormat.parse(s).getTime() / 1000
+      }
+    }
+    }
+    
+    
+    
          
     val raw = myEntries.toList/*.par*/.map{ line =>
       //println(line.mkString("[", ", ", "]"))
       try {
-        val timestamp = dateFormat.parse(line(request.timestamp.columnId).trim).getTime() / 1000
+        val timestamp = getTimestamp(line(request.timestamp.columnId).trim)
         //println("Date: " + timestamp)
         val lineData : List[MeasurementOrParameter] = request.columns.map{col =>
           val data = line(col.columnId)
