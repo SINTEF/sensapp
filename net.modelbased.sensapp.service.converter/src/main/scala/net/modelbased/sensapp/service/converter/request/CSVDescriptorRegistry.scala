@@ -23,23 +23,24 @@
 package net.modelbased.sensapp.service.converter.request
 
 import cc.spray.json._
+import net.modelbased.sensapp.library.datastore._
+import net.modelbased.sensapp.service.converter.request.CSVDescriptorProtocols.csvDescriptorFormat
 
-case class  CSVDescriptor(val name: String, 
-    val timestamp: TimeStampDescriptor, 
-    val columns: List[ColumnDescriptor])
+/**
+ * Persistence layer associated to the CSVDescriptor class
+ * 
+ * @author Brice Morin
+ */
+class CSVDescriptorRegistry extends DataStore[CSVDescriptor]  {
 
-
-case class DateFormatDescriptor(val pattern: String, val locale : String)
-
-case class TimeStampDescriptor(val columnId: Int, val format: Option[DateFormatDescriptor])
-
-case class ColumnDescriptor(val columnId: Int, val name: String, val unit: String, val kind : String){
-  require(List("number", "string", "boolean", "sum").contains(kind), "invalid kind")
-}
-
-object CSVDescriptorProtocols extends DefaultJsonProtocol {
-  implicit val dateFormatFormat = jsonFormat(DateFormatDescriptor, "pattern", "locale")
-  implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "colId", "format")
-  implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit", "kind")
-  implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"desc", "timestamp", "columns")
+  override val databaseName = "sensapp_db"
+  override val collectionName = "csv_desc" 
+  override val key = "name"
+    
+  override def getIdentifier(desc: CSVDescriptor) = desc.name
+  
+  override def deserialize(json: String): CSVDescriptor = { json.asJson.convertTo[CSVDescriptor] }
+ 
+  override def serialize(desc: CSVDescriptor): String = { desc.toJson.toString }
+    
 }
