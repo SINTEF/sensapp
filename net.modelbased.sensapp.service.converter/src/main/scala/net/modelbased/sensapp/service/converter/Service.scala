@@ -114,63 +114,97 @@ trait Service extends SensAppService {
   
   //TODO: separator and escape character should me moved to (optional?) descriptor
   def parseCSV(request : CSVDescriptor, rawData : String) : Root = {
+    val start = System.currentTimeMillis
     
     val reader : CSVReader = new CSVReader(new StringReader(rawData), ',', '\\', 0);
     val myEntries = reader.readAll();
-      
-    val getTimestamp: String => Option[Long] =  request.timestamp.format match {
-        case None => (s: String) => try { 
+    
+    val getTimestamp: String => Option[Long] = (s : String) => try { 
+      request.timestamp.format match {
+        case None =>  
           val t = s.toLong / 1000
           Some(t)
-        } catch {case _ => None}
-        case Some(format) => (s: String) => {
+        case Some(format) => {
           val dateFormat = new SimpleDateFormat(format.pattern, new Locale(format.locale))
-          try {
-            val t = dateFormat.parse(s).getTime() / 1000
-            Some(t)
-          } catch {case _ => None}
+          val t = dateFormat.parse(s).getTime() / 1000
+          Some(t)
         }
+      } 
+    } catch { case _ =>
+      println("Cannot extract timestamp from " + s)
+      None 
     }
     
-    val cleanNumber: (String, String) => Option[Double] = {
-      (data, col : String) =>
-        try {
-          val cleanSplit = data.trim.split("^(0+)(\\d+.\\d+)")//removes leading zeros (e.g. as generated in Torque files)
-          val clean = (if (cleanSplit.length > 2) cleanSplit(2) else data.trim).toDouble
-          Some(clean)
-        } catch {
-          case _ =>
-            println("Cannot parse value " + data +", ignoring measurement " + col)
+    val cleanNumber: (String, String) => Option[Double] = (data, col : String) => try {
+      val cleanSplit = data.trim.split("^(0+)(\\d+.\\d+)")//removes leading zeros (e.g. as generated in Torque files) preventing proper parsing
+      val clean = (if (cleanSplit.length > 2) cleanSplit(2) else data.trim).toDouble
+      Some(clean)
+    } catch { case _ =>
+        println("Cannot parse value " + data +", ignoring measurement " + col)
+        None
+    }
+    
+          
+    val chunk: (List[Array[String]], Long) => List[MeasurementOrParameter] = (chunk : List[Array[String]], timestamp : Long) => request.columns.flatMap{col =>
+      if (col.strategy.isDefined)
+    	  col.strategy.get match {
+    	  	case "chunk" => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(chunk.collect{case cols => cols(col.columnId)}.mkString(", ")), None, None, Some(timestamp), None))
+            case strategy : String =>
+              val values = chunk.flatMap{line =>
+                val data = line(col.columnId)
+                cleanNumber(data, col.name)
+              }
+              strategy match {
+                case "min" => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), Some(values.sortWith(_ < _).head), None, None, None, Some(timestamp), None))
+                case "max" => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), Some(values.sortWith(_ > _).head), None, None, None, Some(timestamp), None))
+                case "avg" => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), Some((values.sum)/values.size), None, None, None, Some(timestamp), None))
+                case "one" => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), Some(values.head), None, None, None, Some(timestamp), None))
+            }
+          }
+      else {//
+        col.kind match {
+          case "number" => cleanNumber(chunk.head(col.columnId), col.name).flatMap(number => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), Some(number), None, None, None, Some(timestamp), None)))
+          case "string" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(chunk.collect{case cols => cols(col.columnId)}.mkString(", ")), None, None, Some(timestamp), None))
+          case "boolean" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, Some(chunk.head(col.columnId).trim=="true"), None, Some(timestamp), None))
+          case "sum" => cleanNumber(chunk.head(col.columnId), col.name).flatMap(number => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, None, Some(number), Some(timestamp), None)))
+          case _ => 
+            println("Kind " + col.kind + " does not exist, ignoring measurement " + col.name)
             None
         }
+      }
     }
-          
-    val raw = myEntries.toList/*.par*/.map{ line =>
-      //println(line.mkString("[", ", ", "]"))
-        getTimestamp(line(request.timestamp.columnId).trim) match {
-          case Some(timestamp)=>
-            val lineData : List[MeasurementOrParameter] = request.columns.map{col =>
-              val data = line(col.columnId)
+    
+     val raw = myEntries.groupBy(line => getTimestamp(line(request.timestamp.columnId).trim).getOrElse(-1l)/*.asInstanceOf[Long]*/).filterKeys(k => k>0).par.flatMap{case (timestamp, lines) =>
+      //At this point, the entries are grouped by chunks of a second TODO: this is where we should insert sampling/chunk strategies
+      println(timestamp + ": " + lines.size)
+      
+      chunk(lines.toList, timestamp)
+      
+      /*lines.flatMap{line =>
+        val lineData : List[MeasurementOrParameter] = request.columns.flatMap{col =>
+          val data = line(col.columnId)
               //println("  Data: " + data)
-          
-              col.kind match {
-                case "number" => cleanNumber(data, col.name).flatMap(number => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), Some(number), None, None, None, Some(timestamp), None)))
-                case "string" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(data.trim), None, None, Some(timestamp), None))
-                case "boolean" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, Some(data.trim=="true"), None, Some(timestamp), None))
-                case "sum" => cleanNumber(data, col.name).flatMap(number => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, None, Some(number), Some(timestamp), None)))
-                case _ => 
-                  println("Kind " + col.kind + " does not exist, ignoring measurement " + col.name)
-                  None
-              }
-            }.flatten 
-            Some(lineData)
-          case None => 
-            println("Cannot parse timestamp, ignoring line\n\t" + line.mkString("[", ", ", "]"))
-            None
-        }}.flatten.flatten
+          col.kind match {
+            case "number" => cleanNumber(data, col.name).flatMap(number => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), Some(number), None, None, None, Some(timestamp), None)))
+            case "string" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(data.trim), None, None, Some(timestamp), None))
+            case "boolean" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, Some(data.trim=="true"), None, Some(timestamp), None))
+            case "sum" => cleanNumber(data, col.name).flatMap(number => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, None, Some(number), Some(timestamp), None)))
+            case _ => 
+              println("Kind " + col.kind + " does not exist, ignoring measurement " + col.name)
+              None
+            }
+          }
+          Some(lineData)
+      }*/
+    }.toIndexedSeq.sortWith(_.time.getOrElse(0l) < _.time.getOrElse(0l))//.flatten
     
     println("Creating Root with " + raw.seq.size + " elements...")
-    Root(Some(request.name + "/" + UUID.randomUUID()), None, None, None, Some(raw/*.seq*/))
+    val root = Root(Some(request.name + "/" + UUID.randomUUID()), None, None, None, Some(raw/*.seq*/))
+    
+    val stop = System.currentTimeMillis
+    println("Parsing CSV took " + (stop-start) + " ms")
+    
+    root
   }  
 }
 

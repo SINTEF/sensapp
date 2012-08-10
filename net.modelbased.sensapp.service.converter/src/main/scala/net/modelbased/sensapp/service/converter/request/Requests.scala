@@ -33,13 +33,16 @@ case class DateFormatDescriptor(val pattern: String, val locale : String)
 
 case class TimeStampDescriptor(val columnId: Int, val format: Option[DateFormatDescriptor])
 
-case class ColumnDescriptor(val columnId: Int, val name: String, val unit: String, val kind : String){
+case class ColumnDescriptor(val columnId: Int, val name: String, val unit: String, val kind : String, val strategy : Option[String]){
   require(List("number", "string", "boolean", "sum").contains(kind), "invalid kind")
+  require(strategy.isDefined && (kind=="number" && List("chunk", "min", "max", "avg", "one").contains(strategy.get)) || !strategy.isDefined, "invalid strategy")
 }
 
+
+//TODO: strategies for resampling/chunking (in the case original sampling rate <1s) might probably be handled by another service...
 object CSVDescriptorProtocols extends DefaultJsonProtocol {
   implicit val dateFormatFormat = jsonFormat(DateFormatDescriptor, "pattern", "locale")
   implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "colId", "format")
-  implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit", "kind")
+  implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit", "kind", "strategy")
   implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"desc", "timestamp", "columns")
 }

@@ -42,7 +42,9 @@ object IANA {
     "m/s" -> velocity,    "m/s2" -> acceleration, "l/s" -> flow, 
     "W/m2" -> irradiance, "cd/m2" -> luminance,   "Bspl" -> belSound,
     "bit/s" -> bitrate,   "lat" -> lat,           "lon" -> lon, "%EL" -> `%EL`,
-    "EL" -> EL, "beet/m" -> `beet/m`, "beets" -> beets, "g/km" -> `g/km`, "RPM" -> RPM
+    "EL" -> EL, "beet/m" -> `beet/m`, "beets" -> beets, 
+    
+    "g/km" -> `g/km`, "RPM" -> RPM, "l/100km" -> `l/100km`, "km/h" -> `km/h`
   )
    
   def apply(s: String): Option[Unit] = { _definitions get(s) }  
@@ -95,7 +97,14 @@ object IANA {
   object `beet/m`        extends Unit("beet/m",   "Heart rate in beets per minute")
   object beets       extends Unit("beets",   "Cumulative number of heart beats")
   
-  //The following units are not defined in SenML08. They however fall in the extension mechanism defined in SenML08.
+  
+  /*
+   * The following units are not defined in SenML08. They however fall in the extension mechanism defined in SenML08.
+   */
+  
+  //SenML profile for the automotive industry
   object `g/km` extends Unit("g/km", "common measure for transportation pollution")
   object RPM extends Unit("RPM", "Revolutions Per Minute")
+  object `l/100km` extends Unit("l/100km", "fuel consumption in liter per 100km")
+  object `km/h` extends Unit("km/h", "speed in kilometer per hour")
 }

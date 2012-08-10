@@ -2,15 +2,14 @@
     "desc": "Torque_bmorin_record",
     "timestamp": {"colId": 0},
     "columns": [
-      {"colId":1, "name":"lon", "unit":"lon", "kind":"number"}, 
-      {"colId":2, "name":"lat", "unit":"lat", "kind":"number"}, 
-      {"colId":4, "name":"GPS_Speed", "unit":"m/s", "kind":"number"}, 
-      {"colId":5, "name":"Engine_RPM", "unit":"RPM", "kind":"number"},
-      {"colId":6, "name":"OBD_Speed", "unit":"km/h", "kind":"number"},
-      {"colId":7, "name":"Liter_per_100km_instant", "unit":"l/100km", "kind":"number"},
-      {"colId":8, "name":"Engine_C02", "unit":"g/km", "kind":"number"},
-      {"colId":9, "name":"Engine_Coolant", "unit":"degC", "kind":"number"},
-      {"colId":10, "name":"Barometric_pressure", "unit":"mbar", "kind":"number"},
-      {"colId":11, "name":"GPS_Altitude", "unit":"m", "kind":"number"} 
+      {"colId":1, "name":"lon", "unit":"lon", "kind":"number", "strategy":"avg"}, 
+      {"colId":2, "name":"lat", "unit":"lat", "kind":"number", "strategy":"avg"}, 
+      {"colId":4, "name":"GPS_Speed", "unit":"km/h", "kind":"number", "strategy":"max"}, 
+      {"colId":5, "name":"Engine_RPM", "unit":"RPM", "kind":"number", "strategy":"max"},
+      {"colId":6, "name":"OBD_Speed", "unit":"km/h", "kind":"number", "strategy":"max"},
+      {"colId":7, "name":"Liter_per_100km_instant", "unit":"l/100km", "kind":"number", "strategy":"avg"},
+      {"colId":8, "name":"Engine_C02", "unit":"g/km", "kind":"number", "strategy":"avg"},
+      {"colId":9, "name":"Engine_Coolant", "unit":"degC", "kind":"number", "strategy":"max"},
+      {"colId":11, "name":"GPS_Altitude", "unit":"m", "kind":"number", "strategy":"avg"} 
     ]
 }
