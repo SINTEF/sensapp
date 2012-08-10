@@ -1,27 +1,4 @@
-{
-    "desc": "Torque_bmorin",
-    "timestamp": {
-        "format": {
-            "pattern": "EEE MMM d HH:mm:ss z yyyy",
-            "locale": "en"
-        },"colId": 0
-    },
-    "columns": [
-      {"colId":2, "name":"lon", "unit":"lon", "kind":"number"}, 
-      {"colId":3, "name":"lat", "unit":"lat", "kind":"number"}, 
-      {"colId":4, "name":"GPS_Speed", "unit":"m/s", "kind":"number"}, 
-      {"colId":6, "name":"GPS_Altitude", "unit":"m", "kind":"number"}, 
-      {"colId":12, "name":"Engine_C02", "unit":"g/km", "kind":"number"}, 
-      {"colId":13, "name":"Engine_Coolant", "unit":"degC", "kind":"number"}, 
-      {"colId":14, "name":"Engine_RPM", "unit":"RPM", "kind":"number"}, 
-      {"colId":15, "name":"Engine_Intake", "unit":"degC", "kind":"number"}
-    ]
-}
-
-
-{
-	"name": "trip1",
-	"raw": "GPS Time, Device Time, Longitude, Latitude,GPS Speed (Meters/second), Horizontal Dilution of Precision, Altitude, Bearing, G(x), G(y), G(z), G(calibrated),CO₂ in g/km (Average)(g/km),Engine Coolant Temperature(°C),Engine RPM(rpm),Intake Air Temperature(°C),Speed (OBD)(km/h)
+GPS Time, Device Time, Longitude, Latitude,GPS Speed (Meters/second), Horizontal Dilution of Precision, Altitude, Bearing, G(x), G(y), G(z), G(calibrated),CO₂ in g/km (Average)(g/km),Engine Coolant Temperature(°C),Engine RPM(rpm),Intake Air Temperature(°C),Speed (OBD)(km/h)
 -,01-Aug-2012 08:46:13.795,-,-,-,-,-,-,4.68,4.36,7.96,0.06,-,19,-,-,-
 -,01-Aug-2012 08:46:14.783,-,-,-,-,-,-,4.68,4.36,7.96,0.06,-,19,999,-,0
 -,01-Aug-2012 08:46:15.792,-,-,-,-,-,-,4.68,4.36,7.96,0.06,-,19,999,14,0
@@ -104,5 +81,4 @@ Wed Aug 01 08:47:28 CEST 2012,01-Aug-2012 08:47:31.775,10.830035561387964,59.841
 Wed Aug 01 08:47:30 CEST 2012,01-Aug-2012 08:47:32.774,10.83019747332782,59.84147497888088,3.4181151,6.0,200.52084520689442,81.86577,5.65,1.21,8.67,0.08,471.4,36,1084,14,14
 Wed Aug 01 08:47:31 CEST 2012,01-Aug-2012 08:47:33.774,10.830268364805502,59.84147904109287,3.4807122,4.0,200.54256102399663,83.28843,3.83,-6.04,9.79,0.25,460.82,36,1017,14,13
 Wed Aug 01 08:47:32 CEST 2012,01-Aug-2012 08:47:34.778,10.830339706410065,59.84148142050949,3.5025265,4.0,200.5598569802855,83.42818,-1.2,-1.98,9.61,0.03,460.82,37,941,14,12
-Wed Aug 01 08:47:33 CEST 2012,01-Aug-2012 08:47:35.774,10.83038913040313,59.841483889164195,3.4951468,4.0,200.59715448166202,77.44396,5.99,-5.11,9.87,0.31,460.82,37,1088,14,12"
-}
+Wed Aug 01 08:47:33 CEST 2012,01-Aug-2012 08:47:35.774,10.83038913040313,59.841483889164195,3.4951468,4.0,200.59715448166202,77.44396,5.99,-5.11,9.87,0.31,460.82,37,1088,14,12

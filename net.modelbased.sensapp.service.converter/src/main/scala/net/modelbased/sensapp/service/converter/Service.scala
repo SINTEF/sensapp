@@ -31,20 +31,17 @@ import cc.spray.directives._
 import cc.spray.typeconversion.SprayJsonSupport
 import net.modelbased.sensapp.service.converter.request._
 import net.modelbased.sensapp.service.converter.request.CSVDescriptorProtocols._
-
 import net.modelbased.sensapp.library.system._
-
 import java.io.StringReader
 import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
-import net.modelbased.sensapp.library.system.{Service => SensAppService} 
-
+import net.modelbased.sensapp.library.system.{Service => SensAppService}
 import net.modelbased.sensapp.library.senml.Root
 import net.modelbased.sensapp.library.senml.MeasurementOrParameter
 import net.modelbased.sensapp.library.senml.export.JsonParser
-
 import scala.collection.JavaConversions._
+import java.util.UUID
 
 
 trait Service extends SensAppService {
@@ -118,7 +115,7 @@ trait Service extends SensAppService {
   //TODO: separator and escape character should me moved to (optional?) descriptor
   def parseCSV(request : CSVDescriptor, rawData : String) : Root = {
     
-    val reader : CSVReader = new CSVReader(new StringReader(rawData), ',', '\\', 1);//skip headers
+    val reader : CSVReader = new CSVReader(new StringReader(rawData), ',', '\\', 0);
     val myEntries = reader.readAll();
       
     val getTimestamp: String => Option[Long] =  request.timestamp.format match {
@@ -135,31 +132,36 @@ trait Service extends SensAppService {
         }
     }
     
-    
+    val cleanNumber: (String, String) => Option[Double] = {
+      (data, col : String) =>
+        try {
+          val cleanSplit = data.trim.split("^(0+)(\\d+.\\d+)")//removes leading zeros (e.g. as generated in Torque files)
+          val clean = (if (cleanSplit.length > 2) cleanSplit(2) else data.trim).toDouble
+          Some(clean)
+        } catch {
+          case _ =>
+            println("Cannot parse value " + data +", ignoring measurement " + col)
+            None
+        }
+    }
           
     val raw = myEntries.toList/*.par*/.map{ line =>
       //println(line.mkString("[", ", ", "]"))
         getTimestamp(line(request.timestamp.columnId).trim) match {
           case Some(timestamp)=>
             val lineData : List[MeasurementOrParameter] = request.columns.map{col =>
-            val data = line(col.columnId)
-            //println("  Data: " + data)
+              val data = line(col.columnId)
+              //println("  Data: " + data)
           
-            try {
               col.kind match {
-                case "number" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), Some(data.toDouble), None, None, None, Some(timestamp), None))
+                case "number" => cleanNumber(data, col.name).flatMap(number => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), Some(number), None, None, None, Some(timestamp), None)))
                 case "string" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, Some(data.trim), None, None, Some(timestamp), None))
                 case "boolean" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, Some(data.trim=="true"), None, Some(timestamp), None))
-                case "sum" =>  Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, None, Some(data.toDouble), Some(timestamp), None))
+                case "sum" => cleanNumber(data, col.name).flatMap(number => Some(MeasurementOrParameter(Some(col.name), Some(col.unit), None, None, None, Some(number), Some(timestamp), None)))
                 case _ => 
                   println("Kind " + col.kind + " does not exist, ignoring measurement " + col.name)
                   None
               }
-            } catch {
-              case e  =>
-                println("Cannot parse value" + data +", ignoring measurement " + col.name)
-                None
-            }
             }.flatten 
             Some(lineData)
           case None => 
@@ -168,8 +170,8 @@ trait Service extends SensAppService {
         }}.flatten.flatten
     
     println("Creating Root with " + raw.seq.size + " elements...")
-    Root(Some(request.name+"/"), None, None, None, Some(raw/*.seq*/))
-  }
+    Root(Some(request.name + "/" + UUID.randomUUID()), None, None, None, Some(raw/*.seq*/))
+  }  
 }
 
 
