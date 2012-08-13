@@ -34,7 +34,10 @@ class Boot(override val system: ActorSystem) extends System {
      
   // "injection of dependency" to propagate the current actorSystem
   trait iod { 
-    lazy val partners = new Monolith { implicit val actorSystem = system }
+    lazy val partners = new Monolith { 
+      implicit val actorSystem = system; 
+      // override val port = 80 
+    }
     implicit def actorSystem = system 
   }
   
