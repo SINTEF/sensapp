@@ -44,6 +44,8 @@ object IANA {
     "bit/s" -> bitrate,   "lat" -> lat,           "lon" -> lon, "%EL" -> `%EL`,
     "EL" -> EL, "beet/m" -> `beet/m`, "beets" -> beets, 
     
+    "rad/s" -> `rad/s`,
+    
     "g/km" -> `g/km`, "RPM" -> RPM, "l/100km" -> `l/100km`, "km/h" -> `km/h`
   )
    
@@ -97,7 +99,7 @@ object IANA {
   object `beet/m`        extends Unit("beet/m",   "Heart rate in beets per minute")
   object beets       extends Unit("beets",   "Cumulative number of heart beats")
   
-  
+  object `rad/s` extends Unit("rad/s",   "Radians per second")
   /*
    * The following units are not defined in SenML08. They however fall in the extension mechanism defined in SenML08.
    */

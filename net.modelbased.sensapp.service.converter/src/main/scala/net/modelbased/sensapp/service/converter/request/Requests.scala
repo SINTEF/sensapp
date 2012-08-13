@@ -26,7 +26,10 @@ import cc.spray.json._
 
 case class  CSVDescriptor(val name: String, 
     val timestamp: TimeStampDescriptor, 
-    val columns: List[ColumnDescriptor])
+    val columns: List[ColumnDescriptor],
+    val separator: Option[Char],
+    val escape: Option[Char],
+    val locale : Option[String])
 
 
 case class DateFormatDescriptor(val pattern: String, val locale : String)
@@ -40,9 +43,10 @@ case class ColumnDescriptor(val columnId: Int, val name: String, val unit: Strin
 
 
 //TODO: strategies for resampling/chunking (in the case original sampling rate <1s) might probably be handled by another service...
+//TODO: we should probably merge the 2 locale (for the data and for the date...)
 object CSVDescriptorProtocols extends DefaultJsonProtocol {
   implicit val dateFormatFormat = jsonFormat(DateFormatDescriptor, "pattern", "locale")
   implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "colId", "format")
   implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit", "kind", "strategy")
-  implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"desc", "timestamp", "columns")
+  implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"desc", "timestamp", "columns", "separator", "escape", "locale")
 }
