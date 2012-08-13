@@ -197,6 +197,10 @@ object APMDataParser {
     data.foreach{ d => d.gps.time -= offset }
   }
 
+  def setBaseTime(data : List[APMData], time : Long) {
+    data.foreach{ d => d.gps.time += time }
+  }
+
   def fix10HzTimeIncrements(data : List[APMData]) {
     var t = data.head.gps.time
     data.foreach{ d =>

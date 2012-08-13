@@ -56,9 +56,9 @@ object WingFlight1 {
     val data1hz = APMDataParser.extract1HzData(data)
 
     APMDataParser.writeCSVLog(out_folder + "raw/" + name + "_1hz.csv", data1hz)
-    APMDataParser.writeSenML(out_folder + "raw/" + name + "_1hz.json", data1hz, name , 0)
+    APMDataParser.writeSenML(out_folder + "raw/" + name + "_1hz.json", data1hz, name , 1338056580)
 
-    APMDataParser.writeIndividualSenML(out_folder + "data/" + name + "_1hz", data1hz, name , 0);
+    APMDataParser.writeIndividualSenML(out_folder + "data/" + name + "_1hz", data1hz, name , 1338056580);
 
     APMDataParser.fixAltitude(data, -ground_altitude)
     APMDataParser.writeSRTFile(out_folder + name + ".srt", data, 11000, 100)
