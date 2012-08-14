@@ -42,7 +42,8 @@ trait PartnerHandler {
  * This default partner handler consider that everything is deployed on localhost:8080
  */
 trait Monolith extends PartnerHandler {
-  def apply(key: String) = Some(("localhost", 8080))
+  val port: Int = 8080
+  def apply(key: String) = Some(("localhost", port))
 }
 
 /**

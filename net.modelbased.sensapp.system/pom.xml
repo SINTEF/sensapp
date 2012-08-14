@@ -43,13 +43,14 @@
   	    <groupId>org.mortbay.jetty</groupId>
  	    <artifactId>jetty-maven-plugin</artifactId>
  	    <!-- <version>8.1.3.v20120416</version> -->
- 	    <version>8.1.4.v20120524</version>
+ 	    <version>8.1.5.v20120716</version>
  	    <configuration>
  	      <stopPort>9966</stopPort>
           <stopKey>${project.artifactId}</stopKey>
           <connectors>
 	 	      <connector implementation="org.eclipse.jetty.server.nio.SelectChannelConnector">
-	 	      <port>8080</port>
+	 	      <port>8080</port> 
+	 	      <!-- <port>80</port> -->
 	 	      <acceptors>10</acceptors>
 	 	      </connector>
  	      </connectors>
