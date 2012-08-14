@@ -24,6 +24,9 @@ package net.modelbased.sensapp.service.converter.request
 
 import cc.spray.json._
 
+/**
+ * The following classes and object deal with the import of CSV file into SensApp datasets
+ */
 case class  CSVDescriptor(val name: String, 
     val timestamp: TimeStampDescriptor, 
     val columns: List[ColumnDescriptor],
@@ -42,11 +45,22 @@ case class ColumnDescriptor(val columnId: Int, val name: String, val unit: Strin
 }
 
 
-//TODO: strategies for resampling/chunking (in the case original sampling rate <1s) might probably be handled by another service...
 //TODO: we should probably merge the 2 locale (for the data and for the date...)
 object CSVDescriptorProtocols extends DefaultJsonProtocol {
   implicit val dateFormatFormat = jsonFormat(DateFormatDescriptor, "pattern", "locale")
   implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "colId", "format")
   implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit", "kind", "strategy")
   implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"desc", "timestamp", "columns", "separator", "escape", "locale")
+}
+
+/**
+ * The following classes and object deal with the export of SensApp datasets to CSV
+ */
+case class DataSetDescriptor(val url: String, val as: String, val unroll : Option[Boolean])
+
+case class CSVExportDescriptor(val datasets : List[DataSetDescriptor], val separator : Option[String])
+
+object CSVExportDescriptorProtocols extends DefaultJsonProtocol {
+  implicit val dataSetFormat = jsonFormat(DataSetDescriptor, "url", "as", "unroll")
+  implicit val csvExportFormat = jsonFormat(CSVExportDescriptor, "datasets", "separator")
 }

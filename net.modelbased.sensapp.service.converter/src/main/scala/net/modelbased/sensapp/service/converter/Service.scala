@@ -22,33 +22,52 @@
  */
 package net.modelbased.sensapp.service.converter
 
+
 import au.com.bytecode.opencsv.CSVReader
-import cc.spray._
 import cc.spray.http._
 import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol._
 import cc.spray.directives._
 import cc.spray.typeconversion.SprayJsonSupport
-import net.modelbased.sensapp.service.converter.request._
-import net.modelbased.sensapp.service.converter.request.CSVDescriptorProtocols._
-import net.modelbased.sensapp.library.system._
+import cc.spray.io.IoWorker
+import cc.spray.client.HttpConduit
+import cc.spray.can.client.HttpClient
+import cc.spray.RequestContext
+
 import java.io.StringReader
 import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
-import net.modelbased.sensapp.library.system.{Service => SensAppService}
-import net.modelbased.sensapp.library.senml.Root
-import net.modelbased.sensapp.library.senml.MeasurementOrParameter
-import net.modelbased.sensapp.library.senml.export.JsonParser
-import scala.collection.JavaConversions._
 import java.util.UUID
-import scala.collection.mutable.Buffer
 import java.text.NumberFormat
+import net.modelbased.sensapp.library.system.{Service => SensAppService, URLHandler}
+import net.modelbased.sensapp.library.senml.{MeasurementOrParameter, Root, DataType, SumDataValue, DoubleDataValue, StringDataValue, BooleanDataValue}
+import net.modelbased.sensapp.library.senml.export.JsonParser
+import net.modelbased.sensapp.service.converter.request._
+import net.modelbased.sensapp.service.converter.request.CSVDescriptorProtocols._
+import net.modelbased.sensapp.service.converter.request.CSVExportDescriptorProtocols._
+import scala.collection.mutable.Buffer
+import scala.collection.JavaConversions._
+import scala.collection.mutable.StringBuilder
+
+
+import akka.actor._
+import akka.dispatch._
+import akka.util.duration._
+
 
 
 trait Service extends SensAppService {
   
   override implicit val partnerName = "converter"
+    
+  implicit val system = ActorSystem()
+  val ioWorker = new IoWorker(system).start()
+  def httpClientName = "converter-client"
+  val httpClient = system.actorOf(
+    props = Props(new HttpClient(ioWorker)),
+    name = httpClientName
+  )
     
   private[this] val _registry = new CSVDescriptorRegistry()
   
@@ -59,7 +78,16 @@ trait Service extends SensAppService {
       context fail(StatusCodes.NotFound, "Unknown descriptor [" + name + "]") 
   }
     
+  
   val service = {
+    path("converter" / "toCSV") {
+      post {
+        content(as[CSVExportDescriptor]) { exportDesc => context =>
+          val csv = generateCSV(exportDesc)
+          context complete csv
+        } 
+      } ~ cors("POST")
+    } ~
     path("converter" / "fromCSV") {
       post {
         content(as[CSVDescriptor]) { desc => context =>
@@ -114,7 +142,57 @@ trait Service extends SensAppService {
     }
   }
   
-  //TODO: separator and escape character should me moved to (optional?) descriptor
+  def generateCSV(exportDesc : CSVExportDescriptor) : String = {
+    val groupedDS : Map[String, List[DataSetDescriptor]] = exportDesc.datasets.groupBy{dataset => 
+      val url = URLHandler.extract(dataset.url)
+      val host = url._1._1 + ":" + url._1._2
+      host
+    }
+    val roots : List[Root] = groupedDS.par.flatMap{case (host, datasets) =>
+      val conduit = new HttpConduit(httpClient, host)
+      datasets.par.map{dataset => 
+        val url = URLHandler.extract(dataset.url)
+        val responseFuture = conduit.sendReceive(HttpRequest(HttpMethods.GET, uri = url._2))
+        try {
+          Await.result(responseFuture, 4 second)
+          Some(JsonParser.fromJson(responseFuture().content.get.toString))
+        } catch {case _ => None}
+      }
+    }.seq.toList.flatten
+    
+    
+    val canonized = roots.par.map(_.canonized).seq.collect{case root => root.measurementsOrParameters}.toList.flatten.flatten
+    val index : Map[Int, String] = canonized.groupBy(mop => mop.name).keySet.flatten.zipWithIndex.toMap.map(_.swap)
+    
+    val builder : StringBuilder = new StringBuilder()
+    
+    //TODO: append headers
+    
+    //TODO: manage unroll strategy by distributing string values evenly between two timestamps
+    canonized.groupBy(mop => mop.time.getOrElse(-1l)).filterKeys(k=> k > -1).map{case (t, mops) => 
+    	builder append (t*1000) //we export timestamps in ms
+    	for(i <- 0 to index.keys.last){
+    	  builder append exportDesc.separator
+    	  val lastIndex = mops.lastIndexOf(index(i))
+    	  if (lastIndex > -1) {
+    	    builder.append(mops.get(lastIndex).data match {
+              case DoubleDataValue(d)   => d
+              case StringDataValue(s)  => s
+              case BooleanDataValue(b) => b
+              case SumDataValue(d,i)   => d
+              case _ => "-"
+            })
+    	  } else {
+    	    builder append "-"
+    	  }
+    	}
+    	builder append "\n"
+    }
+    builder.toString
+  }
+
+  
+  
   def parseCSV(request : CSVDescriptor, rawData : String) : Root = {
     val start = System.currentTimeMillis
     
@@ -200,5 +278,3 @@ trait Service extends SensAppService {
     root
   }  
 }
-
-
