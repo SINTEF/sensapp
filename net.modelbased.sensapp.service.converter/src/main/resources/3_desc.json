@@ -1,0 +1,14 @@
+{
+    "desc": "Esums_imu",
+    "timestamp": {"colId": 2},
+    "separator": "\t",
+    "locale": "no",
+    "columns": [
+      {"colId":3, "name":"AX", "unit":"m/s2", "kind":"number", "strategy":"chunk"}, 
+      {"colId":4, "name":"AY", "unit":"m/s2", "kind":"number", "strategy":"chunk"},
+      {"colId":5, "name":"AZ", "unit":"m/s2", "kind":"number", "strategy":"chunk"}, 
+      {"colId":6, "name":"GX", "unit":"rad/s", "kind":"number", "strategy":"chunk"},
+      {"colId":7, "name":"GY", "unit":"rad/s", "kind":"number", "strategy":"chunk"}, 
+      {"colId":8, "name":"GZ", "unit":"rad/s", "kind":"number", "strategy":"chunk"} 
+    ]
+}

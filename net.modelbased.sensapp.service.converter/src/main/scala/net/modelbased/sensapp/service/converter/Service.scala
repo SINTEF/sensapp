@@ -33,7 +33,7 @@ import cc.spray.io.IoWorker
 import cc.spray.client.HttpConduit
 import cc.spray.can.client.HttpClient
 import cc.spray.RequestContext
-
+import cc.spray.client.Get
 import java.io.StringReader
 import java.io.FileInputStream
 import java.text.SimpleDateFormat
@@ -49,11 +49,12 @@ import net.modelbased.sensapp.service.converter.request.CSVExportDescriptorProto
 import scala.collection.mutable.Buffer
 import scala.collection.JavaConversions._
 import scala.collection.mutable.StringBuilder
-
-
 import akka.actor._
 import akka.dispatch._
 import akka.util.duration._
+import java.net.URL
+import net.modelbased.sensapp.library.senml.export.JsonProtocol
+
 
 
 
@@ -142,48 +143,58 @@ trait Service extends SensAppService {
     }
   }
   
-  def generateCSV(exportDesc : CSVExportDescriptor) : String = {
-    val groupedDS : Map[String, List[DataSetDescriptor]] = exportDesc.datasets.groupBy{dataset => 
-      val url = URLHandler.extract(dataset.url)
-      val host = url._1._1 + ":" + url._1._2
-      host
-    }
-    val roots : List[Root] = groupedDS.par.flatMap{case (host, datasets) =>
-      val conduit = new HttpConduit(httpClient, host)
-      datasets.par.map{dataset => 
-        val url = URLHandler.extract(dataset.url)
-        val responseFuture = conduit.sendReceive(HttpRequest(HttpMethods.GET, uri = url._2))
+  def generateCSV(exportDesc : CSVExportDescriptor) : String = {      
+    
+	  val separator = exportDesc.separator.getOrElse(",")
+    
+      val roots : List[Root] = exportDesc.datasets.par.flatMap{dataset => 
+        val url = new URL(dataset.url)
+        val conduit = new HttpConduit(httpClient, host = url.getHost, port = url.getPort) {val rootPipeline = simpleRequest ~> sendReceive ~> unmarshal[Root]}
+        val responseFuture : Future[Root] = conduit.rootPipeline(Get(url.getPath))
         try {
-          Await.result(responseFuture, 4 second)
-          Some(JsonParser.fromJson(responseFuture().content.get.toString))
-        } catch {case _ => None}
-      }
-    }.seq.toList.flatten
+          val root = Await.result(responseFuture, 30 second)
+          Some(root)
+        } catch { case e : Exception =>
+          println("TIMEOUT: " + url + "\n caused by: " + e.getClass)
+          None
+        } finally {conduit.close}
+      }.seq.toList
     
+    println("#Roots = " + roots.size)
     
-    val canonized = roots.par.map(_.canonized).seq.collect{case root => root.measurementsOrParameters}.toList.flatten.flatten
+    val canonized = roots.par.map(_.canonized).seq.collect{case root => root.measurementsOrParameters}.seq.toList.flatten.flatten
     val index : Map[Int, String] = canonized.groupBy(mop => mop.name).keySet.flatten.zipWithIndex.toMap.map(_.swap)
     
     val builder : StringBuilder = new StringBuilder()
     
-    //TODO: append headers
+    //TODO: use aliases in headers
+    builder append "Timestamp (ms)"
+    for(i <- 0 to index.keys.lastOption.getOrElse(-1)){
+      builder append separator + index(i) 
+    }
+    builder append "\n"
     
     //TODO: manage unroll strategy by distributing string values evenly between two timestamps
-    canonized.groupBy(mop => mop.time.getOrElse(-1l)).filterKeys(k=> k > -1).map{case (t, mops) => 
+    canonized.groupBy(mop => mop.time.getOrElse(-1l)).filterKeys(k=> k > -1).toSeq.sortWith(_._1 < _._1).foreach{case (t, mops) => 
     	builder append (t*1000) //we export timestamps in ms
-    	for(i <- 0 to index.keys.last){
-    	  builder append exportDesc.separator
-    	  val lastIndex = mops.lastIndexOf(index(i))
-    	  if (lastIndex > -1) {
-    	    builder.append(mops.get(lastIndex).data match {
-              case DoubleDataValue(d)   => d
-              case StringDataValue(s)  => s
-              case BooleanDataValue(b) => b
-              case SumDataValue(d,i)   => d
-              case _ => "-"
-            })
-    	  } else {
-    	    builder append "-"
+    	for(i <- 0 to index.keys.lastOption.getOrElse(-1)){
+    	  builder append separator    	  
+    	  
+    	  println(index(i))
+    	  println(mops.collect{case mop => mop.name}.mkString("[", ",", "]"))
+    	  
+    	  mops.find{mop => mop.name.get == index(i)} match {
+    	    case Some(mop) =>
+    	      builder.append(mop.data match {
+                case DoubleDataValue(d)   => d
+                case StringDataValue(s)  => s //TODO: manage unroll strategy somewhere around here
+                case BooleanDataValue(b) => b
+                case SumDataValue(d,i)   => d
+                case _ => "-"
+              })
+    	    case None =>
+    	      println("DTC!")
+    	      builder append "-"
     	  }
     	}
     	builder append "\n"

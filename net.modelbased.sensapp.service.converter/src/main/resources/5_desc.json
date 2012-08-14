@@ -1,0 +1,8 @@
+{
+    "desc": "Esums_ecg",
+    "timestamp": {"colId": 0},
+    "separator": "\t",
+    "columns": [
+      {"colId":1, "name":"ECG", "unit":"V", "kind":"number", "strategy":"chunk"}
+    ]
+}

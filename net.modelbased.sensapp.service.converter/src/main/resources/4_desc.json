@@ -1,0 +1,10 @@
+{
+    "desc": "Esums_phi",
+    "timestamp": {"colId": 2},
+    "separator": "\t",
+    "locale": "no",
+    "columns": [
+      {"colId":3, "name":"Heart_Rate", "unit":"beet/m", "kind":"number"}, 
+      {"colId":4, "name":"Temperature", "unit":"degC", "kind":"number"} 
+    ]
+}
