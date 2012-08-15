@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SRV="54.247.172.50"
+SRV="demo.sensapp.org"
 HOST=80
 
 SENSAPP_REGISTRY="http://$SRV:$HOST/sensapp"

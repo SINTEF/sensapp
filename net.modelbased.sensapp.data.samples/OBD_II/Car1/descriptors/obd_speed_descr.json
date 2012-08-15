@@ -1,0 +1,8 @@
+{
+  "id": "Car1/OBD_Speed", 
+  "descr": "Speed of the car, from the OBD sensor",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+}
