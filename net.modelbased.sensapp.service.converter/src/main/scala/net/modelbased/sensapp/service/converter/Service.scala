@@ -127,7 +127,7 @@ trait Service extends SensAppService {
           ifExists(context, name, {
             val desc = (_registry pull ("desc", name)).get
             val status = parseCSV(desc, rawData)
-            context complete status
+            context complete status.collect{case root => JsonParser.toJson(root)}.mkString("\n")
           })
         }
       } ~ 
@@ -204,7 +204,7 @@ trait Service extends SensAppService {
 
   
   
-  def parseCSV(request : CSVDescriptor, rawData : String) : Root = {
+  def parseCSV(request : CSVDescriptor, rawData : String) : List[Root] = {
     val start = System.currentTimeMillis
     
     
@@ -278,14 +278,16 @@ trait Service extends SensAppService {
       }
     }
     
-     val raw = chunks/*.par*/.flatMap{ case (timestamp, lines) => extract(lines.toList, timestamp) }.toIndexedSeq.sortWith(_.time.getOrElse(0l) < _.time.getOrElse(0l))
+    val raw = chunks/*.par*/.flatMap{ case (timestamp, lines) => extract(lines.toList, timestamp) }.toIndexedSeq.sortWith(_.time.getOrElse(0l) < _.time.getOrElse(0l))
     
-    println("Creating Root with " + raw.seq.size + " elements...")
+    raw.groupBy{mop => mop.name}.map{case (name, mops) => Root(Some(request.name + "/" + UUID.randomUUID()), None, None, None, Some(mops))}.toList
+    
+    /*println("Creating Root with " + raw.seq.size + " elements...")
     val root = Root(Some(request.name + "/" + UUID.randomUUID()), None, None, None, Some(raw/*.seq*/))
     
     val stop = System.currentTimeMillis
     println("Parsing CSV took " + (stop-start) + " ms")
     
-    root
+    root*/
   }  
 }
