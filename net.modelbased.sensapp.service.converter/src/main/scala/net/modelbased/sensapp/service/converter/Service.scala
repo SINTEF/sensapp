@@ -38,7 +38,6 @@ import java.io.StringReader
 import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.UUID
 import java.text.NumberFormat
 import net.modelbased.sensapp.library.system.{Service => SensAppService, URLHandler}
 import net.modelbased.sensapp.library.senml.{MeasurementOrParameter, Root, DataType, SumDataValue, DoubleDataValue, StringDataValue, BooleanDataValue}
@@ -127,7 +126,7 @@ trait Service extends SensAppService {
           ifExists(context, name, {
             val desc = (_registry pull ("desc", name)).get
             val status = parseCSV(desc, rawData)
-            context complete status.collect{case root => JsonParser.toJson(root)}.mkString("\n")
+            context complete status.factorized.collect{case root => JsonParser.toJson(root)}.mkString("\n")
           })
         }
       } ~ 
@@ -193,7 +192,6 @@ trait Service extends SensAppService {
                 case _ => "-"
               })
     	    case None =>
-    	      println("DTC!")
     	      builder append "-"
     	  }
     	}
@@ -204,7 +202,7 @@ trait Service extends SensAppService {
 
   
   
-  def parseCSV(request : CSVDescriptor, rawData : String) : List[Root] = {
+  def parseCSV(request : CSVDescriptor, rawData : String) : Root = {
     val start = System.currentTimeMillis
     
     
@@ -280,14 +278,14 @@ trait Service extends SensAppService {
     
     val raw = chunks/*.par*/.flatMap{ case (timestamp, lines) => extract(lines.toList, timestamp) }.toIndexedSeq.sortWith(_.time.getOrElse(0l) < _.time.getOrElse(0l))
     
-    raw.groupBy{mop => mop.name}.map{case (name, mops) => Root(Some(request.name + "/" + UUID.randomUUID()), None, None, None, Some(mops))}.toList
+    //raw.groupBy{mop => mop.name}.map{case (name, mops) => Root(Some(request.name + "/" + UUID.randomUUID()), None, None, None, Some(mops))}.toList
     
-    /*println("Creating Root with " + raw.seq.size + " elements...")
-    val root = Root(Some(request.name + "/" + UUID.randomUUID()), None, None, None, Some(raw/*.seq*/))
+    println("Creating Root with " + raw.seq.size + " elements...")
+    val root = Root(request.baseName, None, None, None, Some(raw/*.seq*/))
     
     val stop = System.currentTimeMillis
     println("Parsing CSV took " + (stop-start) + " ms")
     
-    root*/
+    root
   }  
 }

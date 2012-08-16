@@ -45,6 +45,13 @@ case class Root (
     }
   }
   
+  def factorized: List[Root] = {
+    measurementsOrParameters.flatten.groupBy{case mop => mop.extractName(this)}.par.map{case (qName, mops) =>
+      val bt = mops.toList.sortWith{ _.extractTime(this) < _.extractTime(this) }.head.extractTime(this)
+      Root(Some(qName), Some(bt), mops.head.extractUnit(this), this.version, Some(mops.map{mop => MeasurementOrParameter(None, None, mop.value, mop.stringValue, mop.booleanValue, mop.valueSum, Some((mop.extractTime(this)-bt).toInt), mop.updateTime)}.toSeq))
+    }.toList
+  }
+  
   /**
    * a SenML message is canonic if no base* elements are provided
    */

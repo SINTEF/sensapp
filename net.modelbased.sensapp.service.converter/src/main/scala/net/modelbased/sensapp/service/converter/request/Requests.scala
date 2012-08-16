@@ -32,7 +32,8 @@ case class  CSVDescriptor(val name: String,
     val columns: List[ColumnDescriptor],
     val separator: Option[Char],
     val escape: Option[Char],
-    val locale : Option[String])
+    val locale : Option[String],
+    val baseName : Option[String])
 
 
 case class DateFormatDescriptor(val pattern: String, val locale : String)
@@ -50,7 +51,7 @@ object CSVDescriptorProtocols extends DefaultJsonProtocol {
   implicit val dateFormatFormat = jsonFormat(DateFormatDescriptor, "pattern", "locale")
   implicit val timestampDescriptorFormat = jsonFormat(TimeStampDescriptor, "colId", "format")
   implicit val columnDescriptorFormat = jsonFormat(ColumnDescriptor,"colId", "name", "unit", "kind", "strategy")
-  implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"desc", "timestamp", "columns", "separator", "escape", "locale")
+  implicit val csvDescriptorFormat = jsonFormat(CSVDescriptor,"desc", "timestamp", "columns", "separator", "escape", "locale", "bn")
 }
 
 /**
