@@ -57,11 +57,11 @@ object CSVDescriptorProtocols extends DefaultJsonProtocol {
 /**
  * The following classes and object deal with the export of SensApp datasets to CSV
  */
-case class DataSetDescriptor(val url: String, val as: String, val unroll : Option[Boolean])
+case class DataSetDescriptor(val url: String, /*val as: String, */val unroll : Option[Boolean])
 
 case class CSVExportDescriptor(val datasets : List[DataSetDescriptor], val separator : Option[String])
 
 object CSVExportDescriptorProtocols extends DefaultJsonProtocol {
-  implicit val dataSetFormat = jsonFormat(DataSetDescriptor, "url", "as", "unroll")
+  implicit val dataSetFormat = jsonFormat(DataSetDescriptor, "url"/*, "as"*/, "unroll")
   implicit val csvExportFormat = jsonFormat(CSVExportDescriptor, "datasets", "separator")
 }

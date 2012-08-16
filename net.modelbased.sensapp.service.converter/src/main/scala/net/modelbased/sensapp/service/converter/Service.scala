@@ -146,54 +146,40 @@ trait Service extends SensAppService {
     
 	  val separator = exportDesc.separator.getOrElse(",")
     
+	  //List of factorized roots (one sensor/root, measurements ordered by timestamp) sorted by base name
       val roots : List[Root] = exportDesc.datasets.par.flatMap{dataset => 
         val url = new URL(dataset.url)
         val conduit = new HttpConduit(httpClient, host = url.getHost, port = url.getPort) {val rootPipeline = simpleRequest ~> sendReceive ~> unmarshal[Root]}
         val responseFuture : Future[Root] = conduit.rootPipeline(Get(url.getPath))
         try {
           val root = Await.result(responseFuture, 30 second)
-          Some(root)
+          root.factorized
         } catch { case e : Exception =>
           println("TIMEOUT: " + url + "\n caused by: " + e.getClass)
-          None
+          Nil
         } finally {conduit.close}
-      }.seq.toList
-    
-    println("#Roots = " + roots.size)
-    
-    val canonized = roots.par.map(_.canonized).seq.collect{case root => root.measurementsOrParameters}.seq.toList.flatten.flatten
-    val index : Map[Int, String] = canonized.groupBy(mop => mop.name).keySet.flatten.zipWithIndex.toMap.map(_.swap)
+      }.toList.sortBy(_.baseName)
     
     val builder : StringBuilder = new StringBuilder()
     
-    //TODO: use aliases in headers
     builder append "Timestamp (ms)"
-    for(i <- 0 to index.keys.lastOption.getOrElse(-1)){
-      builder append separator + index(i) 
+    roots.foreach{r =>
+      builder append separator + r.baseName 
     }
     builder append "\n"
     
     //TODO: manage unroll strategy by distributing string values evenly between two timestamps
-    canonized.groupBy(mop => mop.time.getOrElse(-1l)).filterKeys(k=> k > -1).toSeq.sortWith(_._1 < _._1).foreach{case (t, mops) => 
+    roots.par.map(_.canonized).seq.collect{case root => root.measurementsOrParameters}.toList.flatten.flatten.groupBy(mop => mop.time.getOrElse(-1l)).filterKeys(k=> k > -1).toSeq.sortWith(_._1 < _._1).foreach{case (t, mops) => 
     	builder append (t*1000) //we export timestamps in ms
-    	for(i <- 0 to index.keys.lastOption.getOrElse(-1)){
+    	mops.sortBy(_.name.get).foreach{mop =>
     	  builder append separator    	  
-    	  
-    	  println(index(i))
-    	  println(mops.collect{case mop => mop.name}.mkString("[", ",", "]"))
-    	  
-    	  mops.find{mop => mop.name.get == index(i)} match {
-    	    case Some(mop) =>
-    	      builder.append(mop.data match {
-                case DoubleDataValue(d)   => d
-                case StringDataValue(s)  => s //TODO: manage unroll strategy somewhere around here
-                case BooleanDataValue(b) => b
-                case SumDataValue(d,i)   => d
-                case _ => "-"
-              })
-    	    case None =>
-    	      builder append "-"
-    	  }
+   	      builder.append(mop.data match {
+            case DoubleDataValue(d)   => d
+            case StringDataValue(s)  => s //TODO: manage unroll strategy somewhere around here
+            case BooleanDataValue(b) => b
+            case SumDataValue(d,i)   => d
+            case _ => "-"
+          })
     	}
     	builder append "\n"
     }

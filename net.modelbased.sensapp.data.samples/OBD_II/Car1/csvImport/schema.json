@@ -2,8 +2,8 @@
     "desc": "Torque_track_record",
     "timestamp": {"colId": 0},
     "columns": [
-      {"colId":1, "name":"lon", "unit":"lon", "kind":"number", "strategy":"avg"}, 
-      {"colId":2, "name":"lat", "unit":"lat", "kind":"number", "strategy":"avg"}, 
+      {"colId":1, "name":"lat", "unit":"lat", "kind":"number", "strategy":"avg"}, 
+      {"colId":2, "name":"lon", "unit":"lon", "kind":"number", "strategy":"avg"}, 
       {"colId":4, "name":"GPS_Speed", "unit":"km/h", "kind":"number", "strategy":"max"}, 
       {"colId":5, "name":"Engine_RPM", "unit":"RPM", "kind":"number", "strategy":"max"},
       {"colId":6, "name":"OBD_Speed", "unit":"km/h", "kind":"number", "strategy":"max"},

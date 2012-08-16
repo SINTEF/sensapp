@@ -1,8 +1,8 @@
 {
   "datasets": [
-    {"url": "http://54.247.172.50:80/sensapp/databases/raw/data/Bike1/latitude", "as":"latitude"},
-    {"url": "http://54.247.172.50:80/sensapp/databases/raw/data/Bike1/longitude", "as":"longitude"},
-    {"url": "http://54.247.172.50:80/sensapp/databases/raw/data/Bike1/altitude", "as":"altitude"}
+    {"url": "http://54.247.172.50:80/sensapp/databases/raw/data/Bike1/latitude"},
+    {"url": "http://54.247.172.50:80/sensapp/databases/raw/data/Bike1/longitude"},
+    {"url": "http://54.247.172.50:80/sensapp/databases/raw/data/Bike1/altitude"}
   ],
   "separator": ","
 }
