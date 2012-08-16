@@ -277,15 +277,13 @@ trait Service extends SensAppService {
     }
     
     val raw = chunks/*.par*/.flatMap{ case (timestamp, lines) => extract(lines.toList, timestamp) }.toIndexedSeq.sortWith(_.time.getOrElse(0l) < _.time.getOrElse(0l))
+        
+    //println("Creating Root with " + raw.seq.size + " elements...")
+    /*val root = */Root(request.baseName, None, None, None, Some(raw/*.seq*/))
     
-    //raw.groupBy{mop => mop.name}.map{case (name, mops) => Root(Some(request.name + "/" + UUID.randomUUID()), None, None, None, Some(mops))}.toList
+    //val stop = System.currentTimeMillis
+    //println("Parsing CSV took " + (stop-start) + " ms")
     
-    println("Creating Root with " + raw.seq.size + " elements...")
-    val root = Root(request.baseName, None, None, None, Some(raw/*.seq*/))
-    
-    val stop = System.currentTimeMillis
-    println("Parsing CSV took " + (stop-start) + " ms")
-    
-    root
+    //root
   }  
 }

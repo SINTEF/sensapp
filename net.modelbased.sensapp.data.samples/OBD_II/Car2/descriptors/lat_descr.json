@@ -1,0 +1,8 @@
+{
+  "id": "Car2/lat", 
+  "descr": "Latitude of the car",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+}

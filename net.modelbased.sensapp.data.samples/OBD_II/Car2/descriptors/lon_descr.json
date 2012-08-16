@@ -1,0 +1,8 @@
+{
+  "id": "Car2/lon", 
+  "descr": "Longitude of the car",
+  "schema": { 
+    "backend": "raw", 
+    "template": "Numerical"
+  }
+}
