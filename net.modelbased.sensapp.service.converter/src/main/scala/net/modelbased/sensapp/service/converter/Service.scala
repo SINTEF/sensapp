@@ -164,7 +164,7 @@ trait Service extends SensAppService {
     
     builder append "Timestamp (ms)"
     roots.foreach{r =>
-      builder append separator + r.baseName 
+      builder append separator + r.baseName.get 
     }
     builder append "\n"
     
