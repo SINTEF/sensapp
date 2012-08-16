@@ -10,7 +10,7 @@ do
     register_sensor $name $descr
 done
 
-for file in `ls json/split/*.json`
+for file in `ls json/*.json`
 do
     db_raw_import $file
 done
