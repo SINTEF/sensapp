@@ -4,7 +4,17 @@ source functions.sh
 
 WAIT=1
 
-IDS=`ls $DATA_DIR | cut -d "-" -f 1 | uniq | sort`
+
+if [ "$#" == "1" ]
+then
+    IDS=`ls $DATA_DIR | cut -d "-" -f 1 | uniq | sort | head -n $1`
+else
+    IDS=`ls $DATA_DIR | cut -d "-" -f 1 | uniq | sort`
+fi
+
+echo $IDS
+
+
 ALL=`ls $DATA_DIR | cut -d "-" -f 1 | uniq | wc -l | tr -s " "`
 
 CPT=0
