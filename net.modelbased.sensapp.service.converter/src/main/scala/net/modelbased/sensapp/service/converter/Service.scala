@@ -88,6 +88,14 @@ trait Service extends SensAppService {
         } 
       } ~ cors("POST")
     } ~
+    path("converter" / "toSRT") {
+      post {
+        content(as[CSVExportDescriptor]) { exportDesc => context =>
+          val srt = generateSRT(exportDesc)
+          context complete srt
+        } 
+      } ~ cors("POST")
+    } ~
     path("converter" / "fromCSV") {
       post {
         content(as[CSVDescriptor]) { desc => context =>
@@ -142,23 +150,72 @@ trait Service extends SensAppService {
     }
   }
   
-  def generateCSV(exportDesc : CSVExportDescriptor) : String = {      
-    
-	  val separator = exportDesc.separator.getOrElse(",")
-    
-	  //List of factorized roots (one sensor/root, measurements ordered by timestamp) sorted by base name
-      val roots : List[Root] = exportDesc.datasets.par.flatMap{dataset => 
+  def getRemoteRoots(exportDesc : CSVExportDescriptor) : List[Root] = {
+    exportDesc.datasets/*.par*/.flatMap{dataset => 
         val url = new URL(dataset.url)
         val conduit = new HttpConduit(httpClient, host = url.getHost, port = url.getPort) {val rootPipeline = simpleRequest ~> sendReceive ~> unmarshal[Root]}
         val responseFuture : Future[Root] = conduit.rootPipeline(Get(url.getPath))
         try {
-          val root = Await.result(responseFuture, 30 second)
+          val root = Await.result(responseFuture, 60 second)
           root.factorized
         } catch { case e : Exception =>
           println("TIMEOUT: " + url + "\n caused by: " + e.getClass)
           Nil
         } finally {conduit.close}
       }.toList.sortBy(_.baseName)
+  }
+  
+  def generateSRT(exportDesc : CSVExportDescriptor) : String = {
+	val roots : List[Root] = getRemoteRoots(exportDesc)
+    
+    val builder : StringBuilder = new StringBuilder()
+    
+    //TODO: manage unroll strategy by distributing string values evenly between two timestamps
+    
+	val mopsByTime = roots.par.map(_.canonized).seq.collect{case root => root.measurementsOrParameters}.toList.flatten.flatten.groupBy(mop => mop.time.getOrElse(-1l)).filterKeys(k=> k > -1).toSeq.sortWith(_._1 < _._1)
+	
+	var i = -1
+	var minTime = 0l
+	var previousTime = minTime
+	
+    mopsByTime.foreach{
+	  case (t, mops) if (i == -1) =>
+	    minTime = t
+	    previousTime = minTime
+	    i = i + 1
+      case (t, mops) if (i >= 0) => 
+    	builder append i + "\n"
+    	i = i + 1
+    	var delta = previousTime - minTime
+    	previousTime = t    	
+    	builder append ("%02d:%02d:%02d,%03d".format(delta/3600, (delta%3600)/60, delta%60, 0))
+    	builder append " --> "
+    	delta = t - minTime
+    	builder append ("%02d:%02d:%02d,%03d".format(delta/3600, (delta%3600)/60, delta%60, 0)) + "\n"
+    	mops.sortBy(_.name.get).foreach{mop =>
+    	  builder append "<font color=#FFFF00><b>"
+    	  builder append mop.name.get + ": "
+    	  builder append "</b></font>"
+   	      builder.append(mop.data match {
+            case DoubleDataValue(d)   => d
+            case StringDataValue(s)  => s //TODO: manage unroll strategy somewhere around here
+            case BooleanDataValue(b) => b
+            case SumDataValue(d,i)   => d
+            case _ => "-"
+          })
+          builder append "\n"
+    	}
+    	builder append "\n"
+    }
+    builder.toString    
+  }
+  
+  def generateCSV(exportDesc : CSVExportDescriptor) : String = {      
+    
+	val separator = exportDesc.separator.getOrElse(",")
+    
+	//List of factorized roots (one sensor/root, measurements ordered by timestamp) sorted by base name
+    val roots = getRemoteRoots(exportDesc)
     
     val builder : StringBuilder = new StringBuilder()
     
