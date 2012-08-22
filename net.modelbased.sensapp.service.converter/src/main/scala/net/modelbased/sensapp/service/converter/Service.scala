@@ -153,13 +153,18 @@ trait Service extends SensAppService {
   def getRemoteRoots(exportDesc : CSVExportDescriptor) : List[Root] = {
     exportDesc.datasets/*.par*/.flatMap{dataset => 
         val url = new URL(dataset.url)
-        val conduit = new HttpConduit(httpClient, host = url.getHost, port = url.getPort) {val rootPipeline = simpleRequest ~> sendReceive ~> unmarshal[Root]}
+        val conduit = if (url.getPort > 0)
+          new HttpConduit(httpClient, host = url.getHost, port = url.getPort) {val rootPipeline = simpleRequest ~> sendReceive ~> unmarshal[Root]}
+        else
+          new HttpConduit(httpClient, host = url.getHost) {val rootPipeline = simpleRequest ~> sendReceive ~> unmarshal[Root]}
         val responseFuture : Future[Root] = conduit.rootPipeline(Get(url.getPath))
         try {
-          val root = Await.result(responseFuture, 60 second)
+          val root = Await.result(responseFuture, 600 second)
           root.factorized
         } catch { case e : Exception =>
           println("TIMEOUT: " + url + "\n caused by: " + e.getClass)
+          println(" trace:")
+          e.printStackTrace()
           Nil
         } finally {conduit.close}
       }.toList.sortBy(_.baseName)
@@ -174,73 +179,75 @@ trait Service extends SensAppService {
     
 	val mopsByTime = roots.par.map(_.canonized).seq.collect{case root => root.measurementsOrParameters}.toList.flatten.flatten.groupBy(mop => mop.time.getOrElse(-1l)).filterKeys(k=> k > -1).toSeq.sortWith(_._1 < _._1)
 	
-	var i = -1
+	var i = 0
 	var minTime = 0l
 	var previousTime = minTime
 	
     mopsByTime.foreach{
-	  case (t, mops) if (i == -1) =>
+	  case (t, mops) if (i == 0) =>
 	    minTime = t
 	    previousTime = minTime
 	    i = i + 1
-      case (t, mops) if (i >= 0) => 
-    	builder append i + "\n"
+      case (t, mops) if (i > 0) => 
+    	builder append i + "\r\n"
     	i = i + 1
     	var delta = previousTime - minTime
     	previousTime = t    	
     	builder append ("%02d:%02d:%02d,%03d".format(delta/3600, (delta%3600)/60, delta%60, 0))
     	builder append " --> "
     	delta = t - minTime
-    	builder append ("%02d:%02d:%02d,%03d".format(delta/3600, (delta%3600)/60, delta%60, 0)) + "\n"
+    	builder append ("%02d:%02d:%02d,%03d".format(delta/3600, (delta%3600)/60, delta%60, 0)) + "\r\n"
     	mops.sortBy(_.name.get).foreach{mop =>
-    	  builder append "<font color=#FFFF00><b>"
+    	  //builder append "<font color=#FFFF00><b>"
     	  builder append mop.name.get + ": "
-    	  builder append "</b></font>"
+    	  //builder append "</b></font>"
    	      builder.append(mop.data match {
-            case DoubleDataValue(d)   => d
+            case DoubleDataValue(d)   => "%.2f".format(d)
             case StringDataValue(s)  => s //TODO: manage unroll strategy somewhere around here
             case BooleanDataValue(b) => b
-            case SumDataValue(d,i)   => d
+            case SumDataValue(d,i)   => "%.2f".format(d)
             case _ => "-"
           })
-          builder append "\n"
+          builder append "\r\n"
     	}
-    	builder append "\n"
+    	builder append "\r\n"
     }
+	builder append "\r\n"
     builder.toString    
   }
   
   def generateCSV(exportDesc : CSVExportDescriptor) : String = {      
-    
-	val separator = exportDesc.separator.getOrElse(",")
-    
 	//List of factorized roots (one sensor/root, measurements ordered by timestamp) sorted by base name
     val roots = getRemoteRoots(exportDesc)
     
-    val builder : StringBuilder = new StringBuilder()
-    
-    builder append "Timestamp (ms)"
-    roots.foreach{r =>
-      builder append separator + r.baseName.get 
-    }
-    builder append "\n"
-    
-    //TODO: manage unroll strategy by distributing string values evenly between two timestamps
-    roots.par.map(_.canonized).seq.collect{case root => root.measurementsOrParameters}.toList.flatten.flatten.groupBy(mop => mop.time.getOrElse(-1l)).filterKeys(k=> k > -1).toSeq.sortWith(_._1 < _._1).foreach{case (t, mops) => 
-    	builder append (t*1000) //we export timestamps in ms
-    	mops.sortBy(_.name.get).foreach{mop =>
-    	  builder append separator    	  
-   	      builder.append(mop.data match {
-            case DoubleDataValue(d)   => d
-            case StringDataValue(s)  => s //TODO: manage unroll strategy somewhere around here
-            case BooleanDataValue(b) => b
-            case SumDataValue(d,i)   => d
-            case _ => "-"
-          })
+    val csv = CSV(roots.collect{case r => r.baseName.get}, exportDesc.separator.getOrElse(","))	
+	val index : Map[Int, String] = roots.collect{case r => r.baseName.get}.zipWithIndex.map{_.swap}.toMap
+	    
+    roots.par.map(_.canonized).seq.collect{case root => root.measurementsOrParameters}.toList.flatten.flatten.groupBy(mop => mop.time.getOrElse(-1l)).filterKeys(k=> k > -1).toSeq.sortWith(_._1 < _._1).sliding(2,1).foreach{pair => 
+      val t = pair.head._1
+      val mops = pair.head._2
+      mops.foreach{ mop =>
+        mop.data match {
+   	      case StringDataValue(s)  =>
+     	    val values = s.split(";")
+     	    if (values.size > 1) pair.last match {case (t2, mops2) =>
+   	          val delta = (t2-t)/values.size * 1000
+   	          var time = t*1000 - delta
+   	          values.foreach{ v => 
+   	            time = t*1000 + delta
+   	            csv.push(time, mop.name.get, v)
+   	          }
+   	        }
+   	        else {csv.push(t*1000, mop.name.get, s)}
+   	      case d : DataType => d match {
+            case DoubleDataValue(d)   => csv.push(t*1000, mop.name.get, d.toString)
+            case BooleanDataValue(b) => csv.push(t*1000, mop.name.get, b.toString)
+            case SumDataValue(d,i)   => csv.push(t*1000, mop.name.get, d.toString)
+     	  }
     	}
-    	builder append "\n"
+      }
     }
-    builder.toString
+    csv.toString
   }
 
   
@@ -321,12 +328,6 @@ trait Service extends SensAppService {
     
     val raw = chunks/*.par*/.flatMap{ case (timestamp, lines) => extract(lines.toList, timestamp) }.toIndexedSeq.sortWith(_.time.getOrElse(0l) < _.time.getOrElse(0l))
         
-    //println("Creating Root with " + raw.seq.size + " elements...")
-    /*val root = */Root(request.baseName, None, None, None, Some(raw/*.seq*/))
-    
-    //val stop = System.currentTimeMillis
-    //println("Parsing CSV took " + (stop-start) + " ms")
-    
-    //root
+    Root(request.baseName, None, None, None, Some(raw))
   }  
 }
