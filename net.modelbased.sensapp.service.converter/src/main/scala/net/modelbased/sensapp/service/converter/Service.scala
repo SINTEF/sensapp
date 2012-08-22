@@ -179,24 +179,18 @@ trait Service extends SensAppService {
     
 	val mopsByTime = roots.par.map(_.canonized).seq.collect{case root => root.measurementsOrParameters}.toList.flatten.flatten.groupBy(mop => mop.time.getOrElse(-1l)).filterKeys(k=> k > -1).toSeq.sortWith(_._1 < _._1)
 	
-	var i = 0
-	var minTime = 0l
-	var previousTime = minTime
+	var i = 1
+	val minTime = mopsByTime.head._1
 	
-    mopsByTime.foreach{
-	  case (t, mops) if (i == 0) =>
-	    minTime = t
-	    previousTime = minTime
-	    i = i + 1
-      case (t, mops) if (i > 0) => 
-    	builder append i + "\r\n"
-    	i = i + 1
-    	var delta = previousTime - minTime
-    	previousTime = t    	
-    	builder append ("%02d:%02d:%02d,%03d".format(delta/3600, (delta%3600)/60, delta%60, 0))
+    mopsByTime.sliding(2,1).foreach{pair =>
+        builder append i + "\r\n"
+    	i = i + 1 
+      	val t = pair.head._1 - minTime
+      	val mops = pair.head._2
+      	val t2 = pair.last._1 - minTime    	
+    	builder append ("%02d:%02d:%02d.%03d".format(t/3600, (t%3600)/60, t%60, 0))
     	builder append " --> "
-    	delta = t - minTime
-    	builder append ("%02d:%02d:%02d,%03d".format(delta/3600, (delta%3600)/60, delta%60, 0)) + "\r\n"
+    	builder append ("%02d:%02d:%02d.%03d".format(t2/3600, (t2%3600)/60, t2%60, 0)) + "\r\n"
     	mops.sortBy(_.name.get).foreach{mop =>
     	  //builder append "<font color=#FFFF00><b>"
     	  builder append mop.name.get + ": "
