@@ -183,17 +183,17 @@ trait Service extends SensAppService {
 	val minTime = mopsByTime.head._1
 	
     mopsByTime.sliding(2,1).foreach{pair =>
-        builder append i + "\r\n"
+        builder append i + "\n"
     	i = i + 1 
       	val t = pair.head._1 - minTime
       	val mops = pair.head._2
       	val t2 = pair.last._1 - minTime    	
-    	builder append ("%02d:%02d:%02d.%03d".format(t/3600, (t%3600)/60, t%60, 0))
+    	builder append ("%02d:%02d:%02d,%03d".format(t/3600, (t%3600)/60, t%60, 0))
     	builder append " --> "
-    	builder append ("%02d:%02d:%02d.%03d".format(t2/3600, (t2%3600)/60, t2%60, 0)) + "\r\n"
+    	builder append ("%02d:%02d:%02d,%03d".format(t2/3600, (t2%3600)/60, t2%60, 0)) + "\n"
     	mops.sortBy(_.name.get).foreach{mop =>
     	  //builder append "<font color=#FFFF00><b>"
-    	  builder append mop.name.get + ": "
+    	  builder append mop.name.get.split("/").last + ": "
     	  //builder append "</b></font>"
    	      builder.append(mop.data match {
             case DoubleDataValue(d)   => "%.2f".format(d)
@@ -202,11 +202,11 @@ trait Service extends SensAppService {
             case SumDataValue(d,i)   => "%.2f".format(d)
             case _ => "-"
           })
-          builder append "\r\n"
+          builder append "\n"
     	}
-    	builder append "\r\n"
+    	builder append "\n"
     }
-	builder append "\r\n"
+	builder append "\n"
     builder.toString    
   }
   
