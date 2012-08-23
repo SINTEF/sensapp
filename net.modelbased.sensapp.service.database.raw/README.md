@@ -181,7 +181,7 @@ Obtained response:
       }, ... ]
     }
     
-One can use parameters (`from`, `to`) to restrict the retrieved data to a given interval. The parameter `to` is optional (default value: `"now"`). The `sorted` bollean parameter can be used to sort the data according to their timestamp (it adds a little overhead if the dataset is huge). These parameters can take the following values:
+One can use parameters (`from`, `to`) to restrict the retrieved data to a given interval. The parameter `to` is optional (default value: `"now"`). The `sorted` boolean parameter can be used to sort the data according to their timestamp (it adds a little overhead if the dataset is huge). These parameters can take the following values:
  
 Examples:
 
@@ -194,10 +194,15 @@ Alternatively, one can use the `limit` integer parameter to retrieve the last `x
 
   - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?limit=2
 
+It is also possible to re-sample a dataset, by using the `every` and `by` parameter. `every` specifies the sampling rate in seconds and `by` specifies how data within `every` are aggregated. Valid arguments for `by` are: avg, min, max and one. Note that only numerical values are re-sampled. A simple example:
+
+  - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?every=2&by=avg
+
+
     
 #### PUT /databases/raw/data/%NAME
 
-Push data to be stored for this sensor. Data must be represented as a SENML document. The elements that are not relevant for this sensor (_i.e._, associated to a sensor ­ `%NAME`) are ignored. The list of ignored elements is returned to the user. If a data is already in the database, it will be updated with the new value.
+Push data to be stored for this sensor. Data must be represented as a SENML document. The elements that are not relevant for this sensor (_i.e._, associated to a sensor ï¿½ `%NAME`) are ignored. The list of ignored elements is returned to the user. If a data is already in the database, it will be updated with the new value.
 
 Query example:
 
