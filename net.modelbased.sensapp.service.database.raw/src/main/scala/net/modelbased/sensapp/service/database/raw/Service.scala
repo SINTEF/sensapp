@@ -105,9 +105,9 @@ trait RawDatabaseService extends SensAppService {
 	    } ~
 	    path("databases" / "raw" / "data" / SenMLStd.NAME_VALIDATOR.r ) { name => 
 	      get { 
-	        parameters("from" ? "0", "to" ? "now", "sorted" ? "none", "limit" ? -1, "factorized" ? false) { (from, to, sorted, limit, factorized) => context =>
+	        parameters("from" ? "0", "to" ? "now", "sorted" ? "none", "limit" ? -1, "factorized" ? false, "every" ? 1, "by" ? "avg") { (from, to, sorted, limit, factorized, every, by) => context =>
 	          ifExists(context, name, {
-	            val dataset = _backend get(name, buildTimeStamp(from), buildTimeStamp(to), sorted,limit)
+	            val dataset = (_backend get(name, buildTimeStamp(from), buildTimeStamp(to), sorted, limit)).sampled(every, by).head
 	            context complete (if (factorized) dataset.factorized.head else dataset)
 	          })
 	        } 

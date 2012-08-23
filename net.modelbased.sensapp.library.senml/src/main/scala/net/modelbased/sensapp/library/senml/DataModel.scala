@@ -45,21 +45,67 @@ case class Root (
     }
   }
   
+  /**
+   * factorized processes this root in order to reduce the processing on the client side.
+   * It returns a list of Root, semantically equivalent to this root. It basically:
+   * - splits this root in a one-root-per-sensor fashion
+   * - factorizes the base* elements of each root
+   * - orders the measurements of each root by growing timestamps
+   */
   def factorized: List[Root] = {
     measurementsOrParameters.flatten.groupBy{case mop => mop.extractName(this)}.par.map{case (qName, mops) =>
-      val bt = mops.toList.sortWith{ _.extractTime(this) < _.extractTime(this) }.head.extractTime(this)
-      Root(Some(qName), Some(bt), mops.head.extractUnit(this), this.version, Some(mops.map{mop => MeasurementOrParameter(None, None, mop.value, mop.stringValue, mop.booleanValue, mop.valueSum, Some((mop.extractTime(this)-bt).toInt), mop.updateTime)}.toSeq))
+      val sortedMops = mops.toList.sortWith{ _.extractTime(this) < _.extractTime(this) } 
+      val bt = sortedMops.head.extractTime(this)
+      Root(Some(qName), Some(bt), sortedMops.head.extractUnit(this), this.version, Some(sortedMops.map{mop => MeasurementOrParameter(None, None, mop.value, mop.stringValue, mop.booleanValue, mop.valueSum, Some((mop.extractTime(this)-bt).toInt), mop.updateTime)}.toSeq))
     }.toList
   }
   
   /**
-   * a SenML message is canonic if no base* elements are provided
+   * a SenML message is canonic if no base* element is provided
    */
   def isCanonic: Boolean = {this.baseName == None && this.baseTime == None && this.baseUnits == None}
   
+  
+   /**
+   * a SenML message is factorized if all base* elements are provided
+   */
+  def isFactorized: Boolean = {this.baseName.isDefined && this.baseTime.isDefined && this.baseUnits.isDefined}
+  
+  def sampled(every : Int, by : String) : List[Root] = {
+    if (every > 1 && List("min", "max", "avg", "one").contains(by)) {
+      factorized.map{root => 
+        if (root.measurementsOrParameters.flatten.forall{mop => mop.value.isDefined}) {
+          var t : Long = root.measurementsOrParameters.get.head.time.get //smallest timestamp
+          var values : List[Double] = List()
+          var mops : List[MeasurementOrParameter] = List()
+          root.measurementsOrParameters.get.foreach{mop =>
+            if (mop.time.get-t >= every) {
+       	    mops = (by match {
+                case "min" => MeasurementOrParameter(mop.name, mop.units, Some(values.sortWith(_ < _).head), None, None, None, Some(t+every/2), mop.updateTime)
+                case "max" => MeasurementOrParameter(mop.name, mop.units, Some(values.sortWith(_ > _).head), None, None, None, Some(t+every/2), mop.updateTime)
+                case "avg" => MeasurementOrParameter(mop.name, mop.units, Some((values.sum)/values.size), None, None, None, Some(t+every/2), mop.updateTime)
+                case "one" => MeasurementOrParameter(mop.name, mop.units, Some(values.head), None, None, None, Some(t+every/2), mop.updateTime)
+              }) :: mops
+              println("  " + mops.size)
+              t = mop.time.get
+              values = List()
+      	    } else {
+      	      values = mop.value.get :: values
+      	    }
+          }
+          Root(root.baseName, root.baseTime, root.baseUnits, version, Some(mops))
+        } else {
+          root
+        }     
+      }.toList
+    } else {
+      List(this)
+    }
+  }
+  
   /**
    * returns canonized data classified by each sensor
-   * root message **ALWAYS** containes at leat one mop by construction
+   * root message **ALWAYS** contains at least one mop by construction
    */
   def dispatch: Map[String, Root] = {
     val canonized = this.canonized
