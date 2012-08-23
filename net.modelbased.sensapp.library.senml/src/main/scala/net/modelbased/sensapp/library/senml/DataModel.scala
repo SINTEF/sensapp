@@ -86,7 +86,6 @@ case class Root (
                 case "avg" => MeasurementOrParameter(mop.name, mop.units, Some((values.sum)/values.size), None, None, None, Some(t+every/2), mop.updateTime)
                 case "one" => MeasurementOrParameter(mop.name, mop.units, Some(values.head), None, None, None, Some(t+every/2), mop.updateTime)
               }) :: mops
-              println("  " + mops.size)
               t = mop.time.get
               values = List()
       	    } else {
