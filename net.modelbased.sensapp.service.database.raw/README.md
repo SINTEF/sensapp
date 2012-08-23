@@ -194,11 +194,15 @@ Alternatively, one can use the `limit` integer parameter to retrieve the last `x
 
   - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?limit=2
 
-It is also possible to re-sample a dataset, by using the `every` and `by` parameter. `every` specifies the sampling rate in seconds and `by` specifies how data within `every` are aggregated. Valid arguments for `by` are: avg, min, max and one. Note that only numerical values are re-sampled. A simple example:
+It is also possible to re-sample a dataset, by using the `every` and `by` parameters. `every` specifies the sampling rate in seconds and `by` specifies how data within `every` are aggregated. Valid arguments for `by` are: avg, min, max and one. Note that only numerical values are re-sampled. A simple example:
 
   - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?every=2&by=avg
 
+A last parameter that can be used to retried data is `factorized`. This returns a semantically equivalent representation of the data, in a compact form. The base time, base units and base name are indeed factorized in the root element and are not repeated for every measurement. Example:
 
+  - http://localhost:8080/databases/raw/data/my-pretty-little-sensor?factorized=true
+
+All those parameters can of course be composed.
     
 #### PUT /databases/raw/data/%NAME
 
