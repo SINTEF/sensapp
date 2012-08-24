@@ -1,9 +1,9 @@
 #!/bin/bash
 
-#SRV="demo.sensapp.org"
-#HOST=80
-SRV="127.0.0.1"
-HOST=8080
+SRV="demo.sensapp.org"
+HOST=80
+#SRV="127.0.0.1"
+#HOST=8080
 
 SENSAPP_REGISTRY="http://$SRV:$HOST/sensapp"
 SENSAPP_DATABASE_RAW="http://$SRV:$HOST/sensapp"

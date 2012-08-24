@@ -5,18 +5,18 @@
     "owner": "Franck Fleurey", "license": "LGPL"
   },
   "sensors": [
-    "/registry/sensors/Bike1/altitude",
-    "/registry/sensors/Bike1/crs",
-    "/registry/sensors/Bike1/gps_alt",
-    "/registry/sensors/Bike1/gpsfix",
-    "/registry/sensors/Bike1/gpssats",
-    "/registry/sensors/Bike1/ground_speed",
-    "/registry/sensors/Bike1/heading",
-    "/registry/sensors/Bike1/latitude",
-    "/registry/sensors/Bike1/longitude",
-    "/registry/sensors/Bike1/pitch",
-    "/registry/sensors/Bike1/roll",
-    "/registry/sensors/Bike1/sonar"
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/altitude",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/crs",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/gps_alt",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/gpsfix",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/gpssats",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/ground_speed",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/heading",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/latitude",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/longitude",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/pitch",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/roll",
+    "http://demo.sensapp.org/sensapp/registry/sensors/Bike1/sonar"
   ]
 }
  

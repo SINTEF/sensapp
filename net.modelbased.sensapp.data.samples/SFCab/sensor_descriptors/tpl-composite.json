@@ -4,7 +4,7 @@
   "tags": { 
     "source": "http://crawdad.cs.dartmouth.edu/meta.php?name=epfl/mobility"
   },
-  "sensors": ["/registry/sensors/sf/cab/%NAME%/lambda",
-              "/registry/sensors/sf/cab/%NAME%/phi",
-	      "/registry/sensors/sf/cab/%NAME%/occupied"]
+  "sensors": ["http://demo.sensapp.org/sensapp/registry/sensors/sf/cab/%NAME%/lambda",
+              "http://demo.sensapp.org/sensapp/registry/sensors/sf/cab/%NAME%/phi",
+	      "http://demo.sensapp.org/sensapp/registry/sensors/sf/cab/%NAME%/occupied"]
 }

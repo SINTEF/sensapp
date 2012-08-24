@@ -5,24 +5,24 @@
     "owner": "Franck Fleurey", "license": "LGPL"
   },
   "sensors": [
-    "/registry/sensors/EBike1/ah",
-    "/registry/sensors/EBike1/air_temp",
-    "/registry/sensors/EBike1/altitude",
-    "/registry/sensors/EBike1/crs",
-    "/registry/sensors/EBike1/ctrl_temp",
-    "/registry/sensors/EBike1/current",
-    "/registry/sensors/EBike1/gps_alt",
-    "/registry/sensors/EBike1/gpsfix",
-    "/registry/sensors/EBike1/gpssats",
-    "/registry/sensors/EBike1/ground_speed",
-    "/registry/sensors/EBike1/heading",
-    "/registry/sensors/EBike1/latitude",
-    "/registry/sensors/EBike1/longitude",
-    "/registry/sensors/EBike1/pitch",
-    "/registry/sensors/EBike1/roll",
-    "/registry/sensors/EBike1/sonar",
-    "/registry/sensors/EBike1/voltage",
-    "/registry/sensors/EBike1/wh"
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/ah",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/air_temp",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/altitude",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/crs",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/ctrl_temp",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/current",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/gps_alt",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/gpsfix",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/gpssats",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/ground_speed",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/heading",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/latitude",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/longitude",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/pitch",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/roll",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/sonar",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/voltage",
+    "http://demo.sensapp.org/sensapp/registry/sensors/EBike1/wh"
   ]
 }
  
