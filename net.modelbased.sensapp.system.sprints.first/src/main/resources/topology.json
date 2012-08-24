@@ -1,8 +1,9 @@
 {
   "nodes": [ 
-    { "name": "demo-aws", "srv": "demo.sensapp.org", "port": 80   },
-    { "name": "local",    "srv": "127.0.0.1",        "port": 8080 },
-    { "name": "host",     "srv": "127.0.0.1",        "port": 8080 }
+    { "name": "demo-aws",   "srv": "demo.sensapp.org", "port": 80   },
+    { "name": "sintef-aws", "srv": "46.51.169.123",    "port": 80   },
+    { "name": "local",      "srv": "127.0.0.1",        "port": 8080 },
+    { "name": "host",       "srv": "127.0.0.1",        "port": 8080 }
    ],
   "deployment": [
   	{ "service": "database.raw",         "node": "host" },
