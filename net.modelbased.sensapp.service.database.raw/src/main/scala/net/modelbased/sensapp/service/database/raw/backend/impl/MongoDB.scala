@@ -99,16 +99,16 @@ class MongoDB extends Backend {
       case None =>
       case Some(lst) => {
         lst.par foreach { d =>
-          refTimes.get(d.name.get) match {
+          val ref = refTimes.get(d.name.get) match {
             case None => {
               val ref = getReferenceTime(d.name.get)
               refTimes += d.name.get -> ref
-              data += data2dbobj(d.name.get, mop2data(ref, d))
+              ref
             }
-            case Some(ref) => {
-              data += data2dbobj(d.name.get, mop2data(ref, d))
-            }
+            case Some(ref) => ref
           }
+          data.findOne(MongoDBObject("s" -> d.name.get, "t" -> (d.time.get - ref))) match {case Some(old) => data -= old; case None => }
+          data += data2dbobj(d.name.get, mop2data(ref, d))
         }
       }
     }
