@@ -37,7 +37,7 @@ Returns a list of sensors that owns listeners:
     
     ["/notification/registered/myVeryOwnSensor"]
 
-#### POST /registry/sensors
+#### POST /notification/registered
 
 This endpoint supports the registration of a sensor into the listening mechanism. The sensor declares a list of `hooks`, to be called when a data is pushed into the `dispatch` service (see [Dispatch](http://github.com/mosser/SensApp/tree/master/net.modelbased.sensapp.service.dispatch)).
 
