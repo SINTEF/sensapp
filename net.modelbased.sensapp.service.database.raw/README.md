@@ -253,8 +253,8 @@ Obtained response:
     
 ### Sensor database import: /databases/raw/load
 
-This endpoint support the __very fast__ import of a dataset into SensApp. One chould be aware that this rapidity bypass __all__ the checks introduced in the Sensapp platform to verify data consistency. Thus, it is very fast (it absorb data as fast as the database backend can, with a very little SensApp overhead), but you __must__ be sure that the imported data are consistent (existing sensor, no duplicate, ...)
+This endpoint support the __very fast__ import of a dataset into SensApp. One should be aware that this rapidity bypass __all__ the checks introduced in the Sensapp platform to verify data consistency. Thus, it is very fast (it absorb data as fast as the database backend can, with a very little SensApp overhead), but you __must__ be sure that the imported data are consistent (existing sensor, no duplicate, ...)
 
-Data are expected  as a __single__ SenML document (even if it contains data from multiple sensors), enclosed in in `PUT` request.
+Data are expected  as a __single__ SenML document (even if it contains data from multiple sensors), enclosed in a `PUT` request.
 
   
