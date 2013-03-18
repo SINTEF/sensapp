@@ -20,12 +20,12 @@ The following dependency is required to use this service in a SensApp system.
 
 This endpoint accepts a SENML document as input. It dispatches the content of this document to the registered sensors, according to the following principles:
 
-  1. Canonize the received document (see [Message Canonization](http://github.com/mosser/SensApp/tree/master/net.modelbased.sensapp.library.senml#message-canonization) )
+  1. Canonize the received document (see [Message Canonization](http://github.com/SINTEF-9012/SensApp/tree/master/net.modelbased.sensapp.library.senml#message-canonization) )
   2. Partition the measurements according to the targeted sensors
   3. For each targeted sensors `s`:
     1. Query the `registry` service to retrieve the data backend associated to `s`
     2. Send the data associated to `s` into the data backend
-    3. Notify potential listeners (see [Data Notification](http://github.com/mosser/SensApp/tree/master/net.modelbased.sensapp.service.notifier)):
+    3. Notify potential listeners (see [Data Notification](http://github.com/SINTEF-9012/SensApp/tree/master/net.modelbased.sensapp.service.notifier)):
       1. Call the `notifier` service to retrieve the listeners
       2. Send the data associated to `s` for each listener
   
