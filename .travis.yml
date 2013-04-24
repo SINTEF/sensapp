@@ -1,4 +1,2 @@
-language: java
-script: 
-  cd net.modelbased.sensapp
-  mvn clean install
+language: scala
+script: cd net.modelbased.sensapp && mvn clean install
