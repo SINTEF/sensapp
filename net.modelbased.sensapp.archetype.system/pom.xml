@@ -11,7 +11,7 @@
   <parent>
   	<groupId>net.modelbased.sensapp</groupId>
   	<artifactId>net.modelbased.sensapp.archetype</artifactId>
-  	<version>0.0.1-SNAPSHOT</version>
+  	<version>0.0.1</version>
   	<relativePath>../net.modelbased.sensapp.archetype</relativePath>
   </parent>
   

@@ -10,7 +10,7 @@
   <parent>
   	<groupId>net.modelbased.sensapp</groupId>
   	<artifactId>net.modelbased.sensapp.system</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>0.0.1</version>
   	<relativePath>../net.modelbased.sensapp.system</relativePath>
   </parent>
   
@@ -18,7 +18,7 @@
 	<dependency>
   		<groupId>net.modelbased.sensapp.service</groupId>
   		<artifactId>net.modelbased.sensapp.service.sample</artifactId>
-  		<version>0.0.1-SNAPSHOT</version>
+  		<version>0.0.1</version>
   	</dependency>
   </dependencies>
   

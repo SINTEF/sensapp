@@ -10,7 +10,7 @@
   <parent>
   	<groupId>net.modelbased.sensapp</groupId>
   	<artifactId>net.modelbased.sensapp.system</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>0.0.1</version>
   	<relativePath>../net.modelbased.sensapp.system</relativePath>
   </parent>
   
@@ -19,27 +19,27 @@
 	<dependency>
   		<groupId>net.modelbased.sensapp.service</groupId>
   		<artifactId>net.modelbased.sensapp.service.database.raw</artifactId>
-  		<version>0.0.1-SNAPSHOT</version>
+  		<version>0.0.1</version>
   	</dependency>
   	<dependency>
   		<groupId>net.modelbased.sensapp.service</groupId>
   		<artifactId>net.modelbased.sensapp.service.registry</artifactId>
-  		<version>0.0.1-SNAPSHOT</version>
+  		<version>0.0.1</version>
   	</dependency>
   	<dependency>
   		<groupId>net.modelbased.sensapp.service</groupId>
   		<artifactId>net.modelbased.sensapp.service.dispatch</artifactId>
-  		<version>0.0.1-SNAPSHOT</version>
+  		<version>0.0.1</version>
   	</dependency>
   	<dependency>
   		<groupId>net.modelbased.sensapp.service</groupId>
   		<artifactId>net.modelbased.sensapp.service.notifier</artifactId>
-  		<version>0.0.1-SNAPSHOT</version>
+  		<version>0.0.1</version>
   	</dependency>
   	<dependency>
   		<groupId>net.modelbased.sensapp.service</groupId>
   		<artifactId>net.modelbased.sensapp.service.converter</artifactId>
-  		<version>0.0.1-SNAPSHOT</version>
+  		<version>0.0.1</version>
   	</dependency>
   </dependencies>
   
