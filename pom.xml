@@ -13,17 +13,33 @@
   <inceptionYear>2011</inceptionYear>
   
   <scm>
-    <connection>scm:git:git@github.com:mosser/SensApp.git</connection>
-    <url>scm:git:git@github.com:mosser/SensApp.git</url>
-    <developerConnection>scm:git:git@github.com:mosser/SensApp.git</developerConnection>
+    <connection>scm:git:git@github.com:SINTEF-9012/SensApp.git</connection>
+    <url>scm:git:git@github.com:SINTEF-9012/SensApp.git</url>
+    <developerConnection>scm:git:git@github.com:SINTEF-9012/SensApp.git</developerConnection>
   </scm>
 
+	<distributionManagement>
+        
+            <repository>
+		<id>thingml-release</id>
+		<name>thingml-release</name>
+		<url>http://maven.thingml.org/archiva/repository/thingml-release</url>
+	    </repository>
+
+	    <snapshotRepository>
+		<id>thingml-snapshot</id>
+		<name>thingml-snapshot</name>
+		<url>http://maven.thingml.org/archiva/repository/thingml-snapshot</url>
+	    </snapshotRepository>
+        
+        </distributionManagement>
+
   <modules>
-    <module>../net.modelbased.sensapp.archetype</module>
-    <module>../net.modelbased.sensapp.backyard</module>
-    <module>../net.modelbased.sensapp.service</module>
-  	<module>../net.modelbased.sensapp.library</module>
-  	<module>../net.modelbased.sensapp.system</module>
+    <module>net.modelbased.sensapp.archetype</module>
+    <module>net.modelbased.sensapp.backyard</module>
+    <module>net.modelbased.sensapp.service</module>
+  	<module>net.modelbased.sensapp.library</module>
+  	<module>net.modelbased.sensapp.system</module>
   </modules>
   
   <properties>

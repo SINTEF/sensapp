@@ -18,7 +18,7 @@
   	<groupId>net.modelbased</groupId>
   	<artifactId>net.modelbased.sensapp</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-  	<relativePath>../net.modelbased.sensapp</relativePath>
+  	<relativePath>..</relativePath>
   </parent>
   
   <packaging>pom</packaging>
