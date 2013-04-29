@@ -13,9 +13,9 @@
   <inceptionYear>2011</inceptionYear>
   
   <scm>
-    <connection>scm:git:git@github.com:SINTEF-9012/SensApp.git</connection>
-    <url>scm:git:git@github.com:SINTEF-9012/SensApp.git</url>
-    <developerConnection>scm:git:git@github.com:SINTEF-9012/SensApp.git</developerConnection>
+    <connection>scm:git:git@github.com:SINTEF-9012/sensapp.git</connection>
+    <url>scm:git:git@github.com:SINTEF-9012/sensapp.git</url>
+    <developerConnection>scm:git:git@github.com:SINTEF-9012/sensapp.git</developerConnection>
   </scm>
 
 	<distributionManagement>
