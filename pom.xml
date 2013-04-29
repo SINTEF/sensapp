@@ -114,23 +114,22 @@
     <testSourceDirectory>src/test/scala</testSourceDirectory>
     <plugins>
       <!-- Licence headers -->
-      <plugin>
-	    <inherited>true</inherited>
+     <plugin>
 	    <groupId>com.mycila.maven-license-plugin</groupId>
 	    <artifactId>maven-license-plugin</artifactId>
 	    <version>1.9.0</version>
 	    <configuration>
 	        <strictCheck>true</strictCheck>
-	        <header>${project.basedir}/../LICENCE_HEADER.txt</header>
+	        <header>LICENCE_HEADER.txt</header>
 	        <failIfMissing>true</failIfMissing>
 	        <aggregate>true</aggregate>
 	        <properties>
 	        	<projectname>SensApp</projectname>
 	        	<projecturl>http://sensapp.modelbased.net</projecturl>
 	        	<organization>SINTEF ICT</organization>
-	            <owner>Sebastien Mosser</owner>
+	            <owner>SINTEF ICT</owner>
 	            <year>${project.inceptionYear}</year>
-	            <email>sebastien.mosser@sintef.no</email>
+	            <email>nicolas.ferry@sintef.no</email>
 	            <artid>${project.artifactId}</artid>
 	        </properties>
 	        <mapping>
@@ -141,6 +140,7 @@
 	            <exclude>.gitignore</exclude>
 	            <exclude>.cache</exclude>
 		    <exclude>*.log</exclude>
+		    <exclude>*.yml</exclude>
 		    <exclude>*.srt</exclude>
 		    <exclude>*.csv</exclude>
 	            <exclude>*.txt</exclude>
@@ -153,10 +153,9 @@
 	    </configuration>
 	    <executions>
 	        <execution>
-	            <id>check-headers</id>
-	            <phase>verify</phase>
+	            <phase>process-sources</phase>
 	            <goals>
-	                <goal>check</goal>
+	                <goal>format</goal>
 	            </goals>
 	        </execution>
 	    </executions>

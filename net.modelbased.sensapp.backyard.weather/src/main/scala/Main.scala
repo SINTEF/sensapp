@@ -2,7 +2,7 @@
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
  * Copyright (C) 2012-  SINTEF ICT
- * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
+ * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
  * Module: net.modelbased.sensapp.backyard.weather
  *
@@ -20,7 +20,6 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-
 import net.modelbased.sensapp.backyard.weather.EKlimaDSL
 import java.util.Date
 import java.text.SimpleDateFormat

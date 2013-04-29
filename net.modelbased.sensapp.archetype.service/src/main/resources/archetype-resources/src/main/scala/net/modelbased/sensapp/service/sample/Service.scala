@@ -2,7 +2,7 @@
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
  * Copyright (C) 2012-  SINTEF ICT
- * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
+ * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
  * Module: net.modelbased.sensapp.archetype.service
  *

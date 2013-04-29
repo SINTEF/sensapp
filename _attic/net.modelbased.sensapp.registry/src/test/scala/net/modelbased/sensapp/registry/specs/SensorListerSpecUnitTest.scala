@@ -2,9 +2,9 @@
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
  * Copyright (C) 2011-  SINTEF ICT
- * Contact: Sebastien Mosser <sebastien.mosser@sintef.no>
+ * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.registry
+ * Module: net.modelbased.sensapp
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
