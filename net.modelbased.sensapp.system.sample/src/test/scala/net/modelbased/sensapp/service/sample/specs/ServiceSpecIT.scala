@@ -54,7 +54,7 @@ class ServiceSpecIT extends SpecificationWithJUnit with SprayJsonSupport with Ht
   //step(load) // Load the HttpSpraySupport in the context of this test suite
   
   "GET(/sample/elements)" should {
-    val conduit = new HttpConduit(httpClient, "localhost",8080) {
+    val conduit = new HttpConduit(httpClient, "localhost",8090) {
       val pipeline = { simpleRequest ~> sendReceive ~> unmarshal[List[Element]] }
     }
     "Retrieve an empty list when no elements are stored" in new EmptyRegistry {
