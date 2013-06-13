@@ -225,11 +225,11 @@ trait Service extends SensAppService {
    	      case StringDataValue(s)  =>
      	    val values = s.split(";")
      	    if (values.size > 1) pair.last match {case (t2, mops2) =>
-   	          val delta = (t2-t)/values.size * 1000
+   	          val delta = (((t2-t)*1000).toDouble/values.size).toLong
    	          var time = t*1000 - delta
    	          values.foreach{ v => 
-   	            time = t*1000 + delta
-   	            csv.push(time, mop.name.get, v)
+   	            time += delta
+   	            csv.push(time, mop.name.get, v.trim)
    	          }
    	        }
    	        else {csv.push(t*1000, mop.name.get, s)}
