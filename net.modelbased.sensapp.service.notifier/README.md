@@ -47,7 +47,7 @@ For example, the following request asks for the registration of a sensor named `
     Request Method: POST
     Status Code: 201
     
-    { "sensor": "myVeryOwnSensor", "hooks": ["localhost:8090/echo"] }
+    { "sensor": "myVeryOwnSensor", "hooks": ["http://localhost:8090/echo"] }
 
 
 The server answers the URLs to be used to access to this sensor in the registry
