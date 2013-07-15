@@ -32,5 +32,5 @@ The `net.modelbased.sensapp.system.sprints.first-0.0.1-SNAPSHOT.war` file is gen
   - SensApp Services:
     - [Registry](http://github.com/SINTEF-9012/SensApp/tree/master/net.modelbased.sensapp.service.registry)
     - [Dispatch](http://github.com/SINTEF-9012/SensApp/tree/master/net.modelbased.sensapp.service.dispatch)
-    - [Notifier](http://github.com/SINTEF-9012/SensApp/tree/master/net.modelbased.sensapp.service.notofier)
+    - [Notifier](http://github.com/SINTEF-9012/sensapp/tree/master/net.modelbased.sensapp.service.notifier)
   
