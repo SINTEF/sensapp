@@ -20,16 +20,18 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.notifier.data
+package net.modelbased.sensapp.service.notifier.protocols
 
-import cc.spray.json._
+import cc.spray.typeconversion.SprayJsonSupport
+import net.modelbased.sensapp.library.senml.Root
+import net.modelbased.sensapp.service.notifier.data.Subscription
 
-
-
-case class Subscription(val sensor: String, val hooks: List[String], val protocol: Option[String])
-
-
-object SubscriptionJsonProtocol extends DefaultJsonProtocol {
-  implicit val format = jsonFormat(Subscription, "sensor", "hooks", "protocol")
+/**
+ * Created with IntelliJ IDEA.
+ * User: Jonathan
+ * Date: 15/07/13
+ * Time: 14:37
+ */
+abstract class AbstractProtocol extends SprayJsonSupport{
+  def send(root: Root, subscription: Option[Subscription], sensor: String)
 }
-

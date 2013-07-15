@@ -57,12 +57,22 @@ trait Service extends SensAppService {
     } ~ 
     path("notification" / "registered" ) {
       get { 
-        parameter("flatten" ? false) { flatten =>  context =>
+        parameters("flatten" ? false, "protocol" ? "all") { (flatten, protocol) =>  context =>
           val data = (_registry retrieve(List()))
-          if (flatten) {
+          if(protocol.equals("ws") && flatten){
+            context complete (data filter(sub => {sub.protocol.isDefined && sub.protocol.get == "ws"}))
+          } else if(protocol.equals("ws")){
+            context complete (data filter(sub => {sub.protocol.isDefined && sub.protocol.get == "ws"}))
+              .map { s => URLHandler.build("/notification/registered/" + s.sensor) }
+          } else if (protocol.equals("http") && flatten) {
+            context complete (data filter(sub => {!sub.protocol.isDefined}))
+          } else if (protocol.equals("http")){
+            context complete (data filter(sub => {!sub.protocol.isDefined}))
+              .map { s => URLHandler.build("/notification/registered/" + s.sensor) }
+          } else if (protocol.equals("all") && flatten) {
             context complete data
           } else {
-            context complete (data map { s => URLHandler.build("/notification/registered/" + s.sensor) })
+            context complete (data map { s => URLHandler.build("/notification/registered/" + s.sensor)})
           }
         }
       } ~

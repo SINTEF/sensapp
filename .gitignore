@@ -17,3 +17,6 @@ target
 **/bin/*
 /.svn/
 net.modelbased.sensapp.backyard.weather/src/main/resources/
+net.modelbased.sensapp.service.notifier/LICENCE_HEADER.txt
+net.modelbased.sensapp.system.sprints.first/LICENCE_HEADER.txt
+net.modelbased.sensapp.backyard.echo/LICENCE_HEADER.txt
