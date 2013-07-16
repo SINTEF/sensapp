@@ -1,4 +1,27 @@
 /**
+ * ====
+ *     This file is part of SensApp [ http://sensapp.modelbased.net ]
+ *
+ *     Copyright (C) 2011-  SINTEF ICT
+ *     Contact: SINTEF ICT <nicolas.ferry@sintef.no>
+ *
+ *     Module: net.modelbased.sensapp
+ *
+ *     SensApp is free software: you can redistribute it and/or modify
+ *     it under the terms of the GNU Lesser General Public License as
+ *     published by the Free Software Foundation, either version 3 of
+ *     the License, or (at your option) any later version.
+ *
+ *     SensApp is distributed in the hope that it will be useful, but
+ *     WITHOUT ANY WARRANTY; without even the implied warranty of
+ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *     GNU Lesser General Public License for more details.
+ *
+ *     You should have received a copy of the GNU Lesser General
+ *     Public License along with SensApp. If not, see
+ *     <http://www.gnu.org/licenses/>.
+ * ====
+ *
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
  * Copyright (C) 2012-  SINTEF ICT
@@ -25,6 +48,8 @@ package net.modelbased.sensapp.library.system
 
 import akka.actor.{Props, ActorSystem}
 import cc.spray._
+import org.java_websocket.drafts.Draft_17
+import net.modelbased.sensapp.library.ws.WsServerFactory
 
 /**
  * Initialize a SensApp System (register the actors, ...)
@@ -70,6 +95,9 @@ Contact: Sebastien Mosser <Sebastien.Mosser@sintef.no>
         props = Props(new RootService(actors.head, actors.tail: _*)),
         name = "spray-root-service")
   system.log.info("RootService -> {}", Array(rootService.toString))
+
+  var webSocketServer = WsServerFactory.makeServer(9000, new Draft_17)
+  webSocketServer.start()
  
   system.registerOnTermination(println("Shutting down SensApp"))
   

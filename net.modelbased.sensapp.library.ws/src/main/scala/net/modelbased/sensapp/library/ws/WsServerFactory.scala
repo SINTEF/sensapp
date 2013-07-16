@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.library.datastore
+ * Module: net.modelbased.sensapp.library.ws
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -43,14 +43,17 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.library.datastore
+package net.modelbased.sensapp.library.ws
+
+import org.java_websocket.drafts.Draft
 
 /**
- * The DataStore[T] trait mixes all the sub-traits necessary to provide a SensApp 
- * data registry
- * 
- * @param T the type of the data stored in the registry
- * @author Sebastien Mosser
+ * Created with IntelliJ IDEA.
+ * User: Jonathan
+ * Date: 16/07/13
+ * Time: 14:51
  */
-
-trait DataStore[T] extends DataStoreOperations[T] with Extractors[T]
+object WsServerFactory{
+  var myServer: WsServer = null
+  def makeServer(port: Int, d: Draft): WsServer = {myServer = new WsServer(port, d); myServer}
+}
