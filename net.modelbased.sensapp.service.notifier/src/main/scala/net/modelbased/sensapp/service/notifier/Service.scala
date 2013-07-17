@@ -58,6 +58,7 @@ import net.modelbased.sensapp.library.senml.export.{JsonProtocol => SenMLProtoco
 import net.modelbased.sensapp.library.senml.spec.Standard
 import net.modelbased.sensapp.library.system.{Service => SensAppService} 
 import net.modelbased.sensapp.library.system.URLHandler
+import java.util.UUID
 
 trait Service extends SensAppService {
   
@@ -106,6 +107,10 @@ trait Service extends SensAppService {
           if (_registry exists ("sensor", subscription.sensor)){
             context fail (StatusCodes.Conflict, "A Subscription identified by ["+ subscription.sensor +"] already exists!")
           } else {
+            subscription.protocol.foreach(p => {
+              if(p == "ws" && !subscription.id.isDefined)
+                subscription.id=Option(UUID.randomUUID().toString)
+            })
             _registry push subscription
             context complete (StatusCodes.Created, URLHandler.build("/notification/registered/" + subscription.sensor))
           }

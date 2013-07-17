@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.service.notifier
+ * Module: net.modelbased.sensapp.backyard.echo.ws
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -43,31 +43,18 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.notifier.protocols
+package net.modelbased.sensapp.backyard.echo
 
-import net.modelbased.sensapp.library.senml.{MeasurementOrParameter, Root}
-import net.modelbased.sensapp.service.notifier.data.Subscription
-import net.modelbased.sensapp.library.system.URLHandler
-import net.modelbased.sensapp.library.system._
-import akka.actor.ActorSystem
-import org.java_websocket.WebSocket
-import net.modelbased.sensapp.library.senml.export.JsonParser
-import net.modelbased.sensapp.library.ws.WsServerFactory
 import org.java_websocket.client.WebSocketClient
+import org.java_websocket.drafts.Draft
+import org.java_websocket.handshake.ServerHandshake
+import java.net.URI
+import net.modelbased.sensapp.library.ws.WsClientFactory
 
-/**
- * Created with IntelliJ IDEA.
- * User: Jonathan
- * Date: 15/07/13
- * Time: 14:38
- */
-class WsProtocol extends AbstractProtocol{
-  def send(root: Root, subscription: Option[Subscription], sensor: String) {
-    if (None == root.measurementsOrParameters || None == subscription)
-      return
-
-    val wsClient = WsServerFactory.myServer.getClientById(subscription.get.id.get)
-    if(wsClient != null)
-      wsClient.getWebSocket.send(JsonParser.toJson(root))
+trait EchoService {
+  var cpt = 0
+  val simpleService = {
+    val client = WsClientFactory.makeClient( URI.create( "ws://127.0.0.1:9000" ));
+    client.connect();
   }
 }

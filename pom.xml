@@ -38,6 +38,7 @@
     <module>net.modelbased.sensapp.service</module>
   	<module>net.modelbased.sensapp.library</module>
   	<module>net.modelbased.sensapp.system</module>
+      <module>net.modelbased.sensapp.backyard.echo.ws</module>
   </modules>
   
   <properties>

@@ -96,7 +96,7 @@ Contact: Sebastien Mosser <Sebastien.Mosser@sintef.no>
         name = "spray-root-service")
   system.log.info("RootService -> {}", Array(rootService.toString))
 
-  var webSocketServer = WsServerFactory.makeServer(9000, new Draft_17)
+  var webSocketServer = WsServerFactory.makeServer(9000)
   webSocketServer.start()
  
   system.registerOnTermination(println("Shutting down SensApp"))

@@ -45,7 +45,7 @@
  */
 package net.modelbased.sensapp.library.ws
 
-import org.java_websocket.drafts.Draft
+import org.java_websocket.drafts.{Draft_17, Draft}
 
 /**
  * Created with IntelliJ IDEA.
@@ -55,5 +55,5 @@ import org.java_websocket.drafts.Draft
  */
 object WsServerFactory{
   var myServer: WsServer = null
-  def makeServer(port: Int, d: Draft): WsServer = {myServer = new WsServer(port, d); myServer}
+  def makeServer(port: Int): WsServer = {myServer = new WsServer(port, new Draft_17); myServer}
 }

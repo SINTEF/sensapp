@@ -46,13 +46,12 @@
 package net.modelbased.sensapp.service.notifier.data
 
 import cc.spray.json._
+import java.util.UUID
 
 
-
-case class Subscription(val sensor: String, val hooks: List[String], val protocol: Option[String])
-
+case class Subscription(val sensor: String, val hooks: List[String], val protocol: Option[String], var id: Option[String])
 
 object SubscriptionJsonProtocol extends DefaultJsonProtocol {
-  implicit val format = jsonFormat(Subscription, "sensor", "hooks", "protocol")
+  implicit val format = jsonFormat(Subscription, "sensor", "hooks", "protocol", "id")
 }
 

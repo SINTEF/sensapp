@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.service.notifier
+ * Module: net.modelbased.sensapp.library.ws
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -43,31 +43,50 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.notifier.protocols
+package net.modelbased.sensapp.library.ws;
 
-import net.modelbased.sensapp.library.senml.{MeasurementOrParameter, Root}
-import net.modelbased.sensapp.service.notifier.data.Subscription
-import net.modelbased.sensapp.library.system.URLHandler
-import net.modelbased.sensapp.library.system._
-import akka.actor.ActorSystem
-import org.java_websocket.WebSocket
-import net.modelbased.sensapp.library.senml.export.JsonParser
-import net.modelbased.sensapp.library.ws.WsServerFactory
-import org.java_websocket.client.WebSocketClient
+import org.java_websocket.drafts.{Draft_17, Draft}
+;
+
+import java.net.URI;
 
 /**
  * Created with IntelliJ IDEA.
  * User: Jonathan
- * Date: 15/07/13
- * Time: 14:38
+ * Date: 17/07/13
+ * Time: 08:54
  */
-class WsProtocol extends AbstractProtocol{
-  def send(root: Root, subscription: Option[Subscription], sensor: String) {
-    if (None == root.measurementsOrParameters || None == subscription)
-      return
-
-    val wsClient = WsServerFactory.myServer.getClientById(subscription.get.id.get)
-    if(wsClient != null)
-      wsClient.getWebSocket.send(JsonParser.toJson(root))
-  }
+object WsClientFactory {
+  var myClient: WsClient = null
+  def makeClient(serverUri: URI): WsClient = {myClient = new WsClient(serverUri, new Draft_17); myClient}
 }
+
+
+
+    /*@Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        List<BasicNameValuePair> extraHeaders = Arrays.asList(
+                new BasicNameValuePair("Cookie", "session=abcd")
+        );
+
+        java.lang.System.setProperty("java.net.preferIPv6Addresses", "false");
+        java.lang.System.setProperty("java.net.preferIPv4Stack", "true");
+
+        MonClient c = null; // more about drafts here: http://github.com/TooTallNate/Java-WebSocket/wiki/Drafts
+
+        c = new MonClient( URI.create( "ws://10.218.156.87:8080" ), new Draft_10());
+        c.connect();
+
+        //client.connect();
+
+        //Log.d(TAG, "1");
+// Later…
+        //client.send("hello!");
+        //Log.d(TAG, "2");
+        //client.send(new byte[] { (byte)0xDE, (byte)0xAD, (byte)0xBE, (byte)0xEF });
+        //Log.d(TAG, "3");
+        //client.disconnect();
+
+     c.close();*/
+

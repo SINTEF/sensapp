@@ -66,8 +66,11 @@ import java.util.List;
  * Time: 10:29
  */
 public class WsServer extends WebSocketServer {
+
+    final static public String thisIsMyId = "thisIsMyId=";
+
     private static int counter = 0;
-    private List<WebSocket> clientSockets = new ArrayList<WebSocket>();
+    private List<WebSocketClient> clientList = new ArrayList<WebSocketClient>();
 
     public WsServer(int port, Draft d) throws UnknownHostException {
         super( new InetSocketAddress( port ), Collections.singletonList(d) );
@@ -80,14 +83,13 @@ public class WsServer extends WebSocketServer {
     @Override
     public void onOpen( WebSocket conn, ClientHandshake handshake ) {
         counter++;
-        java.lang.System.out.println( "New client connected" + counter );
-        clientSockets.add(conn);
+        java.lang.System.out.println("New client connected" + counter);
     }
 
     @Override
     public void onClose( WebSocket conn, int code, String reason, boolean remote ) {
         java.lang.System.out.println( "A client has been disconnected" );
-        clientSockets.remove(conn);
+        clientList.remove(getClientByWebSocket(conn));
     }
 
     @Override
@@ -98,8 +100,13 @@ public class WsServer extends WebSocketServer {
 
     @Override
     public void onMessage( WebSocket conn, String message ) {
-        java.lang.System.out.println( "Received Message String: " + message );
-        conn.send( message );
+        if(message.contains(thisIsMyId)){
+            addClientFromMessage(message, conn);
+        }
+        else{
+            java.lang.System.out.println( "Received Message String: " + message );
+            conn.send( message );
+        }
     }
 
     @Override
@@ -116,9 +123,27 @@ public class WsServer extends WebSocketServer {
         conn.sendFrame( frame );
     }
 
-    public WebSocket getClientWebSocket(int i){
-        if(i<clientSockets.size())
-            return clientSockets.get(i);
+    public WebSocketClient getClientByWebSocket(WebSocket ws){
+        for(WebSocketClient wsc: clientList)
+            if(wsc.getWebSocket() == ws)
+                return wsc;
         return null;
+    }
+
+    public WebSocketClient getClientById(String id){
+        for(WebSocketClient wsc: clientList)
+            if(wsc.getId().equals(id))
+                return wsc;
+        return null;
+    }
+
+    private void addClientFromMessage(String m, WebSocket ws){
+        java.lang.System.out.println( "Client identified" );
+        String id = m.substring(thisIsMyId.length(), m.length());
+        clientList.add(new WebSocketClient(ws, id));
+    }
+
+    public List<WebSocketClient> getClientWebSocketList(){
+        return clientList;
     }
 }
