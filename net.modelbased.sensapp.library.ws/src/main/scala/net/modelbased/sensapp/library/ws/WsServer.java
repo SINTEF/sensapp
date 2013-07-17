@@ -70,7 +70,7 @@ public class WsServer extends WebSocketServer {
     final static public String thisIsMyId = "thisIsMyId=";
 
     private static int counter = 0;
-    private List<WebSocketClient> clientList = new ArrayList<WebSocketClient>();
+    private List<ServerWebSocketClient> clientList = new ArrayList<ServerWebSocketClient>();
 
     public WsServer(int port, Draft d) throws UnknownHostException {
         super( new InetSocketAddress( port ), Collections.singletonList(d) );
@@ -89,7 +89,7 @@ public class WsServer extends WebSocketServer {
     @Override
     public void onClose( WebSocket conn, int code, String reason, boolean remote ) {
         java.lang.System.out.println( "A client has been disconnected" );
-        clientList.remove(getClientByWebSocket(conn));
+        clientList.removeAll(getClientsByWebSocket(conn));
     }
 
     @Override
@@ -123,27 +123,36 @@ public class WsServer extends WebSocketServer {
         conn.sendFrame( frame );
     }
 
-    public WebSocketClient getClientByWebSocket(WebSocket ws){
-        for(WebSocketClient wsc: clientList)
+    public List<ServerWebSocketClient> getClientsByWebSocket(WebSocket ws){
+        List<ServerWebSocketClient> l = new ArrayList<ServerWebSocketClient>();
+        for(ServerWebSocketClient wsc: clientList)
             if(wsc.getWebSocket() == ws)
-                return wsc;
-        return null;
+                l.add(wsc);
+        return l;
     }
 
-    public WebSocketClient getClientById(String id){
-        for(WebSocketClient wsc: clientList)
+    public List<ServerWebSocketClient> getClientsById(String id){
+        List<ServerWebSocketClient> l = new ArrayList<ServerWebSocketClient>();
+        for(ServerWebSocketClient wsc: clientList)
             if(wsc.getId().equals(id))
-                return wsc;
-        return null;
+                l.add(wsc);
+        return l;
     }
 
     private void addClientFromMessage(String m, WebSocket ws){
         java.lang.System.out.println( "Client identified" );
+        ws.send("You have been identified successfully");
         String id = m.substring(thisIsMyId.length(), m.length());
-        clientList.add(new WebSocketClient(ws, id));
+        clientList.add(new ServerWebSocketClient(ws, id));
     }
 
-    public List<WebSocketClient> getClientWebSocketList(){
+    private void addClientFromUrl(String m, WebSocket ws){
+        java.lang.System.out.println( "Client identified" );
+        String id = m.substring(thisIsMyId.length(), m.length());
+        clientList.add(new ServerWebSocketClient(ws, id));
+    }
+
+    public List<ServerWebSocketClient> getClientWebSocketList(){
         return clientList;
     }
 }

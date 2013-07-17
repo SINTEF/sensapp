@@ -52,7 +52,7 @@ import net.modelbased.sensapp.library.system._
 import akka.actor.ActorSystem
 import org.java_websocket.WebSocket
 import net.modelbased.sensapp.library.senml.export.JsonParser
-import net.modelbased.sensapp.library.ws.WsServerFactory
+import net.modelbased.sensapp.library.ws.{ServerWebSocketClient, WsServerFactory}
 import org.java_websocket.client.WebSocketClient
 
 /**
@@ -66,8 +66,9 @@ class WsProtocol extends AbstractProtocol{
     if (None == root.measurementsOrParameters || None == subscription)
       return
 
-    val wsClient = WsServerFactory.myServer.getClientById(subscription.get.id.get)
-    if(wsClient != null)
-      wsClient.getWebSocket.send(JsonParser.toJson(root))
+    val wsClient = WsServerFactory.myServer.getClientsById(subscription.get.id.get)
+    for(i<-0 to wsClient.size()-1){
+      wsClient.get(i).getWebSocket.send(JsonParser.toJson(root))
+    }
   }
 }

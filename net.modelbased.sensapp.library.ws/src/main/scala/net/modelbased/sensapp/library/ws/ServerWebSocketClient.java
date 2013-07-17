@@ -53,11 +53,11 @@ import org.java_websocket.WebSocket;
  * Date: 17/07/13
  * Time: 14:04
  */
-public class WebSocketClient{
+public class ServerWebSocketClient {
     private WebSocket ws;
     private String id;
 
-    WebSocketClient(WebSocket ws, String id){
+    ServerWebSocketClient(WebSocket ws, String id){
         this.ws = ws;
         this.id = id;
     }

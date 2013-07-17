@@ -43,18 +43,55 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.backyard.echo
+package net.modelbased.sensapp.backyard.echo.ws
 
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.drafts.Draft
 import org.java_websocket.handshake.ServerHandshake
 import java.net.URI
-import net.modelbased.sensapp.library.ws.WsClientFactory
+import net.modelbased.sensapp.library.ws.{WsClient, WsClientFactory}
 
-trait EchoService {
-  var cpt = 0
-  val simpleService = {
-    val client = WsClientFactory.makeClient( URI.create( "ws://127.0.0.1:9000" ));
-    client.connect();
+object WsEchoClient{
+  def main(args: Array[String]) {
+    var client: WsClient = null
+    //client.connect()
+    //Thread.sleep(2000)
+
+    println(
+      """
+        |
+        | The WebSocket Echo Client is ready
+        |
+        | connect                connect this client to the server
+        | identify<id-topic>     identify this client to the notification server
+        | disconnect             disconnect the client
+        | quit                   kill the app
+        |
+        | Please choose your command
+        |
+      """.stripMargin)
+
+    //client.send(message)
+    var quit = false
+    while(!quit){
+      Thread.sleep(2000)
+      val line = readLine()
+      if(line == "connect"){
+        client = WsClientFactory.makeClient( URI.create( "ws://127.0.0.1:9000" ))
+        client.connect()
+        println("Connection")
+      }
+      if(line.contains("identify")){
+        val message = "thisIsMyId="+line.substring("identify".length, line.length)
+        client.send(message)
+        println("Identification message sent")
+      }
+      if(line == "disconnect"){
+        client.close
+        println("Disconnection")
+      }
+      if(line == "quit")
+        quit = true
+    }
   }
 }
