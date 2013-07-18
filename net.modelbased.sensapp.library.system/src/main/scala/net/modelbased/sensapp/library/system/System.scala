@@ -49,7 +49,7 @@ package net.modelbased.sensapp.library.system
 import akka.actor.{Props, ActorSystem}
 import cc.spray._
 import org.java_websocket.drafts.Draft_17
-import net.modelbased.sensapp.library.ws.WsServerFactory
+import net.modelbased.sensapp.library.ws.Server.WsServerFactory
 
 /**
  * Initialize a SensApp System (register the actors, ...)

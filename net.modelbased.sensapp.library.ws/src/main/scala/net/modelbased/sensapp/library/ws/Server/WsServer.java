@@ -43,30 +43,40 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.library.ws;
+package net.modelbased.sensapp.library.ws.Server;
 
 import org.java_websocket.WebSocket;
+import org.java_websocket.drafts.Draft;
+import org.java_websocket.framing.Framedata;
+import org.java_websocket.handshake.ClientHandshake;
+import org.java_websocket.server.WebSocketServer;
+
+import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.util.Collections;
 
 /**
  * Created with IntelliJ IDEA.
  * User: Jonathan
- * Date: 17/07/13
- * Time: 14:04
+ * Date: 16/07/13
+ * Time: 10:29
  */
-public class ServerWebSocketClient {
-    private WebSocket ws;
-    private String id;
-
-    ServerWebSocketClient(WebSocket ws, String id){
-        this.ws = ws;
-        this.id = id;
+public abstract class WsServer extends WebSocketServer {
+    public WsServer(int port, Draft d) throws UnknownHostException {
+        super( new InetSocketAddress( port ), Collections.singletonList(d) );
     }
 
-    public WebSocket getWebSocket(){
-        return ws;
-    }
-
-    public String getId(){
-        return id;
-    }
+    @Override
+    public abstract void onOpen(WebSocket conn, ClientHandshake handshake);
+    @Override
+    public abstract void onClose( WebSocket conn, int code, String reason, boolean remote );
+    @Override
+    public abstract void onError( WebSocket conn, Exception ex );
+    @Override
+    public abstract void onMessage( WebSocket conn, String message );
+    @Override
+    public abstract void onMessage( WebSocket conn, ByteBuffer blob );
+    @Override
+    public abstract void onWebsocketMessageFragment( WebSocket conn, Framedata frame );
 }

@@ -31,4 +31,4 @@ Here is an example of a basic interaction:
     ->
 
 
-It's done, the server is now notifying the client for every data sent to the server on this/these topics.
+The client must set the topic to be notified at every new connection. When disconnected it will no longer be nofified.

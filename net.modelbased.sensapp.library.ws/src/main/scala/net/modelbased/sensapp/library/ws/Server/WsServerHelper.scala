@@ -43,50 +43,61 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.library.ws;
+package net.modelbased.sensapp.library.ws.Server
 
-import org.java_websocket.drafts.{Draft_17, Draft}
-;
+import net.modelbased.sensapp.library.ws.Server.data.{SensorDescriptionRegistry, SensorInformation}
 
-import java.net.URI;
 
 /**
  * Created with IntelliJ IDEA.
  * User: Jonathan
- * Date: 17/07/13
- * Time: 08:54
+ * Date: 18/07/13
+ * Time: 13:56
  */
-object WsClientFactory {
-  var myClient: WsClient = null
-  def makeClient(serverUri: URI): WsClient = {myClient = new WsClient(serverUri, new Draft_17); myClient}
+object WsServerHelper {
+
+  def doOrder(order: String): String = {
+    var myOrder = order
+    getFunctionName(order) match{
+      case "getNotifications" => /*{
+        return _registry retrieve List() toString()
+      }                            */
+      case "registerNotification" =>
+      case "getNotification" =>
+      case "deleteNotification" =>
+      case "updateNotification" =>
+
+      case "dispatch" =>
+
+      case "getRawSensors" =>
+      case "registerRawSensor" =>
+      case "getRawSensor" =>
+      case "deleteRawSensor" =>
+
+      case "loadRoot" =>
+      case "getData" =>
+      case "registerData" => {
+        myOrder = myOrder.substring(myOrder.indexOf("("))
+        val name = myOrder.substring(1, myOrder.indexOf(","))
+        myOrder = myOrder.substring(myOrder.indexOf(","))
+        var data = myOrder.substring(1, myOrder.indexOf(")"))
+        if(data.charAt(0) == ' ')
+          data = data.substring(1)
+
+        val sensor = (_registry pull ("id", name)).get
+        /*val info = new SensorInformation()
+        val safe = SensorInformation(info.tags.filter( t => t._1 != "" ), info.updateTime, info.localization)
+        sensor.infos = safe
+        _registry push sensor */
+        return sensor.toString
+      }
+    }
+    null
+  }
+
+  private[this] val _registry = new SensorDescriptionRegistry()
+
+  def getFunctionName(order: String): String = {
+    order.substring(0, order.indexOf("("))
+  }
 }
-
-
-
-    /*@Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        List<BasicNameValuePair> extraHeaders = Arrays.asList(
-                new BasicNameValuePair("Cookie", "session=abcd")
-        );
-
-        java.lang.System.setProperty("java.net.preferIPv6Addresses", "false");
-        java.lang.System.setProperty("java.net.preferIPv4Stack", "true");
-
-        MonClient c = null; // more about drafts here: http://github.com/TooTallNate/Java-WebSocket/wiki/Drafts
-
-        c = new MonClient( URI.create( "ws://10.218.156.87:8080" ), new Draft_10());
-        c.connect();
-
-        //client.connect();
-
-        //Log.d(TAG, "1");
-// Later…
-        //client.send("hello!");
-        //Log.d(TAG, "2");
-        //client.send(new byte[] { (byte)0xDE, (byte)0xAD, (byte)0xBE, (byte)0xEF });
-        //Log.d(TAG, "3");
-        //client.disconnect();
-
-     c.close();*/
-

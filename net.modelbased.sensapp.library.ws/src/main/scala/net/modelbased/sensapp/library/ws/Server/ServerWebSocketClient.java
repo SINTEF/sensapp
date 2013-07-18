@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.backyard.echo.ws
+ * Module: net.modelbased.sensapp.library.ws
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -43,60 +43,30 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.backyard.echo.ws
+package net.modelbased.sensapp.library.ws.Server;
 
-import org.java_websocket.client.WebSocketClient
-import org.java_websocket.drafts.Draft
-import org.java_websocket.handshake.ServerHandshake
-import java.net.URI
-import net.modelbased.sensapp.library.ws.Client.{WsClientFactory, WsClient}
-import net.modelbased.sensapp.library.ws.Server.WsServerScala
+import org.java_websocket.WebSocket;
 
-object WsEchoClient{
-  def main(args: Array[String]) {
-    var client: WsClient = null
-    //client.connect()
-    //Thread.sleep(2000)
-    val registerToTopic = WsServerScala.registerToTopic
+/**
+ * Created with IntelliJ IDEA.
+ * User: Jonathan
+ * Date: 17/07/13
+ * Time: 14:04
+ */
+public class ServerWebSocketClient {
+    private WebSocket ws;
+    private String id;
 
-    println(
-      """
-        |
-        | The WebSocket Echo Client is ready
-        |
-        | connect                       connect this client to the server
-        | registerToTopic=<id-topic>    identify this client to the notification server
-        | disconnect                    disconnect the client
-        | quit                          kill the app
-        |
-        | Please choose your command
-        |
-      """.stripMargin)
-
-    //client.send(message)
-    var quit = false
-    while(!quit){
-      Thread.sleep(2000)
-      val line = readLine()
-      if(line == "connect"){
-        client = WsClientFactory.makeClient( URI.create( "ws://127.0.0.1:9000" ))
-        client.connect()
-        println("Connection")
-      }
-      else if(line.contains(registerToTopic)){
-        val message = registerToTopic + line.substring(registerToTopic.length, line.length)
-        client.send(message)
-        println("Identification message sent")
-      }
-      else if(line == "disconnect"){
-        client.close
-        println("Disconnection")
-      }
-      else if(line == "quit")
-        quit = true
-      else{
-        client.send(line)
-      }
+    ServerWebSocketClient(WebSocket ws, String id){
+        this.ws = ws;
+        this.id = id;
     }
-  }
+
+    public WebSocket getWebSocket(){
+        return ws;
+    }
+
+    public String getId(){
+        return id;
+    }
 }

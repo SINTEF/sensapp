@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.service.notifier
+ * Module: net.modelbased.sensapp.library.ws
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -43,32 +43,42 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.service.notifier.protocols
+package net.modelbased.sensapp.library.ws.Server.data
 
-import net.modelbased.sensapp.library.senml.{MeasurementOrParameter, Root}
-import net.modelbased.sensapp.service.notifier.data.Subscription
-import net.modelbased.sensapp.library.system.URLHandler
-import net.modelbased.sensapp.library.system._
-import akka.actor.ActorSystem
-import org.java_websocket.WebSocket
-import net.modelbased.sensapp.library.senml.export.JsonParser
-import org.java_websocket.client.WebSocketClient
-import net.modelbased.sensapp.library.ws.Server.WsServerFactory
+import cc.spray.json._
+import net.modelbased.sensapp.library.datastore._
+import ElementJsonProtocol._
 
 /**
- * Created with IntelliJ IDEA.
- * User: Jonathan
- * Date: 15/07/13
- * Time: 14:38
+ * Persistence layer associated to the Element class
+ * 
+ * @author Sebastien Mosser
  */
-class WsProtocol extends AbstractProtocol{
-  def send(root: Root, subscription: Option[Subscription], sensor: String) {
-    if (None == root.measurementsOrParameters || None == subscription)
-      return
+class SensorDescriptionRegistry extends DataStore[SensorDescription]  {
 
-    val wsClient = WsServerFactory.myServer.getClientsById(subscription.get.id.get)
-    for(i<-0 to wsClient.size-1){
-      wsClient.apply(i).getWebSocket.send(JsonParser.toJson(root))
-    }
-  }
+  override val databaseName = "sensapp_db"
+  override val collectionName = "registry.sensors" 
+  override val key = "id"
+    
+  override def getIdentifier(e: SensorDescription) = e.id
+  
+  override def deserialize(json: String): SensorDescription = { json.asJson.convertTo[SensorDescription] }
+ 
+  override def serialize(e: SensorDescription): String = { e.toJson.toString }
+    
+}
+
+class CompositeSensorDescriptionRegistry extends DataStore[CompositeSensorDescription]  {
+
+  override val databaseName = "sensapp_db"
+  override val collectionName = "registry.sensors.composite" 
+    
+  override val key = "id"
+    
+  override def getIdentifier(e: CompositeSensorDescription) = e.id
+  
+  override def deserialize(json: String): CompositeSensorDescription = { json.asJson.convertTo[CompositeSensorDescription] }
+ 
+  override def serialize(e: CompositeSensorDescription): String = { e.toJson.toString }
+    
 }
