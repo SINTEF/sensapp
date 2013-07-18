@@ -49,7 +49,7 @@ import org.java_websocket.client.WebSocketClient
 import org.java_websocket.drafts.Draft
 import org.java_websocket.handshake.ServerHandshake
 import java.net.URI
-import net.modelbased.sensapp.library.ws.{WsClient, WsClientFactory}
+import net.modelbased.sensapp.library.ws.{WsServer, WsClient, WsClientFactory}
 
 object WsEchoClient{
   def main(args: Array[String]) {
@@ -62,10 +62,10 @@ object WsEchoClient{
         |
         | The WebSocket Echo Client is ready
         |
-        | connect                connect this client to the server
-        | identify<id-topic>     identify this client to the notification server
-        | disconnect             disconnect the client
-        | quit                   kill the app
+        | connect                       connect this client to the server
+        | registerToTopic=<id-topic>    identify this client to the notification server
+        | disconnect                    disconnect the client
+        | quit                          kill the app
         |
         | Please choose your command
         |
@@ -77,12 +77,12 @@ object WsEchoClient{
       Thread.sleep(2000)
       val line = readLine()
       if(line == "connect"){
-        client = WsClientFactory.makeClient( URI.create( "ws://127.0.0.1:9000" ))
+        client = WsClientFactory.makeClient( URI.create( "ws://127.0.0.1:9000/salut" ))
         client.connect()
         println("Connection")
       }
-      if(line.contains("identify")){
-        val message = "thisIsMyId="+line.substring("identify".length, line.length)
+      if(line.contains(WsServer.registerToTopic)){
+        val message = WsServer.registerToTopic+line.substring(WsServer.registerToTopic.length, line.length)
         client.send(message)
         println("Identification message sent")
       }

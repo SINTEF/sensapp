@@ -67,7 +67,7 @@ import java.util.List;
  */
 public class WsServer extends WebSocketServer {
 
-    final static public String thisIsMyId = "thisIsMyId=";
+    final static public String registerToTopic = "registerToTopic=";
 
     private static int counter = 0;
     private List<ServerWebSocketClient> clientList = new ArrayList<ServerWebSocketClient>();
@@ -100,7 +100,7 @@ public class WsServer extends WebSocketServer {
 
     @Override
     public void onMessage( WebSocket conn, String message ) {
-        if(message.contains(thisIsMyId)){
+        if(message.contains(registerToTopic)){
             addClientFromMessage(message, conn);
         }
         else{
@@ -142,13 +142,13 @@ public class WsServer extends WebSocketServer {
     private void addClientFromMessage(String m, WebSocket ws){
         java.lang.System.out.println( "Client identified" );
         ws.send("You have been identified successfully");
-        String id = m.substring(thisIsMyId.length(), m.length());
+        String id = m.substring(registerToTopic.length(), m.length());
         clientList.add(new ServerWebSocketClient(ws, id));
     }
 
     private void addClientFromUrl(String m, WebSocket ws){
         java.lang.System.out.println( "Client identified" );
-        String id = m.substring(thisIsMyId.length(), m.length());
+        String id = m.substring(registerToTopic.length(), m.length());
         clientList.add(new ServerWebSocketClient(ws, id));
     }
 
