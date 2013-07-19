@@ -52,6 +52,7 @@ import org.java_websocket.framing.FrameBuilder
 import org.java_websocket.handshake.ClientHandshake
 import java.nio.ByteBuffer
 import org.java_websocket.framing.Framedata
+import net.modelbased.sensapp.service.ws.WsServerHelper
 
 /**
  * Created with IntelliJ IDEA.
@@ -64,7 +65,7 @@ object WsServerScala{
 }
 
 class WsServerScala(port: Int) extends WsServer(port, new Draft_17){
-  private var clientList: List[ServerWebSocketClient] = null
+  private var clientList: List[ServerWebSocketClient] = List()
 
   override def onOpen(conn: WebSocket, handshake: ClientHandshake) {
     println("New client connected")

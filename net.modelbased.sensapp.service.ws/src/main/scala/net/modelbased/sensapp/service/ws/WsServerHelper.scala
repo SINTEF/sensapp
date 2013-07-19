@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.library.ws
+ * Module: net.modelbased.sensapp.service.ws
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -43,9 +43,13 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.library.ws.Server
+package net.modelbased.sensapp.service.ws
 
-import net.modelbased.sensapp.library.ws.Server.data.{SensorDescriptionRegistry, SensorInformation}
+import net.modelbased.sensapp.library.senml.{Root, MeasurementOrParameter}
+import net.modelbased.sensapp.service.notifier.data.SubscriptionRegistry
+import net.modelbased.sensapp.service.notifier.protocols.ProtocolFactory
+import net.modelbased.sensapp.service.database.raw.backend.impl.MongoDB
+import net.modelbased.sensapp.service.database.raw.backend.Backend
 
 
 /**
@@ -55,6 +59,8 @@ import net.modelbased.sensapp.library.ws.Server.data.{SensorDescriptionRegistry,
  * Time: 13:56
  */
 object WsServerHelper {
+  private[this] val _backend: Backend = new MongoDB()
+  private[this] val _registry = new SubscriptionRegistry()
 
   def doOrder(order: String): String = {
     var myOrder = order
@@ -77,27 +83,62 @@ object WsServerHelper {
       case "loadRoot" =>
       case "getData" =>
       case "registerData" => {
-        myOrder = myOrder.substring(myOrder.indexOf("("))
-        val name = myOrder.substring(1, myOrder.indexOf(","))
-        myOrder = myOrder.substring(myOrder.indexOf(","))
-        var data = myOrder.substring(1, myOrder.indexOf(")"))
-        if(data.charAt(0) == ' ')
-          data = data.substring(1)
+        val parameters = toParameterList(myOrder)
+        val mop = List(MeasurementOrParameter(
+          Option(parameters.apply(1)),
+          Option(parameters.apply(2)),
+          Option(parameters.apply(3).toDouble),
+          None,
+          None,
+          None,
+          Option(parameters.apply(4).toLong),
+          None))
+        val root = new Root(None, None, None, None, Option(mop.toSeq))
+        val exists = ifExists(parameters.apply(1), _backend push (parameters.apply(1), root))
 
-        val sensor = (_registry pull ("id", name)).get
-        /*val info = new SensorInformation()
-        val safe = SensorInformation(info.tags.filter( t => t._1 != "" ), info.updateTime, info.localization)
-        sensor.infos = safe
-        _registry push sensor */
-        return sensor.toString
+        exists match{
+          case "Success" => doNotify(root, parameters.apply(1), _registry)
+          case _ =>
+        }
+        return exists
+        /*
+        Root(None,None,None,None,Some(List(MeasurementOrParameter(Some(JohnTab_Accelerom
+        eterY),Some(m/s2),Some(-0.34476504),None,None,None,Some(1374220611),None))))
+
+         registerData(JohnTab_AccelerometerY, m/s2, -0.34476504, 1374220611)
+         registerData(JohnTab_AccelerometerX, m/s2, 42, 137)
+         */
       }
     }
     null
   }
 
-  private[this] val _registry = new SensorDescriptionRegistry()
+  def toParameterList(data: String): List[String] = {
+    data.split("\\(|, |,|\\)").toList
+  }
+
 
   def getFunctionName(order: String): String = {
     order.substring(0, order.indexOf("("))
+  }
+
+  private def ifExists(name: String, lambda: => Unit) = {
+    if (_backend exists name){
+      lambda
+      "Success"
+    }
+    else
+      "Unknown sensor database [" + name + "]"
+  }
+
+  def doNotify(root: Root, sensor: String, reg: SubscriptionRegistry) {
+    val subscription = reg pull(("sensor", sensor))
+    subscription match{
+      case None =>
+      case Some(x) => x.protocol match{
+        case None => ProtocolFactory.createProtocol("http").send(root, subscription, sensor)
+        case Some(p) => ProtocolFactory.createProtocol(p).send(root, subscription, sensor)
+      }
+    }
   }
 }
