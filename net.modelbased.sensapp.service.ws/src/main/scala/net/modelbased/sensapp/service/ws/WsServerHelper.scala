@@ -55,10 +55,10 @@ import cc.spray.json.DefaultJsonProtocol._
 import java.util.UUID
 import net.modelbased.sensapp.service.database.raw.data.{SensorDatabaseDescriptor, SearchRequest, CreationRequest}
 import net.modelbased.sensapp.library.system.{TopologyFileBasedDistribution, URLHandler}
-import net.modelbased.sensapp.service.notifier.data.SubscriptionJsonProtocol.format
+import net.modelbased.sensapp.service.notifier.data.SubscriptionJsonProtocol._
 import net.modelbased.sensapp.service.database.raw.data.RequestsProtocols._
 import net.modelbased.sensapp.library.senml.export.JsonProtocol._
-
+import net.modelbased.sensapp.library.senml.export.{JsonParser => RootParser}
 
 /**
  * Created with IntelliJ IDEA.
@@ -80,10 +80,8 @@ object WsServerHelper {
       }
 
       case "registerNotification" => {
-        val parameters = toParameterList(myOrder)
-        if(parameters.size != 5)
-          return "Usage: registerNotification(name, hookList, protocol, id)"
-        val subscription:Subscription = buildSubscription(parameters)
+        val json = getUniqueArgument(myOrder)
+        val subscription = json.asJson.convertTo[Subscription]
 
         if (_registry exists ("sensor", subscription.sensor)){
           "A Subscription identified by ["+ subscription.sensor +"] already exists!"
@@ -95,17 +93,17 @@ object WsServerHelper {
           _registry push subscription
           subscription.toJson.prettyPrint
         }
+        /*{"sensor": "JohnTab_AccelerometerZ","hooks": ["http://127.0.0.1:8090/echo"],"protocol": "ws"}*/
+
       }
 
       case "getNotification" => {
-        val parameters = toParameterList(myOrder)
-        val name = parameters.apply(1)
+        val name = getUniqueArgument(myOrder)
         ifExists(name, {(_registry pull ("sensor", name)).get.toJson.prettyPrint})
       }
 
       case "deleteNotification" => {
-        val parameters = toParameterList(myOrder)
-        val name = parameters.apply(1)
+        val name = getUniqueArgument(myOrder)
         ifExists(name, {
           val subscr = (_registry pull ("sensor", name)).get
           _registry drop subscr
@@ -114,35 +112,25 @@ object WsServerHelper {
       }
 
       case "updateNotification" => {
-        val parameters = toParameterList(myOrder)
-        if(parameters.size != 5)
-          return "Usage: updateNotification(name, hookList, protocol, id)"
-        val name = parameters.apply(1)
-        val subscription:Subscription = buildSubscription(parameters)
-        if (subscription.sensor != name) {
-          "Request content does not match URL for update"
-        } else {
-          ifExists(name, {
-            _registry push subscription; subscription.toJson.prettyPrint
-          })
-        }
+        val json = getUniqueArgument(myOrder)
+        val subscription = json.asJson.convertTo[Subscription]//buildSubscription(parameters)
+        ifExists(subscription.sensor, {
+          _registry push subscription; subscription.toJson.prettyPrint
+        })
       }
 
       case "dispatch" => {
-        val parameters = toParameterList(myOrder)
+        val parameters = getUniqueArgument(myOrder)
         null
       }
-
 
       case "getRawSensors" => {
         (_backend.content map { s => _backend.describe(s, URLHandler.build("/databases/raw/sensors/").toString).get}).toJson.prettyPrint
       }
 
       case "registerRawSensor" => {
-        val parameters = toParameterList(myOrder)
-        if(parameters.size != 4)
-          return "Usage: registerRawSensor(name, baseTime, schema)"
-        val req:CreationRequest = buildCreationRequest(parameters)
+        val json = getUniqueArgument(myOrder)
+        val req = json.asJson.convertTo[CreationRequest]
         if (_backend exists req.sensor){
           "A sensor database identified as ["+ req.sensor +"] already exists!"
         } else {
@@ -151,81 +139,67 @@ object WsServerHelper {
       }
 
       case "getRawSensor" => {
-        val parameters = toParameterList(myOrder)
-        val name = parameters.apply(1)
+        val name = getUniqueArgument(myOrder)
         ifExists(name, {
           (_backend describe(name, URLHandler.build("/databases/raw/data/").toString)).toJson.prettyPrint
         })
       }
 
       case "deleteRawSensor" => {
-        val parameters = toParameterList(myOrder)
-        val name = parameters.apply(1)
+        val name = getUniqueArgument(myOrder)
         (_backend delete name).toJson.prettyPrint
       }
 
 
       case "loadRoot" => {
-        val parameters = toParameterList(myOrder)
+        val json = getUniqueArgument(myOrder)
+        val root = json.asJson.convertTo[Root]
         null
       }
 
       case "getData" => {
-        val parameters = toParameterList(myOrder)
-        if(parameters.size == 2){
-          val name = parameters.apply(1)
-          val (from, to, sorted, limit, factorized, every, by) = ("0", "now", "non", -1, false, 1, "avg")
-          val dataset = (_backend get(name, buildTimeStamp(from), buildTimeStamp(to), sorted, limit)).sampled(every, by).head
-          if (factorized) dataset.factorized.head.toJson.prettyPrint else dataset.toJson.prettyPrint
-        } else {
-          val request:SearchRequest = buildSearchRequest(parameters)
-          val from = buildTimeStamp(request.from)
-          val to = buildTimeStamp(request.to)
-          val sort = request.sorted.getOrElse("none")
-          val limit = request.limit.getOrElse(-1)
-          val existing = request.sensors.par.filter{ _backend exists(_) }
-          (_backend get(existing.seq, from, to, sort, limit)).toJson.prettyPrint
-        }
+        //TODO check parameters
+        val parameters = argumentsToList(myOrder)
+        val name = parameters.apply(1)
+        val (from, to, sorted, limit, factorized, every, by) = ("0", "now", "non", -1, false, 1, "avg")
+        val dataset = (_backend get(name, buildTimeStamp(from), buildTimeStamp(to), sorted, limit)).sampled(every, by).head
+        if (factorized) dataset.factorized.head.toJson.prettyPrint else dataset.toJson.prettyPrint
+      }
+
+      case "getDataJson" => {
+        val json = getUniqueArgument(myOrder)
+        val request = json.asJson.convertTo[SearchRequest]
+        val from = buildTimeStamp(request.from)
+        val to = buildTimeStamp(request.to)
+        val sort = request.sorted.getOrElse("none")
+        val limit = request.limit.getOrElse(-1)
+        val existing = request.sensors.par.filter{ _backend exists(_) }
+        (_backend get(existing.seq, from, to, sort, limit)).toJson.prettyPrint
       }
 
       case "registerData" => {
-        val parameters = toParameterList(myOrder)
-        if(parameters.size != 5)
-          return "Usage: registerData(name, unit, value, time)"
-        val mop = List(MeasurementOrParameter(
-          Option(parameters.apply(1)),
-          Option(parameters.apply(2)),
-          Option(parameters.apply(3).toDouble),
-          None,
-          None,
-          None,
-          Option(parameters.apply(4).toLong),
-          None))
-        val root = buildRootMessage(mop.toSeq)
-
-        ifExists(parameters.apply(1), {
-          val result = _backend push (parameters.apply(1), root)
-          doNotify(root, parameters.apply(1), _registry)
+        val json = getUniqueArgument(myOrder)
+        val root = RootParser.fromJson(json)
+        val name = root.baseName.get
+        ifExists(name, {
+          val result = _backend push (name, root)
+          doNotify(root, name, _registry)
           result.toList.toJson.prettyPrint
         })
-
-        /*
-        Root(None,None,None,None,Some(List(MeasurementOrParameter(Some(JohnTab_Accelerom
-        eterY),Some(m/s2),Some(-0.34476504),None,None,None,Some(1374220611),None))))
-
-         registerData(JohnTab_AccelerometerY, m/s2, -0.34476504, 1374220611)
-         registerData(JohnTab_AccelerometerX, m/s2, 42, 137)
-         */
+        //{"bn":"JohnTab_AccelerometerX","bt":1374064069,"e":[{"u":"m/s2","v":12,"t":156544},{"u":"m/s2","v":24,"t":957032}]}
       }
 
       case _ => null
     }
   }
 
-  def toParameterList(data: String): List[String] = {
-    data.split("\\(|, |,|\\)").toList
+  def getUniqueArgument(data: String): String = {
+    data.split("\\(|\\)").apply(1)
   }
 
+  def argumentsToList(data: String): List[String] = {
+    data.split("\\(|, |,|\\)").toList
+  }
 
   def getFunctionName(order: String): String = {
     order.substring(0, order.indexOf("("))
@@ -236,10 +210,6 @@ object WsServerHelper {
       lambda
     else
       "Unknown sensor database [" + name + "]"
-  }
-
-  private[this] def buildRootMessage(mops: Seq[MeasurementOrParameter]): Root = {
-    Root(None, None, None, None, Option(mops))
   }
 
   private def buildTimeStamp(str: String): Long = {
@@ -257,31 +227,6 @@ object WsServerHelper {
       }
       case _ => throw new RuntimeException("Unable to parse date ["+str+"]!")
     }
-  }
-
-  private def buildSubscription(params: List[String]): Subscription = {
-    Subscription(params.apply(1), buildList(params.apply(2)), Option(params.apply(3)), Option(params.apply(4)))
-  }
-
-  private def buildSearchRequest(params: List[String]): SearchRequest = {
-    SearchRequest(
-      buildSeq(params.apply(1)),
-      params.apply(2),
-      params.apply(3),
-      Option(params.apply(4)),
-      Option(params.apply(5).toInt))
-  }
-
-  private def buildCreationRequest(params: List[String]): CreationRequest = {
-    CreationRequest(params.apply(1), params.apply(2).toLong, params.apply(3))
-  }
-
-  private def buildSeq(s: String): Seq[String] = {
-    s.split(", |,").toSeq
-  }
-
-  private def buildList(s: String): List[String] = {
-    s.split(", |,").toList
   }
 
   def doNotify(root: Root, sensor: String, reg: SubscriptionRegistry) {
