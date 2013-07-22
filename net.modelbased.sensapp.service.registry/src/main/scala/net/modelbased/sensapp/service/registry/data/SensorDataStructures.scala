@@ -88,7 +88,7 @@ case class Backend(val kind: String, val descriptor: String, val dataset: String
 /**
  * Information about a sensor (e.g., meta-data)
  * @param tags a key-value map to store arbitrary metadata
- * @param updateRate an optional updateRate for this sensor
+ * @param updateTime an optional updateRate for this sensor
  * @param localization an optional localization for this sensor
  */
 case class SensorInformation(
@@ -123,7 +123,7 @@ case class Localisation(val longitude: Double, latitude: Double)
 
 /**
  * Description of a composite sensor
- * @param identifier the identifier of the sensor
+ * @param id the identifier of the sensor
  * @param description a short sentence to describe  the sensor
  * @param tags a key-value pair bag to store user-given metadata
  * @param sensors list of URLs that points to the atomic sensors contained by this composite
