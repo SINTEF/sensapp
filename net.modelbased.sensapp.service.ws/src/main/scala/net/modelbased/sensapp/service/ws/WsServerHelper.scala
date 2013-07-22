@@ -153,7 +153,7 @@ object WsServerHelper {
 
       case "loadRoot" => {
         val json = getUniqueArgument(myOrder)
-        val root = json.asJson.convertTo[Root]
+        val root = RootParser.fromJson(json)
         null
       }
 
