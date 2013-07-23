@@ -150,7 +150,6 @@ object WsServerHelper {
         (_backend delete name).toJson.prettyPrint
       }
 
-
       case "loadRoot" => {
         val json = getUniqueArgument(myOrder)
         val root = RootParser.fromJson(json)
@@ -158,10 +157,12 @@ object WsServerHelper {
       }
 
       case "getData" => {
-        //TODO check parameters
         val parameters = argumentsToList(myOrder)
-        val name = parameters.apply(1)
-        val (from, to, sorted, limit, factorized, every, by) = ("0", "now", "non", -1, false, 1, "avg")
+        if(parameters.size != 9)
+          return ("""Usage: getData(name, from, to, sorted, limit, factorized, every, by)
+                  |  (for set default argument, put null)
+                  """.stripMargin)
+        val (name, from, to, sorted, limit, factorized, every, by) = setVals(parameters)
         val dataset = (_backend get(name, buildTimeStamp(from), buildTimeStamp(to), sorted, limit)).sampled(every, by).head
         if (factorized) dataset.factorized.head.toJson.prettyPrint else dataset.toJson.prettyPrint
       }
@@ -203,6 +204,20 @@ object WsServerHelper {
 
   def getFunctionName(order: String): String = {
     order.substring(0, order.indexOf("("))
+  }
+
+  def setVals(list: List[String]): (String, String, String, String, Int, Boolean, Int, String)={
+    var (name, from, to, sorted, limit, factorized, every, by) =
+      ("", "0", "now", "none", -1, false, 1, "avg")
+    if(list.apply(1) != "null") name = list.apply(1)
+    if(list.apply(2) != "null") from = list.apply(2)
+    if(list.apply(3) != "null") to = list.apply(3)
+    if(list.apply(4) != "null") sorted = list.apply(4)
+    if(list.apply(5) != "null") limit = list.apply(5).toInt
+    if(list.apply(6) != "null") factorized = list.apply(6).toBoolean
+    if(list.apply(7) != "null") every = list.apply(7).toInt
+    if(list.apply(8) != "null") by = list.apply(8)
+    (name, from, to, sorted, limit, factorized, every, by)
   }
 
   private def ifExists(name: String, lambda: => String): String = {
