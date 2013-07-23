@@ -52,13 +52,13 @@ The client can also ask the server to work for it, it can call server methods in
 
 
     getRawSensors()
-    -> ???
+    -> JSonString: List[SensorDatabaseDescriptor]
 
     registerRawSensor(JsonString: CreationRequest)
     -> Boolean (true = success)
 
     getRawSensor(name)
-    -> ???
+    -> JSonString: SensorDatabaseDescriptor
 
     deleteRawSensor(name)
     -> Boolean (true = success)

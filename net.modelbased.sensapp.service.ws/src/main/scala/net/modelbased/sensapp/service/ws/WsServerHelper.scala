@@ -125,7 +125,7 @@ object WsServerHelper {
       }
 
       case "getRawSensors" => {
-        (_backend.content map { s => _backend.describe(s, URLHandler.build("/databases/raw/sensors/").toString).get}).toJson.prettyPrint
+        (_backend.content map { s => _backend.describe(s, "sensapp/databases/raw/sensors/").get}).toJson.prettyPrint
       }
 
       case "registerRawSensor" => {
@@ -141,7 +141,7 @@ object WsServerHelper {
       case "getRawSensor" => {
         val name = getUniqueArgument(myOrder)
         ifExists(name, {
-          (_backend describe(name, URLHandler.build("/databases/raw/data/").toString)).toJson.prettyPrint
+          (_backend describe(name, "sensapp/databases/raw/data/")).get.toString.toJson.prettyPrint
         })
       }
 
