@@ -46,19 +46,26 @@
 package net.modelbased.sensapp.service.ws
 
 import net.modelbased.sensapp.library.senml.{Root, MeasurementOrParameter}
-import net.modelbased.sensapp.service.notifier.data._
+import net.modelbased.sensapp.library.senml.export.JsonProtocol._
+import net.modelbased.sensapp.library.senml.export.{JsonParser => RootParser}
+import net.modelbased.sensapp.library.system.TopologyFileBasedDistribution
 import net.modelbased.sensapp.service.notifier.protocols.ProtocolFactory
+import net.modelbased.sensapp.service.notifier.data.{SubscriptionRegistry, Subscription}
+import net.modelbased.sensapp.service.notifier.data.SubscriptionJsonProtocol._
 import net.modelbased.sensapp.service.database.raw.backend.impl.MongoDB
 import net.modelbased.sensapp.service.database.raw.backend.Backend
+import net.modelbased.sensapp.service.database.raw.data.{SensorDatabaseDescriptor, SearchRequest, CreationRequest}
+import net.modelbased.sensapp.service.database.raw.data.RequestsProtocols._
+import net.modelbased.sensapp.service.registry.data.CompositeSensorDescription
+import net.modelbased.sensapp.service.registry.data.CompositeSensorDescriptionRegistry
+import net.modelbased.sensapp.service.registry.data.SensorList
+import net.modelbased.sensapp.service.registry.data.SensorTags
+import net.modelbased.sensapp.service.registry.data.DescriptionUpdate
+import net.modelbased.sensapp.service.registry.data.ElementJsonProtocol.{
+  compositeSensorDescription, sensorList, sensorTags, descriptionUpdate}
 import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol._
 import java.util.UUID
-import net.modelbased.sensapp.service.database.raw.data.{SensorDatabaseDescriptor, SearchRequest, CreationRequest}
-import net.modelbased.sensapp.library.system.{TopologyFileBasedDistribution, URLHandler}
-import net.modelbased.sensapp.service.notifier.data.SubscriptionJsonProtocol._
-import net.modelbased.sensapp.service.database.raw.data.RequestsProtocols._
-import net.modelbased.sensapp.library.senml.export.JsonProtocol._
-import net.modelbased.sensapp.library.senml.export.{JsonParser => RootParser}
 
 /**
  * Created with IntelliJ IDEA.
@@ -70,27 +77,28 @@ object WsServerHelper {
   implicit val partnerName = "database.raw.ws"
   implicit val partners = new TopologyFileBasedDistribution { implicit val actorSystem = null }
   private[this] val _backend: Backend = new MongoDB()
-  private[this] val _registry = new SubscriptionRegistry()
+  private[this] val _subscriptionRegistry = new SubscriptionRegistry()
+  private[this] val _compositeRegistry = new CompositeSensorDescriptionRegistry()
 
   def doOrder(order: String): String = {
     val myOrder = order
     getFunctionName(order) match{
       case "getNotifications" => {
-        (_registry retrieve List()).toJson.prettyPrint
+        (_subscriptionRegistry retrieve List()).toJson.prettyPrint
       }
 
       case "registerNotification" => {
         val json = getUniqueArgument(myOrder)
         val subscription = json.asJson.convertTo[Subscription]
 
-        if (_registry exists ("sensor", subscription.sensor)){
+        if (_subscriptionRegistry exists ("sensor", subscription.sensor)){
           "A Subscription identified by ["+ subscription.sensor +"] already exists!"
         } else {
           subscription.protocol.foreach(p => {
             if(p == "ws" && !subscription.id.isDefined)
               subscription.id=Option(UUID.randomUUID().toString)
           })
-          _registry push subscription
+          _subscriptionRegistry push subscription
           subscription.toJson.prettyPrint
         }
         /*{"sensor": "JohnTab_AccelerometerZ","hooks": ["http://127.0.0.1:8090/echo"],"protocol": "ws"}*/
@@ -99,14 +107,14 @@ object WsServerHelper {
 
       case "getNotification" => {
         val name = getUniqueArgument(myOrder)
-        ifExists(name, {(_registry pull ("sensor", name)).get.toJson.prettyPrint})
+        ifExists(name, {(_subscriptionRegistry pull ("sensor", name)).get.toJson.prettyPrint})
       }
 
       case "deleteNotification" => {
         val name = getUniqueArgument(myOrder)
         ifExists(name, {
-          val subscr = (_registry pull ("sensor", name)).get
-          _registry drop subscr
+          val subscr = (_subscriptionRegistry pull ("sensor", name)).get
+          _subscriptionRegistry drop subscr
           "true"
         })
       }
@@ -115,7 +123,7 @@ object WsServerHelper {
         val json = getUniqueArgument(myOrder)
         val subscription = json.asJson.convertTo[Subscription]//buildSubscription(parameters)
         ifExists(subscription.sensor, {
-          _registry push subscription; subscription.toJson.prettyPrint
+          _subscriptionRegistry push subscription; subscription.toJson.prettyPrint
         })
       }
 
@@ -191,10 +199,78 @@ object WsServerHelper {
         val name = root.baseName.get
         ifExists(name, {
           val result = _backend push (name, root)
-          doNotify(root, name, _registry)
+          doNotify(root, name, _subscriptionRegistry)
           result.toList.toJson.prettyPrint
         })
         //{"bn":"JohnTab_AccelerometerX","bt":1374064069,"e":[{"u":"m/s2","v":12,"t":156544},{"u":"m/s2","v":24,"t":957032}]}
+      }
+
+      case "getComposites" => {
+        _compositeRegistry.retrieve(List()).par.seq.toList.toJson.prettyPrint
+      }
+
+      case "postComposite" => {
+        val json = getUniqueArgument(myOrder)
+        val request = json.asJson.convertTo[CompositeSensorDescription]
+        if (_compositeRegistry exists ("id", request.id)){
+          "A CompositeSensorDescription identified as ["+ request.id +"] already exists!"
+        } else {
+          _compositeRegistry push (request)
+          "sensapp/registry/composite/sensors/"+ request.id
+        }
+      }
+
+      case "getComposite" => {
+        val name = getUniqueArgument(myOrder)
+        ifExists(name, {(_compositeRegistry pull ("id", name)).get.toJson.prettyPrint})
+      }
+
+      case "deleteComposite" => {
+        val name = getUniqueArgument(myOrder)
+        ifExists(name, {
+          val sensor = _compositeRegistry pull ("id", name)
+          _compositeRegistry drop sensor.get
+          "true"
+        })
+      }
+
+      /*case "updateCompositeSensors" => {
+        val parameters = argumentsToList(myOrder)
+        if(parameters.size != 3)
+          return """Usage: updateCompositeSensors(name, JsonString: SensorList)""".stripMargin
+        val (name, sensorList) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[SensorList])
+        ifExists(name, {
+          val sensor = (_compositeRegistry pull ("id", name)).get
+          sensor.sensors = sensorList.sensors
+          _compositeRegistry push sensor
+          sensor.toJson.prettyPrint
+        })
+      }
+
+      case "updateCompositeSensorTags" => {
+        val parameters = argumentsToList(myOrder)
+        if(parameters.size != 3)
+          return """Usage: updateCompositeSensorTags(name, JsonString: SensorTags)""".stripMargin
+        val (name, sensorTags) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[SensorTags])
+        ifExists(name, {
+          val sensor = (_compositeRegistry pull ("id", name)).get
+          sensor.tags = Some(sensorTags.tags.filter( t => t._1 != "" ))
+          _compositeRegistry push sensor
+          sensor.toJson.prettyPrint
+        })
+      }  */
+
+      case "updateCompositeDescription" => {
+        val parameters = argumentsToList(myOrder)
+        if(parameters.size != 3)
+          return """Usage: updateCompositeDescription(name, JsonString: DescriptionUpdate)""".stripMargin
+        val (name , request) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[DescriptionUpdate])
+        ifExists(name, {
+          val sensor = (_compositeRegistry pull ("id", name)).get
+          sensor.description = request.description
+          _compositeRegistry push sensor
+          sensor.toJson.prettyPrint
+        })
       }
 
       case _ => null
