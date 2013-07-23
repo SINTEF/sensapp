@@ -32,3 +32,47 @@ Here is an example of a basic interaction:
 
 
 The client must set the topic to be notified at every new connection. When disconnected it will no longer be nofified.
+
+The client can also ask the server to work for it, it can call server methods in WS:
+
+    getNotifications()
+    -> JsonString: List[Subscription]
+
+    registerNotification(JsonString: Subscription)
+    -> JsonString: Subscription
+
+    getNotification(name)
+    -> JsonString: Subscription
+
+    deleteNotification(name)
+    -> Boolean (true = success)
+
+    updateNotification(JsonString: Subscription)
+    -> JsonString: Subscription
+
+
+    getRawSensors()
+    -> ???
+
+    registerRawSensor(JsonString: CreationRequest)
+    -> Boolean (true = success)
+
+    getRawSensor(name)
+    -> ???
+
+    deleteRawSensor(name)
+    -> Boolean (true = success)
+
+
+    loadRoot(JsonString: Root)
+    -> String
+
+
+    getData(name, from, to, sorted, limit, factorized, every, by)
+    -> JsonString: Root
+
+    getDataJson(JsonString: SearchRequest)
+    -> JsonString: Root
+
+    registerData(JsonString: Root)
+    -> JsonString: List[MeasurementOrParameter]
