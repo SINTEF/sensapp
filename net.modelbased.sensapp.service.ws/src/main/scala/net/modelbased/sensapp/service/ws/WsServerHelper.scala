@@ -234,14 +234,14 @@ object WsServerHelper {
         })
       }
 
-      /*case "updateCompositeSensors" => {
+      case "updateCompositeSensors" => {
         val parameters = argumentsToList(myOrder)
         if(parameters.size != 3)
           return """Usage: updateCompositeSensors(name, JsonString: SensorList)""".stripMargin
-        val (name, sensorList) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[SensorList])
+        val (name, list) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[SensorList])
         ifExists(name, {
           val sensor = (_compositeRegistry pull ("id", name)).get
-          sensor.sensors = sensorList.sensors
+          sensor.sensors = list.sensors
           _compositeRegistry push sensor
           sensor.toJson.prettyPrint
         })
@@ -251,14 +251,14 @@ object WsServerHelper {
         val parameters = argumentsToList(myOrder)
         if(parameters.size != 3)
           return """Usage: updateCompositeSensorTags(name, JsonString: SensorTags)""".stripMargin
-        val (name, sensorTags) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[SensorTags])
+        val (name, tags) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[SensorTags])
         ifExists(name, {
           val sensor = (_compositeRegistry pull ("id", name)).get
-          sensor.tags = Some(sensorTags.tags.filter( t => t._1 != "" ))
+          sensor.tags = Some(tags.tags.filter( t => t._1 != "" ))
           _compositeRegistry push sensor
           sensor.toJson.prettyPrint
         })
-      }  */
+      }
 
       case "updateCompositeDescription" => {
         val parameters = argumentsToList(myOrder)
