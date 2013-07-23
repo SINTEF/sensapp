@@ -73,7 +73,7 @@ object WsServerHelper {
   private[this] val _registry = new SubscriptionRegistry()
 
   def doOrder(order: String): String = {
-    var myOrder = order
+    val myOrder = order
     getFunctionName(order) match{
       case "getNotifications" => {
         (_registry retrieve List()).toJson.prettyPrint
@@ -153,7 +153,14 @@ object WsServerHelper {
       case "loadRoot" => {
         val json = getUniqueArgument(myOrder)
         val root = RootParser.fromJson(json)
-        null
+        try {
+          val start = System.currentTimeMillis()
+          _backend importer root
+          val delta = System.currentTimeMillis() - start
+          "processed in %sms".format(delta)
+        } catch {
+          case e => e.toString
+        }
       }
 
       case "getData" => {
@@ -162,7 +169,7 @@ object WsServerHelper {
           return ("""Usage: getData(name, from, to, sorted, limit, factorized, every, by)
                   |  (for set default argument, put null)
                   """.stripMargin)
-        val (name, from, to, sorted, limit, factorized, every, by) = setVals(parameters)
+        val (name, from, to, sorted, limit, factorized, every, by) = setQueryValues(parameters)
         val dataset = (_backend get(name, buildTimeStamp(from), buildTimeStamp(to), sorted, limit)).sampled(every, by).head
         if (factorized) dataset.factorized.head.toJson.prettyPrint else dataset.toJson.prettyPrint
       }
@@ -194,10 +201,20 @@ object WsServerHelper {
     }
   }
 
+  /**
+   * This function return the only argument of a string function call
+   * @param data: The String to parse. Look like "function(argument)"
+   * @return argument defined up here
+   */
   def getUniqueArgument(data: String): String = {
     data.split("\\(|\\)").apply(1)
   }
 
+  /**
+   * This function split the string in a list of strings containing functionName and then all the parameters
+   * @param data: The string to be parsed. Look like "function(arg0, arg1, arg2...)"
+   * @return (function, arg0, arg1, arg2...)
+   */
   def argumentsToList(data: String): List[String] = {
     data.split("\\(|, |,|\\)").toList
   }
@@ -206,7 +223,7 @@ object WsServerHelper {
     order.substring(0, order.indexOf("("))
   }
 
-  def setVals(list: List[String]): (String, String, String, String, Int, Boolean, Int, String)={
+  private def setQueryValues(list: List[String]): (String, String, String, String, Int, Boolean, Int, String)={
     var (name, from, to, sorted, limit, factorized, every, by) =
       ("", "0", "now", "none", -1, false, 1, "avg")
     if(list.apply(1) != "null") name = list.apply(1)
