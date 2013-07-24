@@ -128,7 +128,23 @@ object WsServerHelper {
       }
 
       case "dispatch" => {
-        val parameters = getUniqueArgument(myOrder)
+        val data = getUniqueArgument(myOrder)
+        try{
+          data.asJson.convertTo[Subscription]
+          return doOrder("registerNotification("+data+")")
+        } catch { case e => println("bad idea") }
+        try{
+          data.asJson.convertTo[CreationRequest]
+          return doOrder("registerRawSensor("+data+")")
+        } catch { case e => println("bad idea") }
+        try{
+          RootParser.fromJson(data)
+          return doOrder("registerData("+data+")")
+        } catch { case e => println("bad idea") }
+        try{
+          data.asJson.convertTo[CompositeSensorDescription]
+          return doOrder("registerComposite("+data+")")
+        } catch { case e => println("bad idea") }
         null
       }
 
@@ -209,7 +225,7 @@ object WsServerHelper {
         _compositeRegistry.retrieve(List()).par.seq.toList.toJson.prettyPrint
       }
 
-      case "postComposite" => {
+      case "registerComposite" => {
         val json = getUniqueArgument(myOrder)
         val request = json.asJson.convertTo[CompositeSensorDescription]
         if (_compositeRegistry exists ("id", request.id)){
