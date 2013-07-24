@@ -121,7 +121,7 @@ object WsServerHelper {
 
       case "updateNotification" => {
         val json = getUniqueArgument(myOrder)
-        val subscription = json.asJson.convertTo[Subscription]//buildSubscription(parameters)
+        val subscription = json.asJson.convertTo[Subscription]
         ifExists(subscription.sensor, {
           _subscriptionRegistry push subscription; subscription.toJson.prettyPrint
         })
@@ -132,19 +132,19 @@ object WsServerHelper {
         try{
           data.asJson.convertTo[Subscription]
           return doOrder("registerNotification("+data+")")
-        } catch { case e => println("bad idea") }
+        } catch { case e =>  }
         try{
           data.asJson.convertTo[CreationRequest]
           return doOrder("registerRawSensor("+data+")")
-        } catch { case e => println("bad idea") }
+        } catch { case e =>  }
         try{
           RootParser.fromJson(data)
           return doOrder("registerData("+data+")")
-        } catch { case e => println("bad idea") }
+        } catch { case e =>  }
         try{
           data.asJson.convertTo[CompositeSensorDescription]
           return doOrder("registerComposite("+data+")")
-        } catch { case e => println("bad idea") }
+        } catch { case e =>  }
         null
       }
 
