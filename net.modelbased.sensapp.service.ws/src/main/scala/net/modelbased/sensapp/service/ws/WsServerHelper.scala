@@ -56,16 +56,26 @@ import net.modelbased.sensapp.service.database.raw.backend.impl.MongoDB
 import net.modelbased.sensapp.service.database.raw.backend.Backend
 import net.modelbased.sensapp.service.database.raw.data.{SensorDatabaseDescriptor, SearchRequest, CreationRequest}
 import net.modelbased.sensapp.service.database.raw.data.RequestsProtocols._
-import net.modelbased.sensapp.service.registry.data.CompositeSensorDescription
-import net.modelbased.sensapp.service.registry.data.CompositeSensorDescriptionRegistry
-import net.modelbased.sensapp.service.registry.data.SensorList
-import net.modelbased.sensapp.service.registry.data.SensorTags
-import net.modelbased.sensapp.service.registry.data.DescriptionUpdate
 import net.modelbased.sensapp.service.registry.data.ElementJsonProtocol.{
-  compositeSensorDescription, sensorList, sensorTags, descriptionUpdate}
+  compositeSensorDescription, sensorList, sensorTags, descriptionUpdate, sensorDescription, schema}
 import cc.spray.json._
 import cc.spray.json.DefaultJsonProtocol._
+import cc.spray.json.DefaultJsonProtocol.{jsonFormat => baseJsonFormat}
 import java.util.UUID
+import net.modelbased.sensapp.service.registry.data.{CreationRequest => RegistryCreationRequest}
+import net.modelbased.sensapp.service.registry.data.CompositeSensorDescription
+import net.modelbased.sensapp.service.registry.data.SensorList
+import net.modelbased.sensapp.service.notifier.data.Subscription
+import net.modelbased.sensapp.service.database.raw.data.SearchRequest
+import net.modelbased.sensapp.library.senml.Root
+import scala.Some
+import net.modelbased.sensapp.service.registry.data.CompositeSensorDescriptionRegistry
+import net.modelbased.sensapp.service.registry.data.SensorDescriptionRegistry
+import net.modelbased.sensapp.service.registry.data.SensorTags
+import net.modelbased.sensapp.service.registry.data.Schema
+import net.modelbased.sensapp.service.registry.data.DescriptionUpdate
+import net.modelbased.sensapp.service.registry.data.{Backend => RegistryBackend}
+import net.modelbased.sensapp.service.registry.BackendHelper
 
 /**
  * Created with IntelliJ IDEA.
@@ -79,6 +89,8 @@ object WsServerHelper {
   private[this] val _backend: Backend = new MongoDB()
   private[this] val _subscriptionRegistry = new SubscriptionRegistry()
   private[this] val _compositeRegistry = new CompositeSensorDescriptionRegistry()
+  private[this] val _sensorRegistry = new SensorDescriptionRegistry()
+  implicit val registryCreationRequest = baseJsonFormat(RegistryCreationRequest, "id", "descr", "schema")
 
   def doOrder(order: String): String = {
     val myOrder = order
@@ -295,6 +307,47 @@ object WsServerHelper {
         })
       }
 
+      case "registerSensor" => {
+        val json = getUniqueArgument(myOrder)
+        val req = json.asJson.convertTo[RegistryCreationRequest]
+        val backend = createDatabase(req.id, req.schema)
+        _sensorRegistry push (req.toDescription(backend))
+        sendClient(myOrder, "/registry/sensors/" + req.id)
+      }
+
+      case "getSensors" => {
+        val descriptors =  _sensorRegistry.retrieve(List()).par
+        sendClient(myOrder, descriptors.seq.toList.toJson.prettyPrint)
+      }
+
+      case "getSensor" => {
+        val name = getUniqueArgument(myOrder)
+        sendClient(myOrder, ifExists(name, {(_sensorRegistry pull ("id", name)).get.toJson.prettyPrint}))
+      }
+
+      case "deleteSensor" => {
+        val name = getUniqueArgument(myOrder)
+        ifExists(name, {
+          val sensor = _sensorRegistry pull ("id", name)
+          delDatabase(name)
+          _sensorRegistry drop sensor.get
+          sendClient(myOrder, "true")
+        })
+      }
+
+      case "updateSensor" => {
+        val parameters = argumentsToList(myOrder)
+        if(parameters.size != 3)
+          return sendClient(myOrder, """Usage: updateSensorDescription(name, JsonString: DescriptionUpdate)""".stripMargin)
+        val (name , request) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[DescriptionUpdate])
+        ifExists(name, {
+          val sensor = (_sensorRegistry pull ("id", name)).get
+          sensor.description = request.description
+          _sensorRegistry push sensor
+          sendClient(myOrder, sensor.toJson.prettyPrint)
+        })
+      }
+
       case _ => null
     }
   }
@@ -372,5 +425,17 @@ object WsServerHelper {
 
   private def sendClient(order: String, response: String): String={
     order + ", " + response
+  }
+
+  private[this] def createDatabase(id: String, schema: Schema): RegistryBackend = {
+    val helper = BackendHelper(schema)
+    val urls = helper.createDatabase(id, schema, partners)
+    RegistryBackend(schema.backend, urls._1, urls._2)
+  }
+
+  private[this] def delDatabase(id: String) = {
+    val backend = (_sensorRegistry pull ("id", id)).get.backend
+    val helper = BackendHelper(backend)
+    helper.deleteDatabase(backend, partners)
   }
 }
