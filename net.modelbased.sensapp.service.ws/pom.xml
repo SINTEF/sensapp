@@ -41,5 +41,10 @@
             <artifactId>net.modelbased.sensapp.service.registry</artifactId>
             <version>0.1.0-SNAPSHOT</version>
         </dependency>
+        <dependency>
+            <groupId>org.java-websocket</groupId>
+            <artifactId>Java-WebSocket</artifactId>
+            <version>1.3.0</version>
+        </dependency>
     </dependencies>
 </project>

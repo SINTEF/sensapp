@@ -60,9 +60,6 @@ import net.modelbased.sensapp.service.ws.WsServerHelper
  * Date: 18/07/13
  * Time: 12:12
  */
-object WsServerScala{
-  final val registerToTopic: String = "registerForNotification(\""
-}
 
 class WsServerScala(port: Int) extends WsServer(port, new Draft_17){
   private var clientList: List[ServerWebSocketClient] = List()
@@ -83,7 +80,7 @@ class WsServerScala(port: Int) extends WsServer(port, new Draft_17){
 
   override def onMessage(conn: WebSocket, order: String) {
     println("Received Message String: " + order)
-    val message = WsServerHelper.doOrder(order)
+    val message = WsServerHelper.doOrder(order, conn)
     if(message == null)
       conn.send("Unknown order: " + order)
     else
@@ -110,10 +107,8 @@ class WsServerScala(port: Int) extends WsServer(port, new Draft_17){
     clientList.filter(client => client.getId == id)
   }
 
-  private def addClientFromMessage(m: String, ws: WebSocket) {
+  def addClientFromMessage(id: String, ws: WebSocket) {
     println("Client identified")
-    ws.send("You have been identified successfully")
-    val id: String = m.substring(WsServerScala.registerToTopic.length, m.indexOf("\")"))
     clientList = clientList :+ new ServerWebSocketClient(ws, id)
   }
 }

@@ -76,6 +76,9 @@ import net.modelbased.sensapp.service.registry.data.Schema
 import net.modelbased.sensapp.service.registry.data.DescriptionUpdate
 import net.modelbased.sensapp.service.registry.data.{Backend => RegistryBackend}
 import net.modelbased.sensapp.service.registry.BackendHelper
+import net.modelbased.sensapp.library.ws.Server.WsServerFactory
+import org.java_websocket.WebSocket
+import net.modelbased.sensapp.service.notifier.Helper
 
 /**
  * Created with IntelliJ IDEA.
@@ -92,11 +95,17 @@ object WsServerHelper {
   private[this] val _sensorRegistry = new SensorDescriptionRegistry()
   implicit val registryCreationRequest = baseJsonFormat(RegistryCreationRequest, "id", "descr", "schema")
 
-  def doOrder(order: String): String = {
+  def doOrder(order: String, ws: WebSocket = null): String = {
     val myOrder = order
     getFunctionName(order) match{
       case "getNotifications" => {
         sendClient(myOrder, (_subscriptionRegistry retrieve List()).toJson.prettyPrint)
+      }
+
+      case "getNotified" => {
+        val notificationId = getUniqueArgument(myOrder)
+        WsServerFactory.myServer.addClientFromMessage(notificationId, ws)
+        sendClient(myOrder, "You are now registered for the topic: "+notificationId)
       }
 
       case "registerNotification" => {
@@ -233,7 +242,7 @@ object WsServerHelper {
         val name = root.baseName.get
         ifSensorExists(name, {
           val result = _backend push (name, root)
-          doNotify(root, name, _subscriptionRegistry)
+          Helper.doNotify(root, name, _subscriptionRegistry)
           sendClient(myOrder, result.toList.toJson.prettyPrint)
         })
         //{"bn":"JohnTab_AccelerometerX","bt":1374064069,"e":[{"u":"m/s2","v":12,"t":156544},{"u":"m/s2","v":24,"t":957032}]}
@@ -419,7 +428,7 @@ object WsServerHelper {
     }
   }
 
-  def doNotify(root: Root, sensor: String, reg: SubscriptionRegistry) {
+  /*def doNotify(root: Root, sensor: String, reg: SubscriptionRegistry) {
     val subscription = reg pull(("sensor", sensor))
     subscription match{
       case None =>
@@ -428,7 +437,7 @@ object WsServerHelper {
         case Some(p) => ProtocolFactory.createProtocol(p).send(root, subscription, sensor)
       }
     }
-  }
+  } */
 
   private def sendClient(order: String, response: String): String={
     order + ", " + response
