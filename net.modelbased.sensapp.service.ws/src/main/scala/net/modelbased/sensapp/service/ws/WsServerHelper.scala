@@ -119,12 +119,12 @@ object WsServerHelper {
 
       case "getNotification" => {
         val name = getUniqueArgument(myOrder)
-        sendClient(myOrder, ifExists(name, {(_subscriptionRegistry pull ("sensor", name)).get.toJson.prettyPrint}))
+        sendClient(myOrder, ifSensorExists(name, {(_subscriptionRegistry pull ("sensor", name)).get.toJson.prettyPrint}))
       }
 
       case "deleteNotification" => {
         val name = getUniqueArgument(myOrder)
-        ifExists(name, {
+        ifSensorExists(name, {
           val subscr = (_subscriptionRegistry pull ("sensor", name)).get
           _subscriptionRegistry drop subscr
           sendClient(myOrder, "true")
@@ -134,7 +134,7 @@ object WsServerHelper {
       case "updateNotification" => {
         val json = getUniqueArgument(myOrder)
         val subscription = json.asJson.convertTo[Subscription]
-        ifExists(subscription.sensor, {
+        ifSensorExists(subscription.sensor, {
           _subscriptionRegistry push subscription
           sendClient(myOrder, subscription.toJson.prettyPrint)
         })
@@ -179,7 +179,7 @@ object WsServerHelper {
 
       case "getRawSensor" => {
         val name = getUniqueArgument(myOrder)
-        ifExists(name, {
+        ifSensorExists(name, {
           sendClient(myOrder, (_backend describe(name, "sensapp/databases/raw/data/")).get.toString.toJson.prettyPrint)
         })
       }
@@ -231,7 +231,7 @@ object WsServerHelper {
         val json = getUniqueArgument(myOrder)
         val root = RootParser.fromJson(json)
         val name = root.baseName.get
-        ifExists(name, {
+        ifSensorExists(name, {
           val result = _backend push (name, root)
           doNotify(root, name, _subscriptionRegistry)
           sendClient(myOrder, result.toList.toJson.prettyPrint)
@@ -256,12 +256,12 @@ object WsServerHelper {
 
       case "getComposite" => {
         val name = getUniqueArgument(myOrder)
-        sendClient(myOrder, ifExists(name, {(_compositeRegistry pull ("id", name)).get.toJson.prettyPrint}))
+        sendClient(myOrder, ifCompositeExists(name, {(_compositeRegistry pull ("id", name)).get.toJson.prettyPrint}))
       }
 
       case "deleteComposite" => {
         val name = getUniqueArgument(myOrder)
-        ifExists(name, {
+        ifCompositeExists(name, {
           val sensor = _compositeRegistry pull ("id", name)
           _compositeRegistry drop sensor.get
           sendClient(myOrder, "true")
@@ -273,7 +273,7 @@ object WsServerHelper {
         if(parameters.size != 3)
           return sendClient(myOrder, """Usage: updateCompositeSensors(name, JsonString: SensorList)""".stripMargin)
         val (name, list) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[SensorList])
-        ifExists(name, {
+        ifCompositeExists(name, {
           val sensor = (_compositeRegistry pull ("id", name)).get
           sensor.sensors = list.sensors
           _compositeRegistry push sensor
@@ -286,7 +286,7 @@ object WsServerHelper {
         if(parameters.size != 3)
           return sendClient(myOrder, """Usage: updateCompositeSensorTags(name, JsonString: SensorTags)""".stripMargin)
         val (name, tags) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[SensorTags])
-        ifExists(name, {
+        ifCompositeExists(name, {
           val sensor = (_compositeRegistry pull ("id", name)).get
           sensor.tags = Some(tags.tags.filter( t => t._1 != "" ))
           _compositeRegistry push sensor
@@ -299,7 +299,7 @@ object WsServerHelper {
         if(parameters.size != 3)
           return sendClient(myOrder, """Usage: updateCompositeDescription(name, JsonString: DescriptionUpdate)""".stripMargin)
         val (name , request) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[DescriptionUpdate])
-        ifExists(name, {
+        ifCompositeExists(name, {
           val sensor = (_compositeRegistry pull ("id", name)).get
           sensor.description = request.description
           _compositeRegistry push sensor
@@ -322,12 +322,12 @@ object WsServerHelper {
 
       case "getSensor" => {
         val name = getUniqueArgument(myOrder)
-        sendClient(myOrder, ifExists(name, {(_sensorRegistry pull ("id", name)).get.toJson.prettyPrint}))
+        sendClient(myOrder, ifSensorExists(name, {(_sensorRegistry pull ("id", name)).get.toJson.prettyPrint}))
       }
 
       case "deleteSensor" => {
         val name = getUniqueArgument(myOrder)
-        ifExists(name, {
+        ifSensorExists(name, {
           val sensor = _sensorRegistry pull ("id", name)
           delDatabase(name)
           _sensorRegistry drop sensor.get
@@ -340,7 +340,7 @@ object WsServerHelper {
         if(parameters.size != 3)
           return sendClient(myOrder, """Usage: updateSensorDescription(name, JsonString: DescriptionUpdate)""".stripMargin)
         val (name , request) = (parameters.apply(1), parameters.apply(2).asJson.convertTo[DescriptionUpdate])
-        ifExists(name, {
+        ifSensorExists(name, {
           val sensor = (_sensorRegistry pull ("id", name)).get
           sensor.description = request.description
           _sensorRegistry push sensor
@@ -388,11 +388,18 @@ object WsServerHelper {
     (name, from, to, sorted, limit, factorized, every, by)
   }
 
-  private def ifExists(name: String, lambda: => String): String = {
+  private def ifSensorExists(name: String, lambda: => String): String = {
     if (_backend exists name)
       lambda
     else
       "Unknown sensor database [" + name + "]"
+  }
+
+  private def ifCompositeExists(name: String, lambda: => String): String = {
+    if (_compositeRegistry exists ("id", name))
+      lambda
+    else
+      "Unknown composite database [" + name + "]"
   }
 
   private def buildTimeStamp(str: String): Long = {
