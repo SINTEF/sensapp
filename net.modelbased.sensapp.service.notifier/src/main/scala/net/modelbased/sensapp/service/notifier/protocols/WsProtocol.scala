@@ -68,7 +68,7 @@ class WsProtocol extends AbstractProtocol{
 
     val wsClient = WsServerFactory.myServer.getClientsById(subscription.get.id.get)
     for(i<-0 to wsClient.size-1){
-      wsClient.apply(i).getWebSocket.send(JsonParser.toJson(root))
+      wsClient.apply(i).getWebSocket.send("DataNotification "+JsonParser.toJson(root))
     }
   }
 }

@@ -48,6 +48,7 @@ package net.modelbased.sensapp.service.notifier.data
 import cc.spray.json._
 import net.modelbased.sensapp.library.datastore._
 import net.modelbased.sensapp.service.notifier.data.SubscriptionJsonProtocol.format
+import java.util.UUID
 
 /**
  * Persistence layer associated to the Element class
@@ -65,5 +66,13 @@ class SubscriptionRegistry extends DataStore[Subscription]  {
   override def deserialize(json: String): Subscription = { json.asJson.convertTo[Subscription] }
  
   override def serialize(e: Subscription): String = { e.toJson.toString }
+
+  override def push(subscription: Subscription): Unit = {
+    subscription.protocol.foreach(p => {
+      if(p == "ws" && !subscription.id.isDefined)
+      subscription.id=Option(UUID.randomUUID().toString)
+    })
+    super.push(subscription)
+  }
     
 }

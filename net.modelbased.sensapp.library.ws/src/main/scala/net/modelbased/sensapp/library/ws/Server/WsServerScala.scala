@@ -109,6 +109,12 @@ class WsServerScala(port: Int) extends WsServer(port, new Draft_17){
 
   def addClientFromMessage(id: String, ws: WebSocket) {
     println("Client identified")
-    clientList = clientList :+ new ServerWebSocketClient(ws, id)
+    var exists = false
+    clientList.foreach(client => {
+      if(client.getId == id && client.getWebSocket == ws)
+        exists = true
+    })
+    if(!exists)
+      clientList = clientList :+ new ServerWebSocketClient(ws, id)
   }
 }
