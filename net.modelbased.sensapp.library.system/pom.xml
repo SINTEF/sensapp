@@ -12,7 +12,7 @@
   	<version>0.1.0-SNAPSHOT</version>
   	<relativePath>../net.modelbased.sensapp.library</relativePath>
   </parent>
-    
+
   <dependencies>
   	<dependency>
   		<groupId>cc.spray</groupId>
@@ -28,7 +28,7 @@
   		<groupId>cc.spray</groupId>
   		<artifactId>spray-client</artifactId>
   		<version>1.0-M2</version>
-  	</dependency>  
+  	</dependency>
   	<dependency>
   	  <groupId>com.typesafe.akka</groupId>
   	  <artifactId>akka-actor</artifactId>

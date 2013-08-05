@@ -39,6 +39,7 @@
   	<module>net.modelbased.sensapp.library</module>
   	<module>net.modelbased.sensapp.system</module>
       <module>net.modelbased.sensapp.backyard.echo.ws</module>
+      <module>net.modelbased.sensapp.backyard.gatling2</module>
   </modules>
   
   <properties>
