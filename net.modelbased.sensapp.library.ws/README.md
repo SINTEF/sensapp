@@ -13,8 +13,7 @@ if the message is not allowed.
 
 * To run the server:
 
-    <pre><code>
-    var port = 9000
+    <pre><code>var port = 9000
     var webSocketServer = WsServerFactory.makeServer(port)
     webSocketServer.start()
     </pre></code>
@@ -28,8 +27,7 @@ client is implemented [here].
 
 * To run a client:
 
-    <pre><code>
-    var server = "ws://127.0.0.1:9000"
+    <pre><code>var server = "ws://127.0.0.1:9000"
     var serverUri = URI.create(server)
     val client = WsClientFactory.makeClient(serverUri)
     client.connect()
@@ -48,7 +46,7 @@ If the connection is possible, the client is connecting to the server.
 
 ## Sending message
 
-Now you can use:
+* Now you can use:
 
     <pre><code>send("MyStringMessage")</pre></code>
 
