@@ -51,14 +51,20 @@ import net.modelbased.sensapp.service.registry.{ RegistryService, CompositeRegis
 import net.modelbased.sensapp.service.dispatch.{ Service => DispatchService }
 import net.modelbased.sensapp.service.notifier.{ Service => NotifierService }
 import net.modelbased.sensapp.service.converter.{ Service => ConverterService }
-import net.modelbased.sensapp.library.system._ 
+import net.modelbased.sensapp.library.system._
+import net.modelbased.sensapp.library.ws.Server.WsServerFactory
+import net.modelbased.sensapp.service.ws.WsServerSensApp
 
 class Absolute(override val system: ActorSystem) extends System {
      
   // "injection of dependency" to propagate the current actorSystem
-  trait iod { 
+  trait iod {
+    if(webSocketServer == null){
+      webSocketServer = WsServerFactory.makeServer(new WsServerSensApp(9000))
+      webSocketServer.start()
+    }
     lazy val partners = new TopologyFileBasedDistribution { implicit val actorSystem = system }
-    implicit def actorSystem = system 
+    implicit def actorSystem = system
   }
   
   def services = {

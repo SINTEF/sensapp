@@ -76,7 +76,7 @@ import net.modelbased.sensapp.service.registry.data.Schema
 import net.modelbased.sensapp.service.registry.data.DescriptionUpdate
 import net.modelbased.sensapp.service.registry.data.{Backend => RegistryBackend}
 import net.modelbased.sensapp.service.registry.BackendHelper
-import net.modelbased.sensapp.library.ws.Server.WsServerFactory
+import net.modelbased.sensapp.library.ws.Server.{WsServerScala}
 import org.java_websocket.WebSocket
 import net.modelbased.sensapp.service.notifier.Helper
 
@@ -86,7 +86,7 @@ import net.modelbased.sensapp.service.notifier.Helper
  * Date: 18/07/13
  * Time: 13:56
  */
-object WsServerHelper {
+class WsServerSensApp(port: Int) extends WsServerScala(port){
   implicit val partnerName = "database.raw.ws"
   implicit val partners = new TopologyFileBasedDistribution { implicit val actorSystem = null }
   private[this] val _backend: Backend = new MongoDB()
@@ -94,6 +94,15 @@ object WsServerHelper {
   private[this] val _compositeRegistry = new CompositeSensorDescriptionRegistry()
   private[this] val _sensorRegistry = new SensorDescriptionRegistry()
   implicit val registryCreationRequest = baseJsonFormat(RegistryCreationRequest, "id", "descr", "schema")
+
+  override def onMessage(conn: WebSocket, order: String){
+    println("Received Message String: " + order)
+    val message = doOrder(order, conn)
+    if(message == null)
+      conn.send("Unknown order: " + order)
+    else
+      conn.send(order)
+  }
 
   def doOrder(order: String, ws: WebSocket = null): String = {
     val myOrder = order
@@ -104,7 +113,7 @@ object WsServerHelper {
 
       case "getNotified" => {
         val notificationId = getUniqueArgument(myOrder)
-        WsServerFactory.myServer.addClientFromMessage(notificationId, ws)
+        addClientFromMessage(notificationId, ws)
         sendClient(myOrder, "You are now registered for the topic: "+notificationId)
       }
 

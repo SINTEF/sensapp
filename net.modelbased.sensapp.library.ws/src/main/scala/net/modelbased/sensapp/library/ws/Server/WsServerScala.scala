@@ -52,7 +52,6 @@ import org.java_websocket.framing.FrameBuilder
 import org.java_websocket.handshake.ClientHandshake
 import java.nio.ByteBuffer
 import org.java_websocket.framing.Framedata
-import net.modelbased.sensapp.service.ws.WsServerHelper
 
 /**
  * Created with IntelliJ IDEA.
@@ -80,11 +79,7 @@ class WsServerScala(port: Int) extends WsServer(port, new Draft_17){
 
   override def onMessage(conn: WebSocket, order: String) {
     println("Received Message String: " + order)
-    val message = WsServerHelper.doOrder(order, conn)
-    if(message == null)
-      conn.send("Unknown order: " + order)
-    else
-      conn.send(message)
+    conn.send(order)
   }
 
   override def onMessage(conn: WebSocket, blob: ByteBuffer) {

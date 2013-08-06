@@ -23,7 +23,7 @@
     <module>../net.modelbased.sensapp.service.dispatch</module>
     <module>../net.modelbased.sensapp.service.notifier</module>
     <module>../net.modelbased.sensapp.service.converter</module>
-      <module>../net.modelbased.sensapp.service.ws</module>
+    <module>../net.modelbased.sensapp.service.ws</module>
   </modules>
     
   <dependencies>

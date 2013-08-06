@@ -53,5 +53,5 @@ package net.modelbased.sensapp.library.ws.Server
  */
 object WsServerFactory{
   var myServer: WsServerScala = null
-  def makeServer(port: Int): WsServerScala = {myServer = new WsServerScala(port); myServer}
+  def makeServer(server: WsServerScala): WsServerScala = {myServer = server; myServer}
 }

@@ -48,8 +48,8 @@ package net.modelbased.sensapp.library.system
 
 import akka.actor.{Props, ActorSystem}
 import cc.spray._
-import org.java_websocket.drafts.Draft_17
-import net.modelbased.sensapp.library.ws.Server.WsServerFactory
+import net.modelbased.sensapp.library.ws.Server.{WsServerScala, WsServerFactory}
+//import net.modelbased.sensapp.service.ws.WsServerSensApp
 
 /**
  * Initialize a SensApp System (register the actors, ...)
@@ -96,8 +96,9 @@ Contact: Sebastien Mosser <Sebastien.Mosser@sintef.no>
         name = "spray-root-service")
   system.log.info("RootService -> {}", Array(rootService.toString))
 
-  var webSocketServer = WsServerFactory.makeServer(9000)
-  webSocketServer.start()
+  var webSocketServer: WsServerScala = null
+  /*var webSocketServer = WsServerFactory.makeServer(new WsServerSensApp(9000))
+  webSocketServer.start()*/
  
   system.registerOnTermination(println("Shutting down SensApp"))
   
