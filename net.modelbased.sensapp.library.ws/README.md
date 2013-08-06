@@ -8,8 +8,8 @@ Server and Client can be instantiate using the factory WsServerFactory or WsClie
 ## Running the server
 
 This is a basic server allowing connection, disconnection, message receiving and sending. When receiving a message, it
-is sent to a parsing function implemented [here]. This function returns the response to give to this message, of null
-if the message is not allowed.
+is sent to a parsing function implemented [here](https://github.com/jnain/sensapp/tree/master/net.modelbased.sensapp.service.ws)
+. This function returns the response to give to this message, of null if the message is not allowed.
 
 * To run the server:
 
@@ -23,7 +23,7 @@ Now, the server is running and you can connect as much client as you wish.
 ## Running the client
 
 The client is also a very basic one allowing connection, disconnection, message receiving and sending. A basic "console"
-client is implemented [here].
+client is implemented [here](https://github.com/jnain/sensapp/tree/master/net.modelbased.sensapp.backyard.echo.ws).
 
 * To run a client:
 
