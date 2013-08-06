@@ -13,9 +13,11 @@ if the message is not allowed.
 
 * To run the server:
 
+    <pre><code>
     var port = 9000
     var webSocketServer = WsServerFactory.makeServer(port)
     webSocketServer.start()
+    </pre></code>
 
 Now, the server is running and you can connect as much client as you wish.
 
@@ -26,38 +28,40 @@ client is implemented [here].
 
 * To run a client:
 
+    <pre><code>
     var server = "ws://127.0.0.1:9000"
     var serverUri = URI.create(server)
     val client = WsClientFactory.makeClient(serverUri)
     client.connect()
+    </pre></code>
 
 ## Proof that the connection has been made
 
 If the connection is possible, the client is connecting to the server.
 * The server will display:
 
-    New client connected
+    <pre><code>New client connected</pre></code>
 
 * And the client will display:
 
-    opened connection
+    <pre><code>opened connection</pre></code>
 
 ## Sending message
 
 Now you can use:
 
-    send("MyStringMessage")
+    <pre><code>send("MyStringMessage")</pre></code>
 
 from the server to send this message to the client. You can use the same call to send the message from the client to
 the server.
 
 * If the message is received on the server, it will display:
 
-    Received Message String: MyStringMessage
+    <pre><code>Received Message String: MyStringMessage</pre></code>
 
 * If the client received the message, it will display:
 
-    received: MyStringMessage
+    <pre><code>received: MyStringMessage</pre></code>
 
 
 
