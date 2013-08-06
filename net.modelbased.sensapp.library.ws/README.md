@@ -5,11 +5,13 @@ This library allows the use of WebSockets in SensApp.
 The two sides are implemented in this library: the server and the client.
 Server and Client can be instantiate using the factory WsServerFactory or WsClientFactory which allows only one instance.
 
+## Running the server
+
 This is a basic server allowing connection, disconnection, message receiving and sending. When receiving a message, it
 is sent to a parsing function implemented [here]. This function returns the response to give to this message, of null
 if the message is not allowed.
 
-To run the server:
+* To run the server:
 
     var port = 9000
     var webSocketServer = WsServerFactory.makeServer(port)
@@ -17,33 +19,43 @@ To run the server:
 
 Now, the server is running and you can connect as much client as you wish.
 
+## Running the client
+
 The client is also a very basic one allowing connection, disconnection, message receiving and sending. A basic "console"
 client is implemented [here].
 
-To run a client:
+* To run a client:
 
     var server = "ws://127.0.0.1:9000"
     var serverUri = URI.create(server)
     val client = WsClientFactory.makeClient(serverUri)
     client.connect()
 
+## Proof that the connection has been made
+
 If the connection is possible, the client is connecting to the server.
-The server will display:
+* The server will display:
 
     New client connected
 
-And the client will display:
+* And the client will display:
 
     opened connection
 
-Now you can use send("MyStringMessage") from the server to send this message to the client. You can use the same call
-to send the message from the client to the server.
+## Sending message
 
-If the message is received on the server, it will display:
+Now you can use:
+
+    send("MyStringMessage")
+
+from the server to send this message to the client. You can use the same call to send the message from the client to
+the server.
+
+* If the message is received on the server, it will display:
 
     Received Message String: MyStringMessage
 
-If the client received the message, it will display:
+* If the client received the message, it will display:
 
     received: MyStringMessage
 
