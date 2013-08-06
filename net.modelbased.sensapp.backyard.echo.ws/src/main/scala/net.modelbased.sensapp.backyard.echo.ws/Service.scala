@@ -57,19 +57,17 @@ object WsEchoClient{
     var client: WsClient = null
     //client.connect()
     //Thread.sleep(2000)
-    val registerToTopic = WsServerScala.registerToTopic
 
     println(
       """
         |
         | The WebSocket Echo Client is ready
         |
-        | connect                       connect this client to the server
-        | registerToTopic=<id-topic>    identify this client to the notification server
+        | connect(ws://serverUrl:serverPort)            connect this client to the server
         | disconnect                    disconnect the client
         | quit                          kill the app
         |
-        | Please choose your command
+        | Every other sent line will be send to the server as a String message.
         |
       """.stripMargin)
 
@@ -78,15 +76,12 @@ object WsEchoClient{
     while(!quit){
       Thread.sleep(2000)
       val line = readLine()
-      if(line == "connect"){
-        client = WsClientFactory.makeClient( URI.create( "ws://127.0.0.1:9000" ))
+      if(line.contains("(") && line.substring(0, line.indexOf("(")) == "connect"){
+        var closingParent = line.substring(line.indexOf("(")+1)
+        var serverUrl = closingParent.substring(0, closingParent.indexOf(")"))
+        client = WsClientFactory.makeClient( URI.create(serverUrl))
         client.connect()
         println("Connection")
-      }
-      else if(line.contains(registerToTopic)){
-        val message = registerToTopic + line.substring(registerToTopic.length, line.length)
-        client.send(message)
-        println("Identification message sent")
       }
       else if(line == "disconnect"){
         client.close
