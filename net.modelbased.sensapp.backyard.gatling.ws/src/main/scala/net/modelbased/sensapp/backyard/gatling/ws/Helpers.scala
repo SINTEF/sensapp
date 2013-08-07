@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.backyard.gatling
+ * Module: net.modelbased.sensapp.backyard.gatling.ws
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -43,15 +43,22 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-import io.gatling.recorder.config.RecorderPropertiesBuilder
-import io.gatling.recorder.controller.RecorderController
+package net.modelbased.sensapp.backyard.gatling.ws
 
-object Recorder extends App {
 
-  val props = new RecorderPropertiesBuilder
-  props.simulationOutputFolder(IDEPathHelper.recorderOutputDirectory.toString)
-  props.simulationPackage("GatlingTest")
-  props.requestBodiesFolder(IDEPathHelper.requestBodiesDirectory.toString)
+object RandomData {
+  private[this] val bag = new scala.util.Random	
+  def apply(sensorId: String, stamp: Long): String = {
+    val data = "{\"e\":[{\"n\":\""+ sensorId + "\", \"u\": \"m\", \"v\": " + bag.nextFloat() +",\"t\": "+ stamp +"}]}"
+    data
+  } 
+}
 
-  RecorderController(props.build, Some(IDEPathHelper.recorderConfigFile))
+object RandomSensor {
+  private[this] var counter = 0
+  def apply(prefix: String = "gatling-gen"): String = {
+    counter += 1
+    val name = prefix+"/"+ counter
+    name
+  }
 }

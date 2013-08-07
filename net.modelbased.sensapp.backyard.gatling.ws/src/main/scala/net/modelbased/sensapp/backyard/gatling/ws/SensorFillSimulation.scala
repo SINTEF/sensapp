@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.backyard.gatling
+ * Module: net.modelbased.sensapp.backyard.gatling.ws
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -43,17 +43,15 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-package net.modelbased.sensapp.backyard.gatling
+package net.modelbased.sensapp.backyard.gatling.ws
 
-//import io.gatling.core.scenario.Simulation
-//import io.gatling.core.session.Session
-import io.gatling.core.Predef._
-import io.gatling.http.Predef._
+import com.excilys.ebi.gatling.core.Predef._
+import com.excilys.ebi.gatling.http.Predef._
+import com.excilys.ebi.gatling.jdbc.Predef._
+import com.giltgroupe.util.gatling.websocket.Predef._
+import akka.util.duration._
 import bootstrap._
-import io.gatling.core.scenario.RampInjection
-import io.gatling.core.structure.ProfiledScenarioBuilder
-
-//import io.gatling.core.scenario.RampInjection
+import assertions._
 
 /**
  * Created with IntelliJ IDEA.
@@ -69,7 +67,7 @@ class SensorFillSimulation  extends Simulation {
 
 
   def apply = {
-    setUp(sensorFilling.inject(RampInjection(numberOfUsers, timeframe)))
+    setUp(sensorFilling.users(numberOfUsers).ramp(timeframe))
   }
 
   val headers = Map("Content-Type" -> "application/json", "Accept" -> "text/plain,application/json")
@@ -77,34 +75,39 @@ class SensorFillSimulation  extends Simulation {
   val sensorFilling =
     scenario("Filling the database with random data")
       .exec { (session: Session) => // Preparing the session
-      session.set("sensorId", RandomSensor())
-        .set("stamp", (System.currentTimeMillis / 1000))
+      session.setAttribute("sensorId", RandomSensor())
+        .setAttribute("stamp", (System.currentTimeMillis / 1000))
     }
       .exec{   // 0. Is SensApp alive?
-      http("Is SensApp alive?")
+
+        websocket("socket").open("ws://"+Target.serverName, "open")
+      /*http("Is SensApp alive?")
         .get("http://"+Target.serverName+"/databases/raw/sensors")
-        .check(status is 200)
+        .check(status is 200)*/
     }.pause(100, 200/*, MILLISECONDS*/)
       .exec {  // 1. Creating the database
-      http("Creating the database")
+      websocket("socket").sendMessage("registerRawSensor({\"sensor\": \"${sensorId}\", \"baseTime\": ${stamp}, \"schema\": \"Numerical\"})", "create")
+      /*http("Creating the database")
         .post("http://"+Target.serverName+"/databases/raw/sensors")
         .headers(headers)
-        .body(StringBody("{\"sensor\": \"${sensorId}\", \"baseTime\": ${stamp}, \"schema\": \"Numerical\"}"))
+        .body("{\"sensor\": \"${sensorId}\", \"baseTime\": ${stamp}, \"schema\": \"Numerical\"}")*/
     }.pause(100, 200/*, MILLISECONDS*/)
       //.loop{ chain // Pushing data
       .repeat(numberOfData){
       exec { session: Session =>
-        session.set("data", RandomData(session("sensorId").as[String],
-          session("stamp").as[Long]))
+        session.setAttribute("data", RandomData(session.getAttribute("sensorId").asInstanceOf[String],
+          session.getAttribute("stamp").asInstanceOf[Long]))
       }.exec {
-        http("Pushing random data")
+        websocket("socket").sendMessage("registerData(${data})", "push")
+        /*http("Pushing random data")
           .put("http://"+Target.serverName+"/databases/raw/data/${sensorId}")
-          .headers(headers).body(StringBody("${data}"))
+          .headers(headers).body("${data}")*/
       }.exec { (session: Session) =>
-        session.set("stamp", session("stamp").as[Long] + 1)
+        session.setAttribute("stamp", session.getAttribute("stamp").asInstanceOf[Long] + 1)
       }.pause(100, 400/*, MILLISECONDS*/)
+    }.exec{
+      websocket("socket").close("push")
     }
-  //}.times(numberOfData)
 
-  setUp(sensorFilling.inject(RampInjection(numberOfUsers, timeframe)))
+  setUp(sensorFilling.users(numberOfUsers).ramp(timeframe))
 }

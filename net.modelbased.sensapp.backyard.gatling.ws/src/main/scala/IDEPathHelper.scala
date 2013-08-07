@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.backyard.gatling
+ * Module: net.modelbased.sensapp.backyard.gatling.ws
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -43,15 +43,23 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-import io.gatling.recorder.config.RecorderPropertiesBuilder
-import io.gatling.recorder.controller.RecorderController
+import scala.tools.nsc.io.File
+import scala.tools.nsc.io.Path
+object IDEPathHelper {
 
-object Recorder extends App {
+  val gatlingConfUrl = getClass.getClassLoader.getResource("gatling.conf").getPath
+  val projectRootDir = File(gatlingConfUrl).parents(2)
 
-  val props = new RecorderPropertiesBuilder
-  props.simulationOutputFolder(IDEPathHelper.recorderOutputDirectory.toString)
-  props.simulationPackage("GatlingTest")
-  props.requestBodiesFolder(IDEPathHelper.requestBodiesDirectory.toString)
+  val mavenSourcesDirectory = projectRootDir / "src" / "main" / "scala"
+  val mavenResourcesDirectory = projectRootDir / "src" / "main" / "resources"
+  val mavenTargetDirectory = projectRootDir / "target"
+  val mavenBinariesDirectory = mavenTargetDirectory / "classes"
 
-  RecorderController(props.build, Some(IDEPathHelper.recorderConfigFile))
+  val dataDirectory = mavenResourcesDirectory / "data"
+  val requestBodiesDirectory = mavenResourcesDirectory / "request-bodies"
+
+  val recorderOutputDirectory = mavenSourcesDirectory
+  val resultsDirectory = mavenTargetDirectory / "results"
+
+  val recorderConfigFile = (mavenResourcesDirectory / "recorder.conf").toFile
 }

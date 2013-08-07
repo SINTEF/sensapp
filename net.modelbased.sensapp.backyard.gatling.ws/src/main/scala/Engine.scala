@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.backyard.gatling
+ * Module: net.modelbased.sensapp.backyard.gatling.ws
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -43,15 +43,23 @@
  * Public License along with SensApp. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-import io.gatling.recorder.config.RecorderPropertiesBuilder
-import io.gatling.recorder.controller.RecorderController
+import com.excilys.ebi.gatling.app.{ /*Options,*/ Gatling }
+import com.excilys.ebi.gatling.core.config.GatlingPropertiesBuilder
 
-object Recorder extends App {
+//import com.excilys.ebi.gatling.core.util.PathHelper.path2string
 
-  val props = new RecorderPropertiesBuilder
-  props.simulationOutputFolder(IDEPathHelper.recorderOutputDirectory.toString)
-  props.simulationPackage("GatlingTest")
-  props.requestBodiesFolder(IDEPathHelper.requestBodiesDirectory.toString)
+object Engine extends App {
 
-  RecorderController(props.build, Some(IDEPathHelper.recorderConfigFile))
+  args.length match {
+    case 1 => { net.modelbased.sensapp.backyard.gatling.ws.Target.serverName = args(0) }
+    case _ =>
+  }
+
+  val props = new GatlingPropertiesBuilder
+  props.dataDirectory(IDEPathHelper.dataDirectory.toString)
+  props.resultsDirectory(IDEPathHelper.resultsDirectory.toString)
+  props.requestBodiesDirectory(IDEPathHelper.requestBodiesDirectory.toString)
+  props.binariesDirectory(IDEPathHelper.mavenBinariesDirectory.toString)
+
+  Gatling.fromMap(props.build)
 }
