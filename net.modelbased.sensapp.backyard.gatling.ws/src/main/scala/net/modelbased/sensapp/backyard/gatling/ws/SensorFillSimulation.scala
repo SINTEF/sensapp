@@ -106,7 +106,7 @@ class SensorFillSimulation  extends Simulation {
         session.setAttribute("stamp", session.getAttribute("stamp").asInstanceOf[Long] + 1)
       }.pause(100, 400/*, MILLISECONDS*/)
     }.exec{
-      websocket("socket").close("push")
+      websocket("socket").close("close")
     }
 
   setUp(sensorFilling.users(numberOfUsers).ramp(timeframe))

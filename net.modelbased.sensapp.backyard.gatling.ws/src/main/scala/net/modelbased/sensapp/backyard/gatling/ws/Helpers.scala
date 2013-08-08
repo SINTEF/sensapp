@@ -58,7 +58,7 @@ object RandomSensor {
   private[this] var counter = 0
   def apply(prefix: String = "gatling-gen"): String = {
     counter += 1
-    val name = prefix+"/"+ counter
+    val name = prefix+ "/" + counter
     name
   }
 }

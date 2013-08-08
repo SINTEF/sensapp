@@ -248,7 +248,11 @@ class WsServerSensApp(port: Int) extends WsServerScala(port){
       case "registerData" => {
         val json = getUniqueArgument(myOrder)
         val root = RootParser.fromJson(json)
-        val name = root.baseName.get
+        var name = "name"
+        if(root.baseName.isDefined)
+          name = root.baseName.get
+        else
+          name = root.measurementsOrParameters.get.apply(0).name.get
         ifSensorExists(name, {
           val result = _backend push (name, root)
           Helper.doNotify(root, name, _subscriptionRegistry)
