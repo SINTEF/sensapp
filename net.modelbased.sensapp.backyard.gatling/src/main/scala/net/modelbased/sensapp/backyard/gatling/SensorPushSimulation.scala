@@ -61,9 +61,9 @@ import io.gatling.core.structure.ProfiledScenarioBuilder
  */
 class SensorPushSimulation extends Simulation {
 
-  val numberOfUsers: Int = 10
+  val numberOfUsers: Int = 5
   val timeframe: Int = 10
-  val numberOfData: Int = 200
+  val numberOfData: Int = 5
   val maxDelayBetweenPush: Int = 400
 
   def apply = {

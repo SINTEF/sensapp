@@ -51,13 +51,14 @@ import com.excilys.ebi.gatling.jdbc.Predef._
 import akka.util.duration._
 import bootstrap._
 import assertions._
+import com.giltgroupe.util.gatling.websocket.Predef._
 
 
 class SensorPushSimulation extends Simulation {
   
-  val numberOfUsers: Int = 10
+  val numberOfUsers: Int = 5
   val timeframe: Int = 10
-  val numberOfData: Int = 200
+  val numberOfData: Int = 5
   val maxDelayBetweenPush: Int = 400
   
   def apply = { List(sensorPush.users(numberOfUsers).ramp(timeframe)) }
@@ -71,30 +72,38 @@ class SensorPushSimulation extends Simulation {
   		  .setAttribute("stamp", (System.currentTimeMillis / 1000)) 
   	  }
   	  .exec{   // 0. Is SensApp alive?
-  	    http("Is SensApp alive?")
+        websocket("socket").open("ws://"+Target.serverName, "open")
+  	    /*http("Is SensApp alive?")
   	      .get("http://"+Target.serverName+"/databases/raw/sensors")
-  	      .check(status is 200)
+  	      .check(status is 200)*/
   	  }.pause(100, 200)
 	  .exec {  // 1. Creating the database
-  	    http("Creating the database")
+      websocket("socket").sendMessage("registerRawSensor({\"sensor\": \"${sensorId}\", \"baseTime\": ${stamp}, \"schema\": \"Numerical\"})", "create")
+  	    /*http("Creating the database")
 		  .post("http://"+Target.serverName+"/databases/raw/sensors")
 		  .headers(headers)
-		  .body("{\"sensor\": \"${sensorId}\", \"baseTime\": ${stamp}, \"schema\": \"Numerical\"}")
+		  .body("{\"sensor\": \"${sensorId}\", \"baseTime\": ${stamp}, \"schema\": \"Numerical\"}")*/
   	  }.pause(100, 200)
 	  .repeat(numberOfData){ // Pushing data
   	    exec { session: Session =>
 		  session.setAttribute("data", RandomData(session.getAttribute("sensorId").asInstanceOf[String], 
 		  					 	    			  session.getAttribute("stamp").asInstanceOf[Long]))
 		}.exec {
-		  http("Pushing random data")
+      websocket("socket").sendMessage("registerData(${data})", "push")
+		  /*http("Pushing random data")
 		    .put("http://"+Target.serverName+"/databases/raw/data/${sensorId}")
-		  	.headers(headers).body("${data}")
+		  	.headers(headers).body("${data}")*/
 		}.exec { (session: Session) => 
 		  session.setAttribute("stamp", session.getAttribute("stamp").asInstanceOf[Long] + 1)
 		}.pause(100, maxDelayBetweenPush)
   	  }
   	  .exec { // 3. Eventually deleting the database
-  	    http("Deleting the database") 
-  	      .delete("http://"+Target.serverName+"/databases/raw/sensors/${sensorId}")
-  	  }	  				
+        websocket("socket").sendMessage("deleteSensor(${sensorId})", "delete")
+  	    /*http("Deleting the database")
+  	      .delete("http://"+Target.serverName+"/databases/raw/sensors/${sensorId}")*/
+  	  }.exec{
+      websocket("socket").close("close")
+    }
+
+  setUp(sensorPush.users(numberOfUsers).ramp(timeframe))
 }
