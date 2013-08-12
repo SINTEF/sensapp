@@ -46,15 +46,11 @@
 package net.modelbased.sensapp.backyard.gatling.ws
 
 import com.excilys.ebi.gatling.core.Predef._
-import com.excilys.ebi.gatling.http.Predef._
-import com.excilys.ebi.gatling.jdbc.Predef._
-import akka.util.duration._
 import bootstrap._
-import assertions._
 import com.giltgroupe.util.gatling.websocket.Predef._
 
 
-class SensorPushSimulation extends Simulation {
+class SensorBigPushSimulation extends Simulation {
   
   val numberOfUsers: Int = 5
   val timeframe: Int = 10
@@ -79,6 +75,7 @@ class SensorPushSimulation extends Simulation {
   	  }.pause(100, 200)
 	  .exec {  // 1. Creating the database
       websocket("socket").sendMessage("registerRawSensor({\"sensor\": \"${sensorId}\", \"baseTime\": ${stamp}, \"schema\": \"Numerical\"})", "create")
+
   	    /*http("Creating the database")
 		  .post("http://"+Target.serverName+"/databases/raw/sensors")
 		  .headers(headers)
@@ -86,8 +83,8 @@ class SensorPushSimulation extends Simulation {
   	  }.pause(100, 200)
 	  .repeat(numberOfData){ // Pushing data
   	    exec { session: Session =>
-		  session.setAttribute("data", RandomData(session.getAttribute("sensorId").asInstanceOf[String], 
-		  					 	    			  session.getAttribute("stamp").asInstanceOf[Long]))
+		  session.setAttribute("data", RandomBigData(session.getAttribute("sensorId").asInstanceOf[String],
+		  					 	    			  session.getAttribute("stamp").asInstanceOf[Long], 50))
 		}.exec {
       websocket("socket").sendMessage("registerData(${data})", "push")
 		  /*http("Pushing random data")

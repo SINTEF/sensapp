@@ -54,6 +54,21 @@ object RandomData {
   } 
 }
 
+object RandomBigData {
+  private[this] val bag = new scala.util.Random
+  def apply(sensorId: String, stamp: Long, size: Int): String = {
+    var data = "{\"e\":["
+    var i = 0
+    for(i <- 0 to size){
+      if(i == size)
+        data += "{\"n\":\""+ sensorId + "\", \"u\": \"m\", \"v\": " + bag.nextFloat() +",\"t\": "+ stamp +"}]}"
+      else
+        data += "{\"n\":\""+ sensorId + "\", \"u\": \"m\", \"v\": " + bag.nextFloat() +",\"t\": "+ stamp +"}, "
+    }
+    data
+  }
+}
+
 object RandomSensor {
   private[this] var counter = 0
   def apply(prefix: String = "gatling-gen"): String = {
