@@ -84,7 +84,7 @@ class SensorBigPushSimulation extends Simulation {
 	  .repeat(numberOfData){ // Pushing data
   	    exec { session: Session =>
 		  session.setAttribute("data", RandomBigData(session.getAttribute("sensorId").asInstanceOf[String],
-		  					 	    			  session.getAttribute("stamp").asInstanceOf[Long], 50))
+		  					 	    			  session.getAttribute("stamp").asInstanceOf[Long], 100))
 		}.exec {
       websocket("socket").sendMessage("registerData(${data})", "push")
 		  /*http("Pushing random data")

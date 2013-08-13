@@ -101,7 +101,7 @@ class WsServerSensApp(port: Int) extends WsServerScala(port){
     if(message == null)
       conn.send("Unknown order: " + order)
     else
-      conn.send(order)
+      conn.send(message)
   }
 
   def doOrder(order: String, ws: WebSocket = null): String = {
@@ -137,7 +137,13 @@ class WsServerSensApp(port: Int) extends WsServerScala(port){
 
       case "getNotification" => {
         val name = getUniqueArgument(myOrder)
-        sendClient(myOrder, ifSensorExists(name, {(_subscriptionRegistry pull ("sensor", name)).get.toJson.prettyPrint}))
+        sendClient(myOrder, ifSensorExists(name, {
+          val result = (_subscriptionRegistry pull ("sensor", name))
+          if(result.isDefined)
+            result.get.toJson.prettyPrint
+          else
+            "none"
+        }))
       }
 
       case "deleteNotification" => {

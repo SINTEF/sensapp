@@ -94,7 +94,7 @@ class SensorBigPushSimulation extends Simulation {
       .repeat(numberOfData){ // Pushing data
       exec { session: Session =>
         session.set("data", RandomBigData(session("sensorId").as[String],
-          session("stamp").as[Long], 50))
+          session("stamp").as[Long], 100))
       }.exec {
         http("Pushing random data")
           .put("http://"+Target.serverName+"/databases/raw/data/${sensorId}")
