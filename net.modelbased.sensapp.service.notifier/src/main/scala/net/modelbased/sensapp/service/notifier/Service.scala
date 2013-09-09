@@ -1,4 +1,27 @@
 /**
+ * ====
+ *     This file is part of SensApp [ http://sensapp.modelbased.net ]
+ *
+ *     Copyright (C) 2011-  SINTEF ICT
+ *     Contact: SINTEF ICT <nicolas.ferry@sintef.no>
+ *
+ *     Module: net.modelbased.sensapp
+ *
+ *     SensApp is free software: you can redistribute it and/or modify
+ *     it under the terms of the GNU Lesser General Public License as
+ *     published by the Free Software Foundation, either version 3 of
+ *     the License, or (at your option) any later version.
+ *
+ *     SensApp is distributed in the hope that it will be useful, but
+ *     WITHOUT ANY WARRANTY; without even the implied warranty of
+ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *     GNU Lesser General Public License for more details.
+ *
+ *     You should have received a copy of the GNU Lesser General
+ *     Public License along with SensApp. If not, see
+ *     <http://www.gnu.org/licenses/>.
+ * ====
+ *
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
  * Copyright (C) 2012-  SINTEF ICT
@@ -35,6 +58,7 @@ import net.modelbased.sensapp.library.senml.export.{JsonProtocol => SenMLProtoco
 import net.modelbased.sensapp.library.senml.spec.Standard
 import net.modelbased.sensapp.library.system.{Service => SensAppService} 
 import net.modelbased.sensapp.library.system.URLHandler
+import java.util.UUID
 
 trait Service extends SensAppService {
   
@@ -57,12 +81,24 @@ trait Service extends SensAppService {
     } ~ 
     path("notification" / "registered" ) {
       get { 
-        parameter("flatten" ? false) { flatten =>  context =>
+        parameters("flatten" ? false, "protocol" ? "all") { (flatten, protocol) =>  context =>
           val data = (_registry retrieve(List()))
-          if (flatten) {
+          if(protocol.equals("ws") && flatten){
+            context complete (data filter(sub => {sub.protocol.isDefined && sub.protocol.get == "ws"}))
+          } else if(protocol.equals("ws")){
+            context complete (data filter(sub => {sub.protocol.isDefined && sub.protocol.get == "ws"}))
+              .map { s => URLHandler.build("/notification/registered/" + s.sensor) }
+
+          } else if (protocol.equals("http") && flatten) {
+            context complete (data filter(sub => {!sub.protocol.isDefined}))
+          } else if (protocol.equals("http")){
+            context complete (data filter(sub => {!sub.protocol.isDefined}))
+              .map { s => URLHandler.build("/notification/registered/" + s.sensor) }
+
+          } else if (flatten) {
             context complete data
           } else {
-            context complete (data map { s => URLHandler.build("/notification/registered/" + s.sensor) })
+            context complete (data map { s => URLHandler.build("/notification/registered/" + s.sensor)})
           }
         }
       } ~
@@ -71,6 +107,10 @@ trait Service extends SensAppService {
           if (_registry exists ("sensor", subscription.sensor)){
             context fail (StatusCodes.Conflict, "A Subscription identified by ["+ subscription.sensor +"] already exists!")
           } else {
+            /*subscription.protocol.foreach(p => {
+              if(p == "ws" && !subscription.id.isDefined)
+                subscription.id=Option(UUID.randomUUID().toString)
+            })*/
             _registry push subscription
             context complete (StatusCodes.Created, URLHandler.build("/notification/registered/" + subscription.sensor))
           }

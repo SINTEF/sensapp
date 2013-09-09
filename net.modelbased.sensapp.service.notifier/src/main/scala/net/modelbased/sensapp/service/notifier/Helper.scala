@@ -1,4 +1,27 @@
 /**
+ * ====
+ *     This file is part of SensApp [ http://sensapp.modelbased.net ]
+ *
+ *     Copyright (C) 2011-  SINTEF ICT
+ *     Contact: SINTEF ICT <nicolas.ferry@sintef.no>
+ *
+ *     Module: net.modelbased.sensapp
+ *
+ *     SensApp is free software: you can redistribute it and/or modify
+ *     it under the terms of the GNU Lesser General Public License as
+ *     published by the Free Software Foundation, either version 3 of
+ *     the License, or (at your option) any later version.
+ *
+ *     SensApp is distributed in the hope that it will be useful, but
+ *     WITHOUT ANY WARRANTY; without even the implied warranty of
+ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *     GNU Lesser General Public License for more details.
+ *
+ *     You should have received a copy of the GNU Lesser General
+ *     Public License along with SensApp. If not, see
+ *     <http://www.gnu.org/licenses/>.
+ * ====
+ *
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
  * Copyright (C) 2012-  SINTEF ICT
@@ -32,8 +55,9 @@ import net.modelbased.sensapp.library.system._
 import net.modelbased.sensapp.library.senml._
 import net.modelbased.sensapp.library.senml.export.JsonProtocol._ 
 import data.SubscriptionRegistry
+import net.modelbased.sensapp.service.notifier.protocols.ProtocolFactory
 
-object Helper extends HttpSpraySupport with SprayJsonSupport {
+object Helper {
 
   def httpClientName = "notifier-helper"
   
@@ -42,16 +66,12 @@ object Helper extends HttpSpraySupport with SprayJsonSupport {
    */
   def doNotify(root: Root, sensor: String, reg: SubscriptionRegistry) {
     val subscription = reg pull(("sensor", sensor))
-    if (None == root.measurementsOrParameters || None == subscription)
-      return
-    subscription.get.hooks.par foreach { url =>
-      val data = URLHandler.extract(url)
-      val conduit = new HttpConduit(httpClient, data._1._1, data._1._2) {
-        val pipeline = simpleRequest[Root] ~> sendReceive
+    subscription match{
+      case None =>
+      case Some(x) => x.protocol match{
+        case None => ProtocolFactory.createProtocol("http").send(root, subscription, sensor)
+        case Some(p) => ProtocolFactory.createProtocol(p).send(root, subscription, sensor)
       }
-      conduit.pipeline(Put(data._2, Some(root)))
-      .onSuccess { case _ => conduit.close() }
-      .onFailure { case _ => conduit.close(); system.log.info("Error while notifiying ["+url+"] for sensor ["+sensor+"]")}
     }
   }
 }
