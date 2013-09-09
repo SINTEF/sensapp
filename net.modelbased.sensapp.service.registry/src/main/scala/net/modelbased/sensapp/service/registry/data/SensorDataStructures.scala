@@ -1,4 +1,27 @@
 /**
+ * ====
+ *     This file is part of SensApp [ http://sensapp.modelbased.net ]
+ *
+ *     Copyright (C) 2011-  SINTEF ICT
+ *     Contact: SINTEF ICT <nicolas.ferry@sintef.no>
+ *
+ *     Module: net.modelbased.sensapp
+ *
+ *     SensApp is free software: you can redistribute it and/or modify
+ *     it under the terms of the GNU Lesser General Public License as
+ *     published by the Free Software Foundation, either version 3 of
+ *     the License, or (at your option) any later version.
+ *
+ *     SensApp is distributed in the hope that it will be useful, but
+ *     WITHOUT ANY WARRANTY; without even the implied warranty of
+ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *     GNU Lesser General Public License for more details.
+ *
+ *     You should have received a copy of the GNU Lesser General
+ *     Public License along with SensApp. If not, see
+ *     <http://www.gnu.org/licenses/>.
+ * ====
+ *
  * This file is part of SensApp [ http://sensapp.modelbased.net ]
  *
  * Copyright (C) 2012-  SINTEF ICT
@@ -65,7 +88,7 @@ case class Backend(val kind: String, val descriptor: String, val dataset: String
 /**
  * Information about a sensor (e.g., meta-data)
  * @param tags a key-value map to store arbitrary metadata
- * @param updateRate an optional updateRate for this sensor
+ * @param updateTime an optional updateRate for this sensor
  * @param localization an optional localization for this sensor
  */
 case class SensorInformation(
@@ -100,7 +123,7 @@ case class Localisation(val longitude: Double, latitude: Double)
 
 /**
  * Description of a composite sensor
- * @param identifier the identifier of the sensor
+ * @param id the identifier of the sensor
  * @param description a short sentence to describe  the sensor
  * @param tags a key-value pair bag to store user-given metadata
  * @param sensors list of URLs that points to the atomic sensors contained by this composite
