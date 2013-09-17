@@ -4,7 +4,7 @@ SensApp is a platform to support sensor based application. It is developed by
 SINTEF (IKT division, NSS Department, MOD research group). 
 
 This repository is oriented to developers. End-users or business experts 
-should refer to the following webpage: http://sensapp.modelbased.net
+should refer to the following webpage: http://sensapp.org
 
 ## How to create a new SensApp Service?
 
