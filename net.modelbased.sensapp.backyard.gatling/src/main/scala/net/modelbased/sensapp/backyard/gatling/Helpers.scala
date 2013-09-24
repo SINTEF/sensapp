@@ -27,7 +27,7 @@
  * Copyright (C) 2012-  SINTEF ICT
  * Contact: SINTEF ICT <nicolas.ferry@sintef.no>
  *
- * Module: net.modelbased.sensapp.backyard.gatling.ws
+ * Module: net.modelbased.sensapp.backyard.gatling
  *
  * SensApp is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as

@@ -57,6 +57,10 @@
 				<artifactId>gatling-recorder</artifactId>
 				<version>${gatling.version}</version>
 			</dependency>
+            <!--    This dependency do not exist in the gatling library, you have to add it manually
+                    please, read the documentation about it in the file README.md in this directory
+                    or read it at
+                    https://github.com/SINTEF-9012/sensapp/tree/master/net.modelbased.sensapp.backyard.gatling.ws-->
             <dependency>
                 <groupId>com.excilys.ebi.gatling</groupId>
                 <artifactId>gatling-websocket</artifactId>
