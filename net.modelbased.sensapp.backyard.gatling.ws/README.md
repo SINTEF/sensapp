@@ -8,9 +8,9 @@ have to install it manually into the local Gatling Library.
 
 This is how it is feasible:
 
-You have to go to this page https://github.com/gilt/gatling-websocket
+You have to go to this page https://github.com/gilt/gatling-websocket and get this project.
 
-Here you can find the websocket library. Now you have to compile it using sbt.
+Now you have the websocket library, you have to compile it using sbt.
 You have to be at the root of the "gatling-websocket" file and execute:
 
     sbt package
