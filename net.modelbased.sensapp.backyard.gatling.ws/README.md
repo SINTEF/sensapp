@@ -25,4 +25,4 @@ If the folder "gatling-websocket" do not exist, create it.
 If the folder "1.5.2" create it.
 Paste the jar file into this "1.5.2" directory and rename it as "gatling-websocket-1.5.2.jar".
 
-Now you have added websocket support to the Gatling library.
+Now you have added websocket support to the Gatling library and every thing should work fine.
