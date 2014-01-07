@@ -36,3 +36,7 @@ package: net.modelbased.sensapp.service.registry
  Y: : Y</code></pre>
 
   * Enjoy!
+
+
+[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/SINTEF-9012/sensapp/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
+
