@@ -1,8 +1,0 @@
-{
-  "id": "WingFlight1/gpsfix", 
-  "descr": "GPS Fix status of the wing",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Boolean"
-  }
-}

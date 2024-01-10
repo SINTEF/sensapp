@@ -1,8 +1,0 @@
-{
-  "id": "EBike1/altitude", 
-  "descr": "Altitude of the bike",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-} 

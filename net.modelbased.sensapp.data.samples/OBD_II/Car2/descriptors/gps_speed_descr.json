@@ -1,8 +1,0 @@
-{
-  "id": "Car2/GPS_Speed", 
-  "descr": "Speed of the car, from the GPS sensor",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-}

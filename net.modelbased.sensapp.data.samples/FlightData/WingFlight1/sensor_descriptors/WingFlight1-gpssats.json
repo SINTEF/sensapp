@@ -1,8 +1,0 @@
-{
-  "id": "WingFlight1/gpssats", 
-  "descr": "Number of stallite locked by the wing",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-} 

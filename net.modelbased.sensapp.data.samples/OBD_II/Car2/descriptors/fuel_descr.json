@@ -1,8 +1,0 @@
-{
-  "id": "Car2/Liter_per_100km_instant", 
-  "descr": "Fuel consumption",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-}

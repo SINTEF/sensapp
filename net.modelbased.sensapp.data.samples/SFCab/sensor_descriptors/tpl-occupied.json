@@ -1,9 +1,0 @@
-{
-  "id": "sf/cab/%NAME%/occupied", 
-  "descr": "Occupation of the %NAME% cab",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Boolean", 
-    "baseTime": %BT%
-  }
-}

@@ -1,8 +1,0 @@
-{
-  "id": "EBike1/wh", 
-  "descr": "Watt hours consumed by the bike (summed)",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Summed"
-  }
-} 

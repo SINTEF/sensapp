@@ -1,8 +1,0 @@
-{
-  "id": "WingFlight1/longitude", 
-  "descr": "Longitude of the wing",
-  "schema": { 
-    "backend": "raw", 
-    "template": "String"
-  }
-} 

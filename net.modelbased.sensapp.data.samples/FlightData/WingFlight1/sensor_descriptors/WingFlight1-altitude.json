@@ -1,8 +1,0 @@
-{
-  "id": "WingFlight1/altitude", 
-  "descr": "Altitude of the wing",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-} 

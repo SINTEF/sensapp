@@ -1,8 +1,0 @@
-{
-  "id": "WingFlight1/heading", 
-  "descr": "Heading of the wing",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-} 

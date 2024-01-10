@@ -1,9 +1,0 @@
-{
-  "id": "sf/cab/%NAME%/lambda", 
-  "descr": "Longitude of the %NAME% cab",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical", 
-    "baseTime": %BT%
-  }
-}

@@ -1,8 +1,0 @@
-{
-  "id": "Car1/Engine_Coolant", 
-  "descr": "Temperature of the engine",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-}

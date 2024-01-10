@@ -1,8 +1,0 @@
-{
-  "id": "Car1/Engine_RPM", 
-  "descr": "Round/minutes of the car",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-}
