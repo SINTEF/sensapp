@@ -1,42 +1,50 @@
-# SensApp in a Nutshell
+# ![SensApp](./docs/sensapp_logo.png)
 
-SensApp is a platform to support sensor based application. It is developed by 
-SINTEF (IKT division, NSS Department, MOD research group).
+SensApp is an open-source sensor data platform developed by SINTEF for research purposes. It manages time-series data from a multitude of sensors.
 
-As a basis, SensApp provides four essential services to support the definition of IoT applications. The Registry  stores metadata about the sensors (e.g., description and creation date). The Database servive stores raw data from the sensors using a MongoDB database. The Notifier component sends notifications to third-party applications when relevant data are pushed (e.g., when new data collected by air quality sensors become available). The Dispatcher orchestrates the other components: it receives data from the sensors, stores these data in the Database according to the metadata from the Registry, and then triggers the notification mechanisms for the new data. Finally, the Admin web page provides capabilities to manage sensors and visualise data using a graphical user interface. In order to be deployed, SensApp requires a servlet container and a database, while the SensApp admin requires a servlet container only.
+It enables the handling of small time series data of the edge efficiently to large-scale big data digital twins.
 
-![alt tag](http://sensapp.org/img/sensapp_logo.png)
+## Features
 
-This repository is oriented to developers. End-users or business experts 
-should refer to the following webpage: http://sensapp.org
+- **Flexible Time Series DataBase Storage**: Supports various time-series databases like SQLite, PostgreSQL (with optional TimeScaleDB plugin), and ClickHouse, with the potential to extend support to other databases in the future.
+- **Data Lake Storage**: Supports Parquet files over S3 compatible object stores for long-term time-series data storage.
+- **Multiple Data Ingestion Protocols**: Easy data ingestion via HTTP REST API, MQTT, AMQP, KAFKA, and NATS.
+- **Compatibility with Existing Pipelines**: Offers Prometheus Remote Write and InfluxDB line format support for seamless integration into existing sensor data pipelines.
+- **Data formats**: Supports various data formats like JSON, CSV, Parquet, or SenML.
 
-## How to create a new SensApp Service?
+## Architecture
 
- * Run the maven tool from the command line
+SensApp should be stateless and scale from the edge to big data. The message queue software and the database software solve the complex problems. SensApp is a simple adapter between.
 
-<pre><code>mvn archetype:generate<code></pre>
+* SensApp supports simple deployments without requiring a message queue and only an embedded SQLite database.
+* SensApp supports medium deployments with a single message broker and a PostgreSQL database.
+* For larger deployments, SensApp advises a distributed message queue, an automatic load balancer for the SensApp instances, and a ClickHouse cluster.
 
-  * Select the "service" archetype provided by SensApp, and fill in the blanks
+Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 
-<pre><code>[...]
-Choose a number or apply filter (format: [groupId:]artifactId, case sensitive contains): 186: sensapp
-Choose archetype:
-1: local -> net.modelbased.sensapp.archetype:net.modelbased.sensapp.archetype.service (A Prototypical SensApp Service, integrated with the others)
-2: local -> net.modelbased.sensapp.archetype:net.modelbased.sensapp.archetype.system (A Prototypical SensApp System, integrating Services)
-Choose a number or apply filter (format: [groupId:]artifactId, case sensitive contains): : 1
-Define value for property 'groupId': : net.modelbased.sensapp.service 
-Define value for property 'artifactId': : net.modelbased.sensapp.service.registry
-Define value for property 'version':  1.0-SNAPSHOT: : 0.0.1-SNAPSHOT
-Define value for property 'package':  net.modelbased.sensapp.service: : net.modelbased.sensapp.service.registry
-Confirm properties configuration:
-groupId: net.modelbased.sensapp.service
-artifactId: net.modelbased.sensapp.service.registry
-version: 0.0.1-SNAPSHOT
-package: net.modelbased.sensapp.service.registry
- Y: : Y</code></pre>
+## Built With Rust™️
 
-  * Enjoy!
+SensApp is developed using Rust, a language known for its performance, memory safety, and annoying borrow checker. SensApp used to be written in Scala, but the new author prefers Rust.
 
+## Contributing
 
-[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/SINTEF-9012/sensapp/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
+We appreciate your interest in contributing to SensApp! Contributing is as simple as submitting an issue or a merge/pull request. Please read the [CONTRIBUTING.md](CONTRIBUTING.md) file for more details.
 
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+The SensApp software is provided "as is," with no warranties, and the creators of SensApp are not liable for any damages that may arise from its use.
+
+## You may not want to use it in production (yet)
+
+SensApp is currently under development. It is not yet ready for production.
+
+## Acknowledgments
+
+We thank [the historical authors of SensApp](https://github.com/SINTEF/sensapp/graphs/contributors) who created the first version a decade ago.
+
+SensApp is developed by
+[SINTEF](https://www.sintef.no) ([Digital division](https://www.sintef.no/en/digital/), [Sustainable Communication Technologies department](https://www.sintef.no/en/digital/departments-new/department-of-sustainable-communication-technologies/), [Smart Data research group](https://www.sintef.no/en/expertise/digital/sustainable-communication-technologies/smart-data/)).
+
+We also thank the open-source community for all the tools they create and maintain that allow SensApp to exist.

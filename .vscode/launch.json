@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'sensapp'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=sensapp",
+          "--package=sensapp"
+        ],
+        "filter": {
+          "name": "sensapp",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'sensapp'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=sensapp",
+          "--package=sensapp"
+        ],
+        "filter": {
+          "name": "sensapp",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

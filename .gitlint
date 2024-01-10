@@ -1,0 +1,5 @@
+[general]
+# Ignore rules, reference them by id or name (comma-separated)
+ignore=body-is-missing,CC1
+
+contrib=contrib-title-conventional-commits
