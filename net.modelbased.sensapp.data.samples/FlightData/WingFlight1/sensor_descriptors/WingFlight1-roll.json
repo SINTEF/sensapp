@@ -1,8 +1,0 @@
-{
-  "id": "WingFlight1/roll", 
-  "descr": "Roll of the wing",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-} 

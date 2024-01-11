@@ -1,0 +1,13 @@
+{
+  "recommendations": [
+    "matklad.rust-analyzer",
+    "serayuzgur.crates",
+    "EditorConfig.EditorConfig",
+    "bungcip.better-toml",
+    "vadimcn.vscode-lldb",
+    "usernamehw.errorlens"
+  ],
+  "unwantedRecommendations": [
+    "rust-lang.rust-vscode"
+  ]
+}

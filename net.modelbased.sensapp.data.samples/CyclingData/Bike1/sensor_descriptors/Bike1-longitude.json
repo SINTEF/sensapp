@@ -1,8 +1,0 @@
-{
-  "id": "Bike1/longitude", 
-  "descr": "Longitude of the bike",
-  "schema": { 
-    "backend": "raw", 
-    "template": "String"
-  }
-} 

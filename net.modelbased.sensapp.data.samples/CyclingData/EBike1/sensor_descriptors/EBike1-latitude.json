@@ -1,8 +1,0 @@
-{
-  "id": "EBike1/latitude", 
-  "descr": "Latitude of the bike",
-  "schema": { 
-    "backend": "raw", 
-    "template": "String"
-  }
-} 

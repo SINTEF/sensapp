@@ -1,8 +1,0 @@
-{
-  "id": "WingFlight1/ground_speed", 
-  "descr": "Ground speed measured on the wing",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-} 

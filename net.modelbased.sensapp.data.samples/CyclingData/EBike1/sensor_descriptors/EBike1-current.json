@@ -1,8 +1,0 @@
-{
-  "id": "EBike1/current", 
-  "descr": "Current consumed by the bike",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-} 

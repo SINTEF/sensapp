@@ -1,8 +1,0 @@
-{
-  "id": "EBike1/roll", 
-  "descr": "Roll of the bike",
-  "schema": { 
-    "backend": "raw", 
-    "template": "Numerical"
-  }
-} 
