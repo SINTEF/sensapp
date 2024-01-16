@@ -21,5 +21,9 @@ jobs:
       - run: cargo install sqlx-cli --no-default-features --features sqlite
       - run: touch test.db && cargo sqlx migrate run --source src/storage/sqlite/migrations --database-url sqlite://test.db && cargo sqlx prepare --database-url sqlite://test.db
       - run: cargo clippy --verbose
-      - run: cargo build --verbose
-      - run: cargo llvm-cov --verbose
+      #- run: cargo build --verbose
+      - run: cargo llvm-cov --verbose --lcov --output-file lcov.info
+      - uses: VeryGoodOpenSource/very_good_coverage@v2
+        with:
+          path: lcov.info
+          min_coverage: 30
