@@ -1,5 +1,5 @@
 use super::infer::*;
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InferedColumn {
@@ -140,9 +140,9 @@ pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedCo
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
+    use serde_json::json;
+    use std::{str::FromStr, sync::Arc};
 
     #[test]
     fn test_infer_column_integers() {

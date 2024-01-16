@@ -1,5 +1,6 @@
 use std::{str::FromStr, sync::Arc};
 
+use iso8601::DateTime;
 use nom::{
     branch::alt,
     bytes::complete::tag_no_case,
@@ -10,6 +11,7 @@ use nom::{
     sequence::{delimited, terminated},
     Err, IResult,
 };
+use polars::chunked_array::iterator::par;
 use rust_decimal::Decimal;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +22,7 @@ pub enum InferedValue {
     String(String),
     Boolean(bool),
     JSON(Arc<serde_json::Value>),
+    DateTime(hifitime::Epoch),
     //Location,
     //Blob(Vec<u8>),
     // todo: booleans and dates and timestamps
@@ -79,11 +82,90 @@ pub fn parse_json(data: &str) -> IResult<&str, InferedValue> {
     }
 }
 
+fn convert_datetime_from_iso8601_to_hifitime(
+    dt: iso8601::DateTime,
+) -> Result<hifitime::Epoch, hifitime::Errors> {
+    // convert the iso8601::DateTime to a std::time::Duration first
+    let iso8601::DateTime { date, time } = dt;
+    let (year, month, day) = match date {
+        iso8601::Date::YMD { year, month, day } => (year as i32, month as u8, day as u8),
+        iso8601::Date::Week { year, ww: _, d: _ } | iso8601::Date::Ordinal { year, ddd: _ } => {
+            (year as i32, 1, 1)
+        }
+    };
+    let iso8601::Time {
+        hour,
+        minute,
+        second,
+        millisecond,
+        tz_offset_hours,
+        tz_offset_minutes,
+    } = time;
+    //hifitime::Epoch::from_gregorian_utc(year, month, day, hour, minute, second, nanos)
+    // convert milliseconds to nanoseconds
+    let nanos = millisecond as u32 * 1_000_000_u32;
+    let mut epoch = hifitime::Epoch::maybe_from_gregorian_utc(
+        year,
+        month,
+        day,
+        hour as u8,
+        minute as u8,
+        second as u8,
+        nanos,
+    )?;
+
+    // Add the timezone offsets
+    if tz_offset_hours != 0 {
+        epoch += hifitime::Unit::Hour * tz_offset_hours as i64;
+    }
+    if tz_offset_minutes != 0 {
+        epoch += hifitime::Unit::Minute * tz_offset_minutes as i64;
+    }
+
+    // Add the weird dates offsets, this is most likely
+    // never going to be used ever, but it's here for completeness.
+    match date {
+        iso8601::Date::YMD {
+            year: _,
+            month: _,
+            day: _,
+        } => {}
+        iso8601::Date::Week { year: _, ww, d } => {
+            // This is perhaps not very resilient parsing,
+            // But you should consider the RFC 3339 profile if you care about
+            // safer date parsing.
+            epoch += hifitime::Unit::Day * (7 * (ww as i64 - 1) + (d as i64 - 1));
+        }
+        iso8601::Date::Ordinal { year: _, ddd } => {
+            epoch += hifitime::Unit::Day * (ddd as i64 - 1);
+        }
+    };
+
+    Ok(epoch)
+}
+
+pub fn parse_iso8601_datetime(data: &str) -> IResult<&str, InferedValue> {
+    match iso8601::parsers::parse_datetime(data.as_bytes()) {
+        Ok((_, dt)) => match convert_datetime_from_iso8601_to_hifitime(dt) {
+            Ok(epoch) => Ok(("", InferedValue::DateTime(epoch))),
+            Err(_) => Err(Err::Error(nom::error::Error::new(
+                data,
+                nom::error::ErrorKind::Fail,
+            ))),
+        },
+        Err(_) => Err(Err::Error(nom::error::Error::new(
+            data,
+            nom::error::ErrorKind::Fail,
+        ))),
+    }
+}
+
 pub fn infer_type(data: &str) -> IResult<&str, InferedValue> {
     alt((
         terminated(parse_integer, eof),
         terminated(parse_float, eof),
         terminated(parse_boolean, eof),
+        terminated(parse_iso8601_datetime, eof),
         terminated(parse_json, eof),
         terminated(parse_string, eof),
     ))(data)
@@ -94,6 +176,10 @@ pub fn infer_type_with_trim(data: &str) -> IResult<&str, InferedValue> {
         terminated(delimited(multispace0, parse_integer, multispace0), eof),
         terminated(delimited(multispace0, parse_float, multispace0), eof),
         terminated(delimited(multispace0, parse_boolean, multispace0), eof),
+        terminated(
+            delimited(multispace0, parse_iso8601_datetime, multispace0),
+            eof,
+        ),
         terminated(delimited(multispace0, parse_json, multispace0), eof),
         // We don't trim strings, as they can contain whitespace.
         terminated(parse_string, eof),
@@ -104,6 +190,7 @@ pub fn infer_type_with_numeric(data: &str) -> IResult<&str, InferedValue> {
     alt((
         terminated(parse_numeric, eof),
         terminated(parse_boolean, eof),
+        terminated(parse_iso8601_datetime, eof),
         terminated(parse_json, eof),
         terminated(parse_string, eof),
     ))(data)
@@ -113,6 +200,10 @@ pub fn infer_type_with_trim_and_numeric(data: &str) -> IResult<&str, InferedValu
     alt((
         terminated(delimited(multispace0, parse_numeric, multispace0), eof),
         terminated(delimited(multispace0, parse_boolean, multispace0), eof),
+        terminated(
+            delimited(multispace0, parse_iso8601_datetime, multispace0),
+            eof,
+        ),
         terminated(delimited(multispace0, parse_json, multispace0), eof),
         // We don't trim strings, as they can contain whitespace.
         terminated(parse_string, eof),
@@ -450,5 +541,60 @@ mod tests {
             infer_type_with_trim_and_numeric(" 42.12 "),
             Ok(("", InferedValue::Numeric(Decimal::new(4212, 2))))
         );
+    }
+
+    mod datetime {
+        use super::*;
+
+        #[test]
+        fn test_convert_datetime_from_iso8601_to_hifitime() {
+            // Test the conversion of a date without timezone
+            let dt = iso8601::datetime("2020-01-01T00:00:00").unwrap();
+            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
+            assert_eq!(
+                epoch,
+                hifitime::Epoch::from_gregorian_utc(2020, 1, 1, 0, 0, 0, 0)
+            );
+
+            // Parse not full date
+            let dt = iso8601::datetime("2018-12-24T00:00").unwrap();
+            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
+            assert_eq!(
+                epoch,
+                hifitime::Epoch::from_gregorian_utc(2018, 12, 24, 0, 0, 0, 0)
+            );
+
+            // With Oslo timezone
+            let dt = iso8601::datetime("1969-12-24T00:00+01:00").unwrap();
+            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
+            assert_eq!(
+                epoch,
+                hifitime::Epoch::from_gregorian_utc(1969, 12, 24, 1, 0, 0, 0)
+            );
+
+            // With weird negative offset with minutes
+            let dt = iso8601::datetime("1969-12-24T00:00-01:30").unwrap();
+            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
+            assert_eq!(
+                epoch,
+                hifitime::Epoch::from_gregorian_utc(1969, 12, 23, 22, 30, 0, 0)
+            );
+
+            // Using the week format
+            let dt = iso8601::datetime("1969-W51-2T00:00").unwrap();
+            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
+            assert_eq!(
+                epoch,
+                hifitime::Epoch::from_gregorian_utc(1969, 12, 18, 0, 0, 0, 0)
+            );
+
+            // Using the ordinal format (and some weird timezone to test the offset)
+            let dt = iso8601::datetime("1969-358T14:21:32.0933+05:35").unwrap();
+            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
+            assert_eq!(
+                epoch,
+                hifitime::Epoch::from_gregorian_utc(1969, 12, 24, 19, 56, 32, 93000000)
+            );
+        }
     }
 }
