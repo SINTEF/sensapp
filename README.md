@@ -8,7 +8,7 @@ It enables the handling of small time series data of the edge efficiently to lar
 
 - **Flexible Time Series DataBase Storage**: Supports various time-series databases like SQLite, PostgreSQL (with optional TimeScaleDB plugin), and ClickHouse, with the potential to extend support to other databases in the future.
 - **Data Lake Storage**: Supports Parquet files over S3 compatible object stores for long-term time-series data storage.
-- **Multiple Data Ingestion Protocols**: Easy data ingestion via HTTP REST API, MQTT, AMQP, KAFKA, and NATS.
+- **Multiple Data Ingestion Protocols**: Easy data ingestion via HTTP REST API, MQTT, AMQP, KAFKA, OPCUA, and NATS.
 - **Compatibility with Existing Pipelines**: Offers Prometheus Remote Write and InfluxDB line format support for seamless integration into existing sensor data pipelines.
 - **Data formats**: Supports various data formats like JSON, CSV, Parquet, or SenML.
 
@@ -25,6 +25,15 @@ Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 ## Built With Rust™️
 
 SensApp is developed using Rust, a language known for its performance, memory safety, and annoying borrow checker. SensApp used to be written in Scala, but the new author prefers Rust.
+
+Not only the language, it's also the extensive high quality open-source ecosystem that makes Rust a great choice for SensApp:
+
+* [Tokio](https://tokio.rs/) asynchronous runtime
+* [Serde](https://serde.rs/) serialization framework
+* [Axum](https://github.com/tokio-rs/axum) web framework
+* [SQLx](https://github.com/launchbadge/sqlx) database driver
+* [Polars](https://pola.rs) data frame library
+* *and many more…*
 
 ## Contributing
 

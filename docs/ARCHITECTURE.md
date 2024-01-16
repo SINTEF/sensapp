@@ -137,3 +137,7 @@ SensApp should acknowledge the persistence of the incoming data once the storage
 The publisher should favour the message queue ingestion pipeline if resilience is a concern.
 
 The storage backend and the message queue should be resilient.
+
+## Internal Software Architecture
+
+Internally, SensApp uses a message bus and queues to communicate between components. This is inspired by the NodeJS, Apache NiFi, and the reactive manifesto.

@@ -1,8 +1,36 @@
 [package]
 name = "sensapp"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0"
+#async-stream = "0.3"
+async-trait = "0.1"
+axum = { version = "0.7" }
+#axum-streams = { version = "0.12", features = ["json", "csv", "text"] }
+#bytes = "1.5"
+futures = "0.3"
+#futures-util = { version = "0.3", features = ["io"] }
+#http-body = "1.0"
+#http-body-util = "0.1"
+polars = { version = "0.36" }
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["io-util"] }
+tokio-util = "0.7"
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["full"] }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = "1.6"
+csv-async = "1.2"
+rust_decimal = "1.33.1"
+geo = "0.27.0"
+async-broadcast = "0.6.0"
+cached = { version = "0.47.0", features = ["async", "tokio", "async-trait"] }
+nom = "7.1"
+sindit-senml = "0.2.0"
+serde_json = "1.0"
