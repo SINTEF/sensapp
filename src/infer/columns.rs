@@ -1,4 +1,4 @@
-use super::infer::*;
+use super::parsing::*;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -8,8 +8,8 @@ pub enum InferedColumn {
     Float(Vec<f64>),
     String(Vec<String>),
     Boolean(Vec<bool>),
-    JSON(Vec<Arc<serde_json::Value>>),
-    //DateTime(Vec<chrono::NaiveDateTime>),
+    DateTime(Vec<hifitime::Epoch>),
+    Json(Vec<Arc<serde_json::Value>>),
 }
 
 pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedColumn {
@@ -35,8 +35,9 @@ pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedCo
     let mut has_numeric = false;
     let mut has_floats = false;
     let mut has_string = false;
-    let mut has_boolean = false;
     let mut has_json = false;
+    let mut has_boolean = false;
+    let mut has_datetime = false;
 
     for infered_value in infered_column.iter() {
         match infered_value {
@@ -44,8 +45,9 @@ pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedCo
             Ok((_, InferedValue::Numeric(_))) => has_numeric = true,
             Ok((_, InferedValue::Float(_))) => has_floats = true,
             Ok((_, InferedValue::String(_))) => has_string = true,
-            Ok((_, InferedValue::JSON(_))) => has_json = true,
+            Ok((_, InferedValue::Json(_))) => has_json = true,
             Ok((_, InferedValue::Boolean(_))) => has_boolean = true,
+            Ok((_, InferedValue::DateTime(_))) => has_datetime = true,
             _ => panic!("Failed to infer column"),
         }
     }
@@ -57,11 +59,11 @@ pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedCo
     }
 
     if has_json {
-        return InferedColumn::JSON(
+        return InferedColumn::Json(
             infered_column
                 .iter()
                 .map(|value| match value {
-                    Ok((_, InferedValue::JSON(value))) => value.clone(),
+                    Ok((_, InferedValue::Json(value))) => value.clone(),
                     // Convert the other types to JSON, to be nice
                     Ok((_, InferedValue::Integer(value))) => {
                         Arc::new(serde_json::Value::from(*value))
@@ -72,6 +74,9 @@ pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedCo
                     Ok((_, InferedValue::Boolean(value))) => {
                         Arc::new(serde_json::Value::from(*value))
                     }
+                    Ok((_, InferedValue::DateTime(value))) => {
+                        Arc::new(serde_json::Value::from(value.to_rfc3339()))
+                    }
                     _ => unreachable!("We should have only JSON compatible types at this point"),
                 })
                 .collect::<Vec<_>>(),
@@ -81,7 +86,7 @@ pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedCo
     // If we have booleans
     if has_boolean {
         // If we don't have only booleans, we use string instead
-        if has_integers || has_numeric || has_floats {
+        if has_integers || has_numeric || has_floats || has_datetime {
             return InferedColumn::String(column);
         }
         return InferedColumn::Boolean(
@@ -90,6 +95,23 @@ pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedCo
                 .map(|value| match value {
                     Ok((_, InferedValue::Boolean(value))) => *value,
                     _ => unreachable!("We should have only booleans at this point"),
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    // If we have datetimes
+    if has_datetime {
+        // If we don't have only datetimes, we use string instead
+        if has_integers || has_numeric || has_floats {
+            return InferedColumn::String(column);
+        }
+        return InferedColumn::DateTime(
+            infered_column
+                .iter()
+                .map(|value| match value {
+                    Ok((_, InferedValue::DateTime(value))) => *value,
+                    _ => unreachable!("We should have only datetimes at this point"),
                 })
                 .collect::<Vec<_>>(),
         );
@@ -135,7 +157,11 @@ pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedCo
         );
     }
 
-    unreachable!("failed to infer column");
+    // If we reach this point, the column is supposdly empty
+    // Then we use Integer as a fallback
+    assert!(infered_column.is_empty());
+
+    InferedColumn::Integer(vec![])
 }
 
 #[cfg(test)]
@@ -270,7 +296,7 @@ mod tests {
         let infered_column = infer_column(column, true, false);
         assert_eq!(
             infered_column,
-            InferedColumn::JSON(vec![
+            InferedColumn::Json(vec![
                 Arc::new(json!({"a": 1})),
                 Arc::new(json!([{"b": 2}])),
                 Arc::new(json!({"c": true})),
@@ -287,17 +313,43 @@ mod tests {
             "42".to_string(),
             "42.83".to_string(),
             "true".to_string(),
+            "1951-10-26T00:00:00+02:00".to_string(),
         ];
 
         let infered_column = infer_column(column, true, false);
         assert_eq!(
             infered_column,
-            InferedColumn::JSON(vec![
+            InferedColumn::Json(vec![
                 Arc::new(json!({"a": 1})),
                 Arc::new(json!([{"b": 2}])),
                 Arc::new(json!(42)),
                 Arc::new(json!(42.83)),
                 Arc::new(json!(true)),
+                // Date is converted to UTC
+                Arc::new(json!("1951-10-26T02:00:00+00:00")),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_infer_column_empty() {
+        let infered_column = infer_column(vec![], true, false);
+        assert_eq!(infered_column, InferedColumn::Integer(vec![]));
+    }
+
+    #[test]
+    fn test_datetime() {
+        let column = vec![
+            "2020-01-01T00:00:00Z".to_string(),
+            "1969-358T14:21:32.0933+05:35".to_string(),
+        ];
+
+        let infered_column = infer_column(column, true, false);
+        assert_eq!(
+            infered_column,
+            InferedColumn::DateTime(vec![
+                hifitime::Epoch::from_gregorian_utc(2020, 1, 1, 0, 0, 0, 0),
+                hifitime::Epoch::from_gregorian_utc(1969, 12, 24, 19, 56, 32, 93000000)
             ])
         );
     }

@@ -9,6 +9,7 @@ use axum::routing::get;
 use axum::routing::post;
 use axum::Json;
 use axum::Router;
+use config::SensAppConfig;
 use futures::stream::StreamExt;
 use futures::TryStreamExt;
 use polars::prelude::*;
@@ -29,14 +30,25 @@ use tower_http::{timeout::TimeoutLayer, trace::TraceLayer, ServiceBuilderExt};
 use tracing::event;
 use tracing::Level;
 mod bus;
+mod config;
 mod datamodel;
 mod http;
 mod importers;
 mod infer;
+mod name_to_uuid;
 mod storage;
 
 #[tokio::main]
 async fn main() {
+    // Load configuration
+    let config = match config::SensAppConfig::load() {
+        Ok(config) => Arc::new(config),
+        Err(err) => {
+            panic!("Failed to load configuration: {:?}", err);
+        }
+    };
+    config::set(config.clone()).expect("Failed to set configuration");
+
     /*let (tx, rx) = tokio::sync::mpsc::channel(100); // Channel with buffer size 100
 
     // Simulate event emitter
@@ -68,6 +80,10 @@ async fn main() {
         .expect("Failed to create or migrate database");
 
     println!("Hello, world!");
+
+    let columns = infer::columns::infer_column(vec![], false, true);
+    let _ = infer::datetime_guesser::likely_datetime_column(&vec![], &vec![]);
+    let _ = infer::geo_guesser::likely_geo_columns(&vec![], &vec![]);
 
     /*let event_bus = event_bus::EVENT_BUS
         .get_or_init(|| event_bus::init_event_bus())
@@ -109,15 +125,25 @@ async fn main() {
         }
     });
 
-    run_http_server(
+    let endpoint = config.endpoint;
+    let port = config.port;
+    println!("📡 HTTP server listening on {}:{}", endpoint, port);
+    match run_http_server(
         HttpServerState {
             name: "SensApp".to_string(),
             event_bus: event_bus,
         },
-        SocketAddr::from((Ipv4Addr::LOCALHOST, 3000)),
+        SocketAddr::from((endpoint, port)),
     )
     .await
-    .expect("Failed to run HTTP server");
+    {
+        Ok(_) => {
+            event!(Level::INFO, "HTTP server stopped");
+        }
+        Err(err) => {
+            event!(Level::ERROR, "HTTP server failed: {:?}", err);
+        }
+    }
 }
 
 async fn handler() -> &'static str {

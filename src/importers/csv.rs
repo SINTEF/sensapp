@@ -18,7 +18,7 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
 
     let mut current_samples: Vec<Sample<i64>> = vec![];
 
-    let mut toto = WaitForAll::new();
+    let mut all_batches_waiter = WaitForAll::new();
 
     let mut i = 0;
 
@@ -43,7 +43,7 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
             let sync_receiver = event_bus.publish(batch).await?;
             //sync_receiver.activate().recv().await?;
             current_samples = vec![];
-            toto.add(sync_receiver.activate()).await;
+            all_batches_waiter.add(sync_receiver.activate()).await;
         }
     }
 
@@ -54,11 +54,11 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
             samples: Arc::new(TypedSamples::Integer(current_samples)),
         };
         let sync_receiver = event_bus.publish(batch).await?;
-        toto.add(sync_receiver.activate()).await;
+        all_batches_waiter.add(sync_receiver.activate()).await;
     }
 
     // Wololo ??
-    toto.wait().await?;
+    all_batches_waiter.wait().await?;
 
     println!("Done reading CSV");
     Ok(())

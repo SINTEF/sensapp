@@ -163,7 +163,7 @@ impl SqliteStorage {
     ) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for value in values {
-            let lol = sqlx::query!(
+            let query = sqlx::query!(
                 r#"
                 INSERT INTO integer_values (sensor_id, timestamp_ms, value)
                 VALUES (?, ?, ?)
@@ -172,9 +172,57 @@ impl SqliteStorage {
                 value.timestamp_ms,
                 value.value
             );
-            transaction.execute(lol).await?;
+            transaction.execute(query).await?;
         }
         transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn publish_float_values(&self, sensor_id: i64, values: &Vec<Sample<f64>>) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        for value in values {
+            let query = sqlx::query!(
+                r#"
+                INSERT INTO float_values (sensor_id, timestamp_ms, value)
+                VALUES (?, ?, ?)
+                "#,
+                sensor_id,
+                value.timestamp_ms,
+                value.value
+            );
+            transaction.execute(query).await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn vacuum(&self) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        transaction
+            .execute(sqlx::query!(
+                r#"
+            DELETE FROM integer_values WHERE rowid NOT IN (
+                SELECT MIN(rowid) FROM integer_values GROUP BY sensor_id, timestamp_ms, value
+            )
+            "#
+            ))
+            .await?;
+
+        transaction
+            .execute(sqlx::query!(
+                r#"
+            DELETE FROM float_values WHERE rowid NOT IN (
+                SELECT MIN(rowid) FROM float_values GROUP BY sensor_id, timestamp_ms, value
+            )
+            "#
+            ))
+            .await?;
+
+        transaction.commit().await?;
+
+        let vacuum = sqlx::query!("VACUUM");
+        vacuum.execute(&self.pool).await?;
+
         Ok(())
     }
 }

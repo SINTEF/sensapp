@@ -1,6 +1,5 @@
 use std::{str::FromStr, sync::Arc};
 
-use iso8601::DateTime;
 use nom::{
     branch::alt,
     bytes::complete::tag_no_case,
@@ -11,7 +10,6 @@ use nom::{
     sequence::{delimited, terminated},
     Err, IResult,
 };
-use polars::chunked_array::iterator::par;
 use rust_decimal::Decimal;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,7 +19,7 @@ pub enum InferedValue {
     Float(f64),
     String(String),
     Boolean(bool),
-    JSON(Arc<serde_json::Value>),
+    Json(Arc<serde_json::Value>),
     DateTime(hifitime::Epoch),
     //Location,
     //Blob(Vec<u8>),
@@ -29,13 +27,13 @@ pub enum InferedValue {
 }
 
 pub fn parse_integer(data: &str) -> IResult<&str, InferedValue> {
-    map(i64, |i| InferedValue::Integer(i))(data)
+    map(i64, InferedValue::Integer)(data)
 }
 
 pub fn parse_float(data: &str) -> IResult<&str, InferedValue> {
     // We use the "double" parser from nom, that returns a f64.
     // The parser named "float" from nom returns a f32.
-    map(double, |f| InferedValue::Float(f))(data)
+    map(double, InferedValue::Float)(data)
 }
 
 pub fn parse_numeric(data: &str) -> IResult<&str, InferedValue> {
@@ -72,7 +70,7 @@ fn is_likely_json(data: &str) -> bool {
 pub fn parse_json(data: &str) -> IResult<&str, InferedValue> {
     if is_likely_json(data) {
         serde_json::from_str(data)
-            .map(|val| ("", InferedValue::JSON(val)))
+            .map(|val| ("", InferedValue::Json(val)))
             .map_err(|_| Err::Error(nom::error::Error::new(data, nom::error::ErrorKind::Fail)))
     } else {
         Err(Err::Error(nom::error::Error::new(
@@ -88,9 +86,9 @@ fn convert_datetime_from_iso8601_to_hifitime(
     // convert the iso8601::DateTime to a std::time::Duration first
     let iso8601::DateTime { date, time } = dt;
     let (year, month, day) = match date {
-        iso8601::Date::YMD { year, month, day } => (year as i32, month as u8, day as u8),
+        iso8601::Date::YMD { year, month, day } => (year, month as u8, day as u8),
         iso8601::Date::Week { year, ww: _, d: _ } | iso8601::Date::Ordinal { year, ddd: _ } => {
-            (year as i32, 1, 1)
+            (year, 1, 1)
         }
     };
     let iso8601::Time {
@@ -103,7 +101,7 @@ fn convert_datetime_from_iso8601_to_hifitime(
     } = time;
     //hifitime::Epoch::from_gregorian_utc(year, month, day, hour, minute, second, nanos)
     // convert milliseconds to nanoseconds
-    let nanos = millisecond as u32 * 1_000_000_u32;
+    let nanos = millisecond * 1_000_000_u32;
     let mut epoch = hifitime::Epoch::maybe_from_gregorian_utc(
         year,
         month,
@@ -386,24 +384,24 @@ mod tests {
     fn test_parse_json() {
         assert_eq!(
             parse_json("{}"),
-            Ok(("", InferedValue::JSON(Arc::new(serde_json::json!({})))))
+            Ok(("", InferedValue::Json(Arc::new(serde_json::json!({})))))
         );
         assert_eq!(
             parse_json("[]"),
-            Ok(("", InferedValue::JSON(Arc::new(serde_json::json!([])))))
+            Ok(("", InferedValue::Json(Arc::new(serde_json::json!([])))))
         );
         assert_eq!(
             parse_json("[{\"a\": 1}]"),
             Ok((
                 "",
-                InferedValue::JSON(Arc::new(serde_json::json!([{"a": 1}])))
+                InferedValue::Json(Arc::new(serde_json::json!([{"a": 1}])))
             ))
         );
         assert_eq!(
             parse_json("[{\"a\": 1}, {\"b\": 2}]"),
             Ok((
                 "",
-                InferedValue::JSON(Arc::new(serde_json::json!([{"a": 1}, {"b": 2}])))
+                InferedValue::Json(Arc::new(serde_json::json!([{"a": 1}, {"b": 2}])))
             ))
         );
         assert_eq!(
@@ -444,13 +442,13 @@ mod tests {
         );
         assert_eq!(
             infer_type("{}"),
-            Ok(("", InferedValue::JSON(Arc::new(serde_json::json!({})))))
+            Ok(("", InferedValue::Json(Arc::new(serde_json::json!({})))))
         );
         assert_eq!(
             infer_type("[{\"a\": 1}]"),
             Ok((
                 "",
-                InferedValue::JSON(Arc::new(serde_json::json!([{"a": 1}])))
+                InferedValue::Json(Arc::new(serde_json::json!([{"a": 1}])))
             ))
         );
     }
@@ -506,7 +504,7 @@ mod tests {
         );
         assert_eq!(
             infer_type_with_numeric("{}"),
-            Ok(("", InferedValue::JSON(Arc::new(serde_json::json!({})))))
+            Ok(("", InferedValue::Json(Arc::new(serde_json::json!({})))))
         );
         assert_eq!(
             infer_type_with_numeric(" 42.12 "),
@@ -594,6 +592,49 @@ mod tests {
             assert_eq!(
                 epoch,
                 hifitime::Epoch::from_gregorian_utc(1969, 12, 24, 19, 56, 32, 93000000)
+            );
+
+            // Compute a date that is not valid
+            let dt = iso8601::datetime("1969-02-29T00:00:00").unwrap();
+            let epoch = convert_datetime_from_iso8601_to_hifitime(dt);
+            assert!(epoch.is_err());
+        }
+
+        #[test]
+        fn test_parse_iso8601_datetime() {
+            assert_eq!(
+                parse_iso8601_datetime("2020-01-01T00:00:00Z"),
+                Ok((
+                    "",
+                    InferedValue::DateTime(hifitime::Epoch::from_gregorian_utc(
+                        2020, 1, 1, 0, 0, 0, 0
+                    ))
+                ))
+            );
+            assert_eq!(
+                parse_iso8601_datetime("1969-358T14:21:32.0933+05:35"),
+                Ok((
+                    "",
+                    InferedValue::DateTime(hifitime::Epoch::from_gregorian_utc(
+                        1969, 12, 24, 19, 56, 32, 93000000
+                    ))
+                ))
+            );
+
+            assert_eq!(
+                parse_iso8601_datetime("2024-07-32T00:00:00Z"),
+                Err(Err::Error(nom::error::Error::new(
+                    "2024-07-32T00:00:00Z",
+                    nom::error::ErrorKind::Fail
+                )))
+            );
+
+            assert_eq!(
+                parse_iso8601_datetime("1969-02-29T00:00:00Z"),
+                Err(Err::Error(nom::error::Error::new(
+                    "1969-02-29T00:00:00Z",
+                    nom::error::ErrorKind::Fail
+                )))
             );
         }
     }

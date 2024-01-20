@@ -1,5 +1,11 @@
+use super::state::HttpServerState;
+use crate::config;
+use crate::importers::csv::publish_csv_async;
+use crate::name_to_uuid::name_to_uuid;
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
+use axum::extract::Multipart;
+use axum::extract::Path;
 use axum::extract::State;
 use axum::http::header;
 use axum::http::StatusCode;
@@ -28,9 +34,6 @@ use tower_http::trace;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer, ServiceBuilderExt};
 use tracing::Level;
 
-use super::state::HttpServerState;
-use crate::importers::csv::publish_csv_async;
-
 // Anyhow error handling with axum
 // https://github.com/tokio-rs/axum/blob/d3112a40d55f123bc5e65f995e2068e245f12055/examples/anyhow-error-response/src/main.rs
 struct AppError(anyhow::Error);
@@ -53,6 +56,8 @@ where
 }
 
 pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
+    let max_body_layer = DefaultBodyLimit::max(config::get()?.parse_http_body_limit()?);
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_target(false)
@@ -80,10 +85,17 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .route("/", get(handler))
         .route(
             "/publish",
-            post(publish_handler).layer(DefaultBodyLimit::max(1024 * 1024 * 1024)),
+            post(publish_handler).layer(max_body_layer.clone()),
         )
         //.route("/publish_stream", post(publish_stream_handler))
-        .route("/publish_csv", post(publish_csv))
+        .route(
+            "/sensors/:sensor_name_or_uuid/publish_csv",
+            post(publish_csv),
+        )
+        .route(
+            "/sensors/:sensor_name_or_uuid/publish_multipart",
+            post(publish_multipart).layer(max_body_layer.clone()),
+        )
         .route("/fail", get(test_fail))
         .layer(middleware)
         .with_state(state);
@@ -106,8 +118,11 @@ async fn handler(State(state): State<HttpServerState>) -> Result<Json<String>, A
 
 async fn publish_csv(
     State(state): State<HttpServerState>,
+    Path(sensor_name_or_uuid): Path<String>,
     body: axum::body::Body,
 ) -> Result<String, AppError> {
+    // let uuid = name_to_uuid(sensor_name_or_uuid.as_str())?;
+    // Convert the body in a stream
     let stream = body.into_data_stream();
     let stream = stream.map_err(|err| io::Error::new(io::ErrorKind::Other, err));
     let reader = stream.into_async_read();
@@ -153,5 +168,36 @@ async fn publish_handler(bytes: Bytes) -> Result<Json<String>, (StatusCode, Stri
             StatusCode::INTERNAL_SERVER_ERROR,
             "Error reading CSV".to_string(),
         )),
+    }
+}
+
+async fn publish_multipart(mut multipart: Multipart) -> Result<Json<String>, (StatusCode, String)> {
+    Ok(Json("ok".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::bus::EventBus;
+
+    #[tokio::test]
+    async fn test_handler() {
+        let state = HttpServerState {
+            name: "hello world".to_string(),
+            event_bus: Arc::new(EventBus::init("test".to_string())),
+        };
+        let app = Router::new().route("/", get(handler)).with_state(state);
+        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        use axum::body::to_bytes;
+        let body_str =
+            String::from_utf8(to_bytes(response.into_body(), 128).await.unwrap().to_vec()).unwrap();
+        assert_eq!(body_str, "\"hello world\"");
     }
 }
