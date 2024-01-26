@@ -23,9 +23,9 @@ SensApp distinguises between:
 erDiagram
 
     SENSORS {
-        String name UK "Name of the sensor"
         UUID id PK "UUID (v7 by default) of the sensor"
-        TypeEnum type PK "The type of the sensor (integer, float, string, boolean), part of the primary key"
+        String name "Name of the sensor"
+        TypeEnum type "The type of the sensor (integer, float, string, boolean, etc…)"
         Serial unit FK "The unit of the sensor, for documentation purposes, if provided"
     }
 
@@ -90,13 +90,6 @@ erDiagram
         Boolean value
     }
 
-    SENSORS ||--o{ STRING_VALUES : ""
-    SENSORS ||--o{ INTEGER_VALUES : ""
-    SENSORS ||--o{ NUMERIC_VALUES : ""
-    SENSORS ||--o{ FLOAT_VALUES : ""
-    SENSORS ||--o{ LOCATION_VALUES : ""
-    SENSORS ||--o{ BOOLEAN_VALUES : ""
-
     %% Localisations are common enough to be part of the core data model
     LOCATION_VALUES {
         UUID sensor
@@ -104,6 +97,29 @@ erDiagram
         Float latitude
         Float longitude
     }
+
+    %% JSON values are not recommended, but they can be very convenient
+    JSON_VALUES {
+        UUID sensor
+        DateTime datetime
+        JSON value
+    }
+
+    BLOB_VALUES {
+        UUID sensor
+        DateTime datetime
+        Blob value
+    }
+
+    SENSORS ||--o{ STRING_VALUES : ""
+    SENSORS ||--o{ INTEGER_VALUES : ""
+    SENSORS ||--o{ NUMERIC_VALUES : ""
+    SENSORS ||--o{ FLOAT_VALUES : ""
+    SENSORS ||--o{ LOCATION_VALUES : ""
+    SENSORS ||--o{ BOOLEAN_VALUES : ""
+    SENSORS ||--o{ JSON_VALUES : ""
+    SENSORS ||--o{ BLOB_VALUES : ""
+
 ```
 
 ## Virtual Composite Sensors

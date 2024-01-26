@@ -18,6 +18,9 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_BATCH_SIZE", default = 8192)]
     pub batch_size: usize,
+
+    #[config(env = "SENSAPP_SQLITE_CONNECTION_STRING")]
+    pub sqlite_connection_string: Option<String>,
 }
 
 impl SensAppConfig {

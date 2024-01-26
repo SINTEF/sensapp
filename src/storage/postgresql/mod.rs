@@ -39,4 +39,9 @@ impl StorageInstance for PostgresStorage {
         // Implement sync logic here
         Ok(())
     }
+
+    async fn vacuum(&self) -> Result<()> {
+        // TODO: Implement vacuum logic here
+        Ok(())
+    }
 }

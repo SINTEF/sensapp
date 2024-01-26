@@ -6,7 +6,7 @@ It enables the handling of small time series data of the edge efficiently to lar
 
 ## Features
 
-- **Flexible Time Series DataBase Storage**: Supports various time-series databases like SQLite, PostgreSQL (with optional TimeScaleDB plugin), and ClickHouse, with the potential to extend support to other databases in the future.
+- **Flexible Time Series DataBase Storage**: Supports various time-series databases such as SQLite, PostgreSQL (with optional TimeScaleDB plugin), DuckDB, and ClickHouse, with the potential to extend support to other databases in the future.
 - **Data Lake Storage**: Supports Parquet files over S3 compatible object stores for long-term time-series data storage.
 - **Multiple Data Ingestion Protocols**: Easy data ingestion via HTTP REST API, MQTT, AMQP, KAFKA, OPCUA, and NATS.
 - **Compatibility with Existing Pipelines**: Offers Prometheus Remote Write and InfluxDB line format support for seamless integration into existing sensor data pipelines.
@@ -33,6 +33,7 @@ Not only the language, it's also the extensive high quality open-source ecosyste
 * [Axum](https://github.com/tokio-rs/axum) web framework
 * [SQLx](https://github.com/launchbadge/sqlx) database driver
 * [Polars](https://pola.rs) data frame library
+* [nom](https://github.com/rust-bakery/nom) parser combinator library
 * *and many more…*
 
 ## Contributing
@@ -55,5 +56,7 @@ We thank [the historical authors of SensApp](https://github.com/SINTEF/sensapp/g
 
 SensApp is developed by
 [SINTEF](https://www.sintef.no) ([Digital division](https://www.sintef.no/en/digital/), [Sustainable Communication Technologies department](https://www.sintef.no/en/digital/departments-new/department-of-sustainable-communication-technologies/), [Smart Data research group](https://www.sintef.no/en/expertise/digital/sustainable-communication-technologies/smart-data/)).
+
+It is made possible thanks to the research and development of many research projects, founded notably by the [European Commission](https://ec.europa.eu/programmes/horizon2020/en) and the [Norwegian Research Council](https://www.forskningsradet.no/en/).
 
 We also thank the open-source community for all the tools they create and maintain that allow SensApp to exist.

@@ -19,6 +19,7 @@ pub trait StorageInstance {
     async fn create_sensor(&self, sensor_data: &SensorData) -> Result<()>;
     async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()>;
     async fn sync(&self, sync_sender: Sender<()>) -> Result<()>;
+    async fn vacuum(&self) -> Result<()>;
 }
 
 pub struct SensorData {

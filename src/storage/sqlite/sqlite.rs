@@ -1,4 +1,4 @@
-use crate::datamodel::batch::{Batch, Sample, TypedSamples};
+use crate::datamodel::batch::{Batch, Sample, SingleSensorBatch, TypedSamples};
 use crate::datamodel::SensorType;
 use crate::storage::storage::{GenericStorage, SensorData, StorageInstance};
 use anyhow::{Context, Result};
@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use cached::proc_macro::once;
 use sqlx::{prelude::*, Sqlite, Transaction};
 use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
-use std::default;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,6 +29,7 @@ impl GenericStorage for SqliteStorage {
             // Create the database file if it doesn't exist
             .create_if_missing(true)
             // The Wall mode should perform better for SensApp
+            // It is the default in sqlx, but we want to make sure it stays that way
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
             // Foreign keys have a performance impact, they are disabled by default
             // in SQLite, but we want to make sure they stay disabled.
@@ -64,32 +64,15 @@ impl StorageInstance for SqliteStorage {
         // Implement sensor creation logic here
         Ok(())
     }
+
     async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
-        // Implement batch publishing logic here
-
-        // start transaction
-        match batch.samples.as_ref() {
-            TypedSamples::Integer(samples) => {
-                let sensor_id = self
-                    .get_sensor_id(
-                        batch.sensor_uuid,
-                        batch.sensor_name.clone(),
-                        SensorType::Integer,
-                    )
-                    .await?;
-                self.publish_integer_values(sensor_id, samples).await?;
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unsupported sample type: {:?}",
-                    batch.samples
-                ))
-            }
+        let mut transaction = self.pool.begin().await?;
+        for single_sensor_batch in batch.sensor_batches.as_ref() {
+            self.publish_single_sensor_batch(&mut transaction, &single_sensor_batch)
+                .await?;
         }
-        // finish transaction
-
+        transaction.commit().await?;
         self.sync(sync_sender).await?;
-
         Ok(())
     }
 
@@ -100,6 +83,11 @@ impl StorageInstance for SqliteStorage {
         if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
             let _ = timeout(Duration::from_secs(5), sync_sender.broadcast(())).await?;
         }
+        Ok(())
+    }
+
+    async fn vacuum(&self) -> Result<()> {
+        self.vacuum().await?;
         Ok(())
     }
 }
@@ -156,12 +144,39 @@ impl SqliteStorage {
         once_get_sensor_id(&self.pool, sensor_uuid, sensor_name, sensor_type).await
     }
 
+    async fn publish_single_sensor_batch(
+        &self,
+        mut transaction: &mut Transaction<'_, Sqlite>,
+        single_sensor_batch: &SingleSensorBatch,
+    ) -> Result<()> {
+        match single_sensor_batch.samples.as_ref() {
+            TypedSamples::Integer(samples) => {
+                let sensor_id = self
+                    .get_sensor_id(
+                        single_sensor_batch.sensor_uuid,
+                        single_sensor_batch.sensor_name.clone(),
+                        SensorType::Integer,
+                    )
+                    .await?;
+                self.publish_integer_values(&mut transaction, sensor_id, &samples)
+                    .await?;
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unsupported sample type: {:?}",
+                    single_sensor_batch.samples
+                ))
+            }
+        }
+        Ok(())
+    }
+
     async fn publish_integer_values(
         &self,
+        transaction: &mut Transaction<'_, Sqlite>,
         sensor_id: i64,
-        values: &Vec<Sample<i64>>,
+        values: &[Sample<i64>],
     ) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
         for value in values {
             let query = sqlx::query!(
                 r#"
@@ -174,11 +189,10 @@ impl SqliteStorage {
             );
             transaction.execute(query).await?;
         }
-        transaction.commit().await?;
         Ok(())
     }
 
-    async fn publish_float_values(&self, sensor_id: i64, values: &Vec<Sample<f64>>) -> Result<()> {
+    async fn publish_float_values(&self, sensor_id: i64, values: &[Sample<f64>]) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for value in values {
             let query = sqlx::query!(

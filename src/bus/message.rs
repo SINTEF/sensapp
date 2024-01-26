@@ -1,3 +1,4 @@
+use crate::datamodel::batch::Batch;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -7,7 +8,7 @@ pub enum Message {
 
 #[derive(Debug, Clone)]
 pub struct PublishMessage {
-    pub batch: Arc<crate::datamodel::batch::Batch>,
+    pub batch: Arc<Batch>,
     // A request sync message is sent to ask the storage backends
     // to sync. This is done to ensure that the data is persisted.
     //

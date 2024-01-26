@@ -1,10 +1,11 @@
 use crate::{
     bus::{utils::WaitForAll, EventBus},
-    datamodel::batch::{Batch, Sample, TypedSamples},
+    datamodel::batch::{Batch, Sample, SingleSensorBatch, TypedSamples},
 };
 use anyhow::Result;
 use csv_async::AsyncReader;
 use futures::{io, StreamExt};
+use smallvec::smallvec;
 use std::sync::Arc;
 
 pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
@@ -35,10 +36,13 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
         i += 1;
 
         if current_samples.len() >= batch_size {
-            let batch = Batch {
+            let single_sensor_batch = SingleSensorBatch {
                 sensor_uuid: uuid::Uuid::from_bytes([0; 16]),
                 sensor_name: "test".to_string(),
-                samples: Arc::new(TypedSamples::Integer(current_samples)),
+                samples: Arc::new(TypedSamples::Integer(current_samples.into())),
+            };
+            let batch = Batch {
+                sensor_batches: Arc::new(smallvec![single_sensor_batch]),
             };
             let sync_receiver = event_bus.publish(batch).await?;
             //sync_receiver.activate().recv().await?;
@@ -48,16 +52,19 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
     }
 
     if !current_samples.is_empty() {
-        let batch = Batch {
+        let single_sensor_batch = SingleSensorBatch {
             sensor_uuid: uuid::Uuid::from_bytes([0; 16]),
             sensor_name: "test".to_string(),
-            samples: Arc::new(TypedSamples::Integer(current_samples)),
+            samples: Arc::new(TypedSamples::Integer(current_samples.into())),
+        };
+        let batch = Batch {
+            sensor_batches: Arc::new(smallvec![single_sensor_batch]),
         };
         let sync_receiver = event_bus.publish(batch).await?;
         all_batches_waiter.add(sync_receiver.activate()).await;
     }
 
-    // Wololo ??
+    // Wait for all batches to sync
     all_batches_waiter.wait().await?;
 
     println!("Done reading CSV");

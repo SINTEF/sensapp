@@ -1,3 +1,5 @@
+use super::app_error::AppError;
+use super::influxdb::publish_influxdb;
 use super::state::HttpServerState;
 use crate::config;
 use crate::importers::csv::publish_csv_async;
@@ -9,8 +11,6 @@ use axum::extract::Path;
 use axum::extract::State;
 use axum::http::header;
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::response::Response;
 use axum::routing::get;
 use axum::routing::post;
 use axum::Json;
@@ -33,27 +33,6 @@ use tower::ServiceBuilder;
 use tower_http::trace;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer, ServiceBuilderExt};
 use tracing::Level;
-
-// Anyhow error handling with axum
-// https://github.com/tokio-rs/axum/blob/d3112a40d55f123bc5e65f995e2068e245f12055/examples/anyhow-error-response/src/main.rs
-struct AppError(anyhow::Error);
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong: {}", self.0),
-        )
-            .into_response()
-    }
-}
-impl<E> From<E> for AppError
-where
-    E: Into<anyhow::Error>,
-{
-    fn from(err: E) -> Self {
-        Self(err.into())
-    }
-}
 
 pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
     let max_body_layer = DefaultBodyLimit::max(config::get()?.parse_http_body_limit()?);
@@ -95,6 +74,11 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .route(
             "/sensors/:sensor_name_or_uuid/publish_multipart",
             post(publish_multipart).layer(max_body_layer.clone()),
+        )
+        // InfluxDB compatibility
+        .route(
+            "/api/v2/write",
+            post(publish_influxdb).layer(max_body_layer.clone()),
         )
         .route("/fail", get(test_fail))
         .layer(middleware)
