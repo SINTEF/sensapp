@@ -2,6 +2,7 @@ use super::app_error::AppError;
 use super::influxdb::publish_influxdb;
 use super::state::HttpServerState;
 use crate::config;
+use crate::datamodel::batch_builder::BatchBuilder;
 use crate::importers::csv::publish_csv_async;
 use crate::name_to_uuid::name_to_uuid;
 use anyhow::Result;
@@ -86,9 +87,18 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
 
     // Run our application
     let listener = tokio::net::TcpListener::bind(address).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    // Wait for the CTRL+C signal
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install shutdown CTRL+C signal handler");
 }
 
 async fn handler(State(state): State<HttpServerState>) -> Result<Json<String>, AppError> {
@@ -97,7 +107,9 @@ async fn handler(State(state): State<HttpServerState>) -> Result<Json<String>, A
     // let mut sync_receiver = state.event_bus.sync_request().await?;
     // sync_receiver.recv().await?;
 
-    Ok(Json(state.name))
+    let name: String = (*state.name).clone();
+
+    Ok(Json(name))
 }
 
 async fn publish_csv(
@@ -170,7 +182,7 @@ mod tests {
     #[tokio::test]
     async fn test_handler() {
         let state = HttpServerState {
-            name: "hello world".to_string(),
+            name: Arc::new("hello world".to_string()),
             event_bus: Arc::new(EventBus::init("test".to_string())),
         };
         let app = Router::new().route("/", get(handler)).with_state(state);

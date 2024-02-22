@@ -1,3 +1,5 @@
+use crate::datamodel::SensAppDateTime;
+
 use super::parsing::*;
 use std::sync::Arc;
 
@@ -8,7 +10,7 @@ pub enum InferedColumn {
     Float(Vec<f64>),
     String(Vec<String>),
     Boolean(Vec<bool>),
-    DateTime(Vec<hifitime::Epoch>),
+    DateTime(Vec<SensAppDateTime>),
     Json(Vec<Arc<serde_json::Value>>),
 }
 

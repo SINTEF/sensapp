@@ -18,9 +18,9 @@ CREATE TABLE sensors (
 -- Create the 'labels' table
 CREATE TABLE labels (
     sensor_id INTEGER NOT NULL, -- References 'sensors' (sensor_id), cannot be null
-    named INTEGER NOT NULL, -- ID for the name in the dictionary, cannot be null
+    name INTEGER NOT NULL, -- ID for the name in the dictionary, cannot be null
     description INTEGER, -- ID for the description in the dictionary (optional)
-    PRIMARY KEY (sensor_id, named),
+    PRIMARY KEY (sensor_id, name),
     FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id) -- Foreign key to 'sensors' table
 ) STRICT;
 

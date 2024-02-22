@@ -1,7 +1,9 @@
 use anyhow::Error;
 use confique::Config;
-use once_cell::sync::OnceCell;
-use std::{net::IpAddr, sync::Arc};
+use std::{
+    net::IpAddr,
+    sync::{Arc, OnceLock},
+};
 
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
@@ -18,6 +20,9 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_BATCH_SIZE", default = 8192)]
     pub batch_size: usize,
+
+    #[config(env = "SENSAPP_SENSOR_SALT", default = "sensapp")]
+    pub sensor_salt: String,
 
     #[config(env = "SENSAPP_SQLITE_CONNECTION_STRING")]
     pub sqlite_connection_string: Option<String>,
@@ -42,14 +47,7 @@ impl SensAppConfig {
     }
 }
 
-static SENSAPP_CONFIG: OnceCell<Arc<SensAppConfig>> = OnceCell::new();
-
-pub fn set(config: Arc<SensAppConfig>) -> Result<(), Error> {
-    match SENSAPP_CONFIG.set(config) {
-        Ok(_) => Ok(()),
-        Err(e) => Err(Error::msg(format!("Failed to set configuration: {:?}", e))),
-    }
-}
+static SENSAPP_CONFIG: OnceLock<Arc<SensAppConfig>> = OnceLock::new();
 
 pub fn get() -> Result<Arc<SensAppConfig>, Error> {
     SENSAPP_CONFIG.get().cloned().ok_or_else(|| {
@@ -57,6 +55,19 @@ pub fn get() -> Result<Arc<SensAppConfig>, Error> {
             "Configuration not loaded. Please call load_configuration() before using the configuration",
         )
     })
+}
+
+pub fn load_configuration() -> Result<(), Error> {
+    // Check if the configuration has already been loaded
+    if SENSAPP_CONFIG.get().is_some() {
+        return Ok(());
+    }
+
+    // Load configuration
+    let config = SensAppConfig::load()?;
+    SENSAPP_CONFIG.get_or_init(|| Arc::new(config));
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -111,10 +122,9 @@ mod tests {
     }
 
     #[test]
-    fn test_set_get() {
+    fn test_load_configuration() {
         assert!(SENSAPP_CONFIG.get().is_none());
-        let config = SensAppConfig::load().unwrap();
-        set(Arc::new(config)).unwrap();
+        load_configuration().unwrap();
         assert!(SENSAPP_CONFIG.get().is_some());
 
         let config = get().unwrap();

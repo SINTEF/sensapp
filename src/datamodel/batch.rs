@@ -1,35 +1,310 @@
-use smallvec::SmallVec;
+use super::{sample, sensapp_vec::SensAppVec, Sensor, TypedSamples};
+use anyhow::Error;
 use std::sync::Arc;
-
-#[derive(Debug)]
-pub struct Sample<V> {
-    pub timestamp_ms: i64,
-    pub value: V,
-}
-
-// Small vec size
-const SMALLVEC_BUFFER_SIZE: usize = 1;
-
-#[derive(Debug)]
-pub enum TypedSamples {
-    Integer(SmallVec<[Sample<i64>; SMALLVEC_BUFFER_SIZE]>),
-    Numeric(SmallVec<[Sample<rust_decimal::Decimal>; SMALLVEC_BUFFER_SIZE]>),
-    Float(SmallVec<[Sample<f64>; SMALLVEC_BUFFER_SIZE]>),
-    String(SmallVec<[Sample<String>; SMALLVEC_BUFFER_SIZE]>),
-    Boolean(SmallVec<[Sample<bool>; SMALLVEC_BUFFER_SIZE]>),
-    Location(SmallVec<[Sample<geo::Point>; SMALLVEC_BUFFER_SIZE]>),
-    Blob(SmallVec<[Sample<Vec<u8>>; SMALLVEC_BUFFER_SIZE]>),
-    Json(SmallVec<[Sample<serde_json::Value>; SMALLVEC_BUFFER_SIZE]>),
-}
+use tokio::sync::RwLock;
 
 #[derive(Debug)]
 pub struct SingleSensorBatch {
-    pub sensor_uuid: uuid::Uuid,
-    pub sensor_name: String,
-    pub samples: Arc<TypedSamples>,
+    pub sensor: Arc<Sensor>,
+    pub samples: RwLock<TypedSamples>,
 }
 
 #[derive(Debug)]
 pub struct Batch {
-    pub sensor_batches: Arc<SmallVec<[SingleSensorBatch; SMALLVEC_BUFFER_SIZE]>>,
+    pub sensors: SensAppVec<SingleSensorBatch>,
+}
+
+impl Batch {
+    pub fn new(sensors: SensAppVec<SingleSensorBatch>) -> Self {
+        Self { sensors }
+    }
+
+    pub fn default() -> Self {
+        Self {
+            sensors: SensAppVec::new(),
+        }
+    }
+
+    pub async fn len(&self) -> usize {
+        let sensors_len = self.sensors.len();
+        if sensors_len == 0 {
+            return 0;
+        }
+        if sensors_len == 1 {
+            return self.sensors.iter().next().unwrap().len().await;
+        }
+        let futures = self.sensors.iter().map(|v| v.len());
+        let results = futures::future::join_all(futures).await;
+        results.into_iter().sum()
+    }
+}
+
+impl SingleSensorBatch {
+    pub fn new(sensor: Arc<Sensor>, samples: TypedSamples) -> Self {
+        Self {
+            sensor,
+            samples: RwLock::new(samples),
+        }
+    }
+
+    pub async fn append(&mut self, mut new_samples: TypedSamples) -> Result<(), Error> {
+        let mut old_samples_guard = self.samples.write().await;
+        let old_samples = &mut *old_samples_guard;
+
+        // Beautiful code right there
+        match (old_samples, &mut new_samples) {
+            (
+                TypedSamples::Integer(ref mut old_samples),
+                TypedSamples::Integer(ref mut new_samples),
+            ) => {
+                old_samples.append(&mut *new_samples);
+            }
+            (
+                TypedSamples::Numeric(ref mut old_samples),
+                TypedSamples::Numeric(ref mut new_samples),
+            ) => {
+                old_samples.append(new_samples);
+            }
+            (
+                TypedSamples::Float(ref mut old_samples),
+                TypedSamples::Float(ref mut new_samples),
+            ) => {
+                old_samples.append(new_samples);
+            }
+            (
+                TypedSamples::String(ref mut old_samples),
+                TypedSamples::String(ref mut new_samples),
+            ) => {
+                old_samples.append(new_samples);
+            }
+            (
+                TypedSamples::Boolean(ref mut old_samples),
+                TypedSamples::Boolean(ref mut new_samples),
+            ) => {
+                old_samples.append(new_samples);
+            }
+            (
+                TypedSamples::Location(ref mut old_samples),
+                TypedSamples::Location(ref mut new_samples),
+            ) => {
+                old_samples.append(new_samples);
+            }
+            (TypedSamples::Blob(ref mut old_samples), TypedSamples::Blob(ref mut new_samples)) => {
+                old_samples.append(new_samples);
+            }
+            (TypedSamples::Json(ref mut old_samples), TypedSamples::Json(ref mut new_samples)) => {
+                old_samples.append(new_samples);
+            }
+            _ => {
+                anyhow::bail!("Cannot append {:?} to {:?}", new_samples, self.samples);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn len(&self) -> usize {
+        let samples_guard = self.samples.read().await;
+        match &*samples_guard {
+            TypedSamples::Integer(samples) => samples.len(),
+            TypedSamples::Numeric(samples) => samples.len(),
+            TypedSamples::Float(samples) => samples.len(),
+            TypedSamples::String(samples) => samples.len(),
+            TypedSamples::Boolean(samples) => samples.len(),
+            TypedSamples::Location(samples) => samples.len(),
+            TypedSamples::Blob(samples) => samples.len(),
+            TypedSamples::Json(samples) => samples.len(),
+        }
+    }
+
+    pub async fn take_samples(&mut self) -> TypedSamples {
+        let mut samples_guard = self.samples.write().await;
+        let samples = &*samples_guard;
+        let replacement = samples.clone_empty();
+        let samples = std::mem::replace(&mut *samples_guard, replacement);
+        samples
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{Sample, SensAppDateTime};
+    use super::*;
+    use crate::{config::load_configuration, datamodel::SensorType};
+    use smallvec::smallvec;
+
+    #[tokio::test]
+    async fn test_append() {
+        load_configuration().unwrap();
+
+        let mut batch = SingleSensorBatch::new(
+            Arc::new(
+                Sensor::new_without_uuid("test".to_string(), SensorType::Integer, None, None)
+                    .unwrap(),
+            ),
+            TypedSamples::Integer(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: 0
+            },]),
+        );
+
+        assert_eq!(batch.len().await, 1);
+
+        // New integer
+        batch
+            .append(TypedSamples::Integer(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: 1
+            },]))
+            .await
+            .unwrap();
+        assert_eq!(batch.len().await, 2);
+
+        // Incompatible type
+        let result = batch
+            .append(TypedSamples::Numeric(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: rust_decimal::Decimal::new(1, 0)
+            },]))
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Cannot append"));
+
+        // Append numeric to numeric
+        let mut batch = SingleSensorBatch::new(
+            Arc::new(
+                Sensor::new_without_uuid("test".to_string(), SensorType::Numeric, None, None)
+                    .unwrap(),
+            ),
+            TypedSamples::Numeric(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: rust_decimal::Decimal::new(0, 0)
+            },]),
+        );
+        batch
+            .append(TypedSamples::Numeric(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: rust_decimal::Decimal::new(1, 0)
+            },]))
+            .await
+            .unwrap();
+        assert_eq!(batch.len().await, 2);
+
+        // Append float to float
+        let mut batch = SingleSensorBatch::new(
+            Arc::new(
+                Sensor::new_without_uuid("test".to_string(), SensorType::Float, None, None)
+                    .unwrap(),
+            ),
+            TypedSamples::Float(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: 0.0
+            },]),
+        );
+        batch
+            .append(TypedSamples::Float(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: 1.0
+            },]))
+            .await
+            .unwrap();
+        assert_eq!(batch.len().await, 2);
+
+        // Append string to string
+        let mut batch = SingleSensorBatch::new(
+            Arc::new(
+                Sensor::new_without_uuid("test".to_string(), SensorType::String, None, None)
+                    .unwrap(),
+            ),
+            TypedSamples::String(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: "0".to_string()
+            },]),
+        );
+        batch
+            .append(TypedSamples::String(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: "1".to_string()
+            },]))
+            .await
+            .unwrap();
+        assert_eq!(batch.len().await, 2);
+
+        // Append boolean to boolean
+        let mut batch = SingleSensorBatch::new(
+            Arc::new(
+                Sensor::new_without_uuid("test".to_string(), SensorType::Boolean, None, None)
+                    .unwrap(),
+            ),
+            TypedSamples::Boolean(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: false
+            },]),
+        );
+        batch
+            .append(TypedSamples::Boolean(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: true
+            },]))
+            .await
+            .unwrap();
+        assert_eq!(batch.len().await, 2);
+
+        // Append location to location
+        let mut batch = SingleSensorBatch::new(
+            Arc::new(
+                Sensor::new_without_uuid("test".to_string(), SensorType::Location, None, None)
+                    .unwrap(),
+            ),
+            TypedSamples::Location(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: geo::Point::new(0.0, 0.0)
+            },]),
+        );
+        batch
+            .append(TypedSamples::Location(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: geo::Point::new(1.0, 1.0)
+            },]))
+            .await
+            .unwrap();
+        assert_eq!(batch.len().await, 2);
+
+        // Append blob to blob
+        let mut batch = SingleSensorBatch::new(
+            Arc::new(
+                Sensor::new_without_uuid("test".to_string(), SensorType::Blob, None, None).unwrap(),
+            ),
+            TypedSamples::Blob(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: vec![0]
+            },]),
+        );
+        batch
+            .append(TypedSamples::Blob(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: vec![1]
+            },]))
+            .await
+            .unwrap();
+        assert_eq!(batch.len().await, 2);
+
+        // Append json to json
+        let mut batch = SingleSensorBatch::new(
+            Arc::new(
+                Sensor::new_without_uuid("test".to_string(), SensorType::Json, None, None).unwrap(),
+            ),
+            TypedSamples::Json(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: serde_json::json!({"test": 0})
+            },]),
+        );
+        batch
+            .append(TypedSamples::Json(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: serde_json::json!({"test": 1})
+            },]))
+            .await
+            .unwrap();
+        assert_eq!(batch.len().await, 2);
+    }
 }

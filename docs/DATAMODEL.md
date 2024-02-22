@@ -38,7 +38,7 @@ erDiagram
 
     LABELS {
         UUID sensor PK
-        BigSerial named PK
+        BigSerial name PK
         BigSerial description FK
     }
     SENSORS ||--o{ LABELS : ""

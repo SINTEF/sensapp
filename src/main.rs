@@ -1,32 +1,15 @@
 use crate::bus::message;
-use crate::datamodel::batch::Batch;
+use crate::config::load_configuration;
 use crate::http::server::run_http_server;
 use crate::http::state::HttpServerState;
-use axum::extract::DefaultBodyLimit;
-use axum::http::header;
 use axum::http::StatusCode;
-use axum::routing::get;
-use axum::routing::post;
-use axum::Json;
-use axum::Router;
-use config::SensAppConfig;
 use futures::stream::StreamExt;
 use futures::TryStreamExt;
-use polars::prelude::*;
 use std::io;
-use std::io::Cursor;
-use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 use storage::sqlite::sqlite::SqliteStorage;
 use storage::storage::GenericStorage;
-use tokio::sync::OnceCell;
-use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::bytes::Bytes;
-use tower::ServiceBuilder;
-use tower_http::trace;
-use tower_http::{timeout::TimeoutLayer, trace::TraceLayer, ServiceBuilderExt};
 use tracing::event;
 use tracing::Level;
 mod bus;
@@ -41,13 +24,8 @@ mod storage;
 #[tokio::main]
 async fn main() {
     // Load configuration
-    let config = match config::SensAppConfig::load() {
-        Ok(config) => Arc::new(config),
-        Err(err) => {
-            panic!("Failed to load configuration: {:?}", err);
-        }
-    };
-    config::set(config.clone()).expect("Failed to set configuration");
+    load_configuration().expect("Failed to load configuration");
+    let config = config::get().expect("Failed to get configuration");
 
     /*let (tx, rx) = tokio::sync::mpsc::channel(100); // Channel with buffer size 100
 
@@ -70,7 +48,12 @@ async fn main() {
         println!("Handling chunk of events: {:?}", events);
     }*/
 
-    let sqlite_storage = SqliteStorage::connect("sqlite:test.db")
+    let sqlite_connection_string = config.sqlite_connection_string.clone();
+    if sqlite_connection_string.is_none() {
+        eprintln!("No SQLite connection string provided");
+        std::process::exit(1);
+    }
+    let sqlite_storage = SqliteStorage::connect(sqlite_connection_string.unwrap().as_str())
         .await
         .expect("Failed to connect to SQLite");
 
@@ -78,8 +61,6 @@ async fn main() {
         .create_or_migrate()
         .await
         .expect("Failed to create or migrate database");
-
-    println!("Hello, world!");
 
     let columns = infer::columns::infer_column(vec![], false, true);
     let _ = infer::datetime_guesser::likely_datetime_column(&vec![], &vec![]);
@@ -94,9 +75,16 @@ async fn main() {
     let mut wololo = event_bus.main_bus_receiver.activate_cloned();
     let mut wololo2 = event_bus.main_bus_receiver.activate_cloned();
 
+    // Exit the program if a panic occurs
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default_panic(info);
+        std::process::exit(1);
+    }));
+
     // spawn a task that prints the events to stdout
     tokio::spawn(async move {
-        while let Some(message) = wololo.recv().await.ok() {
+        while let Ok(message) = wololo.recv().await {
             //println!("Received event a: {:?}", message);
 
             use crate::storage::storage::StorageInstance;
@@ -108,8 +96,10 @@ async fn main() {
                     sync_receiver: _,
                     sync_sender,
                 }) => {
-                    toto.publish(batch, sync_sender).await;
-                    //println!("Published batch");
+                    toto.publish(batch, sync_sender)
+                        .await
+                        .expect("Failed to publish batch");
+                    println!("Published batch");
                     //sync_receiver.activate().recv().await.unwrap();
                 } /*message::Message::SyncRequest(message::RequestSyncMessage { sender }) => {
                       println!("Received sync request");
@@ -118,10 +108,13 @@ async fn main() {
                   }*/
             }
         }
+        println!("Done");
+        // exit program
+        std::process::exit(0);
     });
     tokio::spawn(async move {
         while let Some(event) = wololo2.recv().await.ok() {
-            //println!("Received event b: {:?}", event);
+            println!("Received event b: {:?}", event);
         }
     });
 
@@ -130,8 +123,8 @@ async fn main() {
     println!("📡 HTTP server listening on {}:{}", endpoint, port);
     match run_http_server(
         HttpServerState {
-            name: "SensApp".to_string(),
-            event_bus: event_bus,
+            name: Arc::new("SensApp".to_string()),
+            event_bus,
         },
         SocketAddr::from((endpoint, port)),
     )

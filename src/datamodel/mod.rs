@@ -1,35 +1,20 @@
-/*use serde::{Deserialize, Serialize};
-use uuid::Uuid;*/
+/*use serde::{Deserialize, Serialize};*/
 
 pub mod batch;
+pub mod batch_builder;
+pub mod sample;
+pub mod sensapp_datetime;
+pub mod sensapp_vec;
+pub mod sensor;
+pub mod sensor_type;
+pub mod typed_samples;
 
-pub enum SensorType {
-    Integer,
-    Numeric,
-    Float,
-    String,
-    Boolean,
-    Location,
-    JSON,
-    Blob,
-}
-
-// Implement to_string() for SensorType
-impl ToString for SensorType {
-    fn to_string(&self) -> String {
-        match self {
-            SensorType::Integer => "Integer".to_string(),
-            SensorType::Numeric => "Numeric".to_string(),
-            SensorType::Float => "Float".to_string(),
-            SensorType::String => "String".to_string(),
-            SensorType::Boolean => "Boolean".to_string(),
-            SensorType::Location => "Location".to_string(),
-            SensorType::JSON => "JSON".to_string(),
-            SensorType::Blob => "Blob".to_string(),
-        }
-    }
-}
-
+pub use sample::Sample;
+pub use sensapp_datetime::SensAppDateTime;
+pub use sensapp_vec::SensAppVec;
+pub use sensor::Sensor;
+pub use sensor_type::SensorType;
+pub use typed_samples::TypedSamples;
 /*
 // Units
 #[derive(Serialize, Deserialize, Debug)]
@@ -37,18 +22,9 @@ struct Unit {
     id: i32,
     name: String,
     description: Option<String>,
-}
+}*/
 
-// Sensors
-#[derive(Serialize, Deserialize, Debug)]
-struct Sensor {
-    sensor_id: i32,
-    uuid: Uuid,
-    name: String,
-    sensor_type: String, // Represent 'type' as 'sensor_type' to avoid keyword conflict
-    unit_id: Option<i32>,
-}
-
+/*
 // Labels
 #[derive(Serialize, Deserialize, Debug)]
 struct Label {
