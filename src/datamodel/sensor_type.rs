@@ -1,9 +1,7 @@
 use std::{
-    hash::{Hash, Hasher},
+    hash::Hash,
     io::{self, Write},
 };
-
-use num_traits::ToBytes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SensorType {

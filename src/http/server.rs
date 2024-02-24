@@ -2,13 +2,11 @@ use super::app_error::AppError;
 use super::influxdb::publish_influxdb;
 use super::state::HttpServerState;
 use crate::config;
-use crate::datamodel::batch_builder::BatchBuilder;
 use crate::importers::csv::publish_csv_async;
-use crate::name_to_uuid::name_to_uuid;
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
-use axum::extract::Multipart;
-use axum::extract::Path;
+//use axum::extract::Multipart;
+//use axum::extract::Path;
 use axum::extract::State;
 use axum::http::header;
 use axum::http::StatusCode;
@@ -16,19 +14,14 @@ use axum::routing::get;
 use axum::routing::post;
 use axum::Json;
 use axum::Router;
-use futures::io::BufReader;
-use futures::stream::StreamExt;
 use futures::TryStreamExt;
 use polars::prelude::*;
-use sqlx::any;
+use sindit_senml::time;
 use std::io;
 use std::io::Cursor;
-use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::bytes::Bytes;
 use tower::ServiceBuilder;
 use tower_http::trace;
@@ -36,7 +29,9 @@ use tower_http::{timeout::TimeoutLayer, trace::TraceLayer, ServiceBuilderExt};
 use tracing::Level;
 
 pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
-    let max_body_layer = DefaultBodyLimit::max(config::get()?.parse_http_body_limit()?);
+    let config = config::get()?;
+    let max_body_layer = DefaultBodyLimit::max(config.parse_http_body_limit()?);
+    let timeout_seconds = config.http_server_timeout_seconds;
 
     // Initialize tracing
     tracing_subscriber::fmt()
@@ -56,7 +51,7 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
                 .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
         )
         .sensitive_response_headers(sensitive_headers)
-        .layer(TimeoutLayer::new(Duration::from_secs(10)))
+        .layer(TimeoutLayer::new(Duration::from_secs(timeout_seconds)))
         .compression()
         .into_inner();
 
@@ -67,7 +62,6 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             "/publish",
             post(publish_handler).layer(max_body_layer.clone()),
         )
-        //.route("/publish_stream", post(publish_stream_handler))
         .route(
             "/sensors/:sensor_name_or_uuid/publish_csv",
             post(publish_csv),
@@ -81,7 +75,6 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             "/api/v2/write",
             post(publish_influxdb).layer(max_body_layer.clone()),
         )
-        .route("/fail", get(test_fail))
         .layer(middleware)
         .with_state(state);
 
@@ -102,19 +95,13 @@ async fn shutdown_signal() {
 }
 
 async fn handler(State(state): State<HttpServerState>) -> Result<Json<String>, AppError> {
-    //EVENT_BUS.get().unwrap().publish(42).await.unwrap();
-    //state.event_bus.publish(42).await.unwrap();
-    // let mut sync_receiver = state.event_bus.sync_request().await?;
-    // sync_receiver.recv().await?;
-
     let name: String = (*state.name).clone();
-
     Ok(Json(name))
 }
 
 async fn publish_csv(
     State(state): State<HttpServerState>,
-    Path(sensor_name_or_uuid): Path<String>,
+    //Path(sensor_name_or_uuid): Path<String>,
     body: axum::body::Body,
 ) -> Result<String, AppError> {
     // let uuid = name_to_uuid(sensor_name_or_uuid.as_str())?;
@@ -131,17 +118,6 @@ async fn publish_csv(
 
     publish_csv_async(csv_reader, 100, state.event_bus.clone()).await?;
 
-    Ok("ok".to_string())
-}
-
-fn try_thing() -> Result<()> {
-    anyhow::bail!("Test error");
-}
-
-async fn test_fail() -> Result<String, AppError> {
-    // wait 3s
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    try_thing()?;
     Ok("ok".to_string())
 }
 
@@ -167,7 +143,8 @@ async fn publish_handler(bytes: Bytes) -> Result<Json<String>, (StatusCode, Stri
     }
 }
 
-async fn publish_multipart(mut multipart: Multipart) -> Result<Json<String>, (StatusCode, String)> {
+async fn publish_multipart(/*mut multipart: Multipart*/
+) -> Result<Json<String>, (StatusCode, String)> {
     Ok(Json("ok".to_string()))
 }
 

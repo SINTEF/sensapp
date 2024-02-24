@@ -4,7 +4,7 @@ use nom::{
         is_hex_digit,
     },
     combinator::map,
-    combinator::{cond, map_res},
+    combinator::map_res,
     multi::count,
     sequence::tuple,
     IResult,

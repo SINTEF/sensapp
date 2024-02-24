@@ -1,17 +1,17 @@
+use super::sqlite_publishers::*;
+use super::sqlite_utilities::get_sensor_id_or_create_sensor;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
-use crate::datamodel::{Sample, Sensor, SensorType, TypedSamples};
-use crate::storage::storage::{GenericStorage, SensorData, StorageInstance};
+use crate::datamodel::TypedSamples;
+use crate::storage::storage::{GenericStorage, StorageInstance};
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
-use cached::proc_macro::{cached, once};
 use sqlx::{prelude::*, Sqlite, Transaction};
 use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
-use uuid::Uuid;
 
 // SQLite implementation
 #[derive(Debug)]
@@ -53,24 +53,14 @@ impl GenericStorage for SqliteStorage {
 
         Ok(())
     }
-
-    async fn publish_batch(&self, batch: crate::datamodel::batch::Batch) -> Result<()> {
-        // Implement batch publishing logic here
-        Ok(())
-    }
 }
 
 #[async_trait]
 impl StorageInstance for SqliteStorage {
-    async fn create_sensor(&self, sensor_data: &SensorData) -> Result<()> {
-        // Implement sensor creation logic here
-        Ok(())
-    }
-
     async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for single_sensor_batch in batch.sensors.as_ref() {
-            self.publish_single_sensor_batch(&mut transaction, &single_sensor_batch)
+            self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
                 .await?;
         }
         transaction.commit().await?;
@@ -79,11 +69,10 @@ impl StorageInstance for SqliteStorage {
     }
 
     async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
-        // Implement sync logic here
-        //println!("Syncing");
-        //println!("Receiver count: {}", sync_sender.receiver_count());
+        // SQLite doesn't need to do anything special for sync
+        // As we use transactions and the WAL mode.
         if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
-            let _ = timeout(Duration::from_secs(5), sync_sender.broadcast(())).await?;
+            let _ = timeout(Duration::from_secs(15), sync_sender.broadcast(())).await?;
         }
         Ok(())
     }
@@ -94,151 +83,43 @@ impl StorageInstance for SqliteStorage {
     }
 }
 
-/*#[cached(
-    time = 120,
-    result = true,
-    sync_writes = true,
-    key = "Uuid",
-    convert = r#"{ sensor.uuid }"#
-)]*/
-//async fn get_sensor_id_or_create_sensor(pool: &SqlitePool, sensor: &Sensor) -> Result<i64> {
-async fn get_sensor_id_or_create_sensor(
-    transaction: &mut Transaction<'_, Sqlite>,
-    sensor: &Sensor,
-) -> Result<i64> {
-    println!("aaah");
-    let uuid_string = sensor.uuid.to_string();
-    let sensor_id_query = sqlx::query!(
-        r#"
-            SELECT sensor_id FROM sensors WHERE uuid = ?
-            "#,
-        uuid_string
-    );
-
-    let sensor_id = transaction
-        .fetch_optional(sensor_id_query)
-        .await?
-        .map(|row| row.get("sensor_id"));
-
-    // If the sensor exists, it's returned
-    if let Some(Some(sensor_id)) = sensor_id {
-        return Ok(sensor_id);
-    }
-
-    let sensor_type_string = sensor.sensor_type.to_string();
-
-    let create_sensor_query = sqlx::query!(
-        r#"
-            INSERT INTO sensors (uuid, name, type, unit)
-            VALUES (?, ?, ?, ?)
-            "#,
-        uuid_string,
-        sensor.name,
-        sensor_type_string,
-        sensor.unit
-    );
-
-    // Execute the query
-    let sensor_id = transaction
-        .execute(create_sensor_query)
-        .await?
-        .last_insert_rowid();
-
-    // Add the labels
-    for (key, value) in sensor.labels.iter() {
-        let label_query = sqlx::query!(
-            r#"
-                INSERT INTO labels (sensor_id, key, value)
-                VALUES (?, ?, ?)
-                "#,
-            sensor_id,
-            key,
-            value
-        );
-        transaction.execute(label_query).await?;
-    }
-
-    Ok(sensor_id)
-}
-
 impl SqliteStorage {
-    /*async fn get_sensor_id(&self, sensor: &Sensor) -> Result<i64> {
-        get_sensor_id_or_create_sensor(&self.pool, sensor).await
-    }*/
-
     async fn publish_single_sensor_batch(
         &self,
-        mut transaction: &mut Transaction<'_, Sqlite>,
+        transaction: &mut Transaction<'_, Sqlite>,
         single_sensor_batch: &SingleSensorBatch,
     ) -> Result<()> {
-        //let sensor_id = self.get_sensor_id(&single_sensor_batch.sensor).await?;
         let sensor_id =
-            get_sensor_id_or_create_sensor(&mut transaction, &single_sensor_batch.sensor).await?;
+            get_sensor_id_or_create_sensor(transaction, &single_sensor_batch.sensor).await?;
         {
             let samples_guard = single_sensor_batch.samples.read().await;
             match &*samples_guard {
                 TypedSamples::Integer(samples) => {
-                    /*let sensor_id = self
-                        .get_sensor_id(
-                            single_sensor_batch.sensor_uuid,
-                            single_sensor_batch.sensor_name.clone(),
-                            SensorType::Integer,
-                        )
-                        .await?;
-                    */
-                    //let sensor_id = 1;
-                    self.publish_integer_values(&mut transaction, sensor_id, samples)
-                        .await?;
+                    publish_integer_values(transaction, sensor_id, samples).await?;
                 }
-                _ => {
-                    /*return Err(anyhow::anyhow!(
-                        "Unsupported sample type: {:?}",
-                        single_sensor_batch.samples
-                    ))*/
+                TypedSamples::Numeric(samples) => {
+                    publish_numeric_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Float(samples) => {
+                    publish_float_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::String(samples) => {
+                    publish_string_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Boolean(samples) => {
+                    publish_boolean_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Location(samples) => {
+                    publish_location_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Blob(samples) => {
+                    publish_blob_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Json(samples) => {
+                    publish_json_values(transaction, sensor_id, samples).await?;
                 }
             }
         }
-        Ok(())
-    }
-
-    async fn publish_integer_values(
-        &self,
-        transaction: &mut Transaction<'_, Sqlite>,
-        sensor_id: i64,
-        values: &[Sample<i64>],
-    ) -> Result<()> {
-        for value in values {
-            let timestamp_ms = value.datetime.to_unix_milliseconds();
-            let query = sqlx::query!(
-                r#"
-                INSERT INTO integer_values (sensor_id, timestamp_ms, value)
-                VALUES (?, ?, ?)
-                "#,
-                sensor_id,
-                timestamp_ms,
-                value.value
-            );
-            transaction.execute(query).await?;
-        }
-        Ok(())
-    }
-
-    async fn publish_float_values(&self, sensor_id: i64, values: &[Sample<f64>]) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
-        for value in values {
-            let timestamp_ms = value.datetime.to_unix_milliseconds();
-            let query = sqlx::query!(
-                r#"
-                INSERT INTO float_values (sensor_id, timestamp_ms, value)
-                VALUES (?, ?, ?)
-                "#,
-                sensor_id,
-                timestamp_ms,
-                value.value
-            );
-            transaction.execute(query).await?;
-        }
-        transaction.commit().await?;
         Ok(())
     }
 

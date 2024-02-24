@@ -1,6 +1,6 @@
 use crate::config;
 
-use super::{sensapp_vec::SensAppLabels, SensorType};
+use super::{sensapp_vec::SensAppLabels, unit::Unit, SensorType};
 use anyhow::{anyhow, Error};
 use cached::proc_macro::cached;
 use once_cell::sync::OnceCell;
@@ -13,7 +13,7 @@ pub struct Sensor {
     pub uuid: Uuid,
     pub name: String,
     pub sensor_type: SensorType,
-    pub unit: Option<String>,
+    pub unit: Option<Unit>,
     pub labels: SensAppLabels,
 }
 
@@ -78,7 +78,7 @@ fn initialise_uuid_hash_mac() -> Result<Arc<[u8; 32]>, Error> {
 fn compute_uuid_buffer(
     name: &str,
     sensor_type: &SensorType,
-    unit: &Option<String>,
+    unit: &Option<Unit>,
     sorted_labels: &Option<SensAppLabels>,
 ) -> Result<Vec<u8>, Error> {
     if contains_special_chars(name) {
@@ -93,7 +93,7 @@ fn compute_uuid_buffer(
         + 1 // Record Separator (RS) - ASCII 30 (0x1E)
         + match unit {
             None => 0,
-            Some(unit) => unit.len() + 1,
+            Some(unit) => unit.name.len() + 1,
         }
         + 1; // Record Separator (RS) - ASCII 30 (0x1E)
 
@@ -124,7 +124,7 @@ fn compute_uuid_buffer(
     sensor_type.write_to(&mut buffer)?;
     buffer.push(30u8); // Record Separator (RS) - ASCII 30 (0x1E)
     if let Some(unit) = unit {
-        buffer.extend_from_slice(unit.as_bytes());
+        buffer.extend_from_slice(unit.name.as_bytes());
     }
     buffer.push(30u8); // Record Separator (RS) - ASCII 30 (0x1E)
     if let Some(sorted_labels) = sorted_labels {
@@ -178,7 +178,7 @@ impl Sensor {
         uuid: Uuid,
         name: String,
         sensor_type: SensorType,
-        unit: Option<String>,
+        unit: Option<Unit>,
         labels: Option<SensAppLabels>,
     ) -> Self {
         Self {
@@ -201,7 +201,7 @@ impl Sensor {
     pub fn new_without_uuid(
         name: String,
         sensor_type: SensorType,
-        unit: Option<String>,
+        unit: Option<Unit>,
         labels: Option<SensAppLabels>,
     ) -> Result<Self, Error> {
         let sorted_labels = match labels {
@@ -274,7 +274,7 @@ mod tests {
     fn test_compute_uuid_buffer() {
         let name = "TestSensor";
         let sensor_type = SensorType::Numeric;
-        let unit = Some("Celsius".to_string());
+        let unit = Some(Unit::new("Celsius".to_string(), None));
         let mut labels: SensAppLabels = SmallVec::new();
         labels.push(("location".to_string(), "office".to_string()));
         let labels = Some(labels);
@@ -328,7 +328,7 @@ mod tests {
             uuid,
             "TestSensor".to_string(),
             SensorType::Integer,
-            Some("Celsius".to_string()),
+            Some(Unit::new("Celsius".to_string(), None)),
             None,
         );
         assert_eq!(sensor.uuid, uuid);
@@ -340,7 +340,7 @@ mod tests {
             uuid,
             "TestSensor".to_string(),
             SensorType::Integer,
-            Some("Celsius".to_string()),
+            Some(Unit::new("Celsius".to_string(), None)),
             Some(labels),
         );
         assert_eq!(sensor.labels.len(), 1);
@@ -351,7 +351,7 @@ mod tests {
         let sensor = Sensor::new_without_uuid(
             "TestSensor".to_string(),
             SensorType::Location,
-            Some("WGS84".to_string()),
+            Some(Unit::new("WGS84".to_string(), None)),
             None,
         )
         .unwrap();
@@ -368,7 +368,7 @@ mod tests {
         let sensor = Sensor::new_without_uuid(
             "TestSensor".to_string(),
             SensorType::Location,
-            Some("WGS84".to_string()),
+            Some(Unit::new("WGS84".to_string(), None)),
             Some(labels),
         )
         .unwrap();
@@ -387,7 +387,7 @@ mod tests {
             Uuid::new_v4(),
             "TestSensor".to_string(),
             SensorType::Integer,
-            Some("Celsius".to_string()),
+            Some(Unit::new("Celsius".to_string(), None)),
             Some(labels),
         );
         let s = sensor.to_string();

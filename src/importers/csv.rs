@@ -2,8 +2,11 @@ use crate::{
     bus::{wait_for_all::WaitForAll, EventBus},
     datamodel::{
         batch::{Batch, SingleSensorBatch},
-        batch_builder::BatchBuilder,
-        Sample, SensAppDateTime, Sensor, TypedSamples,
+        //batch_builder::BatchBuilder,
+        Sample,
+        SensAppDateTime,
+        Sensor,
+        TypedSamples,
     },
 };
 use anyhow::Result;
@@ -23,7 +26,7 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
 
     let mut current_samples: Vec<Sample<i64>> = vec![];
 
-    let mut batch_builder = BatchBuilder::new()?;
+    //let mut batch_builder = BatchBuilder::new()?;
     let mut all_batches_waiter = WaitForAll::new();
 
     let mut i = 0;
@@ -31,7 +34,7 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
     println!("Reading CSV");
     while let Some(record) = records.next().await {
         let record = record.unwrap();
-        //println!("{:?}", record);
+        println!("{:?}", record);
 
         current_samples.push(Sample {
             datetime: SensAppDateTime::from_unix_seconds(0.0),

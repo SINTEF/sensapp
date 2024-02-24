@@ -22,6 +22,8 @@ CREATE TABLE labels (
     description INTEGER, -- ID for the description in the dictionary (optional)
     PRIMARY KEY (sensor_id, name),
     FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id) -- Foreign key to 'sensors' table
+    FOREIGN KEY (name) REFERENCES labels_name_dictionary(id) -- Foreign key to 'labels_name_dictionary'
+    FOREIGN KEY (description) REFERENCES labels_description_dictionary(id) -- Foreign key to 'labels_description_dictionary'
 ) STRICT;
 
 -- Create the 'labels_name_dictionary' table
@@ -83,8 +85,8 @@ CREATE TABLE boolean_values (
     FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id) -- Foreign key to 'sensors' table
 ) STRICT;
 
--- Create the 'localisations' table
-CREATE TABLE localisations (
+-- Create the 'location_values' table
+CREATE TABLE location_values (
     sensor_id INTEGER NOT NULL, -- References 'sensors' (sensor_id), cannot be null
     timestamp_ms INTEGER NOT NULL, -- Unix timestamp in milliseconds, cannot be null
     latitude REAL NOT NULL, -- Latitude value, cannot be null
@@ -100,11 +102,27 @@ CREATE TABLE json_values (
     FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id) -- Foreign key to 'sensors' table
 ) STRICT;
 
+
+-- Create the 'blob_values' table
+CREATE TABLE blob_values (
+    sensor_id INTEGER NOT NULL, -- References 'sensors' (sensor_id), cannot be null
+    timestamp_ms INTEGER NOT NULL, -- Unix timestamp in milliseconds, cannot be null
+    value BLOB NOT NULL, -- BLOB value, cannot be null
+    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id) -- Foreign key to 'sensors' table
+) STRICT;
+
 -- Indexes
+CREATE INDEX index_units_name ON units(name);
+
+CREATE INDEX index_labels_name_dictionary_name ON labels_name_dictionary(name);
+CREATE INDEX index_labels_description_dictionary_description ON labels_description_dictionary(description);
+CREATE INDEX index_strings_values_dictionary_value ON strings_values_dictionary(value);
+
 CREATE INDEX index_integer_values ON integer_values(sensor_id, timestamp_ms);
 CREATE INDEX index_numeric_values ON numeric_values(sensor_id, timestamp_ms);
 CREATE INDEX index_float_values ON float_values(sensor_id, timestamp_ms);
 CREATE INDEX index_string_values ON string_values(sensor_id, timestamp_ms);
 CREATE INDEX index_boolean_values ON boolean_values(sensor_id, timestamp_ms);
-CREATE INDEX index_localisations ON localisations(sensor_id, timestamp_ms);
+CREATE INDEX index_location_values ON location_values(sensor_id, timestamp_ms);
 CREATE INDEX index_json_values ON json_values(sensor_id, timestamp_ms);
+CREATE INDEX index_blob_values ON blob_values(sensor_id, timestamp_ms);

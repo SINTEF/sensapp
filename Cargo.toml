@@ -17,7 +17,14 @@ futures = "0.3"
 #http-body = "1.0"
 #http-body-util = "0.1"
 polars = { version = "0.37" }
-sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
+sqlx = { version = "0.7", features = [
+  "runtime-tokio",
+  "sqlite",
+  "postgres",
+  "uuid",
+  "json",
+  "time",
+] }
 tokio = { version = "1.35", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = "0.7"

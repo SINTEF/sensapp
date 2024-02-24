@@ -15,6 +15,9 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_BODY_LIMIT", default = "10mb")]
     pub http_body_limit: String,
 
+    #[config(env = "SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS", default = 30)]
+    pub http_server_timeout_seconds: u64,
+
     #[config(env = "SENSAPP_MAX_INFERENCES_ROWS", default = 128)]
     pub max_inference_rows: usize,
 
@@ -26,6 +29,12 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_SQLITE_CONNECTION_STRING")]
     pub sqlite_connection_string: Option<String>,
+
+    #[config(env = "SENSAPP_POSTGRES_CONNECTION_STRING")]
+    pub postgres_connection_string: Option<String>,
+
+    #[config(env = "SENSAPP_TIMESCALEDB_CONNECTION_STRING")]
+    pub timescaledb_connection_string: Option<String>,
 }
 
 impl SensAppConfig {

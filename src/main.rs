@@ -8,6 +8,7 @@ use futures::TryStreamExt;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use storage::postgresql::postgresql::PostgresStorage;
 use storage::sqlite::sqlite::SqliteStorage;
 use storage::storage::GenericStorage;
 use tracing::event;
@@ -62,6 +63,36 @@ async fn main() {
         .await
         .expect("Failed to create or migrate database");
 
+    /*let postgres_connection_string = config.postgres_connection_string.clone();
+    if postgres_connection_string.is_none() {
+        eprintln!("No PostgreSQL connection string provided");
+        std::process::exit(1);
+    }
+    let postgres_storage = PostgresStorage::connect(postgres_connection_string.unwrap().as_str())
+        .await
+        .expect("Failed to connect to PostgreSQL");
+
+    postgres_storage
+        .create_or_migrate()
+        .await
+        .expect("Failed to create or migrate database");*/
+
+    let timescaledb_connection_string = config.timescaledb_connection_string.clone();
+    if timescaledb_connection_string.is_none() {
+        eprintln!("No TimescaleDB connection string provided");
+        std::process::exit(1);
+    }
+    let timescaledb_storage = storage::timescaledb::timescaledb::TimeScaleDBStorage::connect(
+        timescaledb_connection_string.unwrap().as_str(),
+    )
+    .await
+    .expect("Failed to connect to TimescaleDB");
+
+    timescaledb_storage
+        .create_or_migrate()
+        .await
+        .expect("Failed to create or migrate database");
+
     let columns = infer::columns::infer_column(vec![], false, true);
     let _ = infer::datetime_guesser::likely_datetime_column(&vec![], &vec![]);
     let _ = infer::geo_guesser::likely_geo_columns(&vec![], &vec![]);
@@ -72,7 +103,7 @@ async fn main() {
     */
 
     let event_bus = bus::event_bus::init_event_bus();
-    let mut wololo = event_bus.main_bus_receiver.activate_cloned();
+    //let mut wololo = event_bus.main_bus_receiver.activate_cloned();
     let mut wololo2 = event_bus.main_bus_receiver.activate_cloned();
 
     // Exit the program if a panic occurs
@@ -83,7 +114,7 @@ async fn main() {
     }));
 
     // spawn a task that prints the events to stdout
-    tokio::spawn(async move {
+    /*tokio::spawn(async move {
         while let Ok(message) = wololo.recv().await {
             //println!("Received event a: {:?}", message);
 
@@ -98,8 +129,38 @@ async fn main() {
                 }) => {
                     toto.publish(batch, sync_sender)
                         .await
-                        .expect("Failed to publish batch");
-                    println!("Published batch");
+                        .expect("Failed to publish batch sqlite");
+                    println!("Published batch sqlite");
+                    //sync_receiver.activate().recv().await.unwrap();
+                } /*message::Message::SyncRequest(message::RequestSyncMessage { sender }) => {
+                      println!("Received sync request");
+                      toto.sync().await.unwrap();
+                      sender.broadcast(()).await.unwrap();
+                  }*/
+            }
+        }
+        println!("Done");
+        // exit program
+        std::process::exit(0);
+    });*/
+    tokio::spawn(async move {
+        while let Ok(message) = wololo2.recv().await {
+            //println!("Received event a: {:?}", message);
+
+            use crate::storage::storage::StorageInstance;
+            //let toto: &dyn StorageInstance = &postgres_storage;
+            let toto: &dyn StorageInstance = &timescaledb_storage;
+
+            match message {
+                message::Message::Publish(message::PublishMessage {
+                    batch,
+                    sync_receiver: _,
+                    sync_sender,
+                }) => {
+                    toto.publish(batch, sync_sender)
+                        .await
+                        .expect("Failed to publish batch postgresql");
+                    println!("Published batch postgresql");
                     //sync_receiver.activate().recv().await.unwrap();
                 } /*message::Message::SyncRequest(message::RequestSyncMessage { sender }) => {
                       println!("Received sync request");
@@ -112,11 +173,11 @@ async fn main() {
         // exit program
         std::process::exit(0);
     });
-    tokio::spawn(async move {
+    /*tokio::spawn(async move {
         while let Some(event) = wololo2.recv().await.ok() {
             println!("Received event b: {:?}", event);
         }
-    });
+    });*/
 
     let endpoint = config.endpoint;
     let port = config.port;

@@ -1,4 +1,4 @@
-use super::{sample, sensapp_vec::SensAppVec, Sensor, TypedSamples};
+use super::{sensapp_vec::SensAppVec, Sensor, TypedSamples};
 use anyhow::Error;
 use std::sync::Arc;
 use tokio::sync::RwLock;

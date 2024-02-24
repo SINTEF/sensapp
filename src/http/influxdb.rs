@@ -1,10 +1,8 @@
-use crate::datamodel::{
-    batch,
-    batch_builder::{self, BatchBuilder},
-    SensAppDateTime, Sensor, SensorType, TypedSamples,
-};
-
 use super::{app_error::AppError, state::HttpServerState};
+use crate::bus::message;
+use crate::datamodel::{
+    batch_builder::BatchBuilder, SensAppDateTime, Sensor, SensorType, TypedSamples,
+};
 use anyhow::Result;
 use axum::{
     debug_handler,
@@ -12,7 +10,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use flate2::read::GzDecoder;
-use influxdb_line_protocol::{parse_lines, FieldValue, ParsedLine};
+use influxdb_line_protocol::{parse_lines, FieldValue};
 use serde::Deserialize;
 use smallvec::SmallVec;
 use std::{io::Read, str::from_utf8};
@@ -106,7 +104,7 @@ pub async fn publish_influxdb(
     println!("org: {:?}", org);
     println!("org_id: {:?}", org_id);
     println!("precision: {:?}", precision);
-    println!("bytes: {:?}", bytes);
+    //println!("bytes: {:?}", bytes);
     println!("headers: {:?}", headers);
 
     // Requires org or org_id
@@ -121,20 +119,10 @@ pub async fn publish_influxdb(
 
     let mut batch_builder = BatchBuilder::new()?;
 
-    /*let lines = parser
-    .map(|line| match line {
-        Ok(line) => Ok(line),
-        Err(error) => Err(AppError::BadRequest(anyhow::anyhow!(error))),
-    })
-    .collect::<Result<Vec<ParsedLine>, AppError>>()?;*/
-
-    //println!("lines: {:?}", lines);
     for line in parser {
         match line {
             Ok(line) => {
-                //println!("line: {:?}", line);
                 let measurement = line.series.measurement;
-                //let tags = line.series.tag_set;
 
                 let tags = match &line.series.tag_set {
                     None => None,
@@ -159,11 +147,9 @@ pub async fn publish_influxdb(
                     },
                 };
 
-                // let sensor_type = crate::datamodel::SensorType::Numeric;
                 let url_encoded_field_name = urlencoding::encode(&measurement).to_string();
 
                 for (field_key, field_value) in line.field_set {
-                    // todo: space is unsafe
                     let unit = None;
                     let (sensor_type, value) =
                         match influxdb_field_to_sensapp(field_value, datetime) {
@@ -174,7 +160,6 @@ pub async fn publish_influxdb(
                         };
                     let name = compute_field_name(&url_encoded_field_name, &field_key);
                     let sensor = Sensor::new_without_uuid(name, sensor_type, unit, tags.clone())?;
-                    //println!("{:?} - {:?}", value, sensor);
                     batch_builder.add(Arc::new(sensor), value).await?;
                 }
             }
@@ -200,7 +185,7 @@ pub async fn publish_influxdb(
 
 #[cfg(test)]
 mod tests {
-    use crate::bus::EventBus;
+    use crate::bus::{self, message, EventBus};
 
     use super::*;
     use flate2::write::GzEncoder;
@@ -242,9 +227,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_influxdb() {
+        let event_bus = bus::event_bus::init_event_bus();
+        let mut wololo = event_bus.main_bus_receiver.activate_cloned();
+        tokio::spawn(async move {
+            while let Ok(message) = wololo.recv().await {
+                match message {
+                    message::Message::Publish(message::PublishMessage {
+                        batch: _,
+                        sync_receiver: _,
+                        sync_sender,
+                    }) => {
+                        println!("Received publish message");
+                        sync_sender.broadcast(()).await.unwrap();
+                    }
+                }
+            }
+        });
         let state = State(HttpServerState {
             name: Arc::new("influxdb test".to_string()),
-            event_bus: Arc::new(EventBus::init("test".to_string())),
+            event_bus: event_bus.clone(),
         });
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {

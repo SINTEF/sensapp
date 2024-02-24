@@ -62,10 +62,6 @@ impl WaitForAll {
 
         Ok(())
     }
-
-    pub fn get_finished_receiver(&self) -> InactiveReceiver<()> {
-        self.finished_receiver.clone()
-    }
 }
 
 #[cfg(test)]
@@ -117,15 +113,5 @@ mod tests {
         wfa.add(r1).await;
         s1.broadcast(()).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-
-    #[tokio::test]
-    async fn test_get_finished_receiver() {
-        let mut wfa = WaitForAll::new();
-        let mut finished_receiver = wfa.get_finished_receiver().activate();
-        let (s1, r1) = async_broadcast::broadcast(1);
-        wfa.add(r1).await;
-        s1.broadcast(()).await.unwrap();
-        finished_receiver.recv().await.unwrap();
     }
 }

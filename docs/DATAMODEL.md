@@ -90,7 +90,7 @@ erDiagram
         Boolean value
     }
 
-    %% Localisations are common enough to be part of the core data model
+    %% Locations are common enough to be part of the core data model
     LOCATION_VALUES {
         UUID sensor
         DateTime datetime
@@ -177,7 +177,7 @@ Using a dictionary improves the performances in most cases. However if many stri
 
 In practice, we expect sensors to not generate unique distinct strings all the time, so using a dictionary should be a good idea for the majority of use cases.
 
-## Geolocalisation and Coordinates Systems
+## Geolocation and Coordinates Systems
 
 In the current version, the geolocalised data doesn't really mind the coordinate system used. The data is likely going to use WGS84, but it could be ETRS89 or something else. It's up to the publisher and the consumer to agree on the coordinate system used, for now.
 
