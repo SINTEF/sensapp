@@ -98,23 +98,27 @@ We also support InfluxDB line protocol, and the Prometheus remote stores protoco
 SensApp should support various storage backends. The best storage backend for time series has yet to exist.
 
  * For small deployments, SQLite is used.
+  * It is possible to use Litestream to replicate and backup the SQLite database.
  * For medium deployments, PostgreSQL is used.
    * It is optional to use the TimescaleDB plugin or Citus Columnar.
  * For larger deployments, ClickHouse is used.
 
  * SensApp can also produce Parquet files stored in S3-compatible object stores.
+ * A experimental support for DuckDB is also available. The DuckDB database format isn't stable yet, and it may be wise to wait for the DuckDB 1.0 release before using it in production.
 
 SensApp can use other storage backends in the future. Could it be Cassandra, Apache IoTDB, OpenTSDB, QuestDB, HoraeDB, or something new?
 
 We base our storage on the findings of the paper [TSM-Bench: Benchmarking Time Series Database Systems for Monitoring Applications](https://dl.acm.org/doi/abs/10.14778/3611479.3611532) that shows that ClickHouse is a better choice than most databases for time series at scale, at the moment. Unfortunately, The paper didn't include IoTDB, and the new author doesn't like the JVM much, so IoTDB support is not a priority. Other databases are relatively new, and we favour the most popular ones for now.
 
-SensApp also supports SQLite for small deployments and local persistence. The SQLite storage feature cannot scale to large deployments, but many deployments are small, and SQLite is a good choice for these.
+SensApp also supports SQLite for small deployments and local persistence. The SQLite storage feature cannot scale to large deployments, but many deployments are small, and SQLite is a good choice for these. When combined with [Litestream](https://litestream.io/), SQLite can have some replication and backup capabilities.
 
 PostgreSQL is also supported as it is the most popular database according to the [StackOverflow developer Survey 2023](https://survey.stackoverflow.co/2023/) and should provide a good compromise between performance and convenience. The choice between Vanilla PostgreSQL tables, TimeScaleDB bucketstyle (hyper) tables, or Citus columnar tables is left to the user.
 
 Columnar storage with compression fits well with time series data, and a distributed Clickhouse cluster is the favoured choice for large deployments.
 
-SensApp used to rely on MongoDB, as it was created during the NoSQL hype, but the performances were very poor for this use case.
+DuckDB is a new database that is promising. It can be seen as some kind of columnar SQLite, for analytics. Once the DuckDB 1.0 release is out, it may be a good choice for small to medium deployments.
+
+SensApp used to rely on MongoDB, as it was created during the NoSQL hype, but the performances were very poor for this use case. It was supposed to web scale, but it didn't scale well enough for time series data. Having a binary JSON (BSON) document per datapoint had a too significant overhead.
 
 ## Scalability
 
@@ -126,7 +130,7 @@ The publisher should have a mechanism to automatically retry when SensAPP return
 
 SensApp should scale horizontally and not persist state on its own. It keeps relatively small buffers in memory to improve performances and relies on the storage backend to persist data. Publishers should consider the data as persisted once SensApp acknowledges it.
 
-The storage layer should scale as well. SQLite on a network filesystem could work, but using a distributed storage backend is more advisable when one single database instance isn't enough.
+The storage layer should scale as well. SQLite on a network filesystem or using Litestream may, but using another distributed storage backend is advised when one single database instance isn't enough.
 
 It is essential to mention that horizontal scalability comes with a higher complexity and energy cost. Prefer vertical scalability when possible. In 2024, single database servers can handle high loads, with hundreds of cores, petabytes of storage, and terabytes of RAM.
 
@@ -137,3 +141,7 @@ SensApp should acknowledge the persistence of the incoming data once the storage
 The publisher should favour the message queue ingestion pipeline if resilience is a concern.
 
 The storage backend and the message queue should be resilient.
+
+## Internal Software Architecture
+
+Internally, SensApp uses a message bus and queues to communicate between components. This is inspired by the NodeJS, Apache NiFi, and the reactive manifesto.

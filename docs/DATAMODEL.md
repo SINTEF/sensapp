@@ -15,16 +15,17 @@ SensApp distinguises between:
  - **Numeric** values, which are decimal numbers, that shouldn't be approximate values. This is not supported by SQLite 3, it was during the SQLite4 experimental project, but is supported by PostGreSQL and ClickHouse.
  - **String** values, which are UTF-8 encoded strings.
  - **Boolean** values, which are true or false.
- - **Localisation** values, which are latitude and longitude coordinates, with an optional altitude. We consider earth as the center of the universe. _Do not_ use this type for space projects, and rely on multiple sensors instead.
+ - **Locations** values, which are latitude and longitude coordinates, with an optional altitude. We consider earth as the center of the universe. _Do not_ use this type for space projects, and rely on multiple sensors instead.
+ - **JSON** values, which are JSON objects. This not a recommended type but it can be very convenient to store complex data.
 
 
 ```mermaid
 erDiagram
 
     SENSORS {
-        String name UK "Name of the sensor"
         UUID id PK "UUID (v7 by default) of the sensor"
-        TypeEnum type PK "The type of the sensor (integer, float, string, boolean), part of the primary key"
+        String name "Name of the sensor"
+        TypeEnum type "The type of the sensor (integer, float, string, boolean, etc…)"
         Serial unit FK "The unit of the sensor, for documentation purposes, if provided"
     }
 
@@ -37,7 +38,7 @@ erDiagram
 
     LABELS {
         UUID sensor PK
-        BigSerial named PK
+        BigSerial name PK
         BigSerial description FK
     }
     SENSORS ||--o{ LABELS : ""
@@ -89,21 +90,45 @@ erDiagram
         Boolean value
     }
 
-    SENSORS ||--o{ STRING_VALUES : ""
-    SENSORS ||--o{ INTEGER_VALUES : ""
-    SENSORS ||--o{ NUMERIC_VALUES : ""
-    SENSORS ||--o{ FLOAT_VALUES : ""
-    SENSORS ||--o{ LOCALISATIONS : ""
-    SENSORS ||--o{ BOOLEAN_VALUES : ""
-
-    %% Localisations are common enough to be part of the core data model
-    LOCALISATIONS {
+    %% Locations are common enough to be part of the core data model
+    LOCATION_VALUES {
         UUID sensor
         DateTime datetime
         Float latitude
         Float longitude
     }
+
+    %% JSON values are not recommended, but they can be very convenient
+    JSON_VALUES {
+        UUID sensor
+        DateTime datetime
+        JSON value
+    }
+
+    BLOB_VALUES {
+        UUID sensor
+        DateTime datetime
+        Blob value
+    }
+
+    SENSORS ||--o{ STRING_VALUES : ""
+    SENSORS ||--o{ INTEGER_VALUES : ""
+    SENSORS ||--o{ NUMERIC_VALUES : ""
+    SENSORS ||--o{ FLOAT_VALUES : ""
+    SENSORS ||--o{ LOCATION_VALUES : ""
+    SENSORS ||--o{ BOOLEAN_VALUES : ""
+    SENSORS ||--o{ JSON_VALUES : ""
+    SENSORS ||--o{ BLOB_VALUES : ""
+
 ```
+
+## Virtual Composite Sensors
+
+SensApp can compose sensors together. For example if you have a sensor that measures the temperature and another one that measures the humidity, you can create a virtual sensor that will consist of both the temperature and humidity sensors.
+
+This can be useful to simplify the data model and the queries. Composite Sensors can also be represented as materialised views in the database, which can improve the read performances.
+
+Virtual Sensors time-series data is joined through the timestamp, using a configurable window size. For example every second, minute, day… It is possible to have a composite sensor consisting of only one sensor to enable resampling.
 
 ## Optimisations and Compression
 
@@ -152,6 +177,10 @@ Using a dictionary improves the performances in most cases. However if many stri
 
 In practice, we expect sensors to not generate unique distinct strings all the time, so using a dictionary should be a good idea for the majority of use cases.
 
-## Geolocalisation and Coordinates Systems
+## Geolocation and Coordinates Systems
 
 In the current version, the geolocalised data doesn't really mind the coordinate system used. The data is likely going to use WGS84, but it could be ETRS89 or something else. It's up to the publisher and the consumer to agree on the coordinate system used, for now.
+
+## TimeStamps are in microseconds
+
+We use microsecond timestamps, as it provides a good compromise between precision and storage size. Some time-series database go down to nanoseconds but then the minimum and maximum timestamps are too close in times using 64 bits integers. It should be possible to have historical data and prediction data in SensApp. We haven't identified use cases that would require nanosecond precision in our research. People with such use cases should consider patching SensApp or using another solution.
