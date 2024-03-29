@@ -20,6 +20,7 @@ mod http;
 mod importers;
 mod infer;
 mod name_to_uuid;
+mod parsing;
 mod storage;
 
 #[tokio::main]

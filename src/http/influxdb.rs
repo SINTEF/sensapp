@@ -1,6 +1,7 @@
 use super::{app_error::AppError, state::HttpServerState};
 use crate::datamodel::{
-    batch_builder::BatchBuilder, SensAppDateTime, Sensor, SensorType, TypedSamples,
+    batch_builder::BatchBuilder, sensapp_datetime::SensAppDateTimeExt, SensAppDateTime, Sensor,
+    SensorType, TypedSamples,
 };
 use anyhow::Result;
 use axum::{
@@ -122,13 +123,13 @@ pub async fn publish_influxdb(
     }): Query<InfluxDBQueryParams>,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
-    println!("InfluxDB publish");
-    println!("bucket: {}", bucket);
-    println!("org: {:?}", org);
-    println!("org_id: {:?}", org_id);
-    println!("precision: {:?}", precision);
-    //println!("bytes: {:?}", bytes);
-    println!("headers: {:?}", headers);
+    // println!("InfluxDB publish");
+    // println!("bucket: {}", bucket);
+    // println!("org: {:?}", org);
+    // println!("org_id: {:?}", org_id);
+    // println!("precision: {:?}", precision);
+    // println!("bytes: {:?}", bytes);
+    // println!("headers: {:?}", headers);
 
     // Requires org or org_id
     if org.is_none() && org_id.is_none() {
@@ -183,16 +184,16 @@ pub async fn publish_influxdb(
 
                 let datetime = match line.timestamp {
                     Some(timestamp) => match precision_enum {
-                        Precision::Nanoseconds => SensAppDateTime::from_unix_duration(
-                            hifitime::Duration::from_truncated_nanoseconds(timestamp),
-                        ),
-                        Precision::Microseconds => SensAppDateTime::from_unix_duration(
-                            hifitime::Duration::from_microseconds(timestamp as f64),
-                        ),
-                        Precision::Milliseconds => {
-                            SensAppDateTime::from_unix_milliseconds(timestamp as f64)
+                        Precision::Nanoseconds => {
+                            SensAppDateTime::from_unix_nanoseconds_i64(timestamp)
                         }
-                        Precision::Seconds => SensAppDateTime::from_unix_seconds(timestamp as f64),
+                        Precision::Microseconds => {
+                            SensAppDateTime::from_unix_microseconds_i64(timestamp)
+                        }
+                        Precision::Milliseconds => {
+                            SensAppDateTime::from_unix_milliseconds_i64(timestamp)
+                        }
+                        Precision::Seconds => SensAppDateTime::from_unix_seconds_i64(timestamp),
                     },
                     None => match SensAppDateTime::now() {
                         Ok(datetime) => datetime,

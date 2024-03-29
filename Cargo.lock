@@ -2927,6 +2927,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "146c289cda302b98a28d40c8b3b90498d6e526dd24ac2ecea73e4e491685b94a"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efb6c9a1dd1def8e2124d17e83a20af56f1570d6c2d2bd9e266ccb768df3840e"
+dependencies = [
+ "anyhow",
+ "itertools 0.11.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.55",
+]
+
+[[package]]
 name = "ptr_meta"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3266,12 +3289,14 @@ dependencies = [
  "num-traits",
  "once_cell",
  "polars",
+ "prost",
  "regex",
  "rust_decimal",
  "serde",
  "serde_json",
  "sindit-senml",
  "smallvec 1.13.2",
+ "snap",
  "sqlx",
  "tokio",
  "tokio-stream",
@@ -3495,6 +3520,12 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
+
+[[package]]
+name = "snap"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b6b67fb9a61334225b5b790716f609cd58395f895b3fe8b328786812a40bc3b"
 
 [[package]]
 name = "socket2"

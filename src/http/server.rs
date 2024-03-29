@@ -1,5 +1,6 @@
 use super::app_error::AppError;
 use super::influxdb::publish_influxdb;
+use super::prometheus::publish_prometheus;
 use super::state::HttpServerState;
 use crate::config;
 use crate::importers::csv::publish_csv_async;
@@ -16,7 +17,6 @@ use axum::Json;
 use axum::Router;
 use futures::TryStreamExt;
 use polars::prelude::*;
-use sindit_senml::time;
 use std::io;
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -70,10 +70,15 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             "/sensors/:sensor_name_or_uuid/publish_multipart",
             post(publish_multipart).layer(max_body_layer.clone()),
         )
-        // InfluxDB compatibility
+        // InfluxDB Write API
         .route(
             "/api/v2/write",
             post(publish_influxdb).layer(max_body_layer.clone()),
+        )
+        // Prometheus Remote Write API
+        .route(
+            "/api/v1/prometheus_remote_write",
+            post(publish_prometheus).layer(max_body_layer.clone()),
         )
         .layer(middleware)
         .with_state(state);
