@@ -1,7 +1,7 @@
 use crate::bus::message;
 use crate::config::load_configuration;
-use crate::http::server::run_http_server;
-use crate::http::state::HttpServerState;
+use crate::ingestors::http::server::run_http_server;
+use crate::ingestors::http::state::HttpServerState;
 use axum::http::StatusCode;
 use futures::stream::StreamExt;
 use futures::TryStreamExt;
@@ -16,15 +16,32 @@ use tracing::Level;
 mod bus;
 mod config;
 mod datamodel;
-mod http;
 mod importers;
 mod infer;
+mod ingestors;
 mod name_to_uuid;
 mod parsing;
 mod storage;
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    let _sentry = sentry::init((
+        "https://94bc3d0bd0424707898d420ed4ad6a3d@feil.sintef.cloud/5",
+        sentry::ClientOptions {
+            release: sentry::release_name!(),
+            debug: true,
+            ..Default::default()
+        },
+    ));
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Tokio runtime")
+        .block_on(async_main());
+}
+
+async fn async_main() {
+    sentry::capture_message("Hello, Sentry 2!", sentry::Level::Info);
     // Load configuration
     load_configuration().expect("Failed to load configuration");
     let config = config::get().expect("Failed to get configuration");
@@ -179,6 +196,27 @@ async fn main() {
             println!("Received event b: {:?}", event);
         }
     });*/
+
+    let wololo = config.clone();
+    let opcua_event_bus = event_bus.clone();
+    //tokio::task::spawn_blocking(move || {
+    if let Some(opcua_configs) = wololo.opcua.as_ref() {
+        for opcua_config in opcua_configs {
+            let cloned_config = opcua_config.clone();
+            let cloned_event_bus = opcua_event_bus.clone();
+            tokio::spawn(async move {
+                ingestors::opcua::opcua_client(cloned_config, cloned_event_bus)
+                    .await
+                    .expect("Failed to start OPC UA client");
+            });
+            //.await
+            //.expect("Failed to start OPC UA client");
+        }
+        println!("OPC UA clients started");
+    }
+    //});
+    //.await
+    //.expect("Failed to start OPC UA clients");
 
     let endpoint = config.endpoint;
     let port = config.port;

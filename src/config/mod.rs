@@ -1,9 +1,14 @@
 use anyhow::Error;
 use confique::Config;
+use serde::Deserialize;
+use serde_inline_default::serde_inline_default;
 use std::{
     net::IpAddr,
     sync::{Arc, OnceLock},
 };
+
+use self::opcua::OpcuaConfig;
+pub mod opcua;
 
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
@@ -35,6 +40,9 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_TIMESCALEDB_CONNECTION_STRING")]
     pub timescaledb_connection_string: Option<String>,
+
+    #[config(env = "SENSAPP_OPC_UA")]
+    pub opcua: Option<Vec<OpcuaConfig>>,
 }
 
 impl SensAppConfig {
@@ -43,6 +51,14 @@ impl SensAppConfig {
             .env()
             .file("settings.toml")
             .load()?;
+
+        // Print the names of the opc_ua configurations
+        if let Some(opc_ua) = &c.opcua {
+            println!("OPC UA Configurations:");
+            for opc_ua in opc_ua {
+                println!("OPC UA Name: {}", opc_ua.application_name);
+            }
+        }
 
         Ok(c)
     }

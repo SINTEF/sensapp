@@ -6,6 +6,7 @@ use crate::config;
 use crate::importers::csv::publish_csv_async;
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
+use axum::extract::Request;
 //use axum::extract::Multipart;
 //use axum::extract::Path;
 use axum::extract::State;
@@ -17,6 +18,7 @@ use axum::Json;
 use axum::Router;
 use futures::TryStreamExt;
 use polars::prelude::*;
+use sentry::integrations::tower::NewSentryLayer;
 use std::io;
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -34,16 +36,17 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
     let timeout_seconds = config.http_server_timeout_seconds;
 
     // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .compact()
-        .init();
+    /*tracing_subscriber::fmt()
+    .with_target(false)
+    .compact()
+    .init();*/
 
     // List of headers that shouldn't be logged
     let sensitive_headers: Arc<[_]> = vec![header::AUTHORIZATION, header::COOKIE].into();
 
     // Middleware creation
     let middleware = ServiceBuilder::new()
+        //.layer(NewSentryLayer::<Request>::new_from_top())
         .sensitive_request_headers(sensitive_headers.clone())
         .layer(
             TraceLayer::new_for_http()

@@ -1,2 +1,54 @@
 
 sqlite_connection_string = "sqlite:test.db"
+#postgres_connection_string = "postgres://localhost:5432/postgres"
+postgres_connection_string = "postgres://postgres:postgres@localhost:5432/postgres"
+timescaledb_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp"
+
+#endpoint = "0.0.0.0"
+
+# OPCUA client support.
+# Please note that this is an early proof of concept implementation, that is tested
+# only for a few use cases. You may have to modify the code to make it work for your
+# specific use cases. Still, it should be a good starting point.
+#
+# SensApp uses the opca Rust crate.
+# The following example uses a configuration similar of the simple-client example from the opcua crate.
+# It should run along the simple-server example from the same crate.
+[[opcua]]
+
+# The endpoint of the OPCUA server.
+# SensApp only supports one endpoint for now.
+endpoint = "opc.tcp://localhost:4855"
+
+# The name of the OPCUA client.
+application_name = "SensApp Simple OPCUA Client"
+
+# The URN of the OPCUA client.
+application_uri = "urn:localhost:OPCUA:SensAppSimpleClient"
+
+# The OPCUA people think it's a good idea to have another unique identifier
+# to identify the product the application belongs to. So this is the product URI.
+product_uri = "urn:localhost:OPCUA:SensAppSimpleClient"
+
+# The security policy, don't use this one in production obviously.
+security_policy = "None"
+security_mode = "None"
+
+# Used as example
+create_sample_keypair = true
+trust_server_cert = true
+
+[[opcua.subscriptions]]
+namespace = 2
+identifiers = ["v1", "v2"]
+publishing_interval = 2000
+
+[[opcua.subscriptions]]
+namespace = 2
+identifiers = [
+  "v3",
+  { type = "String", identifier = "v4" },
+  5,
+  { type = "Guid", identifier = "f9168c5e-ceb2-4faa-b6bf-329bf39fa1e4" },
+]
+publishing_interval = 1000
