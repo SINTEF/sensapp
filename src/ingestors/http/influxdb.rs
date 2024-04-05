@@ -1,7 +1,7 @@
 use super::{app_error::AppError, state::HttpServerState};
-use crate::bus::message;
 use crate::datamodel::{
-    batch_builder::BatchBuilder, SensAppDateTime, Sensor, SensorType, TypedSamples,
+    batch_builder::BatchBuilder, sensapp_datetime::SensAppDateTimeExt, SensAppDateTime, Sensor,
+    SensorType, TypedSamples,
 };
 use anyhow::Result;
 use axum::{
@@ -13,6 +13,7 @@ use flate2::read::GzDecoder;
 use influxdb_line_protocol::{parse_lines, FieldValue};
 use serde::Deserialize;
 use smallvec::SmallVec;
+use std::str::FromStr;
 use std::{io::Read, str::from_utf8};
 use std::{str, sync::Arc};
 use tokio_util::bytes::Bytes;
@@ -87,6 +88,29 @@ fn influxdb_field_to_sensapp(
     }
 }
 
+#[derive(Debug, Default, PartialEq)]
+enum Precision {
+    #[default]
+    Nanoseconds,
+    Microseconds,
+    Milliseconds,
+    Seconds,
+}
+
+impl FromStr for Precision {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ns" => Ok(Precision::Nanoseconds),
+            "us" => Ok(Precision::Microseconds),
+            "ms" => Ok(Precision::Milliseconds),
+            "s" => Ok(Precision::Seconds),
+            _ => Err(()),
+        }
+    }
+}
+
 #[debug_handler]
 pub async fn publish_influxdb(
     State(state): State<HttpServerState>,
@@ -99,13 +123,13 @@ pub async fn publish_influxdb(
     }): Query<InfluxDBQueryParams>,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
-    println!("InfluxDB publish");
-    println!("bucket: {}", bucket);
-    println!("org: {:?}", org);
-    println!("org_id: {:?}", org_id);
-    println!("precision: {:?}", precision);
-    //println!("bytes: {:?}", bytes);
-    println!("headers: {:?}", headers);
+    // println!("InfluxDB publish");
+    // println!("bucket: {}", bucket);
+    // println!("org: {:?}", org);
+    // println!("org_id: {:?}", org_id);
+    // println!("precision: {:?}", precision);
+    // println!("bytes: {:?}", bytes);
+    // println!("headers: {:?}", headers);
 
     // Requires org or org_id
     if org.is_none() && org_id.is_none() {
@@ -113,6 +137,26 @@ pub async fn publish_influxdb(
             "org or org_id must be specified"
         )));
     }
+
+    // Org or org_id, this is the same for SensApp.
+    let common_org_name = match org {
+        Some(org) => org,
+        None => org_id.unwrap_or_default(),
+    };
+
+    // Convert the precision string to a Precision enum
+    let precision_enum = match precision {
+        Some(precision) => match precision.parse() {
+            Ok(precision) => precision,
+            Err(_) => {
+                return Err(AppError::BadRequest(anyhow::anyhow!(
+                    "Invalid precision: {}",
+                    precision
+                )));
+            }
+        },
+        None => Precision::default(),
+    };
 
     let bytes_string = bytes_to_string(&headers, &bytes)?;
     let parser = parse_lines(&bytes_string);
@@ -128,6 +172,9 @@ pub async fn publish_influxdb(
                     None => None,
                     Some(tags) => {
                         let mut tags_vec: SmallVec<[(String, String); 8]> = SmallVec::new();
+                        tags_vec.push(("influxdb_bucket".to_string(), bucket.clone()));
+                        tags_vec.push(("influxdb_org".to_string(), common_org_name.clone()));
+
                         for (key, value) in tags.iter() {
                             tags_vec.push((key.to_string(), value.to_string()));
                         }
@@ -136,9 +183,18 @@ pub async fn publish_influxdb(
                 };
 
                 let datetime = match line.timestamp {
-                    Some(timestamp) => SensAppDateTime::from_unix_duration(
-                        hifitime::Duration::from_truncated_nanoseconds(timestamp),
-                    ),
+                    Some(timestamp) => match precision_enum {
+                        Precision::Nanoseconds => {
+                            SensAppDateTime::from_unix_nanoseconds_i64(timestamp)
+                        }
+                        Precision::Microseconds => {
+                            SensAppDateTime::from_unix_microseconds_i64(timestamp)
+                        }
+                        Precision::Milliseconds => {
+                            SensAppDateTime::from_unix_milliseconds_i64(timestamp)
+                        }
+                        Precision::Seconds => SensAppDateTime::from_unix_seconds_i64(timestamp),
+                    },
                     None => match SensAppDateTime::now() {
                         Ok(datetime) => datetime,
                         Err(error) => {
@@ -185,7 +241,7 @@ pub async fn publish_influxdb(
 
 #[cfg(test)]
 mod tests {
-    use crate::bus::{self, message, EventBus};
+    use crate::bus::{self, message};
 
     use super::*;
     use flate2::write::GzEncoder;
@@ -342,6 +398,72 @@ mod tests {
         let result = publish_influxdb(state.clone(), headers, query, bytes).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(AppError::BadRequest(_))));
+
+        // With various precisions
+        let headers = HeaderMap::new();
+        let query = Query(InfluxDBQueryParams {
+            bucket: "test".to_string(),
+            org: Some("test".to_string()),
+            org_id: None,
+            precision: Some("ns".to_string()),
+        });
+        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773254420000");
+        let result = publish_influxdb(state.clone(), headers, query, bytes)
+            .await
+            .unwrap();
+        assert_eq!(result, StatusCode::NO_CONTENT);
+
+        let headers = HeaderMap::new();
+        let query = Query(InfluxDBQueryParams {
+            bucket: "test".to_string(),
+            org: Some("test".to_string()),
+            org_id: None,
+            precision: Some("us".to_string()),
+        });
+        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773254420");
+        let result = publish_influxdb(state.clone(), headers, query, bytes)
+            .await
+            .unwrap();
+        assert_eq!(result, StatusCode::NO_CONTENT);
+
+        let headers = HeaderMap::new();
+        let query = Query(InfluxDBQueryParams {
+            bucket: "test".to_string(),
+            org: Some("test".to_string()),
+            org_id: None,
+            precision: Some("ms".to_string()),
+        });
+        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773254");
+        let result = publish_influxdb(state.clone(), headers, query, bytes)
+            .await
+            .unwrap();
+        assert_eq!(result, StatusCode::NO_CONTENT);
+
+        let headers = HeaderMap::new();
+        let query = Query(InfluxDBQueryParams {
+            bucket: "test".to_string(),
+            org: Some("test".to_string()),
+            org_id: None,
+            precision: Some("s".to_string()),
+        });
+        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773");
+        let result = publish_influxdb(state.clone(), headers, query, bytes)
+            .await
+            .unwrap();
+        assert_eq!(result, StatusCode::NO_CONTENT);
+
+        // With wrong precision
+        let headers = HeaderMap::new();
+        let query = Query(InfluxDBQueryParams {
+            bucket: "test".to_string(),
+            org: Some("test".to_string()),
+            org_id: None,
+            precision: Some("wrong".to_string()),
+        });
+        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773");
+        let result = publish_influxdb(state.clone(), headers, query, bytes).await;
+        assert!(result.is_err());
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
     }
 
     #[test]
@@ -391,5 +513,26 @@ mod tests {
         let datetime = SensAppDateTime::from_unix_seconds(0.0);
         let result = influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_precision_enum() {
+        let result = Precision::from_str("ns").unwrap();
+        assert_eq!(result, Precision::Nanoseconds);
+
+        let result = Precision::from_str("us").unwrap();
+        assert_eq!(result, Precision::Microseconds);
+
+        let result = Precision::from_str("ms").unwrap();
+        assert_eq!(result, Precision::Milliseconds);
+
+        let result = Precision::from_str("s").unwrap();
+        assert_eq!(result, Precision::Seconds);
+
+        let result = Precision::from_str("wrong");
+        assert!(result.is_err());
+
+        let result = Precision::default();
+        assert_eq!(result, Precision::Nanoseconds);
     }
 }

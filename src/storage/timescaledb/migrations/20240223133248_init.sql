@@ -135,7 +135,7 @@ ALTER TABLE integer_values SET (
     timescaledb.compress_segmentby = 'sensor_id'
 );
 SELECT add_compression_policy('integer_values', INTERVAL '7 days');
---SELECT add_dimension('integer_values', by_hash('sensor_id', 2));
+SELECT add_dimension('integer_values', by_hash('sensor_id', 2));
 
 SELECT create_hypertable('numeric_values', by_range('time', INTERVAL '7 days'));
 ALTER TABLE numeric_values SET (
@@ -143,7 +143,7 @@ ALTER TABLE numeric_values SET (
     timescaledb.compress_segmentby = 'sensor_id'
 );
 SELECT add_compression_policy('numeric_values', INTERVAL '7 days');
---SELECT add_dimension('numeric_values', by_hash('sensor_id', 2));
+SELECT add_dimension('numeric_values', by_hash('sensor_id', 2));
 
 SELECT create_hypertable('float_values', by_range('time', INTERVAL '7 days'));
 ALTER TABLE float_values SET (
@@ -151,7 +151,7 @@ ALTER TABLE float_values SET (
     timescaledb.compress_segmentby = 'sensor_id'
 );
 SELECT add_compression_policy('float_values', INTERVAL '7 days');
---SELECT add_dimension('float_values', by_hash('sensor_id', 2));
+SELECT add_dimension('float_values', by_hash('sensor_id', 2));
 
 SELECT create_hypertable('string_values', by_range('time', INTERVAL '7 days'));
 ALTER TABLE string_values SET (
@@ -159,7 +159,7 @@ ALTER TABLE string_values SET (
     timescaledb.compress_segmentby = 'sensor_id'
 );
 SELECT add_compression_policy('string_values', INTERVAL '7 days');
---SELECT add_dimension('string_values', by_hash('sensor_id', 2));
+SELECT add_dimension('string_values', by_hash('sensor_id', 2));
 
 SELECT create_hypertable('boolean_values', by_range('time', INTERVAL '7 days'));
 ALTER TABLE boolean_values SET (
@@ -167,7 +167,7 @@ ALTER TABLE boolean_values SET (
     timescaledb.compress_segmentby = 'sensor_id'
 );
 SELECT add_compression_policy('boolean_values', INTERVAL '7 days');
---SELECT add_dimension('boolean_values', by_hash('sensor_id', 2));
+SELECT add_dimension('boolean_values', by_hash('sensor_id', 2));
 
 SELECT create_hypertable('location_values', by_range('time', INTERVAL '7 days'));
 ALTER TABLE location_values SET (
@@ -175,7 +175,7 @@ ALTER TABLE location_values SET (
     timescaledb.compress_segmentby = 'sensor_id'
 );
 SELECT add_compression_policy('location_values', INTERVAL '7 days');
---SELECT add_dimension('location_values', by_hash('sensor_id', 2));
+SELECT add_dimension('location_values', by_hash('sensor_id', 2));
 
 SELECT create_hypertable('json_values', by_range('time', INTERVAL '7 days'));
 ALTER TABLE json_values SET (
@@ -183,7 +183,7 @@ ALTER TABLE json_values SET (
     timescaledb.compress_segmentby = 'sensor_id'
 );
 SELECT add_compression_policy('json_values', INTERVAL '7 days');
---SELECT add_dimension('json_values', by_hash('sensor_id', 2));
+SELECT add_dimension('json_values', by_hash('sensor_id', 2));
 
 SELECT create_hypertable('blob_values', by_range('time', INTERVAL '7 days'));
 ALTER TABLE blob_values SET (
@@ -191,4 +191,4 @@ ALTER TABLE blob_values SET (
     timescaledb.compress_segmentby = 'sensor_id'
 );
 SELECT add_compression_policy('blob_values', INTERVAL '7 days');
---SELECT add_dimension('blob_values', by_hash('sensor_id', 2));
+SELECT add_dimension('blob_values', by_hash('sensor_id', 2));

@@ -1,6 +1,29 @@
 pub type SensAppDateTime = hifitime::Epoch;
 use anyhow::Result;
 
+pub trait SensAppDateTimeExt {
+    fn from_unix_nanoseconds_i64(timestamp: i64) -> Self;
+    fn from_unix_microseconds_i64(timestamp: i64) -> Self;
+    fn from_unix_milliseconds_i64(timestamp: i64) -> Self;
+    fn from_unix_seconds_i64(timestamp: i64) -> Self;
+}
+
+impl SensAppDateTimeExt for SensAppDateTime {
+    fn from_unix_nanoseconds_i64(timestamp: i64) -> Self {
+        Self::from_unix_duration(hifitime::Duration::from_truncated_nanoseconds(timestamp))
+    }
+    fn from_unix_microseconds_i64(timestamp: i64) -> Self {
+        Self::from_utc_duration(UNIX_REF_EPOCH.to_utc_duration() + timestamp * Unit::Microsecond)
+    }
+    fn from_unix_milliseconds_i64(timestamp: i64) -> Self {
+        Self::from_utc_duration(UNIX_REF_EPOCH.to_utc_duration() + timestamp * Unit::Millisecond)
+    }
+    fn from_unix_seconds_i64(timestamp: i64) -> Self {
+        Self::from_utc_duration(UNIX_REF_EPOCH.to_utc_duration() + timestamp * Unit::Second)
+    }
+}
+
+use hifitime::{Unit, UNIX_REF_EPOCH};
 use sqlx::types::time::OffsetDateTime;
 pub fn sensapp_datetime_to_offset_datetime(datetime: &SensAppDateTime) -> Result<OffsetDateTime> {
     let unix_timestamp = datetime.to_unix_seconds().floor() as i128;

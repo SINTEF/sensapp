@@ -310,6 +310,7 @@ mod tests {
 
     #[test]
     fn test_uuid_v8_blake3() {
+        _ = load_configuration();
         let name = "TestSensor";
         let uuid_buffer = Vec::from("test");
         let uuid1 = uuid_v8_blake3(name, uuid_buffer.clone()).unwrap();
@@ -348,6 +349,7 @@ mod tests {
 
     #[test]
     fn test_sensor_new_without_uuid() {
+        _ = load_configuration();
         let sensor = Sensor::new_without_uuid(
             "TestSensor".to_string(),
             SensorType::Location,

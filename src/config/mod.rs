@@ -5,6 +5,10 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+use self::{mqtt::MqttConfig, opcua::OpcuaConfig};
+pub mod mqtt;
+pub mod opcua;
+
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
     #[config(env = "SENSAPP_PORT", default = 3000)]
@@ -35,6 +39,12 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_TIMESCALEDB_CONNECTION_STRING")]
     pub timescaledb_connection_string: Option<String>,
+
+    #[config(env = "SENSAPP_OPC_UA")]
+    pub opcua: Option<Vec<OpcuaConfig>>,
+
+    #[config(env = "SENSAPP_MQTT")]
+    pub mqtt: Option<Vec<MqttConfig>>,
 }
 
 impl SensAppConfig {
@@ -43,6 +53,14 @@ impl SensAppConfig {
             .env()
             .file("settings.toml")
             .load()?;
+
+        // Print the names of the opc_ua configurations
+        if let Some(opc_ua) = &c.opcua {
+            println!("OPC UA Configurations:");
+            for opc_ua in opc_ua {
+                println!("OPC UA Name: {}", opc_ua.application_name);
+            }
+        }
 
         Ok(c)
     }
