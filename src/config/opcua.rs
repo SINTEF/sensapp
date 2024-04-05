@@ -1,14 +1,9 @@
-use opcua::client;
 use opcua::client::prelude::{
     ClientBuilder, ClientEndpoint, ClientUserToken, ANONYMOUS_USER_TOKEN_ID,
 };
-use opcua::types::{MessageSecurityMode, UserTokenPolicy};
-use serde::de::{self, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use serde_bytes::ByteBuf;
 use serde_inline_default::serde_inline_default;
-use std::fmt;
-use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct OpcuaUserTokenConfig {
@@ -72,6 +67,43 @@ impl From<OpcuaIdentifier> for opcua::types::Identifier {
 
 #[serde_inline_default]
 #[derive(Debug, Deserialize, Clone)]
+pub struct OpcuaAutoDiscovery {
+    #[serde_inline_default(true)]
+    pub enabled: bool,
+
+    // Start with the root node by default
+    pub start_node: Option<OpcuaIdentifier>,
+
+    // List of nodes to exclude from the discovery.
+    #[serde_inline_default(Vec::new())]
+    pub excluded_nodes: Vec<OpcuaIdentifier>,
+
+    // Maximum discovery depth
+    #[serde_inline_default(32)]
+    pub max_depth: usize,
+
+    // Maximum number of nodes to discover.
+    #[serde_inline_default(1024)]
+    pub max_nodes: usize,
+
+    // Regular expression to filter out nodes based on their browse name.
+    pub node_browse_name_exclude_regex: Option<String>,
+
+    // Regular expression to select variables based on their node id identifier.
+    // If it's not a string, it uses the string representation of the identifier.
+    pub variable_identifier_include_regex: Option<String>,
+
+    // Allow browsing accross namespaces
+    #[serde_inline_default(false)]
+    pub discover_across_namespaces: bool,
+
+    // Filter out variables that have sub nodes.
+    #[serde_inline_default(true)]
+    pub skip_variables_with_children: bool,
+}
+
+#[serde_inline_default]
+#[derive(Debug, Deserialize, Clone)]
 pub struct OpcuaSubscriptionConfig {
     // The subscription namespace
     pub namespace: u16,
@@ -80,7 +112,11 @@ pub struct OpcuaSubscriptionConfig {
     pub name_prefix: Option<String>,
 
     // The subscription identifiers
+    #[serde_inline_default(Vec::new())]
     pub identifiers: Vec<OpcuaIdentifier>,
+
+    // Autodiscovery feature
+    pub autodiscovery: Option<OpcuaAutoDiscovery>,
 
     // Publishing interval
     #[serde_inline_default(1000.0f64)]

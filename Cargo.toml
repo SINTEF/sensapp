@@ -69,3 +69,8 @@ opcua = { version = "0.12", default-features = false, features = [
 ] }
 serde_bytes = "0.11.14"
 sentry = { version = "0.32.2", features = ["anyhow", "tower"] }
+rumqttc = { version = "0.24.0", features = ["url", "websocket"] }
+url = "2.5.0"
+rand = "0.8.5"
+geobuf = "0.1.4"
+protobuf = "3.0.2"

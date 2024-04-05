@@ -214,6 +214,20 @@ async fn async_main() {
         }
         println!("OPC UA clients started");
     }
+
+    let mqtt_event_bus = event_bus.clone();
+    if let Some(mqtt_configs) = config.mqtt.as_ref() {
+        for mqtt_config in mqtt_configs {
+            let cloned_config = mqtt_config.clone();
+            let cloned_event_bus = mqtt_event_bus.clone();
+            tokio::spawn(async move {
+                ingestors::mqtt::mqtt_client(cloned_config, cloned_event_bus)
+                    .await
+                    .expect("Failed to start MQTT client");
+            });
+        }
+        println!("MQTT clients started");
+    }
     //});
     //.await
     //.expect("Failed to start OPC UA clients");

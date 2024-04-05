@@ -2,7 +2,10 @@ use crate::bus::EventBus;
 use crate::config::opcua::{OpcuaConfig, OpcuaSubscriptionConfig};
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::SensAppVec;
-use crate::ingestors::opcua::utils::{data_values_to_typed_samples, monitored_item_to_sensor};
+use crate::ingestors::opcua::opcua_browser::opcua_browser;
+use crate::ingestors::opcua::opcua_utils::{
+    data_values_to_typed_samples, monitored_item_to_sensor,
+};
 use anyhow::{Context, Error, Result};
 use opcua::client::prelude::*;
 use opcua::{
@@ -22,6 +25,25 @@ fn subscribe<CB>(
 where
     CB: OnSubscriptionNotification + Send + Sync + 'static,
 {
+    let namespace = subscription.namespace;
+    let mut identifier_node_ids = subscription
+        .identifiers
+        .into_iter()
+        .map(|identifier| NodeId::new(namespace, identifier))
+        .collect::<Vec<NodeId>>();
+
+    if let Some(autodiscovery) = subscription.autodiscovery.clone() {
+        if autodiscovery.enabled {
+            let variables = opcua_browser(session.clone(), subscription.namespace, autodiscovery)?;
+            println!("Found variables: {}", variables.len());
+            for variable in &variables {
+                println!("Subscribed to variable: {:?}", variable);
+            }
+            // Append the autodiscovered variables to the list of identifiers
+            identifier_node_ids.extend(variables);
+        }
+    }
+
     let session = session.read();
     let subscription_id = session.create_subscription(
         subscription.publishing_interval,
@@ -33,12 +55,10 @@ where
         callback,
     )?;
 
-    let namespace = subscription.namespace;
-
-    let items = subscription
-        .identifiers
+    // Convert the identifiers node ids to monitored items create requests
+    let items = identifier_node_ids
         .into_iter()
-        .map(|identifier| NodeId::new(namespace, identifier).into())
+        .map(|identifier| identifier.into())
         .collect::<Vec<MonitoredItemCreateRequest>>();
 
     let results =
@@ -54,9 +74,9 @@ pub async fn opcua_client(config: OpcuaConfig, event_bus: Arc<EventBus>) -> Resu
 
     let subscriptions = config.subscriptions.clone();
 
-    if subscriptions.is_empty() {
+    /*if subscriptions.is_empty() {
         anyhow::bail!("No subscriptions defined");
-    }
+    }*/
 
     let client_builder: ClientBuilder = config.into();
 
@@ -74,6 +94,12 @@ pub async fn opcua_client(config: OpcuaConfig, event_bus: Arc<EventBus>) -> Resu
 
         let session = client
             .new_session(&endpoints)
+            //.new_session_from_id("default", &endpoints)
+            /* .new_session_from_info(SessionInfo {
+                endpoint: endpoints.first().unwrap().clone(),
+                user_identity_token: IdentityToken::Anonymous,
+                preferred_locales: vec![],
+            })*/
             .map_err(|e| Error::msg(format!("Failed to create session: {}", e)))?;
 
         // Get a mutable reference to the session

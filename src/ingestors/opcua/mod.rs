@@ -1,4 +1,5 @@
-mod client;
-mod utils;
+mod opcua_browser;
+mod opcua_client;
+mod opcua_utils;
 
-pub use client::opcua_client;
+pub use opcua_client::opcua_client;

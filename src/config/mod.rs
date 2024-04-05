@@ -1,13 +1,12 @@
 use anyhow::Error;
 use confique::Config;
-use serde::Deserialize;
-use serde_inline_default::serde_inline_default;
 use std::{
     net::IpAddr,
     sync::{Arc, OnceLock},
 };
 
-use self::opcua::OpcuaConfig;
+use self::{mqtt::MqttConfig, opcua::OpcuaConfig};
+pub mod mqtt;
 pub mod opcua;
 
 #[derive(Debug, Config)]
@@ -43,6 +42,9 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_OPC_UA")]
     pub opcua: Option<Vec<OpcuaConfig>>,
+
+    #[config(env = "SENSAPP_MQTT")]
+    pub mqtt: Option<Vec<MqttConfig>>,
 }
 
 impl SensAppConfig {
