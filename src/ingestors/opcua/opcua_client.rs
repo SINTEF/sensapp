@@ -61,10 +61,14 @@ where
         .map(|identifier| identifier.into())
         .collect::<Vec<MonitoredItemCreateRequest>>();
 
-    let results =
-        session.create_monitored_items(subscription_id, TimestampsToReturn::Both, &items)?;
+    let mut all_results = Vec::with_capacity(items.len());
+    for chunk in items.chunks(32) {
+        let results =
+            session.create_monitored_items(subscription_id, TimestampsToReturn::Both, chunk)?;
+        all_results.extend(results);
+    }
 
-    Ok((subscription_id, results))
+    Ok((subscription_id, all_results))
 }
 
 pub async fn opcua_client(config: OpcuaConfig, event_bus: Arc<EventBus>) -> Result<()> {

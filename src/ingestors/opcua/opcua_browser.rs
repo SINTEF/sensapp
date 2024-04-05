@@ -27,6 +27,56 @@ struct BrowsingState {
     found_variables: RefCell<HashMap<NodeId, bool>>,
 }
 
+fn handle_references(
+    node_id: NodeId,
+    state: Rc<BrowsingState>,
+    references: Vec<ReferenceDescription>,
+    node_ids_to_browse_again: &mut Vec<NodeId>,
+) -> Result<()> {
+    // If the current node has children and is a variable, we may want to ignore it
+    if state.skip_variables_with_children && !references.is_empty() {
+        let mut found_variables = state.found_variables.borrow_mut();
+        if let Some(true) = found_variables.get(&node_id) {
+            // This variable has children, we should not keep it
+            println!("Excluding variable: {}", node_id);
+            found_variables.insert(node_id.clone(), false);
+        }
+    }
+
+    for reference in references {
+        let browse_name = reference.browse_name.name.as_ref();
+        // Skip references that are in another namespace, if not allowed
+        if !state.discover_across_namespaces
+            && reference.node_id.node_id.namespace != state.namespace
+        {
+            continue;
+        }
+
+        // Filter out the references based on their browsing name, if the option
+        // is enabled.
+        if let Some(filter_regex) = &state.filter_regex {
+            if filter_regex.is_match(browse_name) {
+                continue;
+            }
+        }
+
+        // Add the reference to the list of nodes to browse.
+        node_ids_to_browse_again.push(reference.node_id.node_id.clone());
+
+        // Save the variable !
+        if reference.node_class == NodeClass::Variable {
+            let mut found_variables = state.found_variables.borrow_mut();
+            if found_variables.len() >= state.max_nodes {
+                bail!("Max number of nodes reached: {} Perhaps the OPCUA server has a loop in its organisation.", state.max_nodes);
+            }
+            println!("Found variable: {}", reference.node_id.node_id);
+            found_variables.insert(reference.node_id.node_id.clone(), true);
+        }
+    }
+
+    Ok(())
+}
+
 fn browse(
     node_id: NodeId,
     session: Arc<RwLock<Session>>,
@@ -92,53 +142,43 @@ fn browse(
             }
 
             for result in results {
-                if let Some(refs) = &result.references {
-                    // If the current node has children and is a variable, we may want to ignore it
-                    if state.skip_variables_with_children && !refs.is_empty() {
-                        let mut found_variables = state.found_variables.borrow_mut();
-                        if let Some(true) = found_variables.get(&node_id) {
-                            // This variable has children, we should not keep it
-                            println!("Excluding variable: {}", node_id);
-                            found_variables.insert(node_id.clone(), false);
+                if let Some(references) = result.references {
+                    handle_references(
+                        node_id.clone(),
+                        state.clone(),
+                        references,
+                        &mut node_ids_to_browse_again,
+                    )?;
+                }
+                let mut continuation_point = result.continuation_point;
+                while !continuation_point.is_null_or_empty() {
+                    let browse_next_results =
+                        session_read.browse_next(true, &[continuation_point])?;
+                    if let Some(browse_next_results) = browse_next_results {
+                        if browse_next_results.len() != 1 {
+                            bail!("Not the right number of continuation point results found");
                         }
-                    }
-
-                    for reference in refs {
-                        let browse_name = reference.browse_name.name.as_ref();
-                        // Skip references that are in another namespace, if not allowed
-                        if !state.discover_across_namespaces
-                            && reference.node_id.node_id.namespace != state.namespace
-                        {
-                            continue;
+                        let first_result = browse_next_results
+                            .first()
+                            .expect("No results found")
+                            .to_owned();
+                        if let Some(references) = first_result.references {
+                            handle_references(
+                                node_id.clone(),
+                                state.clone(),
+                                references,
+                                &mut node_ids_to_browse_again,
+                            )?;
                         }
-
-                        // Filter out the references based on their browsing name, if the option
-                        // is enabled.
-                        if let Some(filter_regex) = &state.filter_regex {
-                            if filter_regex.is_match(browse_name) {
-                                continue;
-                            }
-                        }
-
-                        // Add the reference to the list of nodes to browse.
-                        node_ids_to_browse_again.push(reference.node_id.node_id.clone());
-
-                        // Save the variable !
-                        if reference.node_class == NodeClass::Variable {
-                            let mut found_variables = state.found_variables.borrow_mut();
-                            if found_variables.len() >= state.max_nodes {
-                                bail!("Max number of nodes reached: {} Perhaps the OPCUA server has a loop in its organisation.", state.max_nodes);
-                            }
-                            println!("Found variable: {}", reference.node_id.node_id);
-                            found_variables.insert(reference.node_id.node_id.clone(), true);
-                        }
+                        continuation_point = first_result.continuation_point;
+                    } else {
+                        break;
                     }
                 }
             }
         }
     }
 
-    //let current_node_id = node_id;
     for node_id in node_ids_to_browse_again {
         browse(
             node_id,
