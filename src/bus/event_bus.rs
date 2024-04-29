@@ -52,3 +52,54 @@ impl EventBus {
 pub fn init_event_bus() -> Arc<EventBus> {
     Arc::new(EventBus::init("SensApp".to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use tokio::{spawn, sync::Mutex};
+
+    use super::*;
+    use crate::datamodel::batch::Batch;
+
+    #[tokio::test]
+    async fn test_event_bus_init() {
+        let event_bus = EventBus::init("TestBus".to_string());
+        assert_eq!(event_bus.name, "TestBus");
+    }
+
+    #[tokio::test]
+    async fn test_init_event_bus() {
+        let event_bus = init_event_bus();
+        assert_eq!(event_bus.name, "SensApp");
+    }
+
+    #[tokio::test]
+    async fn test_event_bus_publish() {
+        let event_bus = EventBus::init("TestBus".to_string());
+        let batch = Batch::default();
+
+        let has_received = Arc::new(Mutex::new(false));
+        let receiver_spawn_clone = event_bus.main_bus_receiver.clone();
+        let has_received_spawn_clone = has_received.clone();
+
+        spawn(async move {
+            let received_message = receiver_spawn_clone.activate().recv().await;
+
+            match received_message {
+                Ok(Message::Publish(publish_message)) => {
+                    publish_message.sync_sender.broadcast(()).await.unwrap();
+                    {
+                        let mut has_received = has_received_spawn_clone.lock().await;
+                        *has_received = true;
+                    }
+                }
+                _ => panic!("Unexpected message type"),
+            }
+        });
+
+        let sync_receiver = event_bus.publish(batch).await.unwrap();
+
+        sync_receiver.clone().activate().recv().await.unwrap();
+
+        assert!(*has_received.lock().await);
+    }
+}

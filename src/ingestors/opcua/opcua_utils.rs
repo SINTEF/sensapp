@@ -343,7 +343,10 @@ pub fn data_values_to_typed_samples(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opcua::types::{ByteString, Guid};
+    use opcua::types::{
+        Array, ByteString, ExpandedNodeId, ExtensionObject, Guid, LocalizedText, QualifiedName,
+        StatusCode, UAString, VariantTypeId, XmlElement,
+    };
 
     #[test]
     fn test_node_to_name() {
@@ -423,4 +426,140 @@ mod tests {
             ("identifier_kind".to_string(), "binary".to_string())
         );
     }
+
+    #[test]
+    fn test_variant_to_sensor_type() {
+        // Test Empty variant
+        assert_eq!(variant_to_sensor_type(&Variant::Empty), None);
+
+        // Test Boolean variant
+        assert_eq!(
+            variant_to_sensor_type(&Variant::Boolean(true)),
+            Some(SensorType::Boolean)
+        );
+
+        // Test integer variants
+        assert_eq!(
+            variant_to_sensor_type(&Variant::SByte(42)),
+            Some(SensorType::Integer)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::Byte(42)),
+            Some(SensorType::Integer)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::Int16(42)),
+            Some(SensorType::Integer)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::UInt16(42)),
+            Some(SensorType::Integer)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::Int32(42)),
+            Some(SensorType::Integer)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::UInt32(42)),
+            Some(SensorType::Integer)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::Int64(42)),
+            Some(SensorType::Integer)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::UInt64(42)),
+            Some(SensorType::Integer)
+        );
+
+        // Test float variants
+        assert_eq!(
+            variant_to_sensor_type(&Variant::Float(42.0)),
+            Some(SensorType::Float)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::Double(42.0)),
+            Some(SensorType::Float)
+        );
+
+        // Test string variant
+        assert_eq!(
+            variant_to_sensor_type(&Variant::String(UAString::from("value"))),
+            Some(SensorType::String)
+        );
+
+        // Test DateTime variant
+        assert_eq!(
+            variant_to_sensor_type(&Variant::DateTime(Box::new(DateTime::default()))),
+            Some(SensorType::Integer)
+        );
+
+        // Test Guid variant
+        assert_eq!(
+            variant_to_sensor_type(&Variant::Guid(Box::new(Guid::null()))),
+            Some(SensorType::Blob)
+        );
+
+        // Test StatusCode variant
+        assert_eq!(
+            variant_to_sensor_type(&Variant::StatusCode(StatusCode::Good)),
+            Some(SensorType::Integer)
+        );
+
+        // Test ByteString variant
+        assert_eq!(
+            variant_to_sensor_type(&Variant::ByteString(ByteString::default())),
+            Some(SensorType::Blob)
+        );
+
+        // Test XmlElement variant
+        assert_eq!(
+            variant_to_sensor_type(&Variant::XmlElement(XmlElement::default())),
+            Some(SensorType::String)
+        );
+
+        // Test fallback variants
+        assert_eq!(
+            variant_to_sensor_type(&Variant::QualifiedName(Box::new(QualifiedName::null()))),
+            Some(SensorType::Json)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::LocalizedText(Box::new(LocalizedText::null()))),
+            Some(SensorType::Json)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::NodeId(Box::new(NodeId::null()))),
+            Some(SensorType::Json)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::ExpandedNodeId(Box::new(ExpandedNodeId::null()))),
+            Some(SensorType::Json)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::ExtensionObject(Box::new(ExtensionObject::null()))),
+            Some(SensorType::Json)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::Variant(Box::new(Variant::Empty))),
+            Some(SensorType::Json)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::DataValue(Default::default())),
+            Some(SensorType::Json)
+        );
+        assert_eq!(
+            variant_to_sensor_type(&Variant::DiagnosticInfo(Default::default())),
+            Some(SensorType::Json)
+        );
+
+        // Test Array variant
+        assert_eq!(
+            variant_to_sensor_type(&Variant::Array(Box::new(
+                Array::new(VariantTypeId::Boolean, vec![Variant::Boolean(true)],).unwrap()
+            ))),
+            Some(SensorType::Json)
+        );
+    }
+
+
 }

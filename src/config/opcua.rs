@@ -315,3 +315,186 @@ impl From<OpcuaConfig> for ClientBuilder {
         client_builder
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{path::PathBuf, str::FromStr};
+
+    use super::*;
+    use opcua::{client::prelude::ClientBuilder, types::Identifier};
+    use serde_json::json;
+
+    #[test]
+    fn test_opcua_config_to_client_builder() {
+        // Create a sample OpcuaConfig
+        let opcua_config: OpcuaConfig = serde_json::from_value(json!({
+            "logging": true,
+            "application_name": "Test Application",
+            "application_uri": "urn:test:application",
+            "product_uri": "urn:test:product",
+            "endpoint": "opc.tcp://test-server:4840",
+            "create_sample_keypair": true,
+            "certificate_path": "client_cert.der",
+            "private_key_path": "client_key.pem",
+            "trust_server_certs": true,
+            "verify_server_certs": false,
+            "pki_dir": "test_pki",
+            "preferred_locales": ["en-US", "de-DE"],
+            "user_token": {
+                "id": "test_user",
+                "user": "testuser",
+                "password": "testpassword" // gitleaks:allow
+            },
+            "session_retry_limit": 5,
+            "session_retry_interval": 1000,
+            "session_timeout": 30000,
+            "ignore_clock_skew": true,
+            "max_message_size": 1048576,
+            "max_chunk_count": 1024,
+            "security_policy": "Basic256",
+            "security_mode": "SignAndEncrypt",
+            "subscriptions": []
+        }))
+        .expect("Failed to parse OpcuaConfig");
+
+        // Convert OpcuaConfig to ClientBuilder
+        let client_builder: ClientBuilder = opcua_config.into();
+
+        let config = client_builder.config();
+
+        // Assert the properties of the ClientBuilder
+        assert_eq!(config.application_name, "Test Application");
+        assert_eq!(config.application_uri, "urn:test:application");
+        assert_eq!(config.product_uri, "urn:test:product");
+        assert_eq!(config.pki_dir, PathBuf::from_str("test_pki").unwrap());
+        assert_eq!(config.session_retry_limit, 5);
+
+        // Assert the endpoints
+        let endpoints = config.endpoints;
+        assert_eq!(endpoints.len(), 1);
+        let endpoint = endpoints.get("default").unwrap();
+        assert_eq!(endpoint.url, "opc.tcp://test-server:4840");
+        assert_eq!(endpoint.security_policy, "Basic256");
+        assert_eq!(endpoint.security_mode, "SignAndEncrypt");
+        assert_eq!(endpoint.user_token_id, "test_user");
+
+        // Assert the user token
+        let user_tokens = config.user_tokens;
+        assert_eq!(user_tokens.len(), 1);
+        let user_token = user_tokens.get("test_user").unwrap();
+        assert_eq!(user_token.user, "testuser");
+        assert_eq!(user_token.password, Some("testpassword".to_string()));
+
+        // Assert other properties
+        assert!(config.create_sample_keypair);
+        assert_eq!(
+            config.certificate_path,
+            Some(PathBuf::from("client_cert.der"))
+        );
+        assert_eq!(
+            config.private_key_path,
+            Some(PathBuf::from("client_key.pem"))
+        );
+        assert!(config.trust_server_certs);
+        assert!(!config.verify_server_certs);
+        assert_eq!(
+            config.preferred_locales,
+            vec!["en-US".to_string(), "de-DE".to_string()]
+        );
+        assert_eq!(config.session_retry_interval, 1000);
+        assert_eq!(config.session_timeout, 30000);
+        assert!(config.performance.ignore_clock_skew);
+        assert_eq!(config.decoding_options.max_message_size, 1048576);
+        assert_eq!(config.decoding_options.max_chunk_count, 1024);
+    }
+
+    #[test]
+    fn test_opcua_config_to_client_builder_with_defaults() {
+        // Create a minimal OpcuaConfig with only the required fields
+        let opcua_config: OpcuaConfig = serde_json::from_value(json!({
+            "endpoint": "opc.tcp://test-server:4840",
+            "security_policy": "None",
+            "security_mode": "None",
+            "subscriptions": []
+        }))
+        .expect("Failed to parse OpcuaConfig");
+
+        // Convert OpcuaConfig to ClientBuilder
+        let client_builder: ClientBuilder = opcua_config.into();
+        let config = client_builder.config();
+
+        // Assert the default values of the ClientBuilder
+        assert_eq!(config.application_name, "unnamed sensapp opcua");
+        assert_eq!(
+            config.application_uri,
+            "urn:localhost:OPCUA:unnamed_sensapp"
+        );
+        assert_eq!(config.product_uri, "urn:localhost:OPCUA:unnamed_sensapp");
+        assert_eq!(config.pki_dir, PathBuf::from_str("pki").unwrap());
+        assert_eq!(config.session_retry_limit, 3);
+
+        // Assert the endpoints
+        let endpoints = config.endpoints;
+        assert_eq!(endpoints.len(), 1);
+        let endpoint = endpoints.get("default").unwrap();
+        assert_eq!(endpoint.url, "opc.tcp://test-server:4840");
+        assert_eq!(endpoint.security_policy, "None");
+        assert_eq!(endpoint.security_mode, "None");
+        assert_eq!(endpoint.user_token_id, ANONYMOUS_USER_TOKEN_ID);
+    }
+
+    #[test]
+    fn test_opcua_identifier_conversion() {
+        // Test case 1: OpcuaIdentifier::Int
+        let identifier_int: OpcuaIdentifier = serde_json::from_value(json!(42)).unwrap();
+        let expected_int = Identifier::Numeric(42);
+        assert_eq!(Identifier::from(identifier_int), expected_int);
+
+        // Test case 2: OpcuaIdentifier::String
+        let identifier_string: OpcuaIdentifier = serde_json::from_value(json!("example")).unwrap();
+        let expected_string = Identifier::String("example".into());
+        assert_eq!(Identifier::from(identifier_string), expected_string);
+
+        // Test case 3: OpcuaIdentifier::Tagged::Int
+        let identifier_tagged_int: OpcuaIdentifier =
+            serde_json::from_value(json!({"type": "Int", "identifier": 123})).unwrap();
+        let expected_tagged_int = Identifier::Numeric(123);
+        assert_eq!(Identifier::from(identifier_tagged_int), expected_tagged_int);
+
+        // Test case 4: OpcuaIdentifier::Tagged::String
+        let identifier_tagged_string: OpcuaIdentifier = serde_json::from_value(json!({
+            "type": "String",
+            "identifier": "tagged_example"
+        }))
+        .unwrap();
+        let expected_tagged_string = Identifier::String("tagged_example".into());
+        assert_eq!(
+            Identifier::from(identifier_tagged_string),
+            expected_tagged_string
+        );
+
+        // Test case 5: OpcuaIdentifier::Tagged::Guid
+        let identifier_tagged_guid: OpcuaIdentifier = serde_json::from_value(json!({
+            "type": "Guid",
+            "identifier": "00000000-0000-0000-0000-000000000000"
+        }))
+        .unwrap();
+        let expected_tagged_guid = Identifier::Guid(uuid::Uuid::nil().into());
+        assert_eq!(
+            Identifier::from(identifier_tagged_guid),
+            expected_tagged_guid
+        );
+
+        // Test case 6: OpcuaIdentifier::Tagged::Binary
+        let identifier_tagged_binary: OpcuaIdentifier = serde_json::from_value(json!({
+            "type": "Binary",
+            "identifier": [1, 2, 3]
+        }))
+        .unwrap();
+        let expected_tagged_binary = Identifier::ByteString(vec![1, 2, 3].into());
+        assert_eq!(
+            Identifier::from(identifier_tagged_binary),
+            expected_tagged_binary
+        );
+    }
+}

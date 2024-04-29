@@ -215,17 +215,236 @@ impl BatchBuilder {
 
 #[cfg(test)]
 mod tests {
+    use tokio::{spawn, sync::Mutex};
+
     use super::*;
+    use crate::{
+        bus::message::Message,
+        config::load_configuration,
+        datamodel::{sensapp_vec::SensAppLabels, Sample, SensorType},
+    };
+
+    // Utility function to create a test sensor
+    fn create_test_sensor(uuid: Uuid) -> Arc<Sensor> {
+        Arc::new(Sensor {
+            uuid,
+            name: "Test Sensor".to_string(),
+            unit: None,
+            sensor_type: SensorType::Integer,
+            labels: SensAppLabels::new(),
+        })
+    }
+
+    // Utility function to create test typed samples
+    fn create_test_samples(count: usize) -> TypedSamples {
+        let samples = (0..count)
+            .map(|i| Sample {
+                datetime: hifitime::Epoch::from_unix_seconds(i as f64 * 1000_f64),
+                value: i as i64,
+            })
+            .collect();
+        TypedSamples::Integer(samples)
+    }
 
     #[tokio::test]
-    async fn test_batch_builder() {
-        let batch_size = 10;
-        let mut batch_builder = BatchBuilder::new();
+    async fn test_add_samples() {
+        _ = load_configuration();
+
+        let mut batch_builder = BatchBuilder::new().unwrap();
+        let sensor = create_test_sensor(Uuid::new_v4());
+        let samples = create_test_samples(5);
+
+        batch_builder.add(sensor.clone(), samples).await.unwrap();
+
+        let more_samples = create_test_samples(10);
+        batch_builder
+            .add(sensor.clone(), more_samples)
+            .await
+            .unwrap();
+
+        let single_sensor_batches = batch_builder.single_sensor_batches.read().await;
+        assert_eq!(single_sensor_batches.len(), 1);
+        assert_eq!(
+            single_sensor_batches.get(&sensor.uuid).unwrap().len().await,
+            15
+        );
     }
 
-    fn assert_send<T: Send>() {}
-    #[test]
-    fn test_send() {
-        assert_send::<BatchBuilder>();
+    #[tokio::test]
+    async fn test_build_batch() {
+        _ = load_configuration();
+
+        let mut batch_builder = BatchBuilder::new().unwrap();
+        let sensor1 = create_test_sensor(Uuid::new_v4());
+        let sensor2 = create_test_sensor(Uuid::new_v4());
+        let samples1 = create_test_samples(3);
+        let samples2 = create_test_samples(2);
+
+        batch_builder.add(sensor1.clone(), samples1).await.unwrap();
+        batch_builder.add(sensor2.clone(), samples2).await.unwrap();
+
+        let batch = batch_builder.build_batch().await;
+        assert_eq!(batch.sensors.len(), 2);
+        assert_eq!(batch.sensors[0].len().await, 3);
+        assert_eq!(batch.sensors[1].len().await, 2);
     }
+
+    #[tokio::test]
+    async fn test_build_batches() {
+        _ = load_configuration();
+
+        let mut batch_builder = BatchBuilder::new().unwrap();
+        let sensor1 = create_test_sensor(Uuid::new_v4());
+        let sensor2 = create_test_sensor(Uuid::new_v4());
+        let sensor3 = create_test_sensor(Uuid::new_v4());
+
+        batch_builder.batch_size = 5;
+
+        let samples1 = create_test_samples(3);
+        let samples2 = create_test_samples(2);
+        let samples3 = create_test_samples(1);
+        let samples4 = create_test_samples(1);
+
+        batch_builder.add(sensor1.clone(), samples1).await.unwrap();
+        batch_builder.add(sensor1.clone(), samples2).await.unwrap();
+        batch_builder.add(sensor2.clone(), samples3).await.unwrap();
+        batch_builder.add(sensor3.clone(), samples4).await.unwrap();
+
+        let batches = batch_builder.build_batches().await;
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].len().await, 5);
+        assert_eq!(batches[1].len().await, 2);
+    }
+
+    #[tokio::test]
+    async fn test_len() {
+        _ = load_configuration();
+
+        let mut batch_builder = BatchBuilder::new().unwrap();
+        assert_eq!(batch_builder.len().await, 0);
+
+        let sensor1 = create_test_sensor(Uuid::new_v4());
+        let samples1 = create_test_samples(3);
+
+        batch_builder.add(sensor1.clone(), samples1).await.unwrap();
+
+        assert_eq!(batch_builder.len().await, 3);
+
+        let samples2 = create_test_samples(7);
+        batch_builder.add(sensor1.clone(), samples2).await.unwrap();
+        assert_eq!(batch_builder.len().await, 10);
+
+        let sensor2 = create_test_sensor(Uuid::new_v4());
+        let samples3 = create_test_samples(1);
+
+        batch_builder.add(sensor2.clone(), samples3).await.unwrap();
+        assert_eq!(batch_builder.len().await, 11);
+    }
+
+    #[tokio::test]
+    async fn test_send_multiple_batch() {
+        _ = load_configuration();
+        let mut batch_builder = BatchBuilder::new().unwrap();
+        batch_builder.batch_size = 3;
+        let sensor1 = create_test_sensor(Uuid::new_v4());
+        let sensor2 = create_test_sensor(Uuid::new_v4());
+        let samples1 = create_test_samples(5);
+        let samples2 = create_test_samples(2);
+        batch_builder.add(sensor1.clone(), samples1).await.unwrap();
+        batch_builder.add(sensor2.clone(), samples2).await.unwrap();
+        let event_bus = Arc::new(EventBus::init("TestBus".to_string()));
+
+        let has_received = Arc::new(Mutex::new(false));
+        let sync_receiver = event_bus.main_bus_receiver.clone();
+        let has_received_spawn_clone = has_received.clone();
+
+        spawn(async move {
+            let result = batch_builder.send_multiple_batch(event_bus).await;
+            result.unwrap();
+            {
+                let mut has_received = has_received_spawn_clone.lock().await;
+                *has_received = true;
+            }
+        });
+
+        let mut receiver = sync_receiver.clone().activate();
+
+        for expected_batch_size in [(1, 3), (1, 2), (1, 2)] {
+            let message = receiver.recv().await.unwrap();
+
+            match message {
+                Message::Publish(publish_message) => {
+                    let batch = publish_message.batch;
+                    let sensors = &batch.sensors;
+                    assert_eq!(sensors.len(), expected_batch_size.0);
+                    let first_sensor = &sensors[0];
+                    assert_eq!(first_sensor.len().await, expected_batch_size.1);
+                }
+            }
+        }
+
+        assert!(*has_received.lock().await);
+
+        // It's now empty
+        receiver.recv().await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn test_send() {
+        _ = load_configuration();
+
+        let mut batch_builder = BatchBuilder::new().unwrap();
+
+        let event_bus = Arc::new(EventBus::init("TestBus".to_string()));
+
+        // Sending nothing should work
+        batch_builder.send(event_bus, 0).await.unwrap();
+
+        batch_builder.batch_size = 5;
+        let sensor = create_test_sensor(Uuid::new_v4());
+        let samples = create_test_samples(3);
+
+        spawn(async move {
+
+        });
+    }
+
+    /*
+    #[tokio::test]
+    async fn test_send_if_batch_full() {
+        _ = load_configuration();
+        let mut batch_builder = BatchBuilder::new().unwrap();
+        batch_builder.batch_size = 3;
+        let sensor1 = create_test_sensor(Uuid::new_v4());
+        let sensor2 = create_test_sensor(Uuid::new_v4());
+        let samples1 = create_test_samples(2);
+        let samples2 = create_test_samples(1);
+        batch_builder.add(sensor1.clone(), samples1).await.unwrap();
+        batch_builder.add(sensor2.clone(), samples2).await.unwrap();
+        let event_bus = Arc::new(EventBus::init("TestBus".to_string()));
+        let result = batch_builder.send_if_batch_full(event_bus.clone()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+        let samples3 = create_test_samples(1);
+        batch_builder.add(sensor1.clone(), samples3).await.unwrap();
+        let result = batch_builder.send_if_batch_full(event_bus).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_send_what_is_left() {
+        _ = load_configuration();
+        let mut batch_builder = BatchBuilder::new().unwrap();
+        let sensor1 = create_test_sensor(Uuid::new_v4());
+        let sensor2 = create_test_sensor(Uuid::new_v4());
+        let samples1 = create_test_samples(2);
+        let samples2 = create_test_samples(1);
+        batch_builder.add(sensor1.clone(), samples1).await.unwrap();
+        batch_builder.add(sensor2.clone(), samples2).await.unwrap();
+        let event_bus = Arc::new(EventBus::init("TestBus".to_string()));
+        let result = batch_builder.send_what_is_left(event_bus).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    }*/
 }

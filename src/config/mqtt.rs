@@ -1,6 +1,14 @@
 use serde::Deserialize;
 use serde_inline_default::serde_inline_default;
 
+
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct MqttSubscription {
+    pub topic: String,
+    pub qos: u8,
+}
+
 #[serde_inline_default]
 #[derive(Debug, Deserialize, Clone)]
 pub struct MqttConfig {
