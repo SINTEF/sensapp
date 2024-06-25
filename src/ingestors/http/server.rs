@@ -131,11 +131,10 @@ async fn publish_csv(
 
 async fn publish_handler(bytes: Bytes) -> Result<Json<String>, (StatusCode, String)> {
     let cursor = Cursor::new(bytes);
-    let df_result = CsvReader::new(cursor)
-        .with_separator(b';')
-        //.infer_schema(Some(128))
-        //.with_dtypes(
-        .has_header(true)
+    let df_result = CsvReadOptions::default()
+        .with_has_header(true)
+        .with_parse_options(CsvParseOptions::default().with_separator(b';'))
+        .into_reader_with_file_handle(cursor)
         .finish();
 
     // print the schema
