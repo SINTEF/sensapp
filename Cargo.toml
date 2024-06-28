@@ -45,7 +45,7 @@ serde_json = "1.0"
 num-traits = "0.2"
 hifitime = "3.9"
 iso8601 = "0.6"
-duckdb = "0.10"
+duckdb = { version = "0.10", features = ["bundled"] }
 config = "0.14"
 serde = "1.0"
 confique = "0.2"

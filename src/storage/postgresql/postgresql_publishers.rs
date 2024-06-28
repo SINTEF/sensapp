@@ -9,7 +9,7 @@ pub async fn publish_integer_values(
     values: &[Sample<i64>],
 ) -> Result<()> {
     for value in values {
-        let timestamp_ms = value.datetime.to_unix_milliseconds();
+        let timestamp_ms = value.datetime.to_unix_milliseconds().floor() as i64;
         let query = sqlx::query(
             r#"
             INSERT INTO integer_values (sensor_id, timestamp_ms, value)
@@ -30,7 +30,7 @@ pub async fn publish_numeric_values(
     values: &[Sample<rust_decimal::Decimal>],
 ) -> Result<()> {
     for value in values {
-        let timestamp_ms = value.datetime.to_unix_milliseconds();
+        let timestamp_ms = value.datetime.to_unix_milliseconds().floor() as i64;
         let string_value = value.value.to_string();
         let query = sqlx::query(
             r#"
@@ -52,7 +52,7 @@ pub async fn publish_float_values(
     values: &[Sample<f64>],
 ) -> Result<()> {
     for value in values {
-        let timestamp_ms = value.datetime.to_unix_milliseconds();
+        let timestamp_ms = value.datetime.to_unix_milliseconds().floor() as i64;
         let query = sqlx::query(
             r#"
             INSERT INTO float_values (sensor_id, timestamp_ms, value)
@@ -74,7 +74,7 @@ pub async fn publish_string_values(
 ) -> Result<()> {
     for value in values {
         let string_id = get_string_value_id_or_create(transaction, &value.value).await?;
-        let timestamp_ms = value.datetime.to_unix_milliseconds();
+        let timestamp_ms = value.datetime.to_unix_milliseconds().floor() as i64;
         let query = sqlx::query(
             r#"
             INSERT INTO string_values (sensor_id, timestamp_ms, value)
@@ -95,7 +95,7 @@ pub async fn publish_boolean_values(
     values: &[Sample<bool>],
 ) -> Result<()> {
     for value in values {
-        let timestamp_ms = value.datetime.to_unix_milliseconds();
+        let timestamp_ms = value.datetime.to_unix_milliseconds().floor() as i64;
         let query = sqlx::query(
             r#"
             INSERT INTO boolean_values (sensor_id, timestamp_ms, value)
@@ -116,7 +116,7 @@ pub async fn publish_location_values(
     values: &[Sample<geo::Point>],
 ) -> Result<()> {
     for value in values {
-        let timestamp_ms = value.datetime.to_unix_milliseconds();
+        let timestamp_ms = value.datetime.to_unix_milliseconds().floor() as i64;
         let lat = value.value.y();
         let lon = value.value.x();
         let query = sqlx::query(
@@ -140,7 +140,7 @@ pub async fn publish_blob_values(
     values: &[Sample<Vec<u8>>],
 ) -> Result<()> {
     for value in values {
-        let timestamp_ms = value.datetime.to_unix_milliseconds();
+        let timestamp_ms = value.datetime.to_unix_milliseconds().floor() as i64;
         let query = sqlx::query(
             r#"
             INSERT INTO blob_values (sensor_id, timestamp_ms, value)
@@ -161,7 +161,7 @@ pub async fn publish_json_values(
     values: &[Sample<serde_json::Value>],
 ) -> Result<()> {
     for value in values {
-        let timestamp_ms = value.datetime.to_unix_milliseconds();
+        let timestamp_ms = value.datetime.to_unix_milliseconds().floor() as i64;
         let string_value = value.value.to_string();
         let query = sqlx::query(
             r#"

@@ -1,5 +1,6 @@
 use crate::bus::message;
 use crate::config::load_configuration;
+use crate::ingestors::amqp::amqp_example;
 use crate::ingestors::http::server::run_http_server;
 use crate::ingestors::http::state::HttpServerState;
 use axum::http::StatusCode;
@@ -8,6 +9,7 @@ use futures::TryStreamExt;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use storage::duckdb::DuckDBStorage;
 use storage::postgresql::postgresql::PostgresStorage;
 use storage::sqlite::sqlite::SqliteStorage;
 use storage::storage::GenericStorage;
@@ -41,7 +43,10 @@ fn main() {
 }
 
 async fn async_main() {
-    sentry::capture_message("Hello, Sentry 2!", sentry::Level::Info);
+    // sentry::capture_message("Hello, Sentry 2!", sentry::Level::Info);
+
+    // amqp_example().await.expect("Failed to start AMQP example");
+
     // Load configuration
     load_configuration().expect("Failed to load configuration");
     let config = config::get().expect("Failed to get configuration");
@@ -81,6 +86,15 @@ async fn async_main() {
         .await
         .expect("Failed to create or migrate database");
 
+    let duckdb_storage = DuckDBStorage::connect("sensapp.db")
+        .await
+        .expect("Failed to connect to DuckDB");
+
+    duckdb_storage
+        .create_or_migrate()
+        .await
+        .expect("Failed to create or migrate database");
+
     /*let postgres_connection_string = config.postgres_connection_string.clone();
     if postgres_connection_string.is_none() {
         eprintln!("No PostgreSQL connection string provided");
@@ -95,7 +109,7 @@ async fn async_main() {
         .await
         .expect("Failed to create or migrate database");*/
 
-    let timescaledb_connection_string = config.timescaledb_connection_string.clone();
+    /*let timescaledb_connection_string = config.timescaledb_connection_string.clone();
     if timescaledb_connection_string.is_none() {
         eprintln!("No TimescaleDB connection string provided");
         std::process::exit(1);
@@ -113,7 +127,7 @@ async fn async_main() {
 
     let columns = infer::columns::infer_column(vec![], false, true);
     let _ = infer::datetime_guesser::likely_datetime_column(&vec![], &vec![]);
-    let _ = infer::geo_guesser::likely_geo_columns(&vec![], &vec![]);
+    let _ = infer::geo_guesser::likely_geo_columns(&vec![], &vec![]);*/
 
     /*let event_bus = event_bus::EVENT_BUS
         .get_or_init(|| event_bus::init_event_bus())
@@ -121,7 +135,7 @@ async fn async_main() {
     */
 
     let event_bus = bus::event_bus::init_event_bus();
-    //let mut wololo = event_bus.main_bus_receiver.activate_cloned();
+    let mut wololo = event_bus.main_bus_receiver.activate_cloned();
     let mut wololo2 = event_bus.main_bus_receiver.activate_cloned();
 
     // Exit the program if a panic occurs
@@ -132,7 +146,7 @@ async fn async_main() {
     }));
 
     // spawn a task that prints the events to stdout
-    /*tokio::spawn(async move {
+    tokio::spawn(async move {
         while let Ok(message) = wololo.recv().await {
             //println!("Received event a: {:?}", message);
 
@@ -145,10 +159,12 @@ async fn async_main() {
                     sync_receiver: _,
                     sync_sender,
                 }) => {
+                    let start_time = std::time::Instant::now();
                     toto.publish(batch, sync_sender)
                         .await
                         .expect("Failed to publish batch sqlite");
-                    println!("Published batch sqlite");
+                    let elapsed = start_time.elapsed();
+                    println!("Published batch sqlite: {:?}", elapsed);
                     //sync_receiver.activate().recv().await.unwrap();
                 } /*message::Message::SyncRequest(message::RequestSyncMessage { sender }) => {
                       println!("Received sync request");
@@ -160,14 +176,15 @@ async fn async_main() {
         println!("Done");
         // exit program
         std::process::exit(0);
-    });*/
+    });
     tokio::spawn(async move {
         while let Ok(message) = wololo2.recv().await {
             //println!("Received event a: {:?}", message);
 
             use crate::storage::storage::StorageInstance;
             //let toto: &dyn StorageInstance = &postgres_storage;
-            let toto: &dyn StorageInstance = &timescaledb_storage;
+            //let toto: &dyn StorageInstance = &timescaledb_storage;
+            let toto: &dyn StorageInstance = &duckdb_storage;
 
             match message {
                 message::Message::Publish(message::PublishMessage {
@@ -175,10 +192,12 @@ async fn async_main() {
                     sync_receiver: _,
                     sync_sender,
                 }) => {
+                    let start_time = std::time::Instant::now();
                     toto.publish(batch, sync_sender)
                         .await
-                        .expect("Failed to publish batch postgresql");
-                    println!("Published batch postgresql");
+                        .expect("Failed to publish batch duckdb");
+                    let elapsed = start_time.elapsed();
+                    println!("Published batch duckdb: {:?}", elapsed);
                     //sync_receiver.activate().recv().await.unwrap();
                 } /*message::Message::SyncRequest(message::RequestSyncMessage { sender }) => {
                       println!("Received sync request");
@@ -198,7 +217,7 @@ async fn async_main() {
     });*/
 
     let wololo = config.clone();
-    let opcua_event_bus = event_bus.clone();
+    /*let opcua_event_bus = event_bus.clone();
     //tokio::task::spawn_blocking(move || {
     if let Some(opcua_configs) = wololo.opcua.as_ref() {
         for opcua_config in opcua_configs {
@@ -213,7 +232,7 @@ async fn async_main() {
             //.expect("Failed to start OPC UA client");
         }
         println!("OPC UA clients started");
-    }
+    }*/
 
     let mqtt_event_bus = event_bus.clone();
     if let Some(mqtt_configs) = config.mqtt.as_ref() {
