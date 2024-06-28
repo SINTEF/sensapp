@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS integer_values (
     sensor_id BIGINT NOT NULL,
     timestamp_ms TIMESTAMP_MS NOT NULL,
     value BIGINT NOT NULL,
-    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
+    --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
 
 -- Create the 'numeric_values' table
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS numeric_values (
     sensor_id BIGINT NOT NULL,
     timestamp_ms TIMESTAMP_MS NOT NULL,
     value DECIMAL(18,6) NOT NULL,
-    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
+    --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
 
 -- Create the 'float_values' table
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS float_values (
     sensor_id BIGINT NOT NULL,
     timestamp_ms TIMESTAMP_MS NOT NULL,
     value DOUBLE NOT NULL,
-    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
+    --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
 
 -- Create the 'string_values' table
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS string_values (
     sensor_id BIGINT NOT NULL,
     timestamp_ms TIMESTAMP_MS NOT NULL,
     value BIGINT NOT NULL,
-    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
+    --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
 
 -- Create the 'boolean_values' table
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS boolean_values (
     sensor_id BIGINT NOT NULL,
     timestamp_ms TIMESTAMP_MS NOT NULL,
     value BOOLEAN NOT NULL,
-    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
+    --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
 
 -- Create the 'location_values' table
@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS location_values (
     timestamp_ms TIMESTAMP_MS NOT NULL,
     latitude DOUBLE NOT NULL,
     longitude DOUBLE NOT NULL,
-    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
+    --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
 
 -- Create the 'json_values' table
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS json_values (
     sensor_id BIGINT NOT NULL,
     timestamp_ms TIMESTAMP_MS NOT NULL,
     value JSON NOT NULL,
-    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
+    --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
 
 -- Create the 'blob_values' table
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS blob_values (
     sensor_id BIGINT NOT NULL,
     timestamp_ms TIMESTAMP_MS NOT NULL,
     value BLOB NOT NULL,
-    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
+    --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
 
 -- Create indexes (DuckDB automatically creates indexes for primary keys and unique constraints)

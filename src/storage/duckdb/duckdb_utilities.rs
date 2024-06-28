@@ -2,7 +2,7 @@ use crate::datamodel::unit::Unit;
 use crate::datamodel::Sensor;
 use anyhow::Result;
 use cached::proc_macro::cached;
-use duckdb::{params, CachedStatement, Transaction};
+use duckdb::{params, CachedStatement, OptionalExt, Transaction};
 use uuid::Uuid;
 
 #[cached(
@@ -16,7 +16,9 @@ pub fn get_label_name_id_or_create(transaction: &Transaction, label_name: &str) 
     let mut select_stmt: CachedStatement =
         transaction.prepare_cached("SELECT id FROM labels_name_dictionary WHERE name = ?")?;
 
-    let label_name_id = select_stmt.query_row(params![label_name], |row| row.get(0))?;
+    let label_name_id = select_stmt
+        .query_row(params![label_name], |row| row.get(0))
+        .optional()?;
 
     if let Some(id) = label_name_id {
         Ok(id)
@@ -42,8 +44,9 @@ pub fn get_label_description_id_or_create(
     let mut select_stmt: CachedStatement = transaction
         .prepare_cached("SELECT id FROM labels_description_dictionary WHERE description = ?")?;
 
-    let label_description_id =
-        select_stmt.query_row(params![label_description], |row| row.get(0))?;
+    let label_description_id = select_stmt
+        .query_row(params![label_description], |row| row.get(0))
+        .optional()?;
 
     if let Some(id) = label_description_id {
         Ok(id)
@@ -68,7 +71,9 @@ pub fn get_unit_id_or_create(transaction: &Transaction, unit: &Unit) -> Result<i
     let mut select_stmt: CachedStatement =
         transaction.prepare_cached("SELECT id FROM units WHERE name = ?")?;
 
-    let unit_id = select_stmt.query_row(params![unit.name], |row| row.get(0))?;
+    let unit_id = select_stmt
+        .query_row(params![unit.name], |row| row.get(0))
+        .optional()?;
 
     if let Some(id) = unit_id {
         Ok(id)
@@ -94,11 +99,12 @@ pub fn get_sensor_id_or_create_sensor(transaction: &Transaction, sensor: &Sensor
     let mut select_stmt: CachedStatement =
         transaction.prepare_cached("SELECT sensor_id FROM sensors WHERE uuid = ?")?;
 
-    let mut binding = select_stmt.query(params![uuid_string])?;
-    let existing_sensor_id = binding.next()?;
+    let existing_sensor_id = select_stmt
+        .query_row(params![uuid_string], |row| row.get(0))
+        .optional()?;
 
     if let Some(existing_sensor_id) = existing_sensor_id {
-        Ok(existing_sensor_id.get(0)?)
+        Ok(existing_sensor_id)
     } else {
         let sensor_type_string = sensor.sensor_type.to_string();
 
@@ -110,10 +116,12 @@ pub fn get_sensor_id_or_create_sensor(transaction: &Transaction, sensor: &Sensor
         let mut insert_stmt: CachedStatement = transaction.prepare_cached(
             "INSERT INTO sensors (uuid, name, type, unit) VALUES (?, ?, ?, ?) RETURNING sensor_id",
         )?;
+        println!("bonjour - 1");
         let sensor_id: i64 = insert_stmt.query_row(
             params![uuid_string, sensor.name, sensor_type_string, unit_id],
             |row| row.get(0),
         )?;
+        println!("bonjour - 2");
 
         // Add the labels
         let mut label_insert_stmt: CachedStatement = transaction
@@ -139,7 +147,9 @@ pub fn get_string_value_id_or_create(transaction: &Transaction, string_value: &s
     let mut select_stmt: CachedStatement =
         transaction.prepare_cached("SELECT id FROM strings_values_dictionary WHERE value = ?")?;
 
-    let string_id = select_stmt.query_row(params![string_value], |row| row.get(0))?;
+    let string_id = select_stmt
+        .query_row(params![string_value], |row| row.get(0))
+        .optional()?;
 
     if let Some(id) = string_id {
         Ok(id)

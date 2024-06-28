@@ -124,7 +124,8 @@ async fn publish_csv(
         .delimiter(b';')
         .create_reader(reader);
 
-    publish_csv_async(csv_reader, 100, state.event_bus.clone()).await?;
+    //publish_csv_async(csv_reader, 100, state.event_bus.clone()).await?;
+    publish_csv_async(csv_reader, 8192, state.event_bus.clone()).await?;
 
     Ok("ok".to_string())
 }
