@@ -1,6 +1,5 @@
 use super::{
-    super::storage::{GenericStorage, StorageInstance},
-    postgresql_publishers::*,
+    super::storage::StorageInstance, postgresql_publishers::*,
     postgresql_utilities::get_sensor_id_or_create_sensor,
 };
 use crate::datamodel::{batch::Batch, TypedSamples};
@@ -17,11 +16,8 @@ pub struct PostgresStorage {
     pool: PgPool,
 }
 
-#[async_trait]
-impl GenericStorage for PostgresStorage {
-    type StorageInstance = Self;
-
-    async fn connect(connection_string: &str) -> Result<Self::StorageInstance> {
+impl PostgresStorage {
+    pub async fn connect(connection_string: &str) -> Result<Self> {
         let connect_options = PgConnectOptions::from_str(connection_string)
             .context("Failed to create postgres connection options")?;
 
@@ -29,8 +25,12 @@ impl GenericStorage for PostgresStorage {
             .await
             .context("Failed to create postgres pool")?;
 
-        Ok(Self::StorageInstance { pool })
+        Ok(Self { pool })
     }
+}
+
+#[async_trait]
+impl StorageInstance for PostgresStorage {
     async fn create_or_migrate(&self) -> Result<()> {
         sqlx::migrate!("src/storage/postgresql/migrations")
             .run(&self.pool)
@@ -39,10 +39,6 @@ impl GenericStorage for PostgresStorage {
 
         Ok(())
     }
-}
-
-#[async_trait]
-impl StorageInstance for PostgresStorage {
     async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for single_sensor_batch in batch.sensors.as_ref() {

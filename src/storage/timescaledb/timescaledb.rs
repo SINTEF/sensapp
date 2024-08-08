@@ -1,6 +1,5 @@
 use super::{
-    super::storage::{GenericStorage, StorageInstance},
-    timescaledb_publishers::*,
+    super::storage::StorageInstance, timescaledb_publishers::*,
     timescaledb_utilities::get_sensor_id_or_create_sensor,
 };
 use crate::datamodel::{batch::Batch, TypedSamples};
@@ -17,11 +16,8 @@ pub struct TimeScaleDBStorage {
     pool: PgPool,
 }
 
-#[async_trait]
-impl GenericStorage for TimeScaleDBStorage {
-    type StorageInstance = Self;
-
-    async fn connect(connection_string: &str) -> Result<Self::StorageInstance> {
+impl TimeScaleDBStorage {
+    pub async fn connect(connection_string: &str) -> Result<Self> {
         let connect_options = PgConnectOptions::from_str(connection_string)
             .context("Failed to create timescaledb connection options")?;
 
@@ -29,8 +25,12 @@ impl GenericStorage for TimeScaleDBStorage {
             .await
             .context("Failed to create timescaledb pool")?;
 
-        Ok(Self::StorageInstance { pool })
+        Ok(Self { pool })
     }
+}
+
+#[async_trait]
+impl StorageInstance for TimeScaleDBStorage {
     async fn create_or_migrate(&self) -> Result<()> {
         sqlx::migrate!("src/storage/timescaledb/migrations")
             .run(&self.pool)
@@ -39,10 +39,6 @@ impl GenericStorage for TimeScaleDBStorage {
 
         Ok(())
     }
-}
-
-#[async_trait]
-impl StorageInstance for TimeScaleDBStorage {
     async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for single_sensor_batch in batch.sensors.as_ref() {

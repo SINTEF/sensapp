@@ -9,10 +9,11 @@ use futures::TryStreamExt;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use storage::duckdb::DuckDBStorage;
-use storage::postgresql::postgresql::PostgresStorage;
+use storage::storage::StorageInstance;
+use storage::storage_factory::create_storage_from_connection_string;
+//use storage::duckdb::DuckDBStorage;
+//use storage::postgresql::postgresql::PostgresStorage;
 use storage::sqlite::sqlite::SqliteStorage;
-use storage::storage::GenericStorage;
 use tracing::event;
 use tracing::Level;
 mod bus;
@@ -51,6 +52,11 @@ async fn async_main() {
     load_configuration().expect("Failed to load configuration");
     let config = config::get().expect("Failed to get configuration");
 
+    sinteflake::set_instance_id(config.instance_id).unwrap();
+    sinteflake::set_instance_id_async(config.instance_id)
+        .await
+        .unwrap();
+
     /*let (tx, rx) = tokio::sync::mpsc::channel(100); // Channel with buffer size 100
 
     // Simulate event emitter
@@ -72,7 +78,7 @@ async fn async_main() {
         println!("Handling chunk of events: {:?}", events);
     }*/
 
-    let sqlite_connection_string = config.sqlite_connection_string.clone();
+    /*let sqlite_connection_string = config.sqlite_connection_string.clone();
     if sqlite_connection_string.is_none() {
         eprintln!("No SQLite connection string provided");
         std::process::exit(1);
@@ -84,16 +90,30 @@ async fn async_main() {
     sqlite_storage
         .create_or_migrate()
         .await
-        .expect("Failed to create or migrate database");
+        .expect("Failed to create or migrate database");*/
 
-    let duckdb_storage = DuckDBStorage::connect("sensapp.db")
+    //let storage = create_storage_from_connection_string("sqlite://toto.db")
+    //let storage = create_storage_from_connection_string("postgres://localhost:5432/postgres")
+    //let storage = create_storage_from_connection_string("duckdb://caca.db")
+    let storage = create_storage_from_connection_string(
+        "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_1",
+    )
+    .await
+    .expect("Failed to create storage");
+
+    /*storage
+    .create_or_migrate()
+    .await
+    .expect("Failed to create or migrate database");*/
+
+    /*let duckdb_storage = DuckDBStorage::connect("sensapp.db")
         .await
         .expect("Failed to connect to DuckDB");
 
     duckdb_storage
         .create_or_migrate()
         .await
-        .expect("Failed to create or migrate database");
+        .expect("Failed to create or migrate database");*/
 
     /*let postgres_connection_string = config.postgres_connection_string.clone();
     if postgres_connection_string.is_none() {
@@ -136,7 +156,7 @@ async fn async_main() {
 
     let event_bus = bus::event_bus::init_event_bus();
     let mut wololo = event_bus.main_bus_receiver.activate_cloned();
-    let mut wololo2 = event_bus.main_bus_receiver.activate_cloned();
+    // let mut wololo2 = event_bus.main_bus_receiver.activate_cloned();
 
     // Exit the program if a panic occurs
     let default_panic = std::panic::take_hook();
@@ -148,10 +168,11 @@ async fn async_main() {
     // spawn a task that prints the events to stdout
     tokio::spawn(async move {
         while let Ok(message) = wololo.recv().await {
-            //println!("Received event a: {:?}", message);
+            println!("Received event a: {:?}", message);
 
             use crate::storage::storage::StorageInstance;
-            let toto: &dyn StorageInstance = &sqlite_storage;
+            //let toto: &dyn StorageInstance = &storage;
+            let toto: &dyn StorageInstance = storage.as_ref();
 
             match message {
                 message::Message::Publish(message::PublishMessage {
@@ -164,7 +185,8 @@ async fn async_main() {
                         .await
                         .expect("Failed to publish batch sqlite");
                     let elapsed = start_time.elapsed();
-                    println!("Published batch sqlite: {:?}", elapsed);
+                    //println!("Published batch sqlite: {:?}", elapsed);
+                    println!("Published batch bigquery: {:?}", elapsed);
                     //sync_receiver.activate().recv().await.unwrap();
                 } /*message::Message::SyncRequest(message::RequestSyncMessage { sender }) => {
                       println!("Received sync request");
@@ -177,7 +199,7 @@ async fn async_main() {
         // exit program
         std::process::exit(0);
     });
-    tokio::spawn(async move {
+    /*tokio::spawn(async move {
         while let Ok(message) = wololo2.recv().await {
             //println!("Received event a: {:?}", message);
 
@@ -209,7 +231,7 @@ async fn async_main() {
         println!("Done");
         // exit program
         std::process::exit(0);
-    });
+    });*/
     /*tokio::spawn(async move {
         while let Some(event) = wololo2.recv().await.ok() {
             println!("Received event b: {:?}", event);

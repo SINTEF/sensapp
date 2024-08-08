@@ -1,22 +1,21 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
+use sqlx::Sqlite;
 use std::sync::Arc;
 
 use crate::datamodel::batch::Batch;
 
 #[async_trait]
-pub trait GenericStorage {
-    type StorageInstance: StorageInstance + Sync + Send;
-
-    async fn connect(connection_string: &str) -> Result<Self::StorageInstance>;
+//#[enum_delegate::register]
+pub trait StorageInstance: Send + Sync {
     async fn create_or_migrate(&self) -> Result<()>;
-}
-
-#[async_trait]
-pub trait StorageInstance {
-    async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()>;
-    async fn sync(&self, sync_sender: Sender<()>) -> Result<()>;
+    async fn publish(
+        &self,
+        batch: std::sync::Arc<crate::datamodel::batch::Batch>,
+        sync_sender: async_broadcast::Sender<()>,
+    ) -> Result<()>;
+    async fn sync(&self, sync_sender: async_broadcast::Sender<()>) -> Result<()>;
     async fn vacuum(&self) -> Result<()>;
 }
 

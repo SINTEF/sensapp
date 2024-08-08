@@ -38,14 +38,14 @@ csv-async = "1.2"
 rust_decimal = "1.33"
 geo = "0.28"
 async-broadcast = "0.7"
-cached = { version = "0.51", features = ["async", "tokio", "async-trait"] }
+cached = { version = "0.53", features = ["async", "tokio", "async-trait"] }
 nom = "7.1"
 sindit-senml = "0.2"
 serde_json = "1.0"
 num-traits = "0.2"
 hifitime = "3.9"
 iso8601 = "0.6"
-duckdb = { version = "0.10", features = ["bundled"] }
+duckdb = { version = "1.0", features = ["bundled"] }
 config = "0.14"
 serde = "1.0"
 confique = "0.2"
@@ -76,3 +76,11 @@ rand = "0.8"
 #protobuf = "3.0.2"
 lapin = "2.3"
 futures-lite = "2.3"
+gcp-bigquery-client = { git = "https://github.com/lquerel/gcp-bigquery-client.git", rev = "107a5557df6336933f6b0bcf330aa91fe6ca866a" }
+#prost = { version = "0.12", features = ["derive"] }
+#enum_delegate = "0.2"
+sinteflake = { version = "0.1", features = ["async"] }
+tonic = "0.11"
+bigdecimal = "0.4.5"
+big-decimal-byte-string-encoder = "0.1.0"
+clru = "0.6"

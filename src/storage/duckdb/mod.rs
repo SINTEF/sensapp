@@ -1,6 +1,6 @@
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::TypedSamples;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
 use duckdb::Connection;
@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout;
 
-use super::storage::{GenericStorage, StorageInstance};
+use super::storage::StorageInstance;
 
 mod duckdb_publishers;
 mod duckdb_utilities;
@@ -24,17 +24,23 @@ pub struct DuckDBStorage {
 
 const INIT_SQL: &str = include_str!("./migrations/20240223133248_init.sql");
 
-#[async_trait]
-impl GenericStorage for DuckDBStorage {
-    type StorageInstance = Self;
+impl DuckDBStorage {
+    pub async fn connect(connection_string: &str) -> Result<Self> {
+        const PREFIX: &str = "duckdb://";
 
-    async fn connect(connection_string: &str) -> Result<Self::StorageInstance> {
-        let connection =
-            Connection::open(connection_string).context("Failed to open DuckDB connection")?;
+        if !connection_string.starts_with(PREFIX) {
+            bail!("Invalid connection string, must start with {}", PREFIX);
+        }
+
+        let connection = Connection::open(&connection_string[PREFIX.len()..])
+            .context("Failed to open DuckDB connection")?;
         let connection = Arc::new(Mutex::new(connection));
-        Ok(DuckDBStorage { connection })
+        Ok(Self { connection })
     }
+}
 
+#[async_trait]
+impl StorageInstance for DuckDBStorage {
     async fn create_or_migrate(&self) -> Result<()> {
         let connection = self.connection.lock().await;
         connection
@@ -42,10 +48,6 @@ impl GenericStorage for DuckDBStorage {
             .context("Failed to initialise database")?;
         Ok(())
     }
-}
-
-#[async_trait]
-impl StorageInstance for DuckDBStorage {
     async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
         let connection = Arc::clone(&self.connection);
         let bbatch = batch.clone();
