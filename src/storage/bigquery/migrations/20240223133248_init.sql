@@ -129,3 +129,23 @@ JOIN
   `{dataset_id}.numeric_values` nv
 ON
   s.sensor_id = nv.sensor_id;
+
+CREATE OR REPLACE VIEW `{dataset_id}.sensor_labels_view` AS
+SELECT
+  s.sensor_id,
+  s.uuid,
+  s.name AS sensor_name,
+  s.type,
+  s.unit,
+  (
+    SELECT JSON_OBJECT(
+          ARRAY_AGG(lnd.name),
+          ARRAY_AGG(ldd.description)
+    )
+    FROM `{dataset_id}.labels` l
+    LEFT JOIN `{dataset_id}.labels_name_dictionary` lnd ON l.name = lnd.id
+    LEFT JOIN `{dataset_id}.labels_description_dictionary` ldd ON l.description = ldd.id
+    WHERE l.sensor_id = s.sensor_id
+  ) AS labels
+FROM
+  `{dataset_id}.sensors` s;

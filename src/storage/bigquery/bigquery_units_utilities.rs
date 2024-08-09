@@ -8,10 +8,9 @@ use gcp_bigquery_client::model::{
 };
 use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
-use smallvec::SmallVec;
 use tokio::sync::Mutex;
 
-use crate::datamodel::unit::Unit;
+use crate::datamodel::{unit::Unit, SensAppVec};
 
 use super::{
     bigquery_prost_structs::Unit as ProstUnit, bigquery_table_descriptors::UNITS_DESCRIPTOR,
@@ -23,7 +22,7 @@ static UNITS_CACHE: Lazy<Mutex<CLruCache<String, i64>>> =
 
 pub async fn get_or_create_units_ids(
     bqs: &BigQueryStorage,
-    units: SmallVec<[Unit; 8]>,
+    units: SensAppVec<Unit>,
 ) -> Result<HybridMap<String, i64>> {
     if units.is_empty() {
         return Ok(HybridMap::new());
@@ -57,7 +56,7 @@ pub async fn get_or_create_units_ids(
     let just_the_units = unknown_units
         .values()
         .cloned()
-        .collect::<SmallVec<[Unit; 8]>>();
+        .collect::<SensAppVec<Unit>>();
 
     let found_ids = get_existing_units_ids(bqs, &just_the_units).await?;
     {
@@ -70,9 +69,8 @@ pub async fn get_or_create_units_ids(
 
     let units_to_create = unknown_units
         .into_values()
-        .into_iter()
         .filter(|unit| found_ids.get(&unit.name).is_none())
-        .collect::<SmallVec<[Unit; 8]>>();
+        .collect::<SensAppVec<Unit>>();
 
     if units_to_create.is_empty() {
         return Ok(result);
@@ -157,7 +155,7 @@ async fn get_existing_units_ids(
 
 async fn create_units(
     bqs: &BigQueryStorage,
-    units: SmallVec<[Unit; 8]>,
+    units: SensAppVec<Unit>,
 ) -> Result<HybridMap<String, i64>> {
     let mut map = HybridMap::with_capacity(units.len());
 

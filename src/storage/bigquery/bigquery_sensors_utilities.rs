@@ -5,18 +5,22 @@ use gcp_bigquery_client::model::{
 };
 use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
-use smallvec::{smallvec, SmallVec};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::{
-    bigquery_prost_structs::Sensor as ProstSensor,
-    bigquery_units_utilities::get_or_create_units_ids, bigquery_utilities::publish_rows,
+    bigquery_labels_utilities::{
+        get_or_create_labels_description_ids, get_or_create_labels_name_ids,
+    },
+    bigquery_prost_structs::{Label as ProstLabel, Sensor as ProstSensor},
+    bigquery_table_descriptors::LABELS_DESCRIPTOR,
+    bigquery_units_utilities::get_or_create_units_ids,
+    bigquery_utilities::publish_rows,
     BigQueryStorage,
 };
 use crate::{
-    datamodel::{unit::Unit, Sensor},
+    datamodel::{unit::Unit, SensAppVec, Sensor},
     storage::bigquery::bigquery_table_descriptors::SENSORS_DESCRIPTOR,
 };
 
@@ -28,7 +32,7 @@ pub async fn get_sensor_ids_or_create_sensors(
     bqs: &BigQueryStorage,
     sensors: &[Arc<Sensor>],
 ) -> Result<HybridMap<Uuid, i64>> {
-    let mut unknown_sensors: SmallVec<[Arc<Sensor>; 8]> = smallvec![];
+    let mut unknown_sensors: SensAppVec<Arc<Sensor>> = SensAppVec::new();
 
     let mut result = HybridMap::new();
 
@@ -71,7 +75,7 @@ pub async fn get_sensor_ids_or_create_sensors(
     let sensors_to_create = unknown_sensors
         .into_iter()
         .filter(|sensor| found_ids.get(&sensor.uuid).is_none())
-        .collect::<SmallVec<[_; 8]>>();
+        .collect::<SensAppVec<_>>();
 
     if sensors_to_create.is_empty() {
         return Ok(result);
@@ -164,17 +168,27 @@ async fn create_sensors(
     sinteflake::update_time_async().await?;
 
     let mut map = HybridMap::with_capacity(sensors.len());
-    let mut units: SmallVec<[Unit; 8]> = smallvec![];
+    let mut units: SensAppVec<Unit> = SensAppVec::new();
+    let mut labels_names: SensAppVec<String> = SensAppVec::new();
+    let mut labels_descriptions: SensAppVec<String> = SensAppVec::new();
     for sensor in sensors {
         let sensor_id = sinteflake::next_id_with_hash_async(sensor.uuid.as_bytes()).await? as i64;
         map.insert(sensor.uuid, sensor_id);
         if let Some(unit) = &sensor.unit {
             units.push(unit.clone());
         }
+        for label in sensor.labels.iter() {
+            labels_names.push(label.0.clone());
+            labels_descriptions.push(label.1.clone());
+        }
     }
 
     let units_map = get_or_create_units_ids(bqs, units).await?;
+    let labels_names_map = get_or_create_labels_name_ids(bqs, labels_names).await?;
+    let labels_descriptions_map =
+        get_or_create_labels_description_ids(bqs, labels_descriptions).await?;
 
+    // create the sensors
     let rows = sensors
         .iter()
         .map(|sensor| {
@@ -196,6 +210,29 @@ async fn create_sensors(
         .collect::<Vec<_>>();
 
     publish_rows(bqs, "sensors", &SENSORS_DESCRIPTOR, rows).await?;
+
+    // create the labels
+    let mut labels_rows = Vec::new();
+    for sensor in sensors {
+        let sensor_id = map
+            .get(&sensor.uuid)
+            .expect("sensor_id not found, this should never happen so we panic");
+        for (name, description) in sensor.labels.iter() {
+            let name_id = labels_names_map
+                .get(name)
+                .expect("name_id not found, this should never happen so we panic");
+            let description_id = labels_descriptions_map
+                .get(description)
+                .expect("description_id not found, this should never happen so we panic");
+            labels_rows.push(ProstLabel {
+                sensor_id: *sensor_id,
+                name: *name_id,
+                description: Some(*description_id),
+            });
+        }
+    }
+
+    publish_rows(bqs, "labels", &LABELS_DESCRIPTOR, labels_rows).await?;
 
     Ok(map)
 }

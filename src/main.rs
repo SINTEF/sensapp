@@ -96,15 +96,15 @@ async fn async_main() {
     //let storage = create_storage_from_connection_string("postgres://localhost:5432/postgres")
     //let storage = create_storage_from_connection_string("duckdb://caca.db")
     let storage = create_storage_from_connection_string(
-        "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_1",
+        "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_3",
     )
     .await
     .expect("Failed to create storage");
 
-    /*storage
-    .create_or_migrate()
-    .await
-    .expect("Failed to create or migrate database");*/
+    storage
+        .create_or_migrate()
+        .await
+        .expect("Failed to create or migrate database");
 
     /*let duckdb_storage = DuckDBStorage::connect("sensapp.db")
         .await
@@ -239,7 +239,7 @@ async fn async_main() {
     });*/
 
     let wololo = config.clone();
-    /*let opcua_event_bus = event_bus.clone();
+    let opcua_event_bus = event_bus.clone();
     //tokio::task::spawn_blocking(move || {
     if let Some(opcua_configs) = wololo.opcua.as_ref() {
         for opcua_config in opcua_configs {
@@ -254,7 +254,7 @@ async fn async_main() {
             //.expect("Failed to start OPC UA client");
         }
         println!("OPC UA clients started");
-    }*/
+    }
 
     let mqtt_event_bus = event_bus.clone();
     if let Some(mqtt_configs) = config.mqtt.as_ref() {

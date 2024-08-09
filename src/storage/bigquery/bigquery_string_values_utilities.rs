@@ -8,8 +8,9 @@ use gcp_bigquery_client::model::{
 };
 use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
-use smallvec::SmallVec;
 use tokio::sync::Mutex;
+
+use crate::datamodel::SensAppVec;
 
 use super::{
     bigquery_prost_structs::StringValueDictionary,
@@ -22,7 +23,7 @@ static STRING_VALUES_CACHE: Lazy<Mutex<CLruCache<String, i64>>> =
 
 pub async fn get_or_create_string_values_ids(
     bqs: &BigQueryStorage,
-    strings: SmallVec<[String; 8]>,
+    strings: SensAppVec<String>,
 ) -> Result<HybridMap<String, i64>> {
     let mut unknown_string_values: HashSet<String> = HashSet::new();
 
@@ -55,7 +56,7 @@ pub async fn get_or_create_string_values_ids(
     let just_the_values = unknown_string_values
         .iter()
         .cloned()
-        .collect::<SmallVec<[String; 8]>>();
+        .collect::<SensAppVec<String>>();
 
     let found_ids = get_existing_string_values_ids(bqs, &just_the_values).await?;
     {
@@ -69,7 +70,7 @@ pub async fn get_or_create_string_values_ids(
     let values_to_create = unknown_string_values
         .into_iter()
         .filter(|value| found_ids.get(value).is_none())
-        .collect::<SmallVec<[String; 8]>>();
+        .collect::<SensAppVec<String>>();
 
     if values_to_create.is_empty() {
         return Ok(result);
@@ -154,7 +155,7 @@ async fn get_existing_string_values_ids(
 
 async fn create_string_values(
     bqs: &BigQueryStorage,
-    string_values: SmallVec<[String; 8]>,
+    string_values: SensAppVec<String>,
 ) -> Result<HybridMap<String, i64>> {
     let mut map = HybridMap::with_capacity(string_values.len());
 

@@ -18,6 +18,7 @@ use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 use tokio::{sync::RwLock, time::timeout};
 use url::Url;
 
+mod bigquery_labels_utilities;
 mod bigquery_prost_structs;
 mod bigquery_publishers;
 mod bigquery_sensors_utilities;

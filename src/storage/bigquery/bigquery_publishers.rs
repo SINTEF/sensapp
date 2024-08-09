@@ -1,9 +1,7 @@
 use anyhow::{anyhow, Result};
 use big_decimal_byte_string_encoder::encode_bigdecimal_to_bigquery_bytes;
 use bigdecimal::BigDecimal;
-use gcp_bigquery_client::storage::TableDescriptor;
 use hybridmap::HybridMap;
-use smallvec::{smallvec, SmallVec};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -13,6 +11,7 @@ use super::bigquery_table_descriptors::{
 };
 use super::bigquery_utilities::publish_rows;
 use super::BigQueryStorage;
+use crate::datamodel::SensAppVec;
 use crate::datamodel::{batch::Batch, SensorType, TypedSamples};
 use crate::storage::bigquery::bigquery_prost_structs::{
     BooleanValue, FloatValue, NumericValue, StringValue,
@@ -137,7 +136,7 @@ pub async fn publish_string_values(
         value_string: String,
     }
 
-    let mut tmp_rows: SmallVec<[TmpStringValue; 8]> = smallvec![];
+    let mut tmp_rows: SensAppVec<TmpStringValue> = SensAppVec::new();
 
     for single_sensor_batch in batch.sensors.as_ref() {
         if single_sensor_batch.sensor.sensor_type == SensorType::String {
@@ -172,7 +171,7 @@ pub async fn publish_string_values(
     let only_string_values = tmp_rows
         .iter()
         .map(|row| row.value_string.clone())
-        .collect::<SmallVec<[String; 8]>>();
+        .collect::<SensAppVec<String>>();
 
     let ids_map = get_or_create_string_values_ids(bqs, only_string_values).await?;
 
