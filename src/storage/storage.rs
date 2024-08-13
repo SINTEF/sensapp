@@ -1,14 +1,9 @@
-use anyhow::{bail, Result};
-use async_broadcast::Sender;
+use anyhow::Result;
 use async_trait::async_trait;
-use sqlx::Sqlite;
-use std::sync::Arc;
-
-use crate::datamodel::batch::Batch;
+use std::fmt::Debug;
 
 #[async_trait]
-//#[enum_delegate::register]
-pub trait StorageInstance: Send + Sync {
+pub trait StorageInstance: Send + Sync + Debug {
     async fn create_or_migrate(&self) -> Result<()>;
     async fn publish(
         &self,
@@ -17,30 +12,6 @@ pub trait StorageInstance: Send + Sync {
     ) -> Result<()>;
     async fn sync(&self, sync_sender: async_broadcast::Sender<()>) -> Result<()>;
     async fn vacuum(&self) -> Result<()>;
-}
 
-/*#[derive(Debug)]
-enum GenericStorages {
-    Sqlite(crate::storage::sqlite::SqliteStorage),
-    Postgres(crate::storage::postgresql::PostgresStorage),
+    async fn list_sensors(&self) -> Result<Vec<String>>;
 }
-
-#[derive(Debug)]
-pub struct Storage {
-    generic_storage: GenericStorages,
-}
-
-impl Storage {
-    pub async fn publish_batch(&self, batch: Batch) -> Result<()> {
-        match self.generic_storage {
-            GenericStorages::Sqlite(ref sqlite_storage) => {
-                sqlite_storage.publish_batch(batch).await?
-            }
-            GenericStorages::Postgres(ref postgres_storage) => {
-                postgres_storage.publish_batch(batch).await?
-            }
-        }
-        // Implement batch publishing logic here
-        Ok(())
-    }
-}*/

@@ -75,7 +75,7 @@ impl StorageInstance for DuckDBStorage {
     }
 
     async fn vacuum(&self) -> Result<()> {
-        let mut connection = self.connection.lock().await;
+        let connection = self.connection.lock().await;
         /*let transaction = connection.transaction()?;
 
         transaction.execute(
@@ -90,6 +90,10 @@ impl StorageInstance for DuckDBStorage {
 
         connection.execute("VACUUM ANALYZE", [])?;
         Ok(())
+    }
+
+    async fn list_sensors(&self) -> Result<Vec<String>> {
+        unimplemented!();
     }
 }
 

@@ -63,6 +63,10 @@ impl StorageInstance for TimeScaleDBStorage {
         self.vacuum().await?;
         Ok(())
     }
+
+    async fn list_sensors(&self) -> Result<Vec<String>> {
+        unimplemented!();
+    }
 }
 
 impl TimeScaleDBStorage {
@@ -112,5 +116,9 @@ impl TimeScaleDBStorage {
             .context("Failed to vacuum database")?;
 
         Ok(())
+    }
+
+    async fn list_sensors(&self) -> Result<Vec<String>> {
+        unimplemented!();
     }
 }

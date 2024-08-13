@@ -50,7 +50,8 @@ config = "0.14"
 serde = "1.0"
 confique = "0.2"
 byte-unit = "5.1"
-prost = "0.12"
+#prost = "0.12"
+prost = "0.13"
 snap = "1.1"
 hex = "0.4"
 blake3 = "1.5"
@@ -76,11 +77,17 @@ rand = "0.8"
 #protobuf = "3.0.2"
 lapin = "2.3"
 futures-lite = "2.3"
-gcp-bigquery-client = { git = "https://github.com/lquerel/gcp-bigquery-client.git", rev = "107a5557df6336933f6b0bcf330aa91fe6ca866a" }
+#gcp-bigquery-client = { git = "https://github.com/lquerel/gcp-bigquery-client.git", rev = "107a5557df6336933f6b0bcf330aa91fe6ca866a" }
+gcp-bigquery-client = { version = "0.23.0" }
 #prost = { version = "0.12", features = ["derive"] }
 #enum_delegate = "0.2"
 sinteflake = { version = "0.1", features = ["async"] }
-tonic = "0.11"
+#tonic = "0.11"
+tonic = "0.12"
 bigdecimal = "0.4.5"
 big-decimal-byte-string-encoder = "0.1.0"
 clru = "0.6"
+utoipa = { version = "4.2", features = ["axum_extras"] }
+utoipa-scalar = { version = "0.1", features = ["axum"] }
+rrdcached-client = "0.1"
+rustls = "0.23"

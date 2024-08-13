@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 use crate::bus::message;
 use crate::config::load_configuration;
 use crate::ingestors::amqp::amqp_example;
@@ -6,6 +7,7 @@ use crate::ingestors::http::state::HttpServerState;
 use axum::http::StatusCode;
 use futures::stream::StreamExt;
 use futures::TryStreamExt;
+use rustls::crypto::CryptoProvider;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -35,6 +37,10 @@ fn main() {
             ..Default::default()
         },
     ));
+
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install CryptoProvider");
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -95,16 +101,17 @@ async fn async_main() {
     //let storage = create_storage_from_connection_string("sqlite://toto.db")
     //let storage = create_storage_from_connection_string("postgres://localhost:5432/postgres")
     //let storage = create_storage_from_connection_string("duckdb://caca.db")
-    let storage = create_storage_from_connection_string(
-        "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_3",
-    )
-    .await
-    .expect("Failed to create storage");
-
-    storage
-        .create_or_migrate()
+    //let storage = create_storage_from_connection_string(
+    //    "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_3",
+    //)
+    let storage = create_storage_from_connection_string("rrdcached://localhost:42217?preset=munin")
         .await
-        .expect("Failed to create or migrate database");
+        .expect("Failed to create storage");
+
+    /*storage
+    .create_or_migrate()
+    .await
+    .expect("Failed to create or migrate database");*/
 
     /*let duckdb_storage = DuckDBStorage::connect("sensapp.db")
         .await
@@ -165,6 +172,8 @@ async fn async_main() {
         std::process::exit(1);
     }));
 
+    let storage_for_publish = storage.clone();
+
     // spawn a task that prints the events to stdout
     tokio::spawn(async move {
         while let Ok(message) = wololo.recv().await {
@@ -172,7 +181,7 @@ async fn async_main() {
 
             use crate::storage::storage::StorageInstance;
             //let toto: &dyn StorageInstance = &storage;
-            let toto: &dyn StorageInstance = storage.as_ref();
+            let toto: &dyn StorageInstance = storage_for_publish.as_ref();
 
             match message {
                 message::Message::Publish(message::PublishMessage {
@@ -280,6 +289,8 @@ async fn async_main() {
         HttpServerState {
             name: Arc::new("SensApp".to_string()),
             event_bus,
+            //storage: storage.clone(),
+            storage,
         },
         SocketAddr::from((endpoint, port)),
     )
@@ -294,52 +305,52 @@ async fn async_main() {
     }
 }
 
-async fn handler() -> &'static str {
-    "Hello, world!"
-}
+// async fn handler() -> &'static str {
+//     "Hello, world!"
+// }
 
-async fn publish_stream_handler(body: axum::body::Body) -> Result<String, (StatusCode, String)> {
-    let mut count = 0usize;
-    let mut stream = body.into_data_stream();
+// async fn publish_stream_handler(body: axum::body::Body) -> Result<String, (StatusCode, String)> {
+//     let mut count = 0usize;
+//     let mut stream = body.into_data_stream();
 
-    loop {
-        let chunk = stream.try_next().await;
-        match chunk {
-            Ok(bytes) => match bytes {
-                Some(bytes) => count += bytes.into_iter().filter(|b| *b == b'\n').count(),
-                None => break,
-            },
-            Err(_) => {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Error reading body".to_string(),
-                ))
-            }
-        }
-    }
+//     loop {
+//         let chunk = stream.try_next().await;
+//         match chunk {
+//             Ok(bytes) => match bytes {
+//                 Some(bytes) => count += bytes.into_iter().filter(|b| *b == b'\n').count(),
+//                 None => break,
+//             },
+//             Err(_) => {
+//                 return Err((
+//                     StatusCode::INTERNAL_SERVER_ERROR,
+//                     "Error reading body".to_string(),
+//                 ))
+//             }
+//         }
+//     }
 
-    Ok(count.to_string())
-}
+//     Ok(count.to_string())
+// }
 
-async fn publish_csv(body: axum::body::Body) -> Result<String, (StatusCode, String)> {
-    let stream = body.into_data_stream();
-    let stream = stream.map_err(|err| io::Error::new(io::ErrorKind::Other, err));
-    let reader = stream.into_async_read();
-    let mut csv_reader = csv_async::AsyncReaderBuilder::new()
-        .has_headers(true)
-        .delimiter(b';')
-        .create_reader(reader);
+// async fn publish_csv(body: axum::body::Body) -> Result<String, (StatusCode, String)> {
+//     let stream = body.into_data_stream();
+//     let stream = stream.map_err(|err| io::Error::new(io::ErrorKind::Other, err));
+//     let reader = stream.into_async_read();
+//     let mut csv_reader = csv_async::AsyncReaderBuilder::new()
+//         .has_headers(true)
+//         .delimiter(b';')
+//         .create_reader(reader);
 
-    println!("{:?}", csv_reader.has_headers());
-    println!("{:?}", csv_reader.headers().await.unwrap());
-    let mut records = csv_reader.records();
+//     println!("{:?}", csv_reader.has_headers());
+//     println!("{:?}", csv_reader.headers().await.unwrap());
+//     let mut records = csv_reader.records();
 
-    println!("Reading CSV");
-    while let Some(record) = records.next().await {
-        let record = record.unwrap();
-        println!("{:?}", record);
-    }
-    println!("Done reading CSV");
+//     println!("Reading CSV");
+//     while let Some(record) = records.next().await {
+//         let record = record.unwrap();
+//         println!("{:?}", record);
+//     }
+//     println!("Done reading CSV");
 
-    Ok("ok".to_string())
-}
+//     Ok("ok".to_string())
+// }

@@ -1,4 +1,5 @@
 use super::app_error::AppError;
+use super::crud::list_sensors;
 use super::influxdb::publish_influxdb;
 use super::prometheus::publish_prometheus;
 use super::state::HttpServerState;
@@ -9,6 +10,9 @@ use axum::extract::DefaultBodyLimit;
 use axum::extract::Request;
 //use axum::extract::Multipart;
 //use axum::extract::Path;
+use crate::ingestors::http::crud::__path_list_sensors;
+use crate::ingestors::http::influxdb::__path_publish_influxdb;
+use crate::ingestors::http::prometheus::__path_publish_prometheus;
 use axum::extract::State;
 use axum::http::header;
 use axum::http::StatusCode;
@@ -29,6 +33,19 @@ use tower::ServiceBuilder;
 use tower_http::trace;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer, ServiceBuilderExt};
 use tracing::Level;
+use utoipa::OpenApi;
+use utoipa_scalar::{Scalar, Servable as ScalarServable};
+
+#[derive(OpenApi)]
+#[openapi(
+    tags(
+        (name = "SensApp", description = "SensApp API"),
+        (name = "InfluxDB", description = "InfluxDB Write API"),
+        (name = "Prometheus", description = "Prometheus Remote Write API"),
+    ),
+    paths(frontpage, list_sensors, publish_influxdb, publish_prometheus),
+)]
+struct ApiDoc;
 
 pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
     let config = config::get()?;
@@ -60,7 +77,9 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
 
     // Create our application with a single route
     let app = Router::new()
-        .route("/", get(handler))
+        .route("/", get(frontpage))
+        //.route("/api-docs/openapi.json", get(openapi))
+        .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
         .route(
             "/publish",
             post(publish_handler).layer(max_body_layer.clone()),
@@ -73,6 +92,8 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             "/sensors/:sensor_name_or_uuid/publish_multipart",
             post(publish_multipart).layer(max_body_layer.clone()),
         )
+        // Boring Sensor CRUD
+        .route("/sensors", get(list_sensors))
         // InfluxDB Write API
         .route(
             "/api/v2/write",
@@ -102,10 +123,29 @@ async fn shutdown_signal() {
         .expect("failed to install shutdown CTRL+C signal handler");
 }
 
-async fn handler(State(state): State<HttpServerState>) -> Result<Json<String>, AppError> {
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "SensApp",
+    responses(
+        (status = 200, description = "SensApp Frontpage", body = String)
+    )
+)]
+async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>, AppError> {
     let name: String = (*state.name).clone();
     Ok(Json(name))
 }
+
+// #[utoipa::path(
+//     get,
+//     path = "/api-docs/openapi.json",
+//     responses(
+//         (status = 200, description = "OpenAPI JSON", body = ApiDoc)
+//     )
+// )]
+// async fn openapi() -> Json<utoipa::openapi::OpenApi> {
+//     Json(ApiDoc::openapi())
+// }
 
 async fn publish_csv(
     State(state): State<HttpServerState>,
@@ -162,15 +202,16 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::bus::EventBus;
+    use crate::{bus::EventBus, storage::sqlite::SqliteStorage};
 
     #[tokio::test]
     async fn test_handler() {
         let state = HttpServerState {
             name: Arc::new("hello world".to_string()),
             event_bus: Arc::new(EventBus::init("test".to_string())),
+            storage: Arc::new(SqliteStorage::connect("sqlite::memory:").await.unwrap()),
         };
-        let app = Router::new().route("/", get(handler)).with_state(state);
+        let app = Router::new().route("/", get(frontpage)).with_state(state);
         let request = Request::builder().uri("/").body(Body::empty()).unwrap();
 
         let response = app.oneshot(request).await.unwrap();

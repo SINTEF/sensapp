@@ -35,6 +35,15 @@ pub struct BigQueryStorage {
     dataset_id: String,
 }
 
+impl std::fmt::Debug for BigQueryStorage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BigQueryStorage")
+            .field("project_id", &self.project_id)
+            .field("dataset_id", &self.dataset_id)
+            .finish()
+    }
+}
+
 fn parse_connection_string(connection_string: &str) -> Result<(String, String, String)> {
     let url = Url::parse(connection_string)?;
     if url.scheme() != "bigquery" {
@@ -222,5 +231,9 @@ impl StorageInstance for BigQueryStorage {
     async fn vacuum(&self) -> Result<()> {
         // Implement vacuum logic here
         Ok(())
+    }
+
+    async fn list_sensors(&self) -> Result<Vec<String>> {
+        unimplemented!();
     }
 }

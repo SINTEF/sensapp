@@ -116,12 +116,10 @@ pub fn get_sensor_id_or_create_sensor(transaction: &Transaction, sensor: &Sensor
         let mut insert_stmt: CachedStatement = transaction.prepare_cached(
             "INSERT INTO sensors (uuid, name, type, unit) VALUES (?, ?, ?, ?) RETURNING sensor_id",
         )?;
-        println!("bonjour - 1");
         let sensor_id: i64 = insert_stmt.query_row(
             params![uuid_string, sensor.name, sensor_type_string, unit_id],
             |row| row.get(0),
         )?;
-        println!("bonjour - 2");
 
         // Add the labels
         let mut label_insert_stmt: CachedStatement = transaction

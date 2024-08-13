@@ -119,6 +119,32 @@ impl FromStr for Precision {
     }
 }
 
+/// InfluxDB Compatible Write API.
+///
+/// Allows you to write data from InfluxDB or Telegraf to SensApp.
+/// [More information.](https://github.com/SINTEF/sensapp/blob/main/docs/INFLUX_DB.md)
+#[utoipa::path(
+    post,
+    path = "/api/v2/write",
+    tag = "InfluxDB",
+    request_body(
+        content = String,
+        content_type = "text/plain",
+        description = "InfluxDB Line Protocol endpoint. [Reference](https://docs.influxdata.com/influxdb/v2/reference/syntax/line-protocol/).",
+        example = "cpu,host=A,region=west usage_system=64.2 1590488773254420000"
+    ),
+    params(
+        ("bucket" = String, Query, description = "Bucket name", example = "sensapp"),
+        ("org" = Option<String>, Query, description = "Organization name", example = "sensapp"),
+        ("org_id" = Option<String>, Query, description = "Organization ID"),
+        ("precision" = Option<String>, Query, description = "Precision of the timestamps. One of ns, us, ms, s"),
+    ),
+    responses(
+        (status = 204, description = "No Content"),
+        (status = 400, description = "Bad Request", body = AppError),
+        (status = 500, description = "Internal Server Error", body = AppError),
+    )
+)]
 #[debug_handler]
 pub async fn publish_influxdb(
     State(state): State<HttpServerState>,
@@ -258,6 +284,7 @@ pub async fn publish_influxdb(
 #[cfg(test)]
 mod tests {
     use crate::bus::{self, message};
+    use crate::storage::sqlite::SqliteStorage;
 
     use super::*;
     use flate2::write::GzEncoder;
@@ -318,6 +345,7 @@ mod tests {
         let state = State(HttpServerState {
             name: Arc::new("influxdb test".to_string()),
             event_bus: event_bus.clone(),
+            storage: Arc::new(SqliteStorage::connect("sqlite::memory:").await.unwrap()),
         });
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {

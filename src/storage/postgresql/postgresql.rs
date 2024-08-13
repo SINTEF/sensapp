@@ -63,6 +63,10 @@ impl StorageInstance for PostgresStorage {
         self.vacuum().await?;
         Ok(())
     }
+
+    async fn list_sensors(&self) -> Result<Vec<String>> {
+        unimplemented!();
+    }
 }
 
 impl PostgresStorage {

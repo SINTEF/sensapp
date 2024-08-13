@@ -4,7 +4,8 @@ use anyhow::{bail, Result};
 
 use super::{
     bigquery::BigQueryStorage, duckdb::DuckDBStorage, postgresql::PostgresStorage,
-    sqlite::SqliteStorage, storage::StorageInstance, timescaledb::TimeScaleDBStorage,
+    rrdcached::RrdCachedStorage, sqlite::SqliteStorage, storage::StorageInstance,
+    timescaledb::TimeScaleDBStorage,
 };
 
 /*#[enum_delegate::implement(StorageInstance)]
@@ -35,6 +36,7 @@ pub async fn create_storage_from_connection_string(
         s if s.starts_with("postgres:") => Arc::new(PostgresStorage::connect(s).await?),
         s if s.starts_with("sqlite:") => Arc::new(SqliteStorage::connect(s).await?),
         s if s.starts_with("timescaledb:") => Arc::new(TimeScaleDBStorage::connect(s).await?),
+        s if s.starts_with("rrdcached:") => Arc::new(RrdCachedStorage::connect(s).await?),
         _ => bail!("Unsupported storage type: {}", connection_string),
     })
 }

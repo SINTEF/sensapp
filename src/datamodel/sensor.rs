@@ -5,6 +5,7 @@ use anyhow::{anyhow, Error};
 use cached::proc_macro::cached;
 use once_cell::sync::OnceCell;
 use smallvec::SmallVec;
+use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -17,20 +18,23 @@ pub struct Sensor {
     pub labels: SensAppLabels,
 }
 
-impl ToString for Sensor {
-    fn to_string(&self) -> String {
-        let mut s = format!(
+impl fmt::Display for Sensor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
             "Sensor {{ uuid: {}, name: {}, sensor_type: {:?}",
             self.uuid, self.name, self.sensor_type
-        );
+        )?;
+
         if let Some(unit) = &self.unit {
-            s.push_str(&format!(", unit: {}", unit));
+            write!(f, ", unit: {}", unit)?;
         }
+
         if !self.labels.is_empty() {
-            s.push_str(&format!(", labels: {:?}", self.labels));
+            write!(f, ", labels: {:?}", self.labels)?;
         }
-        s.push_str(" }");
-        s
+
+        write!(f, " }}")
     }
 }
 

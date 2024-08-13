@@ -73,6 +73,31 @@ fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Prometheus Remote Write API.
+///
+/// Allows you to write data from Prometheus to SensApp.
+///
+/// It follows the [Prometheus Remote Write specification](https://prometheus.io/docs/concepts/remote_write_spec/).
+#[utoipa::path(
+    post,
+    path = "/api/v1/prometheus_remote_write",
+    tag = "Prometheus",
+    request_body(
+        content = Bytes,
+        content_type = "application/x-protobuf",
+        description = "Prometheus Remote Write endpoint. [Reference](https://prometheus.io/docs/concepts/remote_write_spec/)",
+    ),
+    params(
+        ("content-encoding" = String, Header, format = "snappy", description = "Content encoding, must be snappy"),
+        ("content-type" = String, Header, format = "application/x-protobuf", description = "Content type, must be application/x-protobuf"),
+        ("x-prometheus-remote-write-version" = String, Header, format = "0.1.0", description = "Prometheus Remote Write version, must be 0.1.0"),
+    ),
+    responses(
+        (status = 204, description = "No Content"),
+        (status = 400, description = "Bad Request", body = AppError),
+        (status = 500, description = "Internal Server Error", body = AppError),
+    )
+)]
 #[debug_handler]
 pub async fn publish_prometheus(
     State(state): State<HttpServerState>,
