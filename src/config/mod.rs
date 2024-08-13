@@ -11,6 +11,9 @@ pub mod opcua;
 
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
+    #[config(env = "SENSAPP_INSTANCE_ID", default = 0)]
+    pub instance_id: u16,
+
     #[config(env = "SENSAPP_PORT", default = 3000)]
     pub port: u16,
     #[config(env = "SENSAPP_ENDPOINT", default = "127.0.0.1")]

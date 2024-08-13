@@ -100,7 +100,7 @@ pub async fn mqtt_client(config: MqttConfig, event_bus: Arc<EventBus>) -> Result
                 let payload = publish.payload;
                 println!("Received message on topic: {}", topic);
                 println!("Payload: {:?}", payload);
-                let mut geobuf = geobuf::geobuf_pb::Data::new();
+                /*let mut geobuf = geobuf::geobuf_pb::Data::new();
                 use protobuf::Message;
                 geobuf.merge_from_bytes(&payload); //.unwrap();
                 match geobuf::decode::Decoder::decode(&geobuf).unwrap() {
@@ -108,7 +108,7 @@ pub async fn mqtt_client(config: MqttConfig, event_bus: Arc<EventBus>) -> Result
                         println!("GeoJSON: {:?}", geojson);
                     }
                     _ => {}
-                }
+                }*/
             }
             Ok(_) => {}
             Err(e) => {

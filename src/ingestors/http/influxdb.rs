@@ -1,7 +1,7 @@
 use super::{app_error::AppError, state::HttpServerState};
 use crate::datamodel::{
-    batch_builder::BatchBuilder, sensapp_datetime::SensAppDateTimeExt, SensAppDateTime, Sensor,
-    SensorType, TypedSamples,
+    batch_builder::BatchBuilder, sensapp_datetime::SensAppDateTimeExt, sensapp_vec::SensAppLabels,
+    SensAppDateTime, Sensor, SensorType, TypedSamples,
 };
 use anyhow::Result;
 use axum::{
@@ -11,8 +11,8 @@ use axum::{
 };
 use flate2::read::GzDecoder;
 use influxdb_line_protocol::{parse_lines, FieldValue};
+use rust_decimal::Decimal;
 use serde::Deserialize;
-use smallvec::SmallVec;
 use std::str::FromStr;
 use std::{io::Read, str::from_utf8};
 use std::{str, sync::Arc};
@@ -76,7 +76,15 @@ fn influxdb_field_to_sensapp(
             )),
             Err(_) => anyhow::bail!("U64 value is too big to be converted to i64"),
         },
-        FieldValue::F64(value) => Ok((SensorType::Float, TypedSamples::one_float(value, datetime))),
+        //FieldValue::F64(value) => Ok((SensorType::Float, TypedSamples::one_float(value, datetime))),
+        FieldValue::F64(value) => Ok((
+            SensorType::Numeric,
+            TypedSamples::one_numeric(
+                Decimal::from_f64_retain(value)
+                    .ok_or(anyhow::anyhow!("Failed to convert f64 to Decimal"))?,
+                datetime,
+            ),
+        )),
         FieldValue::String(value) => Ok((
             SensorType::String,
             TypedSamples::one_string(value.into(), datetime),
@@ -111,6 +119,32 @@ impl FromStr for Precision {
     }
 }
 
+/// InfluxDB Compatible Write API.
+///
+/// Allows you to write data from InfluxDB or Telegraf to SensApp.
+/// [More information.](https://github.com/SINTEF/sensapp/blob/main/docs/INFLUX_DB.md)
+#[utoipa::path(
+    post,
+    path = "/api/v2/write",
+    tag = "InfluxDB",
+    request_body(
+        content = String,
+        content_type = "text/plain",
+        description = "InfluxDB Line Protocol endpoint. [Reference](https://docs.influxdata.com/influxdb/v2/reference/syntax/line-protocol/).",
+        example = "cpu,host=A,region=west usage_system=64.2 1590488773254420000"
+    ),
+    params(
+        ("bucket" = String, Query, description = "Bucket name", example = "sensapp"),
+        ("org" = Option<String>, Query, description = "Organization name", example = "sensapp"),
+        ("org_id" = Option<String>, Query, description = "Organization ID"),
+        ("precision" = Option<String>, Query, description = "Precision of the timestamps. One of ns, us, ms, s"),
+    ),
+    responses(
+        (status = 204, description = "No Content"),
+        (status = 400, description = "Bad Request", body = AppError),
+        (status = 500, description = "Internal Server Error", body = AppError),
+    )
+)]
 #[debug_handler]
 pub async fn publish_influxdb(
     State(state): State<HttpServerState>,
@@ -171,7 +205,7 @@ pub async fn publish_influxdb(
                 let tags = match &line.series.tag_set {
                     None => None,
                     Some(tags) => {
-                        let mut tags_vec: SmallVec<[(String, String); 8]> = SmallVec::new();
+                        let mut tags_vec = SensAppLabels::new();
                         tags_vec.push(("influxdb_bucket".to_string(), bucket.clone()));
                         tags_vec.push(("influxdb_org".to_string(), common_org_name.clone()));
 
@@ -225,12 +259,20 @@ pub async fn publish_influxdb(
         }
     }
 
+    // TODO: Remove this println once debugged
+    println!("INfluxDB: Sending to the event bus soon");
+
     match batch_builder.send_what_is_left(state.event_bus).await {
         Ok(Some(mut receiver)) => {
+            println!("INfluxDB: Waiting for the receiver");
             receiver.wait().await?;
+            println!("INfluxDB: Receiver done");
         }
-        Ok(None) => {}
+        Ok(None) => {
+            println!("INfluxDB: No receiver");
+        }
         Err(error) => {
+            println!("INfluxDB: Error: {:?}", error);
             return Err(AppError::InternalServerError(anyhow::anyhow!(error)));
         }
     }
@@ -242,6 +284,7 @@ pub async fn publish_influxdb(
 #[cfg(test)]
 mod tests {
     use crate::bus::{self, message};
+    use crate::storage::sqlite::SqliteStorage;
 
     use super::*;
     use flate2::write::GzEncoder;
@@ -302,6 +345,7 @@ mod tests {
         let state = State(HttpServerState {
             name: Arc::new("influxdb test".to_string()),
             event_bus: event_bus.clone(),
+            storage: Arc::new(SqliteStorage::connect("sqlite::memory:").await.unwrap()),
         });
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {

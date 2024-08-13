@@ -2,7 +2,7 @@ use super::sqlite_publishers::*;
 use super::sqlite_utilities::get_sensor_id_or_create_sensor;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::TypedSamples;
-use crate::storage::storage::{GenericStorage, StorageInstance};
+use crate::storage::storage::StorageInstance;
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
@@ -19,11 +19,8 @@ pub struct SqliteStorage {
     pool: SqlitePool,
 }
 
-#[async_trait]
-impl GenericStorage for SqliteStorage {
-    type StorageInstance = Self;
-
-    async fn connect(connection_string: &str) -> Result<Self::StorageInstance> {
+impl SqliteStorage {
+    pub async fn connect(connection_string: &str) -> Result<Self> {
         let connect_options = SqliteConnectOptions::from_str(connection_string)
             .context("Failed to create sqlite connection options")?
             // Create the database file if it doesn't exist
@@ -41,9 +38,12 @@ impl GenericStorage for SqliteStorage {
             .await
             .context("Failed to create sqlite pool")?;
 
-        Ok(SqliteStorage { pool })
+        Ok(Self { pool })
     }
+}
 
+#[async_trait]
+impl StorageInstance for SqliteStorage {
     async fn create_or_migrate(&self) -> Result<()> {
         // Implement schema creation or migration logic here
         sqlx::migrate!("src/storage/sqlite/migrations")
@@ -53,10 +53,6 @@ impl GenericStorage for SqliteStorage {
 
         Ok(())
     }
-}
-
-#[async_trait]
-impl StorageInstance for SqliteStorage {
     async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for single_sensor_batch in batch.sensors.as_ref() {
@@ -80,6 +76,10 @@ impl StorageInstance for SqliteStorage {
     async fn vacuum(&self) -> Result<()> {
         self.vacuum().await?;
         Ok(())
+    }
+
+    async fn list_sensors(&self) -> Result<Vec<String>> {
+        unimplemented!();
     }
 }
 

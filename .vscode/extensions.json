@@ -1,7 +1,6 @@
 {
   "recommendations": [
     "matklad.rust-analyzer",
-    "serayuzgur.crates",
     "EditorConfig.EditorConfig",
     "tamasfe.even-better-toml",
     "vadimcn.vscode-lldb",

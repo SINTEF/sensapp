@@ -34,7 +34,7 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
     println!("Reading CSV");
     while let Some(record) = records.next().await {
         let record = record.unwrap();
-        println!("{:?}", record);
+        //println!("{:?}", record);
 
         current_samples.push(Sample {
             datetime: SensAppDateTime::from_unix_seconds(0.0),
