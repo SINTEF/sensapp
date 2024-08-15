@@ -75,7 +75,7 @@ url = "2.5"
 rand = "0.8"
 #geobuf = "0.1.4"
 #protobuf = "3.0.2"
-lapin = "2.3"
+#lapin = "2.3"
 futures-lite = "2.3"
 #gcp-bigquery-client = { git = "https://github.com/lquerel/gcp-bigquery-client.git", rev = "107a5557df6336933f6b0bcf330aa91fe6ca866a" }
 gcp-bigquery-client = { version = "0.23.0" }

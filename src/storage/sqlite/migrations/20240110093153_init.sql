@@ -10,6 +10,7 @@ CREATE TABLE sensors (
     sensor_id INTEGER PRIMARY KEY AUTOINCREMENT, -- Auto-incrementing integer for relationships
     uuid TEXT NOT NULL UNIQUE, -- UUID as text for unique sensor identification, cannot be null
     name TEXT NOT NULL, -- Name of the sensor, cannot be null
+    created_at INTEGER NOT NULL, -- Timestamp of the sensor creation
     type TEXT NOT NULL, -- Type of the sensor (e.g., integer, float, etc.), cannot be null
     unit INTEGER, -- References 'units' (optional)
     FOREIGN KEY (unit) REFERENCES units(id) -- Foreign key to 'units' table
@@ -64,7 +65,7 @@ CREATE TABLE numeric_values (
 CREATE TABLE float_values (
     sensor_id INTEGER NOT NULL, -- References 'sensors' (sensor_id), cannot be null
     timestamp_ms INTEGER NOT NULL, -- Unix timestamp in milliseconds, cannot be null
-    value REAL NOT NULL, -- Real (float) value, cannot be null
+    value REAL, -- Real (float) value, cannot be null
     FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id) -- Foreign key to 'sensors' table
 ) STRICT;
 

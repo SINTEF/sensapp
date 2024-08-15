@@ -7,7 +7,6 @@ use crate::config;
 use crate::importers::csv::publish_csv_async;
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
-use axum::extract::Request;
 //use axum::extract::Multipart;
 //use axum::extract::Path;
 use crate::ingestors::http::crud::__path_list_sensors;
@@ -22,7 +21,6 @@ use axum::Json;
 use axum::Router;
 use futures::TryStreamExt;
 use polars::prelude::*;
-use sentry::integrations::tower::NewSentryLayer;
 use std::io;
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -43,7 +41,7 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
         (name = "InfluxDB", description = "InfluxDB Write API"),
         (name = "Prometheus", description = "Prometheus Remote Write API"),
     ),
-    paths(frontpage, list_sensors, publish_influxdb, publish_prometheus),
+    paths(frontpage, list_sensors, vacuum, publish_influxdb, publish_prometheus),
 )]
 struct ApiDoc;
 
@@ -93,7 +91,9 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             post(publish_multipart).layer(max_body_layer.clone()),
         )
         // Boring Sensor CRUD
-        .route("/sensors", get(list_sensors))
+        .route("/api/v1/sensors", get(list_sensors))
+        // Administration
+        .route("/admin/vacuum", post(vacuum))
         // InfluxDB Write API
         .route(
             "/api/v2/write",
@@ -196,6 +196,24 @@ async fn publish_multipart(/*mut multipart: Multipart*/
     Ok(Json("ok".to_string()))
 }
 
+/// Vacuum the database.
+///
+/// This is a very expensive operation, so it should be used with caution.
+#[utoipa::path(
+    post,
+    path = "/admin/vacuum",
+    tag = "SensApp",
+    responses(
+        (status = 204, description = "No Content"),
+        (status = 400, description = "Bad Request", body = AppError),
+        (status = 500, description = "Internal Server Error", body = AppError),
+    )
+)]
+pub async fn vacuum(State(state): State<HttpServerState>) -> Result<StatusCode, AppError> {
+    state.storage.vacuum().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[cfg(test)]
 mod tests {
     use axum::{body::Body, http::Request};
@@ -208,7 +226,7 @@ mod tests {
     async fn test_handler() {
         let state = HttpServerState {
             name: Arc::new("hello world".to_string()),
-            event_bus: Arc::new(EventBus::init("test".to_string())),
+            event_bus: Arc::new(EventBus::new()),
             storage: Arc::new(SqliteStorage::connect("sqlite::memory:").await.unwrap()),
         };
         let app = Router::new().route("/", get(frontpage)).with_state(state);

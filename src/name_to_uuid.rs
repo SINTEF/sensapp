@@ -1,5 +1,6 @@
-use crate::infer::uuid::attempt_uuid_parsing;
-use anyhow::{anyhow, Error};
+use crate::config;
+use anyhow::Error;
+use cached::proc_macro::cached;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -7,95 +8,89 @@ use uuid::Uuid;
 type NameToUuidKey = [u8; 32];
 static UUID_HASH_MAC: OnceCell<Arc<NameToUuidKey>> = OnceCell::new();
 
-pub fn initialise_uuid_hash_mac(salt: &str) -> Result<(), Error> {
+fn initialise_uuid_hash_mac() -> Result<Arc<[u8; 32]>, Error> {
     const KEY_CONTEXT: &str = "SENSAPP uuid hash mac 2024-01-19 strings to unique ids";
+    let salt = config::get()?.sensor_salt.clone();
     let key = blake3::derive_key(KEY_CONTEXT, salt.as_bytes());
 
-    match UUID_HASH_MAC.set(Arc::new(key)) {
-        Ok(_) => Ok(()),
-        Err(e) => Err(anyhow!("Failed to set UUID_HASH_MAC: {:?}", e)),
-    }
+    Ok(Arc::new(key))
 }
 
-pub fn uuid_v8_blake3(name: &str) -> Result<Uuid, Error> {
-    // uuid::Uuid::from_bytes(uuid::v5::NAMESPACE_DNS, name.as_bytes())
+#[cached(
+    sync_writes = true,
+    size = 1024,
+    result = true,
+    key = "Vec<u8>",
+    convert = r#"{ uuid_buffer.clone() }"#
+)]
+pub fn uuid_v8_blake3(name: &str, uuid_buffer: Vec<u8>) -> Result<Uuid, Error> {
     // Using a UUID v5 (SHA1) or v3 (MD5) is too easy to implement.
     // It's friday, let's take terrible decisions and use Blake3 instead.
 
-    let key = UUID_HASH_MAC.get().ok_or_else(|| {
-        anyhow!("UUID_HASH_MAC not initialised. Please call initialise_uuid_hash_mac() before using name_to_uuid()")
-    })?;
+    let key = UUID_HASH_MAC.get_or_try_init(initialise_uuid_hash_mac)?;
 
-    // Create the random bytes
-    let mut hash_output = [0; 16];
-    let mut hasher = blake3::Hasher::new_keyed(key);
-    hasher.update(name.as_bytes());
-    hasher.finalize_xof().fill(&mut hash_output);
+    // Hash the sensor name only to get a 32-bits beginning
+    let mut hash_name_output = [0; 4];
+    let mut hasher_name = blake3::Hasher::new_keyed(key);
+    hasher_name.update(name.as_bytes());
+    hasher_name.finalize_xof().fill(&mut hash_name_output);
 
-    Ok(uuid::Builder::from_custom_bytes(hash_output).into_uuid())
-}
+    let mut hash_everything_output = [0; 12];
+    let mut hasher_everything = blake3::Hasher::new_keyed(key);
+    hasher_everything.update(&uuid_buffer);
+    hasher_everything
+        .finalize_xof()
+        .fill(&mut hash_everything_output);
 
-pub fn name_to_uuid(name: &str) -> Result<Uuid, Error> {
-    match attempt_uuid_parsing(name) {
-        Some(uuid) => Ok(uuid),
-        None => uuid_v8_blake3(name),
-    }
+    // Create a buffer with the name hash and the uuid buffer
+    let mut uuid_bytes = [0; 16];
+    uuid_bytes[..4].copy_from_slice(&hash_name_output);
+    uuid_bytes[4..].copy_from_slice(&hash_everything_output);
+
+    Ok(uuid::Builder::from_custom_bytes(uuid_bytes).into_uuid())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::load_configuration;
 
     #[test]
-    fn test_uuid_v8_blake3() {
-        let _ = initialise_uuid_hash_mac("sensapp tests");
-
-        let uuid = uuid_v8_blake3("test").unwrap();
-        assert_eq!(uuid.to_string(), "a2794553-385f-8d6c-9d2f-843cf728307a");
-
-        let uuid = uuid_v8_blake3("test2").unwrap();
-        assert_eq!(uuid.to_string(), "daa4b5f3-70b5-820f-819b-787344e7a4c7");
-
-        // This is case sensitive
-        let uuid = uuid_v8_blake3("TEST").unwrap();
-        assert_eq!(uuid.to_string(), "6aa50a6c-9f4f-899f-9f24-93efacb0c9e5");
-
-        let uuid = uuid_v8_blake3("").unwrap();
-        assert_eq!(uuid.to_string(), "58748fa2-0c24-86b3-925b-59e65e916af0");
-
-        // Giving an UUID will return another UUID
-        let uuid = uuid_v8_blake3("aa6e8b8f0-5b0b-5b7a-8c4d-2b9f1c1b1b1b").unwrap();
-        assert_eq!(uuid.to_string(), "d90a33ab-0e7e-8e19-99ab-847c5399884a");
-
-        // Already initialised
-        let is_err = initialise_uuid_hash_mac("sensapp tests 2");
-        assert!(is_err.is_err());
+    fn test_initialise_uuid_hash_mac() {
+        _ = load_configuration();
+        let result = initialise_uuid_hash_mac();
+        assert!(result.is_ok());
     }
 
     #[test]
-    fn test_name_to_uuid() {
-        let _ = initialise_uuid_hash_mac("sensapp tests");
-        let uuid = name_to_uuid("test").unwrap();
-        assert_eq!(uuid.to_string(), "a2794553-385f-8d6c-9d2f-843cf728307a");
+    fn test_uuid_v8_blake3() {
+        _ = load_configuration();
+        let name = "TestSensor";
+        let uuid_buffer = Vec::from("test");
+        let uuid1 = uuid_v8_blake3(name, uuid_buffer.clone()).unwrap();
+        let uuid2 = uuid_v8_blake3(name, uuid_buffer).unwrap();
+        assert_eq!(uuid1, uuid2); // Should be the same for the same input
 
-        let uuid = name_to_uuid("test2").unwrap();
-        assert_eq!(uuid.to_string(), "daa4b5f3-70b5-820f-819b-787344e7a4c7");
+        let uuid_buffer = Vec::from("another test");
+        let different_uuid = uuid_v8_blake3(name, uuid_buffer).unwrap();
+        assert_ne!(uuid1, different_uuid); // Different input should produce different UUID
+    }
 
-        let uuid = name_to_uuid("").unwrap();
-        assert_eq!(uuid.to_string(), "58748fa2-0c24-86b3-925b-59e65e916af0");
+    #[test]
+    fn test_uuid_v8_blake3_more() {
+        _ = load_configuration();
 
-        // Giving an UUID will return the same UUID
-        let uuid = name_to_uuid("aa6e8b8f-5b0b-5b7a-8c4d-2b9f1c1b1b1b").unwrap();
-        assert_eq!(uuid.to_string(), "aa6e8b8f-5b0b-5b7a-8c4d-2b9f1c1b1b1b");
+        let uuid_buffer_a = Vec::from("test _a");
+        let uuid_buffer_b = Vec::from("test very different");
 
-        // This is not case sensitive
-        let uuid = name_to_uuid("AA6E8B8F-5b0b-5B7A-8c4d-2B9F1C1B1B1B").unwrap();
-        assert_eq!(uuid.to_string(), "aa6e8b8f-5b0b-5b7a-8c4d-2b9f1c1b1b1b");
+        let uuid = uuid_v8_blake3("test", uuid_buffer_a).unwrap();
+        assert_eq!(uuid.to_string(), "b46bd9dc-588e-83a1-8f85-b7a09d8f033b");
+        let uuid = uuid_v8_blake3("test", uuid_buffer_b).unwrap();
+        assert_eq!(uuid.to_string(), "b46bd9dc-cef5-8df8-8416-0fe6c1c9e5e1");
+        // starts with b46bd9dc in both cases
 
-        // If it's not a valid UUID, even it's almost, it will return a new UUID
-        // This may be a bit confusing to the users
-        // But I'm not sure that trying to detect almost UUIDs is sound.
-        let uuid = name_to_uuid("aa6e8b8f0-5b0b-5b7a-8c4d-2b9f1c1b1b1G").unwrap();
-        assert_eq!(uuid.to_string(), "48dfa368-01bd-8d5a-892e-1e009653c92b");
+        let uuid = uuid_v8_blake3("not a test", Vec::from("not a test _a")).unwrap();
+        assert_eq!(uuid.to_string(), "ac8e016e-79f8-8cd4-bc0e-093e4f7b9f18");
+        // does not start with b46bd9dc
     }
 }

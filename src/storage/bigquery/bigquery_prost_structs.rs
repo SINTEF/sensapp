@@ -21,8 +21,10 @@ pub struct Sensor {
     #[prost(string, required, tag = "3")]
     pub name: String,
     #[prost(string, required, tag = "4")]
+    pub created_at: String,
+    #[prost(string, required, tag = "5")]
     pub r#type: String,
-    #[prost(int64, optional, tag = "5")]
+    #[prost(int64, optional, tag = "6")]
     pub unit: Option<i64>,
 }
 

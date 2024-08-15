@@ -4,4 +4,4 @@
 
 ## No implementations yet
 
-FoundationDB doesn't have an easy and pure rust client, so we have no plans to implement it yet.
+FoundationDB doesn't have an easy and pure rust client, so we have no plans to implement it for now.

@@ -160,10 +160,14 @@ impl BatchBuilder {
     ) -> Result<Option<WaitForAll>, Error> {
         let mut all_batches_waiter = WaitForAll::new();
 
+        println!("aa: Building batches");
         let batches_iter = self.build_batches().await;
         for batch in batches_iter {
+            println!("ab: Publishing batch");
             let receiver = event_bus.publish(batch).await?;
+            println!("ac: Adding receiver");
             all_batches_waiter.add(receiver.activate()).await;
+            println!("ad: Done");
         }
         Ok(Some(all_batches_waiter))
     }
@@ -174,16 +178,22 @@ impl BatchBuilder {
         len: usize,
     ) -> Result<Option<WaitForAll>, Error> {
         if len == 0 {
+            println!("a: Nothing to send");
             // Shouldn't happen but just in case
             return Ok(None);
         }
         if len > self.batch_size {
+            println!("b: Sending multiple batches");
             return self.send_multiple_batch(event_bus).await;
         }
+        println!("c: Sending one batch");
         let mut one_waiter = WaitForAll::new();
         let batch = self.build_batch().await;
+        println!("d: Sending batch");
         let receiver = event_bus.publish(batch).await?;
+        println!("e: Adding receiver");
         one_waiter.add(receiver.activate()).await;
+        println!("f: Done");
         Ok(Some(one_waiter))
     }
 
@@ -352,7 +362,7 @@ mod tests {
         let samples2 = create_test_samples(2);
         batch_builder.add(sensor1.clone(), samples1).await.unwrap();
         batch_builder.add(sensor2.clone(), samples2).await.unwrap();
-        let event_bus = Arc::new(EventBus::init("TestBus".to_string()));
+        let event_bus = Arc::new(EventBus::new());
 
         let has_received = Arc::new(Mutex::new(false));
         let sync_receiver = event_bus.main_bus_receiver.clone();
@@ -395,18 +405,18 @@ mod tests {
 
         let mut batch_builder = BatchBuilder::new().unwrap();
 
-        let event_bus = Arc::new(EventBus::init("TestBus".to_string()));
+        let event_bus = Arc::new(EventBus::new());
 
         // Sending nothing should work
-        batch_builder.send(event_bus, 0).await.unwrap();
+        batch_builder.send(event_bus.clone(), 0).await.unwrap();
 
         batch_builder.batch_size = 5;
         let sensor = create_test_sensor(Uuid::new_v4());
         let samples = create_test_samples(3);
 
-        spawn(async move {
-
-        });
+        // Sending a batch of 3 should work
+        batch_builder.add(sensor.clone(), samples).await.unwrap();
+        batch_builder.send(event_bus.clone(), 3).await.unwrap();
     }
 
     /*

@@ -1,12 +1,9 @@
-use crate::config;
+use crate::name_to_uuid::uuid_v8_blake3;
 
 use super::{sensapp_vec::SensAppLabels, unit::Unit, SensorType};
 use anyhow::{anyhow, Error};
-use cached::proc_macro::cached;
-use once_cell::sync::OnceCell;
 use smallvec::SmallVec;
 use std::fmt;
-use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -66,17 +63,6 @@ fn sort_labels(labels: &mut SensAppLabels) {
 /// * `bool`: `true` if any of the special characters are found, `false` otherwise.
 fn contains_special_chars(s: &str) -> bool {
     s.bytes().any(|b| matches!(b, 11 | 28 | 29 | 30 | 31))
-}
-
-type NameToUuidKey = [u8; 32];
-static UUID_HASH_MAC: OnceCell<Arc<NameToUuidKey>> = OnceCell::new();
-
-fn initialise_uuid_hash_mac() -> Result<Arc<[u8; 32]>, Error> {
-    const KEY_CONTEXT: &str = "SENSAPP uuid hash mac 2024-01-19 strings to unique ids";
-    let salt = config::get()?.sensor_salt.clone();
-    let key = blake3::derive_key(KEY_CONTEXT, salt.as_bytes());
-
-    Ok(Arc::new(key))
 }
 
 fn compute_uuid_buffer(
@@ -141,40 +127,6 @@ fn compute_uuid_buffer(
     }
 
     Ok(buffer)
-}
-
-#[cached(
-    sync_writes = true,
-    size = 1024,
-    result = true,
-    key = "Vec<u8>",
-    convert = r#"{ uuid_buffer.clone() }"#
-)]
-fn uuid_v8_blake3(name: &str, uuid_buffer: Vec<u8>) -> Result<Uuid, Error> {
-    // Using a UUID v5 (SHA1) or v3 (MD5) is too easy to implement.
-    // It's friday, let's take terrible decisions and use Blake3 instead.
-
-    let key = UUID_HASH_MAC.get_or_try_init(initialise_uuid_hash_mac)?;
-
-    // Hash the sensor name only to get a 32-bits beginning
-    let mut hash_name_output = [0; 4];
-    let mut hasher_name = blake3::Hasher::new_keyed(key);
-    hasher_name.update(name.as_bytes());
-    hasher_name.finalize_xof().fill(&mut hash_name_output);
-
-    let mut hash_everything_output = [0; 12];
-    let mut hasher_everything = blake3::Hasher::new_keyed(key);
-    hasher_everything.update(&uuid_buffer);
-    hasher_everything
-        .finalize_xof()
-        .fill(&mut hash_everything_output);
-
-    // Create a buffer with the name hash and the uuid buffer
-    let mut uuid_bytes = [0; 16];
-    uuid_bytes[..4].copy_from_slice(&hash_name_output);
-    uuid_bytes[4..].copy_from_slice(&hash_everything_output);
-
-    Ok(uuid::Builder::from_custom_bytes(uuid_bytes).into_uuid())
 }
 
 impl Sensor {
@@ -267,14 +219,6 @@ mod tests {
     }
 
     #[test]
-    fn test_initialise_uuid_hash_mac() {
-        _ = load_configuration();
-        let result = initialise_uuid_hash_mac();
-        println!("{:?}", result);
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn test_compute_uuid_buffer() {
         let name = "TestSensor";
         let sensor_type = SensorType::Numeric;
@@ -310,20 +254,6 @@ mod tests {
         let labels = Some(labels);
         let result = compute_uuid_buffer(name, &sensor_type, &unit, &labels);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_uuid_v8_blake3() {
-        _ = load_configuration();
-        let name = "TestSensor";
-        let uuid_buffer = Vec::from("test");
-        let uuid1 = uuid_v8_blake3(name, uuid_buffer.clone()).unwrap();
-        let uuid2 = uuid_v8_blake3(name, uuid_buffer).unwrap();
-        assert_eq!(uuid1, uuid2); // Should be the same for the same input
-
-        let uuid_buffer = Vec::from("another test");
-        let different_uuid = uuid_v8_blake3(name, uuid_buffer).unwrap();
-        assert_ne!(uuid1, different_uuid); // Different input should produce different UUID
     }
 
     #[test]

@@ -161,6 +161,8 @@ pub async fn publish_prometheus(
             time_serie
                 .samples
                 .into_iter()
+                // Special prometheus NaN value (Stale Marker)
+                .filter(|sample| sample.value.to_bits() != 0x7ff0000000000002)
                 .map(|sample| Sample {
                     datetime: SensAppDateTime::from_unix_milliseconds_i64(sample.timestamp),
                     value: sample.value,

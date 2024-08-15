@@ -11,7 +11,6 @@ use axum::{
 };
 use flate2::read::GzDecoder;
 use influxdb_line_protocol::{parse_lines, FieldValue};
-use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::str::FromStr;
 use std::{io::Read, str::from_utf8};
@@ -76,15 +75,15 @@ fn influxdb_field_to_sensapp(
             )),
             Err(_) => anyhow::bail!("U64 value is too big to be converted to i64"),
         },
-        //FieldValue::F64(value) => Ok((SensorType::Float, TypedSamples::one_float(value, datetime))),
-        FieldValue::F64(value) => Ok((
+        FieldValue::F64(value) => Ok((SensorType::Float, TypedSamples::one_float(value, datetime))),
+        /*FieldValue::F64(value) => Ok((
             SensorType::Numeric,
             TypedSamples::one_numeric(
                 Decimal::from_f64_retain(value)
                     .ok_or(anyhow::anyhow!("Failed to convert f64 to Decimal"))?,
                 datetime,
             ),
-        )),
+        )),*/
         FieldValue::String(value) => Ok((
             SensorType::String,
             TypedSamples::one_string(value.into(), datetime),
@@ -326,7 +325,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_influxdb() {
-        let event_bus = bus::event_bus::init_event_bus();
+        let event_bus = Arc::new(bus::event_bus::EventBus::new());
         let mut wololo = event_bus.main_bus_receiver.activate_cloned();
         tokio::spawn(async move {
             while let Ok(message) = wololo.recv().await {

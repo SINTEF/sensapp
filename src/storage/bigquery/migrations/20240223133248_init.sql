@@ -10,8 +10,9 @@ CREATE TABLE IF NOT EXISTS `{dataset_id}.sensors` (
     sensor_id INT64 NOT NULL,
     uuid STRING NOT NULL,
     name STRING NOT NULL,
+    created_at TIMESTAMP NOT NULL,
     type STRING NOT NULL,
-    unit INT64
+    unit INT64,
 );
 
 -- Create the 'labels_name_dictionary' table

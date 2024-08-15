@@ -132,6 +132,12 @@ pub async fn get_sensor_id_or_create_sensor(
         return Ok(sensor_id);
     }
 
+    let now_nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let created_at =
+        sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos(now_nanos as i128)?;
+
     let sensor_type_string = sensor.sensor_type.to_string();
 
     let unit_id = match sensor.unit {
@@ -141,13 +147,14 @@ pub async fn get_sensor_id_or_create_sensor(
 
     let create_sensor_query = sqlx::query(
         r#"
-            INSERT INTO sensors (uuid, name, type, unit)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO sensors (uuid, name, created_at, type, unit)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING sensor_id
             "#,
     )
     .bind(sensor.uuid)
     .bind(sensor.name.to_string())
+    .bind(created_at)
     .bind(sensor_type_string)
     .bind(unit_id);
 

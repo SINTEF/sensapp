@@ -171,6 +171,10 @@ pub async fn get_sensor_id_or_create_sensor(
         return Ok(sensor_id);
     }
 
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs() as i64;
+
     let sensor_type_string = sensor.sensor_type.to_string();
 
     let unit_id = match sensor.unit {
@@ -180,11 +184,12 @@ pub async fn get_sensor_id_or_create_sensor(
 
     let create_sensor_query = sqlx::query!(
         r#"
-            INSERT INTO sensors (uuid, name, type, unit)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO sensors (uuid, name, created_at, type, unit)
+            VALUES (?, ?, ?, ?, ?)
             "#,
         uuid_string,
         sensor.name,
+        created_at,
         sensor_type_string,
         unit_id
     );

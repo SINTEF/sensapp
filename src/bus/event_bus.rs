@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct EventBus {
-    pub name: String,
     pub main_bus_sender: async_broadcast::Sender<Message>,
     pub main_bus_receiver: async_broadcast::InactiveReceiver<Message>,
 }
@@ -14,18 +13,33 @@ impl EventBus {
     // Create a new event bus.
     // Please note that the receiver is inactive by default as it may be cloned many times.
     // Consider using .activate() or .activate_cloned() to activate it.
-    pub fn init(name: String) -> Self {
+    pub fn new() -> Self {
         let (s, r) = async_broadcast::broadcast(128);
         let r = r.deactivate();
         Self {
-            name,
             main_bus_sender: s,
             main_bus_receiver: r,
         }
     }
 
     async fn broadcast(&self, message: Message) -> Result<()> {
+        println!("aad: publish event bus");
+        println!(
+            "aad: number of receivers: {}",
+            self.main_bus_sender.receiver_count(),
+        );
+        println!(
+            "aad: number of inactive receivers: {}",
+            self.main_bus_sender.inactive_receiver_count(),
+        );
+        println!(
+            "aad: number of senders: {}",
+            self.main_bus_sender.sender_count(),
+        );
+        println!("aad: is full ? {}", self.main_bus_sender.is_full(),);
+        println!("aad: len: {}", self.main_bus_sender.len(),);
         self.main_bus_sender.broadcast(message).await?;
+        println!("aae: publish event bus");
         Ok(())
     }
 
@@ -35,8 +49,10 @@ impl EventBus {
         // In most cases, it should be a one to one relationship, but
         // it could be possible to have multiple storage backends and a single
         // receiver that waits for the first one to sync, or all.
+        println!("aaa: publish event bus");
         let (sync_sender, sync_receiver) = async_broadcast::broadcast(1);
         let sync_receiver = sync_receiver.deactivate();
+        println!("aab: publish event bus");
 
         self.broadcast(Message::Publish(PublishMessage {
             batch: Arc::new(batch),
@@ -45,12 +61,10 @@ impl EventBus {
         }))
         .await?;
 
+        println!("aac: publish event bus");
+
         Ok(sync_receiver)
     }
-}
-
-pub fn init_event_bus() -> Arc<EventBus> {
-    Arc::new(EventBus::init("SensApp".to_string()))
 }
 
 #[cfg(test)]
@@ -62,19 +76,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_bus_init() {
-        let event_bus = EventBus::init("TestBus".to_string());
-        assert_eq!(event_bus.name, "TestBus");
-    }
-
-    #[tokio::test]
-    async fn test_init_event_bus() {
-        let event_bus = init_event_bus();
-        assert_eq!(event_bus.name, "SensApp");
+        let _ = EventBus::new();
     }
 
     #[tokio::test]
     async fn test_event_bus_publish() {
-        let event_bus = EventBus::init("TestBus".to_string());
+        let event_bus = EventBus::new();
         let batch = Batch::default();
 
         let has_received = Arc::new(Mutex::new(false));

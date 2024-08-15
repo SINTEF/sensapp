@@ -10,6 +10,7 @@ CREATE TABLE sensors (
     sensor_id BIGSERIAL PRIMARY KEY,
     uuid UUID NOT NULL UNIQUE,
     name TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL,
     type TEXT NOT NULL,
     unit BIGINT,
     FOREIGN KEY (unit) REFERENCES units(id)

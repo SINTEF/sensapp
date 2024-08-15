@@ -48,6 +48,12 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_MQTT")]
     pub mqtt: Option<Vec<MqttConfig>>,
+
+    #[config(env = "SKIP_MIGRATIONS", default = false)]
+    pub skip_migrations: bool,
+
+    #[config(env = "SENSAPP_SENTRY_DSN")]
+    pub sentry_dsn: Option<String>,
 }
 
 impl SensAppConfig {

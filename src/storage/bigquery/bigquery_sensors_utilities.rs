@@ -20,7 +20,7 @@ use super::{
     BigQueryStorage,
 };
 use crate::{
-    datamodel::{unit::Unit, SensAppVec, Sensor},
+    datamodel::{unit::Unit, SensAppDateTime, SensAppVec, Sensor},
     storage::bigquery::bigquery_table_descriptors::SENSORS_DESCRIPTOR,
 };
 
@@ -188,6 +188,9 @@ async fn create_sensors(
     let labels_descriptions_map =
         get_or_create_labels_description_ids(bqs, labels_descriptions).await?;
 
+    let now = SensAppDateTime::now()?;
+    let created_at = now.to_isoformat();
+
     // create the sensors
     let rows = sensors
         .iter()
@@ -203,6 +206,7 @@ async fn create_sensors(
                 sensor_id: *sensor_id,
                 uuid: sensor.uuid.to_string(),
                 name: sensor.name.clone(),
+                created_at: created_at.clone(),
                 r#type: sensor.sensor_type.to_string(),
                 unit,
             }

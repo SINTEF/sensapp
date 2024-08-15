@@ -1,21 +1,13 @@
 #![forbid(unsafe_code)]
 use crate::bus::message;
 use crate::config::load_configuration;
-use crate::ingestors::amqp::amqp_example;
 use crate::ingestors::http::server::run_http_server;
 use crate::ingestors::http::state::HttpServerState;
-use axum::http::StatusCode;
-use futures::stream::StreamExt;
-use futures::TryStreamExt;
-use rustls::crypto::CryptoProvider;
-use std::io;
+use bus::EventBus;
+use config::SensAppConfig;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use storage::storage::StorageInstance;
 use storage::storage_factory::create_storage_from_connection_string;
-//use storage::duckdb::DuckDBStorage;
-//use storage::postgresql::postgresql::PostgresStorage;
-use storage::sqlite::sqlite::SqliteStorage;
 use tracing::event;
 use tracing::Level;
 mod bus;
@@ -29,14 +21,19 @@ mod parsing;
 mod storage;
 
 fn main() {
-    let _sentry = sentry::init((
-        "https://94bc3d0bd0424707898d420ed4ad6a3d@feil.sintef.cloud/5",
-        sentry::ClientOptions {
-            release: sentry::release_name!(),
-            debug: true,
-            ..Default::default()
-        },
-    ));
+    load_configuration().expect("Failed to load configuration");
+    let config = config::get().expect("Failed to get configuration");
+
+    if let Some(sentry_dsn) = &config.sentry_dsn {
+        let _sentry = sentry::init((
+            sentry_dsn.as_str(),
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                debug: true,
+                ..Default::default()
+            },
+        ));
+    }
 
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
@@ -46,17 +43,15 @@ fn main() {
         .enable_all()
         .build()
         .expect("Failed to create Tokio runtime")
-        .block_on(async_main());
+        .block_on(async_main(config));
 }
 
-async fn async_main() {
+async fn async_main(config: Arc<SensAppConfig>) {
     // sentry::capture_message("Hello, Sentry 2!", sentry::Level::Info);
 
     // amqp_example().await.expect("Failed to start AMQP example");
 
     // Load configuration
-    load_configuration().expect("Failed to load configuration");
-    let config = config::get().expect("Failed to get configuration");
 
     sinteflake::set_instance_id(config.instance_id).unwrap();
     sinteflake::set_instance_id_async(config.instance_id)
@@ -98,20 +93,26 @@ async fn async_main() {
         .await
         .expect("Failed to create or migrate database");*/
 
-    //let storage = create_storage_from_connection_string("sqlite://toto.db")
-    //let storage = create_storage_from_connection_string("postgres://localhost:5432/postgres")
-    //let storage = create_storage_from_connection_string("duckdb://caca.db")
-    //let storage = create_storage_from_connection_string(
-    //    "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_3",
-    //)
-    let storage = create_storage_from_connection_string("rrdcached://localhost:42217?preset=munin")
+    let storage = create_storage_from_connection_string("sqlite://test.db")
+        //let storage = create_storage_from_connection_string("postgres://localhost:5432/sensapp")
+        // password is postgres
+        //let storage = create_storage_from_connection_string(
+        //    "timescaledb://postgres:postgres@localhost:5432/sensapp",
+        //)
+        //let storage = create_storage_from_connection_string("duckdb://caca2.db")
+        //let storage = create_storage_from_connection_string(
+        //    "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_3",
+        //)
+        //let storage = create_storage_from_connection_string("rrdcached://localhost:42217?preset=munin")
         .await
         .expect("Failed to create storage");
 
-    /*storage
-    .create_or_migrate()
-    .await
-    .expect("Failed to create or migrate database");*/
+    if !config.skip_migrations {
+        storage
+            .create_or_migrate()
+            .await
+            .expect("Failed to create or migrate database");
+    }
 
     /*let duckdb_storage = DuckDBStorage::connect("sensapp.db")
         .await
@@ -161,7 +162,7 @@ async fn async_main() {
         .await;
     */
 
-    let event_bus = bus::event_bus::init_event_bus();
+    let event_bus = Arc::new(EventBus::new());
     let mut wololo = event_bus.main_bus_receiver.activate_cloned();
     // let mut wololo2 = event_bus.main_bus_receiver.activate_cloned();
 

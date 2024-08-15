@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use opcua::client::prelude::MonitoredItem;
-use opcua::types::{DataValue, DateTime, DateTimeUtc, Identifier, NodeId, Variant};
+use opcua::types::{DataValue, DateTime, Identifier, NodeId, Variant};
 use uuid::Uuid;
 
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;

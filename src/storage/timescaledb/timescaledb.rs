@@ -117,8 +117,4 @@ impl TimeScaleDBStorage {
 
         Ok(())
     }
-
-    async fn list_sensors(&self) -> Result<Vec<String>> {
-        unimplemented!();
-    }
 }

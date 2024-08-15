@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS sensors (
     sensor_id BIGINT PRIMARY KEY DEFAULT nextval('sensors_id_seq'),
     uuid UUID NOT NULL UNIQUE,
     name TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL,
     type TEXT NOT NULL,
     unit BIGINT,
     FOREIGN KEY (unit) REFERENCES units(id)

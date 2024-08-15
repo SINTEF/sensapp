@@ -1,5 +1,5 @@
-use crate::datamodel::unit::Unit;
 use crate::datamodel::Sensor;
+use crate::datamodel::{unit::Unit, SensAppDateTime};
 use anyhow::Result;
 use cached::proc_macro::cached;
 use duckdb::{params, CachedStatement, OptionalExt, Transaction};
@@ -108,16 +108,25 @@ pub fn get_sensor_id_or_create_sensor(transaction: &Transaction, sensor: &Sensor
     } else {
         let sensor_type_string = sensor.sensor_type.to_string();
 
+        let now = SensAppDateTime::now()?;
+        let created_at = now.to_rfc3339();
+
         let unit_id = match sensor.unit {
             Some(ref unit) => Some(get_unit_id_or_create(transaction, unit)?),
             None => None,
         };
 
         let mut insert_stmt: CachedStatement = transaction.prepare_cached(
-            "INSERT INTO sensors (uuid, name, type, unit) VALUES (?, ?, ?, ?) RETURNING sensor_id",
+            "INSERT INTO sensors (uuid, name, created_at, type, unit) VALUES (?, ?, ?, ?, ?) RETURNING sensor_id",
         )?;
         let sensor_id: i64 = insert_stmt.query_row(
-            params![uuid_string, sensor.name, sensor_type_string, unit_id],
+            params![
+                uuid_string,
+                sensor.name,
+                created_at,
+                sensor_type_string,
+                unit_id
+            ],
             |row| row.get(0),
         )?;
 

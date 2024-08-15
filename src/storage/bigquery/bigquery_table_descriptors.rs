@@ -39,13 +39,18 @@ pub static SENSORS_DESCRIPTOR: Lazy<TableDescriptor> = Lazy::new(|| TableDescrip
             typ: ColumnType::String,
         },
         FieldDescriptor {
-            name: "type".to_string(),
+            name: "created_at".to_string(),
             number: 4,
+            typ: ColumnType::Timestamp,
+        },
+        FieldDescriptor {
+            name: "type".to_string(),
+            number: 5,
             typ: ColumnType::String,
         },
         FieldDescriptor {
             name: "unit".to_string(),
-            number: 5,
+            number: 6,
             typ: ColumnType::Int64,
         },
     ],
