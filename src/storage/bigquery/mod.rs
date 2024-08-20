@@ -4,6 +4,7 @@ use crate::{
 };
 use anyhow::{bail, Result};
 use async_trait::async_trait;
+use bigquery_crud::list_sensors;
 use bigquery_publishers::{
     publish_blob_values, publish_boolean_values, publish_float_values, publish_integer_values,
     publish_json_values, publish_location_values, publish_numeric_values, publish_string_values,
@@ -21,6 +22,7 @@ use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 use tokio::{sync::RwLock, time::timeout};
 use url::Url;
 
+mod bigquery_crud;
 mod bigquery_labels_utilities;
 mod bigquery_prost_structs;
 mod bigquery_publishers;
@@ -241,6 +243,6 @@ impl StorageInstance for BigQueryStorage {
         cursor: ListCursor,
         limit: usize,
     ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {
-        unimplemented!();
+        list_sensors(self, cursor, limit).await
     }
 }

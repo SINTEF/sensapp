@@ -132,21 +132,13 @@ ON
   s.sensor_id = nv.sensor_id;
 
 CREATE OR REPLACE VIEW `{dataset_id}.sensor_labels_view` AS
-SELECT
-  s.sensor_id,
-  s.uuid,
-  s.name AS sensor_name,
-  s.type,
-  s.unit,
-  (
-    SELECT JSON_OBJECT(
-          ARRAY_AGG(lnd.name),
-          ARRAY_AGG(ldd.description)
-    )
-    FROM `{dataset_id}.labels` l
-    LEFT JOIN `{dataset_id}.labels_name_dictionary` lnd ON l.name = lnd.id
-    LEFT JOIN `{dataset_id}.labels_description_dictionary` ldd ON l.description = ldd.id
-    WHERE l.sensor_id = s.sensor_id
-  ) AS labels
-FROM
-  `{dataset_id}.sensors` s;
+SELECT sensors.uuid, sensors.created_at, sensors.name, type, units.name as unit, JSON_OBJECT(
+	ARRAY_AGG(labels_name_dictionary.name), ARRAY_AGG(labels_description_dictionary.description)
+) AS labels
+FROM `{dataset_id}.sensors` as sensors
+LEFT JOIN `{dataset_id}.units` as units on sensors.unit = units.id
+LEFT JOIN `{dataset_id}.labels`  as labels on sensors.sensor_id = labels.sensor_id
+LEFT JOIN `{dataset_id}.labels_name_dictionary` as labels_name_dictionary on labels.name = labels_name_dictionary.id
+LEFT JOIN `{dataset_id}.labels_description_dictionary` as labels_description_dictionary on labels.description = labels_description_dictionary.id
+GROUP BY sensors.sensor_id, sensors.uuid, sensors.created_at, sensors.name, type, units.name
+ORDER BY sensors.created_at ASC, sensors.uuid ASC;
