@@ -1,4 +1,5 @@
 use crate::{
+    crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel},
     datamodel::{Sensor, SensorType, TypedSamples},
     storage::storage::StorageInstance,
 };
@@ -277,6 +278,7 @@ impl StorageInstance for RrdCachedStorage {
                 .collect::<Vec<_>>();
         }
         if !sensors_to_create.is_empty() {
+            eprintln!("Creating sensors with min timestamp: {}", min_timestamp);
             self.create_sensors(&sensors_to_create, min_timestamp as u64 - 10)
                 .await?;
         }
@@ -287,14 +289,11 @@ impl StorageInstance for RrdCachedStorage {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Failed to batch update: {:?}", e);
-                    match e {
-                        RRDCachedClientError::BatchUpdateErrorResponse(string, errors) => {
-                            println!("Batch update error response: {:?}", string);
-                            for error in errors {
-                                println!("Batch update error: {:?}", error);
-                            }
+                    if let RRDCachedClientError::BatchUpdateErrorResponse(string, errors) = e {
+                        eprintln!("Batch update error response: {:?}", string);
+                        for error in errors {
+                            eprintln!("Batch update error: {:?}", error);
                         }
-                        _ => {}
                     }
                 }
             }
@@ -323,7 +322,11 @@ impl StorageInstance for RrdCachedStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
-        unimplemented!();
+    async fn list_sensors(
+        &self,
+        _cursor: ListCursor,
+        _limit: usize,
+    ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {
+        Err(anyhow::anyhow!("rrdcached doesn't support listing sensors"))
     }
 }

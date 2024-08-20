@@ -91,3 +91,6 @@ utoipa = { version = "4.2", features = ["axum_extras"] }
 utoipa-scalar = { version = "0.1", features = ["axum"] }
 rrdcached-client = "0.1"
 rustls = "0.23"
+base64 = "0.22"
+rot13 = "0.1"
+time = "0.3"

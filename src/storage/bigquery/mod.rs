@@ -1,4 +1,7 @@
-use crate::storage::storage::StorageInstance;
+use crate::{
+    crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel},
+    storage::storage::StorageInstance,
+};
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use bigquery_publishers::{
@@ -233,7 +236,11 @@ impl StorageInstance for BigQueryStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
+    async fn list_sensors(
+        &self,
+        cursor: ListCursor,
+        limit: usize,
+    ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {
         unimplemented!();
     }
 }

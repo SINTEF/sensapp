@@ -1,9 +1,12 @@
+use crate::crud::list_cursor::ListCursor;
+use crate::crud::viewmodel::sensor_viewmodel::SensorViewModel;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::TypedSamples;
 use anyhow::{bail, Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
 use duckdb::Connection;
+use duckdb_crud::list_sensors;
 use duckdb_publishers::*;
 use duckdb_utilities::get_sensor_id_or_create_sensor;
 use std::sync::Arc;
@@ -14,6 +17,7 @@ use tokio::time::timeout;
 
 use super::storage::StorageInstance;
 
+mod duckdb_crud;
 mod duckdb_publishers;
 mod duckdb_utilities;
 
@@ -92,8 +96,12 @@ impl StorageInstance for DuckDBStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
-        unimplemented!();
+    async fn list_sensors(
+        &self,
+        cursor: ListCursor,
+        limit: usize,
+    ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {
+        list_sensors(self.connection.clone(), cursor, limit).await
     }
 }
 

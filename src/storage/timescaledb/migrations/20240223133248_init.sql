@@ -37,7 +37,8 @@ CREATE TABLE labels (
     PRIMARY KEY (sensor_id, name),
     FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id),
     FOREIGN KEY (name) REFERENCES labels_name_dictionary(id),
-    FOREIGN KEY (description) REFERENCES labels_description_dictionary(id)
+    FOREIGN KEY (description) REFERENCES labels_description_dictionary(id),
+    UNIQUE (sensor_id, name)
 );
 
 -- Create the 'strings_values_dictionary' table
@@ -193,3 +194,15 @@ ALTER TABLE blob_values SET (
 );
 SELECT add_compression_policy('blob_values', INTERVAL '7 days');
 SELECT add_dimension('blob_values', by_hash('sensor_id', 2));
+
+CREATE VIEW sensor_labels_view AS
+SELECT sensors.uuid, sensors.created_at, sensors."name", type, units.name as unit, jsonb_object_agg(
+	labels_name_dictionary."name",labels_description_dictionary."description"
+) AS labels
+FROM sensors
+LEFT JOIN units on sensors.unit = units.id
+LEFT JOIN Labels on sensors.sensor_id = labels.sensor_id
+LEFT JOIN labels_name_dictionary on labels."name" = labels_name_dictionary."id"
+LEFT JOIN labels_description_dictionary on labels.description = labels_description_dictionary.id
+GROUP BY sensors."sensor_id", sensors.uuid, sensors.created_at, sensors."name", type, units.name
+ORDER BY sensors.created_at ASC, sensors.uuid ASC;

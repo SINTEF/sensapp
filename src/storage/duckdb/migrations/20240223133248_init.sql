@@ -43,7 +43,10 @@ CREATE TABLE IF NOT EXISTS labels (
     PRIMARY KEY (sensor_id, name),
     FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id),
     FOREIGN KEY (name) REFERENCES labels_name_dictionary(id),
-    FOREIGN KEY (description) REFERENCES labels_description_dictionary(id)
+    FOREIGN KEY (description) REFERENCES labels_description_dictionary(id),
+
+    -- Unique constraint on (sensor_id, name)
+    UNIQUE (sensor_id, name)
 );
 
 -- Create the 'strings_values_dictionary' table
@@ -124,3 +127,15 @@ CREATE INDEX IF NOT EXISTS idx_units_name ON units (name);
 CREATE INDEX IF NOT EXISTS idx_labels_name_dictionary_name ON labels_name_dictionary (name);
 CREATE INDEX IF NOT EXISTS idx_labels_description_dictionary_description ON labels_description_dictionary (description);
 CREATE INDEX IF NOT EXISTS idx_strings_values_dictionary_value ON strings_values_dictionary (value);
+
+CREATE VIEW IF NOT EXISTS sensor_labels_view AS
+SELECT sensors.uuid, sensors.created_at, sensors."name", type, units.name as unit, json_group_object(
+	labels_name_dictionary."name",labels_description_dictionary."description"
+) AS labels
+FROM sensors
+LEFT JOIN units on sensors.unit = units.id
+LEFT JOIN Labels on sensors.sensor_id = labels.sensor_id
+LEFT JOIN labels_name_dictionary on labels."name" = labels_name_dictionary."id"
+LEFT JOIN labels_description_dictionary on labels.description = labels_description_dictionary.id
+GROUP BY sensors."sensor_id", sensors.uuid, sensors.created_at, sensors."name", type, units.name
+ORDER BY sensors.created_at ASC, sensors.uuid ASC;

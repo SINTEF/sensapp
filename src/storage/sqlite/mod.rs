@@ -1,4 +1,5 @@
 pub mod sqlite;
+pub mod sqlite_crud;
 pub mod sqlite_publishers;
 pub mod sqlite_utilities;
 

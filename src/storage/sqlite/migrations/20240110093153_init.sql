@@ -22,9 +22,10 @@ CREATE TABLE labels (
     name INTEGER NOT NULL, -- ID for the name in the dictionary, cannot be null
     description INTEGER, -- ID for the description in the dictionary (optional)
     PRIMARY KEY (sensor_id, name),
-    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id) -- Foreign key to 'sensors' table
-    FOREIGN KEY (name) REFERENCES labels_name_dictionary(id) -- Foreign key to 'labels_name_dictionary'
-    FOREIGN KEY (description) REFERENCES labels_description_dictionary(id) -- Foreign key to 'labels_description_dictionary'
+    FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id), -- Foreign key to 'sensors' table
+    FOREIGN KEY (name) REFERENCES labels_name_dictionary(id), -- Foreign key to 'labels_name_dictionary'
+    FOREIGN KEY (description) REFERENCES labels_description_dictionary(id), -- Foreign key to 'labels_description_dictionary'
+    UNIQUE (sensor_id, name)
 ) STRICT;
 
 -- Create the 'labels_name_dictionary' table
@@ -127,3 +128,15 @@ CREATE INDEX index_boolean_values ON boolean_values(sensor_id, timestamp_ms);
 CREATE INDEX index_location_values ON location_values(sensor_id, timestamp_ms);
 CREATE INDEX index_json_values ON json_values(sensor_id, timestamp_ms);
 CREATE INDEX index_blob_values ON blob_values(sensor_id, timestamp_ms);
+
+CREATE VIEW sensor_labels_view AS
+SELECT sensors.uuid, sensors.created_at, sensors."name", type, units.name as unit, json_group_object(
+	labels_name_dictionary."name",labels_description_dictionary."description"
+) AS labels
+FROM sensors
+LEFT JOIN units on sensors.unit = units.id
+LEFT JOIN Labels on sensors.sensor_id = labels.sensor_id
+LEFT JOIN labels_name_dictionary on labels."name" = labels_name_dictionary."id"
+LEFT JOIN labels_description_dictionary on labels.description = labels_description_dictionary.id
+GROUP BY sensors."sensor_id", sensors.uuid, sensors.created_at, sensors."name", type, units.name
+ORDER BY sensors.created_at ASC, sensors.uuid ASC;

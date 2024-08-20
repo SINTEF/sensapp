@@ -2,6 +2,8 @@ use super::{
     super::storage::StorageInstance, timescaledb_publishers::*,
     timescaledb_utilities::get_sensor_id_or_create_sensor,
 };
+use crate::crud::list_cursor::ListCursor;
+use crate::crud::viewmodel::sensor_viewmodel::SensorViewModel;
 use crate::datamodel::{batch::Batch, TypedSamples};
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
@@ -64,8 +66,12 @@ impl StorageInstance for TimeScaleDBStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
-        unimplemented!();
+    async fn list_sensors(
+        &self,
+        cursor: ListCursor,
+        limit: usize,
+    ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {
+        super::super::postgresql::postgresql_crud::list_sensors(&self.pool, cursor, limit).await
     }
 }
 

@@ -1,11 +1,15 @@
+use super::postgresql_crud::list_sensors;
 use super::{
     super::storage::StorageInstance, postgresql_publishers::*,
     postgresql_utilities::get_sensor_id_or_create_sensor,
 };
+use crate::crud::list_cursor::ListCursor;
+use crate::crud::viewmodel::sensor_viewmodel::SensorViewModel;
 use crate::datamodel::{batch::Batch, TypedSamples};
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{postgres::PgConnectOptions, PgPool};
 use std::time::Duration;
 use std::{str::FromStr, sync::Arc};
@@ -21,9 +25,23 @@ impl PostgresStorage {
         let connect_options = PgConnectOptions::from_str(connection_string)
             .context("Failed to create postgres connection options")?;
 
-        let pool = PgPool::connect_with(connect_options)
+        let pool = PgPoolOptions::new()
+            .after_connect(|connection, _metadata| {
+                Box::pin(async move {
+                    use sqlx::Executor;
+                    //connection.execute("set time zone UTC;").await?;
+                    println!("aaa fuck");
+                    connection.execute("set time zone UTC;").await?;
+                    Ok(())
+                })
+            })
+            .connect_with(connect_options)
             .await
             .context("Failed to create postgres pool")?;
+
+        /*let pool = PgPool::connect_with(connect_options)
+        .await
+        .context("Failed to create postgres pool")?;*/
 
         Ok(Self { pool })
     }
@@ -64,8 +82,12 @@ impl StorageInstance for PostgresStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
-        unimplemented!();
+    async fn list_sensors(
+        &self,
+        cursor: ListCursor,
+        limit: usize,
+    ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {
+        list_sensors(&self.pool, cursor, limit).await
     }
 }
 
