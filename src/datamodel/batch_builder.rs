@@ -231,7 +231,7 @@ mod tests {
     use crate::{
         bus::message::Message,
         config::load_configuration,
-        datamodel::{sensapp_vec::SensAppLabels, Sample, SensorType},
+        datamodel::{Sample, SensAppLabels, SensorType},
     };
 
     // Utility function to create a test sensor

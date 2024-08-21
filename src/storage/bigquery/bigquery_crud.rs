@@ -1,9 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{
-    crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel},
-    datamodel::sensor,
-};
+use crate::crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel};
 use anyhow::{anyhow, Result};
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,

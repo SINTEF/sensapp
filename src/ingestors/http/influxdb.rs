@@ -1,7 +1,8 @@
 use super::{app_error::AppError, state::HttpServerState};
-use crate::datamodel::{
-    batch_builder::BatchBuilder, sensapp_datetime::SensAppDateTimeExt, sensapp_vec::SensAppLabels,
-    SensAppDateTime, Sensor, SensorType, TypedSamples,
+use crate::parsing::ParseData;
+use crate::{
+    datamodel::batch_builder::BatchBuilder,
+    parsing::influx::{precision::Precision, InfluxLineProtocolCompression, InfluxParser},
 };
 use anyhow::Result;
 use axum::{
@@ -9,12 +10,9 @@ use axum::{
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
 };
-use flate2::read::GzDecoder;
-use influxdb_line_protocol::{parse_lines, FieldValue};
+use hybridmap::HybridMap;
 use serde::Deserialize;
-use std::str::FromStr;
-use std::{io::Read, str::from_utf8};
-use std::{str, sync::Arc};
+use std::str;
 use tokio_util::bytes::Bytes;
 
 #[derive(Debug, Deserialize)]
@@ -24,98 +22,6 @@ pub struct InfluxDBQueryParams {
     #[serde(rename = "orgID")]
     pub org_id: Option<String>,
     pub precision: Option<String>,
-}
-
-fn bytes_to_string(headers: &HeaderMap, bytes: &Bytes) -> Result<String, AppError> {
-    match headers.get("content-encoding") {
-        Some(value) => match value.to_str() {
-            Ok("gzip") => {
-                let mut d = GzDecoder::new(&bytes[..]);
-                let mut s = String::new();
-                d.read_to_string(&mut s)
-                    .map_err(|e| AppError::BadRequest(anyhow::anyhow!(e)))?;
-                Ok(s)
-            }
-            _ => Err(AppError::BadRequest(anyhow::anyhow!(
-                "Unsupported content-encoding: {:?}",
-                value
-            ))),
-        },
-        // No content-encoding header
-        None => {
-            let str = from_utf8(bytes).map_err(|e| AppError::BadRequest(anyhow::anyhow!(e)))?;
-            Ok(str.to_string())
-        }
-    }
-}
-
-fn compute_field_name(url_encoded_measurement_name: &str, field_key: &str) -> String {
-    let name = urlencoding::encode(field_key);
-    let mut string_builder =
-        String::with_capacity(url_encoded_measurement_name.len() + name.len() + 1);
-    string_builder.push_str(url_encoded_measurement_name);
-    string_builder.push(' '); // Space as separator, as it's not allowed in measurement name nor field key
-    string_builder.push_str(&name);
-    string_builder
-}
-
-fn influxdb_field_to_sensapp(
-    field_value: FieldValue,
-    datetime: SensAppDateTime,
-) -> Result<(SensorType, TypedSamples)> {
-    match field_value {
-        FieldValue::I64(value) => Ok((
-            SensorType::Integer,
-            TypedSamples::one_integer(value, datetime),
-        )),
-        FieldValue::U64(value) => match i64::try_from(value) {
-            Ok(value) => Ok((
-                SensorType::Integer,
-                TypedSamples::one_integer(value, datetime),
-            )),
-            Err(_) => anyhow::bail!("U64 value is too big to be converted to i64"),
-        },
-        FieldValue::F64(value) => Ok((SensorType::Float, TypedSamples::one_float(value, datetime))),
-        /*FieldValue::F64(value) => Ok((
-            SensorType::Numeric,
-            TypedSamples::one_numeric(
-                Decimal::from_f64_retain(value)
-                    .ok_or(anyhow::anyhow!("Failed to convert f64 to Decimal"))?,
-                datetime,
-            ),
-        )),*/
-        FieldValue::String(value) => Ok((
-            SensorType::String,
-            TypedSamples::one_string(value.into(), datetime),
-        )),
-        FieldValue::Boolean(value) => Ok((
-            SensorType::Boolean,
-            TypedSamples::one_boolean(value, datetime),
-        )),
-    }
-}
-
-#[derive(Debug, Default, PartialEq)]
-enum Precision {
-    #[default]
-    Nanoseconds,
-    Microseconds,
-    Milliseconds,
-    Seconds,
-}
-
-impl FromStr for Precision {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "ns" => Ok(Precision::Nanoseconds),
-            "us" => Ok(Precision::Microseconds),
-            "ms" => Ok(Precision::Milliseconds),
-            "s" => Ok(Precision::Seconds),
-            _ => Err(()),
-        }
-    }
 }
 
 /// InfluxDB Compatible Write API.
@@ -191,72 +97,33 @@ pub async fn publish_influxdb(
         None => Precision::default(),
     };
 
-    let bytes_string = bytes_to_string(&headers, &bytes)?;
-    let parser = parse_lines(&bytes_string);
+    let compression = match headers.get("content-encoding") {
+        Some(value) => match value.to_str() {
+            Ok("gzip") => InfluxLineProtocolCompression::Gzip,
+            Ok("plain") => InfluxLineProtocolCompression::None,
+            _ => {
+                return Err(AppError::BadRequest(anyhow::anyhow!(
+                    "Unsupported content-encoding: {:?}",
+                    value
+                )))
+            }
+        },
+        // No content-encoding header
+        None => InfluxLineProtocolCompression::Automatic,
+    };
+
+    let mut context_map = HybridMap::with_capacity(2);
+    context_map.insert("influxdb_bucket".to_string(), bucket);
+    context_map.insert("influxdb_org".to_string(), common_org_name);
+
+    let parser = InfluxParser::new(compression, precision_enum, false);
 
     let mut batch_builder = BatchBuilder::new()?;
 
-    for line in parser {
-        match line {
-            Ok(line) => {
-                let measurement = line.series.measurement;
-
-                let tags = match &line.series.tag_set {
-                    None => None,
-                    Some(tags) => {
-                        let mut tags_vec = SensAppLabels::new();
-                        tags_vec.push(("influxdb_bucket".to_string(), bucket.clone()));
-                        tags_vec.push(("influxdb_org".to_string(), common_org_name.clone()));
-
-                        for (key, value) in tags.iter() {
-                            tags_vec.push((key.to_string(), value.to_string()));
-                        }
-                        Some(tags_vec)
-                    }
-                };
-
-                let datetime = match line.timestamp {
-                    Some(timestamp) => match precision_enum {
-                        Precision::Nanoseconds => {
-                            SensAppDateTime::from_unix_nanoseconds_i64(timestamp)
-                        }
-                        Precision::Microseconds => {
-                            SensAppDateTime::from_unix_microseconds_i64(timestamp)
-                        }
-                        Precision::Milliseconds => {
-                            SensAppDateTime::from_unix_milliseconds_i64(timestamp)
-                        }
-                        Precision::Seconds => SensAppDateTime::from_unix_seconds_i64(timestamp),
-                    },
-                    None => match SensAppDateTime::now() {
-                        Ok(datetime) => datetime,
-                        Err(error) => {
-                            return Err(AppError::InternalServerError(anyhow::anyhow!(error)));
-                        }
-                    },
-                };
-
-                let url_encoded_field_name = urlencoding::encode(&measurement).to_string();
-
-                for (field_key, field_value) in line.field_set {
-                    let unit = None;
-                    let (sensor_type, value) =
-                        match influxdb_field_to_sensapp(field_value, datetime) {
-                            Ok((sensor_type, value)) => (sensor_type, value),
-                            Err(error) => {
-                                return Err(AppError::BadRequest(anyhow::anyhow!(error)));
-                            }
-                        };
-                    let name = compute_field_name(&url_encoded_field_name, &field_key);
-                    let sensor = Sensor::new_without_uuid(name, sensor_type, unit, tags.clone())?;
-                    batch_builder.add(Arc::new(sensor), value).await?;
-                }
-            }
-            Err(error) => {
-                return Err(AppError::BadRequest(anyhow::anyhow!(error)));
-            }
-        }
-    }
+    parser
+        .parse_data(&bytes, Some(context_map), &mut batch_builder)
+        .await
+        .map_err(|error| AppError::BadRequest(anyhow::anyhow!(error)))?;
 
     // TODO: Remove this println once debugged
     println!("INfluxDB: Sending to the event bus soon");
@@ -283,48 +150,18 @@ pub async fn publish_influxdb(
 #[cfg(test)]
 mod tests {
     use crate::bus::{self, message};
+    use crate::config::load_configuration;
     use crate::storage::sqlite::SqliteStorage;
 
     use super::*;
     use flate2::write::GzEncoder;
     use flate2::Compression;
-    use influxdb_line_protocol::EscapedStr;
     use std::io::Write;
-
-    #[test]
-    fn test_bytes_to_string() {
-        let headers = HeaderMap::new();
-        let bytes = Bytes::from("test");
-        let result = bytes_to_string(&headers, &bytes).unwrap();
-        assert_eq!(result, "test".to_string());
-
-        // Gziped bytes
-        let mut headers = HeaderMap::new();
-        headers.insert("content-encoding", "gzip".parse().unwrap());
-        let raw_bytes = "test".as_bytes();
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(raw_bytes).unwrap();
-        let bytes = Bytes::from(encoder.finish().unwrap());
-        let result = bytes_to_string(&headers, &bytes).unwrap();
-        assert_eq!(result, "test".to_string());
-
-        // Unsupported content-encoding
-        let mut headers = HeaderMap::new();
-        headers.insert("content-encoding", "deflate".parse().unwrap());
-        let bytes = Bytes::from("test");
-        let result = bytes_to_string(&headers, &bytes);
-        assert!(result.is_err());
-
-        // Invalid UTF-8 bytes
-        let headers = HeaderMap::new();
-        // Starts with a 0
-        let bytes = Bytes::from(&[0, 159, 146, 150][..]);
-        let result = bytes_to_string(&headers, &bytes);
-        assert!(result.is_err());
-    }
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_publish_influxdb() {
+        _ = load_configuration();
         let event_bus = Arc::new(bus::event_bus::EventBus::new());
         let mut wololo = event_bus.main_bus_receiver.activate_cloned();
         tokio::spawn(async move {
@@ -354,6 +191,24 @@ mod tests {
             precision: None,
         });
         let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773254420000");
+        let result = publish_influxdb(state.clone(), headers, query, bytes)
+            .await
+            .unwrap();
+        assert_eq!(result, StatusCode::NO_CONTENT);
+
+        // with good gzip encoding
+        let mut headers = HeaderMap::new();
+        headers.insert("content-encoding", "gzip".parse().unwrap());
+        let query = Query(InfluxDBQueryParams {
+            bucket: "test".to_string(),
+            org: Some("test".to_string()),
+            org_id: None,
+            precision: None,
+        });
+        let bytes = "cpu,host=A,region=west usage_system=64i 1590488773254420000".as_bytes();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(bytes).unwrap();
+        let bytes = Bytes::from(encoder.finish().unwrap());
         let result = publish_influxdb(state.clone(), headers, query, bytes)
             .await
             .unwrap();
@@ -507,75 +362,5 @@ mod tests {
         let result = publish_influxdb(state.clone(), headers, query, bytes).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(AppError::BadRequest(_))));
-    }
-
-    #[test]
-    fn test_influxdb_field_to_sensapp() {
-        let datetime = SensAppDateTime::from_unix_seconds(0.0);
-        let result = influxdb_field_to_sensapp(FieldValue::I64(42), datetime).unwrap();
-        assert_eq!(
-            result,
-            (SensorType::Integer, TypedSamples::one_integer(42, datetime))
-        );
-
-        let result = influxdb_field_to_sensapp(FieldValue::U64(42), datetime).unwrap();
-        assert_eq!(
-            result,
-            (SensorType::Integer, TypedSamples::one_integer(42, datetime))
-        );
-
-        let result = influxdb_field_to_sensapp(FieldValue::F64(42.0), datetime).unwrap();
-        assert_eq!(
-            result,
-            (SensorType::Float, TypedSamples::one_float(42.0, datetime))
-        );
-
-        let result =
-            influxdb_field_to_sensapp(FieldValue::String(EscapedStr::from("test")), datetime)
-                .unwrap();
-        assert_eq!(
-            result,
-            (
-                SensorType::String,
-                TypedSamples::one_string("test".to_string(), datetime)
-            )
-        );
-
-        let result = influxdb_field_to_sensapp(FieldValue::Boolean(true), datetime).unwrap();
-        assert_eq!(
-            result,
-            (
-                SensorType::Boolean,
-                TypedSamples::one_boolean(true, datetime)
-            )
-        );
-    }
-
-    #[test]
-    fn test_convert_too_high_u64_to_i64() {
-        let datetime = SensAppDateTime::from_unix_seconds(0.0);
-        let result = influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_precision_enum() {
-        let result = Precision::from_str("ns").unwrap();
-        assert_eq!(result, Precision::Nanoseconds);
-
-        let result = Precision::from_str("us").unwrap();
-        assert_eq!(result, Precision::Microseconds);
-
-        let result = Precision::from_str("ms").unwrap();
-        assert_eq!(result, Precision::Milliseconds);
-
-        let result = Precision::from_str("s").unwrap();
-        assert_eq!(result, Precision::Seconds);
-
-        let result = Precision::from_str("wrong");
-        assert!(result.is_err());
-
-        let result = Precision::default();
-        assert_eq!(result, Precision::Nanoseconds);
     }
 }

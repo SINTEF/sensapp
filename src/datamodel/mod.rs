@@ -2,6 +2,7 @@ pub mod batch;
 pub mod batch_builder;
 pub mod sample;
 pub mod sensapp_datetime;
+pub mod sensapp_labels;
 pub mod sensapp_vec;
 pub mod sensor;
 pub mod sensor_type;
@@ -10,6 +11,8 @@ pub mod unit;
 
 pub use sample::Sample;
 pub use sensapp_datetime::SensAppDateTime;
+pub use sensapp_labels::SensAppLabels;
+pub use sensapp_labels::SensAppLabelsExt;
 pub use sensapp_vec::SensAppVec;
 pub use sensor::Sensor;
 pub use sensor_type::SensorType;

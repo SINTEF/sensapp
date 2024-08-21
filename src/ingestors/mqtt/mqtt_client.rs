@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 fn random_client_id() -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
-        .take(12)
+        .take(18)
         .map(char::from)
         .collect()
 }
@@ -83,7 +83,7 @@ fn configure_mqtt_options(
     Ok(mqtt_options)
 }
 
-pub async fn mqtt_client(config: MqttConfig, event_bus: Arc<EventBus>) -> Result<()> {
+pub async fn mqtt_client(config: MqttConfig, _event_bus: Arc<EventBus>) -> Result<()> {
     let mqtt_options = make_client_options(&config)?;
 
     let (client, mut event_loop) = AsyncClient::new(mqtt_options, 16);

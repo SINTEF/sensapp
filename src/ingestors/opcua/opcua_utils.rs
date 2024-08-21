@@ -4,8 +4,7 @@ use opcua::types::{DataValue, DateTime, Identifier, NodeId, Variant};
 use uuid::Uuid;
 
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
-use crate::datamodel::sensapp_vec::SensAppLabels;
-use crate::datamodel::{Sample, SensAppDateTime, SensAppVec, SensorType};
+use crate::datamodel::{Sample, SensAppDateTime, SensAppLabels, SensAppVec, SensorType};
 use crate::datamodel::{Sensor, TypedSamples};
 
 pub fn node_id_to_name(name_prefix: Option<String>, node: &NodeId) -> String {
@@ -560,6 +559,4 @@ mod tests {
             Some(SensorType::Json)
         );
     }
-
-
 }

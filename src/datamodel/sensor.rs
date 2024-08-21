@@ -1,6 +1,6 @@
 use crate::name_to_uuid::uuid_v8_blake3;
 
-use super::{sensapp_vec::SensAppLabels, unit::Unit, SensorType};
+use super::{unit::Unit, SensAppLabels, SensorType};
 use anyhow::{anyhow, Error};
 use smallvec::SmallVec;
 use std::fmt;

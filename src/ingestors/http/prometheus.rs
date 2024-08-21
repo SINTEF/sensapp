@@ -1,15 +1,8 @@
-use std::sync::Arc;
-
-use crate::{
-    datamodel::{
-        batch_builder::BatchBuilder, sensapp_datetime::SensAppDateTimeExt,
-        sensapp_vec::SensAppLabels, unit::Unit, Sample, SensAppDateTime, Sensor, SensorType,
-        TypedSamples,
-    },
-    parsing::prometheus::remote_write_parser::parse_remote_write_request,
-};
-
 use super::{app_error::AppError, state::HttpServerState};
+use crate::{
+    datamodel::batch_builder::BatchBuilder,
+    parsing::{prometheus::PrometheusParser, ParseData},
+};
 use anyhow::Result;
 use axum::{
     debug_handler,
@@ -104,75 +97,11 @@ pub async fn publish_prometheus(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
-    // println!("InfluxDB publish");
-    // println!("bucket: {}", bucket);
-    // println!("org: {:?}", org);
-    // println!("org_id: {:?}", org_id);
-    // println!("precision: {:?}", precision);
-    // println!("bytes: {:?}", bytes);
-
-    println!("Received {} bytes", bytes.len());
-
-    // Verify headers
     verify_headers(&headers)?;
 
-    // Parse the content
-    let write_request = parse_remote_write_request(&bytes)?;
-
-    // Regularly, prometheus sends metadata on the undocumented reserved field,
-    // so we stop immediately when it happens.
-    if write_request.timeseries.is_empty() {
-        return Ok(StatusCode::NO_CONTENT);
-    }
-
-    println!("Received {} timeseries", write_request.timeseries.len());
-
     let mut batch_builder = BatchBuilder::new()?;
-    for time_serie in write_request.timeseries {
-        let mut labels = SensAppLabels::with_capacity(time_serie.labels.len());
-        let mut name: Option<String> = None;
-        let mut unit: Option<Unit> = None;
-        for label in time_serie.labels {
-            match label.name.as_str() {
-                "__name__" => {
-                    name = Some(label.value.clone());
-                }
-                "unit" => {
-                    unit = Some(Unit::new(label.value.clone(), None));
-                }
-                _ => {}
-            }
-            labels.push((label.name, label.value));
-        }
-        let name = match name {
-            Some(name) => name,
-            None => {
-                return Err(AppError::BadRequest(anyhow::anyhow!(
-                    "A time serie is missing its __name__ label"
-                )));
-            }
-        };
-
-        // Prometheus has a very simple model, it's always a float.
-        let sensor = Sensor::new_without_uuid(name, SensorType::Float, unit, Some(labels))?;
-
-        // We can now add the samples
-        let samples = TypedSamples::Float(
-            time_serie
-                .samples
-                .into_iter()
-                // Special prometheus NaN value (Stale Marker)
-                .filter(|sample| sample.value.to_bits() != 0x7ff0000000000002)
-                .map(|sample| Sample {
-                    datetime: SensAppDateTime::from_unix_milliseconds_i64(sample.timestamp),
-                    value: sample.value,
-                })
-                .collect(),
-        );
-
-        batch_builder.add(Arc::new(sensor), samples).await?;
-        // batch_builder.send_if_batch_full(event_bus.clone()).await?;
-    }
+    let parser = PrometheusParser;
+    parser.parse_data(&bytes, None, &mut batch_builder).await?;
 
     match batch_builder.send_what_is_left(state.event_bus).await {
         Ok(Some(mut receiver)) => {
@@ -184,6 +113,5 @@ pub async fn publish_prometheus(
         }
     }
 
-    // OK no content
     Ok(StatusCode::NO_CONTENT)
 }

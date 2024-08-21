@@ -33,7 +33,7 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
 
     println!("Reading CSV");
     while let Some(record) = records.next().await {
-        let record = record.unwrap();
+        let _record = record.unwrap();
         //println!("{:?}", record);
 
         current_samples.push(Sample {
