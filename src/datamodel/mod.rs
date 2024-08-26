@@ -1,5 +1,6 @@
 pub mod batch;
 pub mod batch_builder;
+pub mod matchers;
 pub mod sample;
 pub mod sensapp_datetime;
 pub mod sensapp_labels;

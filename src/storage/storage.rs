@@ -2,7 +2,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::fmt::Debug;
 
-use crate::crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel};
+use crate::{
+    crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel},
+    datamodel::matchers::SensorMatcher,
+};
 
 #[async_trait]
 pub trait StorageInstance: Send + Sync + Debug {
@@ -17,6 +20,7 @@ pub trait StorageInstance: Send + Sync + Debug {
 
     async fn list_sensors(
         &self,
+        matcher: SensorMatcher,
         cursor: ListCursor,
         limit: usize,
     ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)>;

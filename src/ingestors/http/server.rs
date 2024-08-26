@@ -2,6 +2,7 @@ use super::app_error::AppError;
 use super::crud::list_sensors;
 use super::influxdb::publish_influxdb;
 use super::prometheus::publish_prometheus;
+use super::senml::publish_senml;
 use super::state::HttpServerState;
 use crate::config;
 use crate::importers::csv::publish_csv_async;
@@ -12,6 +13,7 @@ use axum::extract::DefaultBodyLimit;
 use crate::ingestors::http::crud::__path_list_sensors;
 use crate::ingestors::http::influxdb::__path_publish_influxdb;
 use crate::ingestors::http::prometheus::__path_publish_prometheus;
+use crate::ingestors::http::senml::__path_publish_senml;
 use axum::extract::State;
 use axum::http::header;
 use axum::http::StatusCode;
@@ -40,8 +42,9 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
         (name = "SensApp", description = "SensApp API"),
         (name = "InfluxDB", description = "InfluxDB Write API"),
         (name = "Prometheus", description = "Prometheus Remote Write API"),
+        (name = "SenML", description = "SenML API"),
     ),
-    paths(frontpage, list_sensors, vacuum, publish_influxdb, publish_prometheus),
+    paths(frontpage, list_sensors, vacuum, publish_influxdb, publish_prometheus, publish_senml),
 )]
 struct ApiDoc;
 
@@ -103,6 +106,11 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .route(
             "/api/v1/prometheus_remote_write",
             post(publish_prometheus).layer(max_body_layer.clone()),
+        )
+        // SenML legacy SensApp API
+        .route(
+            "/api/v1/senml",
+            post(publish_senml).layer(max_body_layer.clone()),
         )
         .layer(middleware)
         .with_state(state);

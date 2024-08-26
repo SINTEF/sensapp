@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use crate::crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel};
+use crate::{
+    crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel},
+    datamodel::matchers::SensorMatcher,
+};
 use anyhow::{anyhow, Result};
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
@@ -12,6 +15,7 @@ use super::BigQueryStorage;
 
 pub async fn list_sensors(
     bqs: &BigQueryStorage,
+    matcher: SensorMatcher,
     cursor: ListCursor,
     limit: usize,
 ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {

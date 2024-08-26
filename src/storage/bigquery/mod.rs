@@ -22,6 +22,8 @@ use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 use tokio::{sync::RwLock, time::timeout};
 use url::Url;
 
+use crate::datamodel::matchers::SensorMatcher;
+
 mod bigquery_crud;
 mod bigquery_labels_utilities;
 mod bigquery_prost_structs;
@@ -240,9 +242,10 @@ impl StorageInstance for BigQueryStorage {
 
     async fn list_sensors(
         &self,
+        matcher: SensorMatcher,
         cursor: ListCursor,
         limit: usize,
     ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {
-        list_sensors(self, cursor, limit).await
+        list_sensors(self, matcher, cursor, limit).await
     }
 }

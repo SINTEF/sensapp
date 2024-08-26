@@ -4,6 +4,7 @@ use super::sqlite_utilities::get_sensor_id_or_create_sensor;
 use crate::crud::list_cursor::ListCursor;
 use crate::crud::viewmodel::sensor_viewmodel::SensorViewModel;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
+use crate::datamodel::matchers::SensorMatcher;
 use crate::datamodel::TypedSamples;
 use crate::storage::storage::StorageInstance;
 use anyhow::{Context, Result};
@@ -81,8 +82,13 @@ impl StorageInstance for SqliteStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self, cursor: ListCursor, limit: usize) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {
-        list_sensors(&self.pool, cursor, limit).await
+    async fn list_sensors(
+        &self,
+        matcher: SensorMatcher,
+        cursor: ListCursor,
+        limit: usize,
+    ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {
+        list_sensors(&self.pool, matcher, cursor, limit).await
     }
 }
 

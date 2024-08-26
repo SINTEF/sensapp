@@ -17,6 +17,8 @@ use tokio::{sync::RwLock, time::timeout};
 use url::Url;
 use uuid::Uuid;
 
+use crate::datamodel::matchers::SensorMatcher;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Preset {
     Munin,
@@ -324,6 +326,7 @@ impl StorageInstance for RrdCachedStorage {
 
     async fn list_sensors(
         &self,
+        _matcher: SensorMatcher,
         _cursor: ListCursor,
         _limit: usize,
     ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {

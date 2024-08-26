@@ -6,11 +6,12 @@ use tokio::sync::Mutex;
 
 use crate::{
     crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel},
-    datamodel::{sensapp_datetime::SensAppDateTimeExt, SensAppDateTime},
+    datamodel::{matchers::SensorMatcher, sensapp_datetime::SensAppDateTimeExt, SensAppDateTime},
 };
 
 pub async fn list_sensors(
     connection: Arc<Mutex<Connection>>,
+    matcher: SensorMatcher,
     cursor: ListCursor,
     limit: usize,
 ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {

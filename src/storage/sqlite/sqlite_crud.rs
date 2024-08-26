@@ -3,10 +3,14 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use sqlx::SqlitePool;
 
-use crate::crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel};
+use crate::{
+    crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel},
+    datamodel::matchers::SensorMatcher,
+};
 
 pub async fn list_sensors(
     pool: &SqlitePool,
+    matcher: SensorMatcher,
     cursor: ListCursor,
     limit: usize,
 ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {

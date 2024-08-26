@@ -10,6 +10,7 @@ use serde_json::json;
 pub enum AppError {
     InternalServerError(anyhow::Error),
     BadRequest(anyhow::Error),
+    NotFound(anyhow::Error),
 }
 
 impl IntoResponse for AppError {
@@ -22,6 +23,7 @@ impl IntoResponse for AppError {
                     "Internal Server Error".to_string(),
                 )
             }
+            AppError::NotFound(error) => (StatusCode::NOT_FOUND, error.to_string()),
             AppError::BadRequest(error) => (StatusCode::BAD_REQUEST, error.to_string()),
         };
         let body = Json(json!({ "error": message }));

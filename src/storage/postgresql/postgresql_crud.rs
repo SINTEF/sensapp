@@ -7,9 +7,11 @@ use sqlx::PgPool;
 use sqlx::Row;
 
 use crate::crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel};
+use crate::datamodel::matchers::SensorMatcher;
 
 pub async fn list_sensors(
     pool: &PgPool,
+    matcher: SensorMatcher,
     cursor: ListCursor,
     limit: usize,
 ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {

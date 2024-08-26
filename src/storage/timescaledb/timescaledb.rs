@@ -4,6 +4,7 @@ use super::{
 };
 use crate::crud::list_cursor::ListCursor;
 use crate::crud::viewmodel::sensor_viewmodel::SensorViewModel;
+use crate::datamodel::matchers::SensorMatcher;
 use crate::datamodel::{batch::Batch, TypedSamples};
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
@@ -68,10 +69,12 @@ impl StorageInstance for TimeScaleDBStorage {
 
     async fn list_sensors(
         &self,
+        matcher: SensorMatcher,
         cursor: ListCursor,
         limit: usize,
     ) -> Result<(Vec<SensorViewModel>, Option<ListCursor>)> {
-        super::super::postgresql::postgresql_crud::list_sensors(&self.pool, cursor, limit).await
+        super::super::postgresql::postgresql_crud::list_sensors(&self.pool, matcher, cursor, limit)
+            .await
     }
 }
 

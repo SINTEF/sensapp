@@ -133,9 +133,10 @@ CREATE INDEX index_json_values ON json_values USING brin (sensor_id, timestamp_m
 CREATE INDEX index_blob_values ON blob_values USING brin (sensor_id, timestamp_ms) WITH (pages_per_range = 32);
 
 CREATE VIEW sensor_labels_view AS
-SELECT sensors.uuid, sensors.created_at, sensors."name", type, units.name as unit, jsonb_object_agg(
-	labels_name_dictionary."name",labels_description_dictionary."description"
-) AS labels
+SELECT sensors.uuid, sensors.created_at, sensors."name", type, units.name as unit,
+CASE WHEN COUNT(labels.sensor_id) = 0 THEN '{}' ELSE jsonb_object_agg(
+	COALESCE(labels_name_dictionary."name",'whatever_this_is_a_bug_workaround'),labels_description_dictionary."description")
+END AS labels
 FROM sensors
 LEFT JOIN units on sensors.unit = units.id
 LEFT JOIN Labels on sensors.sensor_id = labels.sensor_id

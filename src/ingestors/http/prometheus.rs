@@ -115,3 +115,36 @@ pub async fn publish_prometheus(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// Prometheus Remote Read API.
+///
+/// Read data from SensApp in Prometheus.
+///
+/// It follows the [Prometheus Remote Read specification](https://prometheus.io/docs/prometheus/latest/querying/remote_read_api/).
+#[utoipa::path(
+    post,
+    path = "/api/v1/prometheus_remote_read",
+    tag = "Prometheus",
+    request_body(
+        content = String,
+        content_type = "application/x-protobuf",
+        description = "Prometheus Remote Read endpoint. [Reference](https://prometheus.io/docs/prometheus/latest/querying/remote_read_api/).",
+    ),
+    params(
+        ("content-encoding" = String, Header, format = "snappy", description = "Content encoding, must be snappy"),
+        ("content-type" = String, Header, format = "application/x-protobuf", description = "Content type, must be application/x-protobuf"),
+    ),
+    responses(
+        (status = 200, description = "Prometheus Remote Read endpoint"),
+        (status = 400, description = "Bad Request", body = AppError),
+        (status = 500, description = "Internal Server Error", body = AppError),
+    )
+)]
+#[debug_handler]
+pub async fn read(
+    State(state): State<HttpServerState>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Result<StatusCode, AppError> {
+    todo!();
+}
