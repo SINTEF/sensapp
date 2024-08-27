@@ -2,12 +2,16 @@ use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use anyhow::Result;
+use sqlx::postgres::PgArguments;
+use sqlx::query::Query;
 use sqlx::types::time::PrimitiveDateTime;
 use sqlx::PgPool;
+use sqlx::Postgres;
 use sqlx::Row;
 
 use crate::crud::{list_cursor::ListCursor, viewmodel::sensor_viewmodel::SensorViewModel};
 use crate::datamodel::matchers::SensorMatcher;
+use crate::storage::postgresql::postgresql_matchers::append_sensor_matcher_to_query;
 
 pub async fn list_sensors(
     pool: &PgPool,
@@ -23,18 +27,54 @@ pub async fn list_sensors(
         ::time::OffsetDateTime::from_unix_timestamp_nanos(cursor_next_created_at_timestamp)?;
     let cursor_uuid = uuid::Uuid::parse_str(&cursor.next_uuid)?;
 
-    let query = sqlx::query(
-        r#"
-        SELECT uuid, name, created_at, type, unit, labels
-        FROM sensor_labels_view
-        WHERE (created_at, uuid) >= ($1, $2)
-        ORDER BY created_at ASC, uuid ASC
-        LIMIT $3
-        "#,
-    )
-    .bind(cursor_next_created_at_offset_datetime)
-    .bind(cursor_uuid)
-    .bind(query_limit);
+    let mut query: Query<Postgres, PgArguments>;
+    let mut query_string: String;
+
+    if matcher.is_all() {
+        query = sqlx::query(
+            r#"SELECT uuid, name, created_at, type, unit, labels
+FROM sensor_labels_view
+WHERE (created_at, uuid) >= ($1, $2)
+ORDER BY created_at ASC, uuid ASC
+LIMIT $3"#,
+        )
+        .bind(cursor_next_created_at_offset_datetime)
+        .bind(cursor_uuid)
+        .bind(query_limit);
+    } else {
+        query_string = String::from(
+            r#"SELECT uuid, name, created_at, type, unit, labels
+FROM sensor_labels_view
+WHERE (created_at, uuid) >= ($1, $2)
+AND sensor_id IN (
+"#,
+        );
+
+        let mut params: Vec<String> = Vec::new();
+
+        append_sensor_matcher_to_query(&mut query_string, &mut params, &matcher, 2);
+
+        query_string.push_str(
+            r#"
+)
+ORDER BY created_at ASC, uuid ASC
+LIMIT $"#,
+        );
+        query_string.push_str((params.len() + 3).to_string().as_str());
+
+        //println!("query_string: {}", query_string);
+        //println!("params: {:?}", params);
+
+        query = sqlx::query(&query_string)
+            .bind(cursor_next_created_at_offset_datetime)
+            .bind(cursor_uuid);
+
+        for param in params {
+            query = query.bind(param);
+        }
+
+        query = query.bind(query_limit);
+    }
 
     let mut connection = pool.acquire().await?;
     let mut records = query.fetch_all(&mut *connection).await?;

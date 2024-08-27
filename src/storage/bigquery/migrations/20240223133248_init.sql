@@ -132,7 +132,7 @@ ON
   s.sensor_id = nv.sensor_id;
 
 CREATE OR REPLACE VIEW `{dataset_id}.sensor_labels_view` AS
-SELECT sensors.uuid, sensors.created_at, sensors.name, type, units.name as unit,
+SELECT sensors.sensor_id, sensors.uuid, sensors.created_at, sensors.name, type, units.name as unit,
 CASE WHEN COUNT(labels.sensor_id) = 0 THEN JSON_OBJECT() ELSE JSON_OBJECT(
 	ARRAY_AGG(labels_name_dictionary.name), ARRAY_AGG(labels_description_dictionary.description)
 ) END AS labels

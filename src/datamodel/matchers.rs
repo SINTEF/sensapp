@@ -3,7 +3,7 @@ use prometheus_parser::{
     Expression as PrometheusExpression, Label as PrometheusLabel, LabelOp as PrometheusLabelOp,
 };
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub enum StringMatcher {
     #[default]
     All,
@@ -22,9 +22,31 @@ impl StringMatcher {
             PrometheusLabelOp::RegexNotEqual => StringMatcher::NotMatch(value),
         }
     }
+
+    /// Is the matcher a negative matcher?
+    pub fn is_negative(&self) -> bool {
+        match self {
+            StringMatcher::All => false,
+            StringMatcher::Equal(_) => false,
+            StringMatcher::NotEqual(_) => true,
+            StringMatcher::Match(_) => false,
+            StringMatcher::NotMatch(_) => true,
+        }
+    }
+
+    /// Negate the matcher.
+    pub fn negate(&self) -> Self {
+        match self {
+            StringMatcher::All => StringMatcher::All,
+            StringMatcher::Equal(value) => StringMatcher::NotEqual(value.clone()),
+            StringMatcher::NotEqual(value) => StringMatcher::Equal(value.clone()),
+            StringMatcher::Match(value) => StringMatcher::NotMatch(value.clone()),
+            StringMatcher::NotMatch(value) => StringMatcher::Match(value.clone()),
+        }
+    }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LabelMatcher {
     name: String,
     matcher: StringMatcher,
@@ -35,6 +57,21 @@ impl LabelMatcher {
         let name = label.key;
         let matcher = StringMatcher::from_prometheus_label_op(label.op, label.value);
         Self { name, matcher }
+    }
+
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+
+    pub fn matcher(&self) -> &StringMatcher {
+        &self.matcher
+    }
+
+    pub fn negate(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            matcher: self.matcher.negate(),
+        }
     }
 }
 
@@ -89,6 +126,19 @@ impl SensorMatcher {
                 false => Some(label_matchers),
             },
         })
+    }
+
+    pub fn name_matcher(&self) -> &StringMatcher {
+        &self.name_matcher
+    }
+
+    pub fn label_matchers(&self) -> Option<&Vec<LabelMatcher>> {
+        self.label_matchers.as_ref()
+    }
+
+    pub fn is_all(&self) -> bool {
+        self.name_matcher == StringMatcher::All
+            && (self.label_matchers.is_none() || self.label_matchers.as_ref().unwrap().is_empty())
     }
 }
 
@@ -216,5 +266,38 @@ mod tests {
                 .is_err()
         );
         assert!(SensorMatcher::from_prometheus_query("http_requests_total @ 1609746000").is_err());
+    }
+
+    #[test]
+    fn test_negative_matcher() {
+        let matcher = SensorMatcher::from_prometheus_query("http_requests_total").unwrap();
+        assert!(!matcher.name_matcher.is_negative());
+        assert!(matcher.name_matcher.negate().is_negative());
+
+        let matcher =
+            SensorMatcher::from_prometheus_query("http_requests_total{job!=\"prometheus\"}")
+                .unwrap();
+        assert!(matcher.label_matchers.as_ref().unwrap()[0]
+            .matcher
+            .is_negative(),);
+        assert!(!matcher.label_matchers.unwrap()[0]
+            .matcher
+            .negate()
+            .is_negative());
+    }
+
+    #[test]
+    fn test_sensor_matcher_is_all() {
+        let matcher = SensorMatcher::from_prometheus_query("http_requests_total").unwrap();
+        assert!(!matcher.is_all());
+
+        let matcher = SensorMatcher {
+            name_matcher: StringMatcher::All,
+            label_matchers: None,
+        };
+        assert!(matcher.is_all());
+
+        let matcher = SensorMatcher::default();
+        assert!(matcher.is_all());
     }
 }

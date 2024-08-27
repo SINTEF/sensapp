@@ -130,7 +130,7 @@ CREATE INDEX index_json_values ON json_values(sensor_id, timestamp_ms);
 CREATE INDEX index_blob_values ON blob_values(sensor_id, timestamp_ms);
 
 CREATE VIEW sensor_labels_view AS
-SELECT sensors.uuid, sensors.created_at, sensors."name", type, units.name as unit, json_group_object(
+SELECT sensors.sensor_id, sensors.uuid, sensors.created_at, sensors."name", type, units.name as unit, json_group_object(
 	labels_name_dictionary."name",labels_description_dictionary."description"
 ) AS labels
 FROM sensors

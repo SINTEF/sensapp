@@ -53,7 +53,9 @@ pub async fn list_sensors(
     }
 
     let matcher = match query.query {
-        Some(query_str) => SensorMatcher::from_prometheus_query(&query_str)?,
+        Some(query_str) => {
+            SensorMatcher::from_prometheus_query(&query_str).map_err(AppError::BadRequest)?
+        }
         None => SensorMatcher::default(),
     };
 
@@ -90,7 +92,7 @@ pub async fn get_sensor(
     State(state): State<HttpServerState>,
     Path(uuid): Path<String>,
 ) -> Result<Json<SensorViewModel>, AppError> {
-    todo!();
+    unimplemented!();
     /*let sensor = state.storage.get_sensor(uuid).await.map_err(|error| {
         eprintln!("Failed to get sensor: {:?}", error);
         AppError::InternalServerError(error)

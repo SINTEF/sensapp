@@ -129,7 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_labels_description_dictionary_description ON labe
 CREATE INDEX IF NOT EXISTS idx_strings_values_dictionary_value ON strings_values_dictionary (value);
 
 CREATE VIEW IF NOT EXISTS sensor_labels_view AS
-SELECT sensors.uuid, sensors.created_at, sensors."name", type, units.name as unit, json_group_object(
+SELECT sensors.sensor_id, sensors.uuid, sensors.created_at, sensors."name", type, units.name as unit, json_group_object(
 	labels_name_dictionary."name",labels_description_dictionary."description"
 ) AS labels
 FROM sensors
