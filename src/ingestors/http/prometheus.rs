@@ -1,17 +1,17 @@
-use std::io::Write;
+use std::sync::Arc;
 
 use super::{app_error::AppError, state::HttpServerState};
 use crate::{
     datamodel::{
-        batch_builder::BatchBuilder, sensapp_datetime::SensAppDateTimeExt, SensAppDateTime,
+        batch::SingleSensorBatch, batch_builder::BatchBuilder,
+        sensapp_datetime::SensAppDateTimeExt, SensAppDateTime, TypedSamples,
     },
     parsing::{
         prometheus::{
-            remote_read_request_models::ResponseType,
+            remote_read_request_models::{Query, ResponseType},
             remote_read_request_parser::parse_remote_read_request,
             remote_read_response::{
-                chunk, Chunk, ChunkedReadResponse, ChunkedSeries, Label, QueryResult, ReadResponse,
-                Sample, TimeSeries,
+                ChunkedReadResponse, ChunkedSeries, QueryResult, ReadResponse, TimeSeries,
             },
             PrometheusParser,
         },
@@ -19,13 +19,16 @@ use crate::{
     },
 };
 use anyhow::Result;
+use async_stream::stream;
 use axum::{
+    body::Body,
     debug_handler,
     extract::State,
     http::{HeaderMap, HeaderValue, StatusCode},
 };
+use futures::stream::StreamExt;
+use futures::Stream;
 use prost::Message;
-use rusty_chunkenc::{crc32c::write_crc32c, uvarint::write_uvarint, xor};
 use tokio_util::bytes::Bytes;
 
 #[derive(Debug, PartialEq)]
@@ -187,7 +190,7 @@ pub async fn prometheus_remote_read(
     State(state): State<HttpServerState>,
     headers: HeaderMap,
     bytes: Bytes,
-) -> Result<(StatusCode, HeaderMap, Bytes), AppError> {
+) -> Result<(StatusCode, HeaderMap, Body), AppError> {
     println!("Prometheus Remote Write API");
     println!("bytes: {:?}", bytes);
     println!("headers: {:?}", headers);
@@ -203,123 +206,126 @@ pub async fn prometheus_remote_read(
                 *accepted_response_type == ResponseType::StreamedXorChunks as i32
             });
 
-    println!("xor_response_type: {:?}", xor_response_type);
+    let stream = prometheus_read_stream(read_request.queries);
 
-    // Write status header
-    // content-type: application/x-protobuf
+    if xor_response_type {
+        prometheus_read_xor(Box::pin(stream))
+    } else {
+        prometheus_read_protobuf(Box::pin(stream)).await
+    }
+}
+
+fn prometheus_read_stream(queries: Vec<Query>) -> impl Stream<Item = (usize, SingleSensorBatch)> {
+    stream! {
+        for (i, query) in queries.into_iter().enumerate() {
+            let start = query.start_timestamp_ms;
+            let end = query.end_timestamp_ms;
+
+            // create 100 samples
+            let n_samples = 10_000_i64;
+            let mut samples = Vec::with_capacity(n_samples as usize);
+            let step = (end - start) / n_samples;
+            for j in 0..n_samples {
+                let timestamp = start + step * j;
+                let value = (i + 1) as f64 * j as f64;
+                samples.push(crate::datamodel::sample::Sample {
+                    datetime: SensAppDateTime::from_unix_milliseconds_i64(timestamp),
+                    value,
+                });
+            }
+
+            // create the single sensor batch
+            let batch = SingleSensorBatch::new(
+                Arc::new(crate::datamodel::Sensor::new_without_uuid(
+                    "canard".to_string(),
+                    crate::datamodel::SensorType::Float,
+                    None,
+                    None,
+                )
+                .unwrap()),
+                TypedSamples::Float(samples.into()),
+            );
+
+            yield (i, batch);
+        }
+    }
+}
+
+async fn prometheus_read_protobuf<S>(
+    mut chunk_stream: S,
+) -> Result<(StatusCode, HeaderMap, Body), AppError>
+where
+    S: Stream<Item = (usize, SingleSensorBatch)> + Unpin,
+{
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "Content-Type",
+        HeaderValue::from_static("application/x-protobuf"),
+    );
+    headers.insert("Content-Encoding", HeaderValue::from_static("snappy"));
+
+    let mut current_query_index = 0;
+    let mut current_query_result = QueryResult {
+        timeseries: Vec::new(),
+    };
+    let mut read_response = ReadResponse { results: vec![] };
+
+    while let Some((query_index, batch)) = chunk_stream.next().await {
+        if query_index != current_query_index {
+            read_response.results.push(current_query_result);
+            current_query_index = query_index;
+            current_query_result = QueryResult {
+                timeseries: Vec::new(),
+            };
+        }
+        let timeserie = TimeSeries::from_single_sensor_batch(&batch).await;
+        current_query_result.timeseries.push(timeserie);
+    }
+    read_response.results.push(current_query_result);
+
+    // Serialise to protobuf binary
+    let mut proto_buffer: Vec<u8> = Vec::new();
+    read_response.encode(&mut proto_buffer).unwrap();
+
+    // Snappy it
+    let mut encoder = snap::raw::Encoder::new();
+    let buffer = encoder.compress_vec(&proto_buffer).unwrap();
+
+    // It could be possible to have some performance gains by writing the
+    // buffer directly to the stream instead of a temporary buffer.
+    // But the XOR stream should be preffered if performance is a concern.
+
+    Ok((StatusCode::OK, headers, buffer.into()))
+}
+
+fn prometheus_read_xor<S>(chunk_stream: S) -> Result<(StatusCode, HeaderMap, Body), AppError>
+where
+    S: Stream<Item = (usize, SingleSensorBatch)> + Unpin + Send + 'static,
+{
+    let body_stream = chunk_stream.then(|(query_index, batch)| async move {
+        let chunked_serie = ChunkedSeries::from_single_sensor_batch(&batch).await;
+
+        let chunked_read_response = ChunkedReadResponse {
+            chunked_series: vec![chunked_serie],
+            query_index: query_index as i64,
+        };
+
+        let mut buffer: Vec<u8> = Vec::new();
+        chunked_read_response.promotheus_stream_encode(&mut buffer)?;
+
+        Ok::<Vec<u8>, anyhow::Error>(buffer)
+    });
 
     let mut headers = HeaderMap::new();
-    if xor_response_type {
-        headers.insert(
-            "Content-Type",
-            HeaderValue::from_static(
-                "application/x-streamed-protobuf; proto=prometheus.ChunkedReadResponse",
-            ),
-        );
-        headers.insert("Content-Encoding", HeaderValue::from_static(""));
-    } else {
-        headers.insert(
-            "Content-Type",
-            HeaderValue::from_static("application/x-protobuf"),
-        );
-        headers.insert("Content-Encoding", HeaderValue::from_static("snappy"));
-    }
+    headers.insert(
+        "Content-Type",
+        HeaderValue::from_static(
+            "application/x-streamed-protobuf; proto=prometheus.ChunkedReadResponse",
+        ),
+    );
+    headers.insert("Content-Encoding", HeaderValue::from_static(""));
 
-    for (i, query) in read_request.queries.iter().enumerate() {
-        println!("query matcher: {:?}", query.to_sensor_matcher());
-        let start = query.start_timestamp_ms;
-        let end = query.end_timestamp_ms;
+    let body = Body::from_stream(body_stream);
 
-        // create 100 samples
-        let n_samples = 10_000_i64;
-        let mut samples = Vec::with_capacity(n_samples as usize);
-        let step = (end - start) / n_samples;
-        for j in 0..n_samples {
-            let timestamp = start + step * j;
-            let value = (i + 1) as f64 * j as f64;
-            samples.push(crate::datamodel::sample::Sample {
-                datetime: SensAppDateTime::from_unix_milliseconds_i64(timestamp),
-                value,
-            });
-        }
-
-        if xor_response_type {
-            let mut chunk_buffer: Vec<u8> = Vec::new();
-            let chunk = rusty_chunkenc::xor::XORChunk::new(
-                samples
-                    .into_iter()
-                    .map(|sample| rusty_chunkenc::XORSample {
-                        timestamp: sample.datetime.to_unix_milliseconds().floor() as i64,
-                        value: sample.value,
-                    })
-                    .collect(),
-            );
-            chunk.write(&mut chunk_buffer).unwrap();
-
-            println!("buffer: {}", base64::encode(&chunk_buffer));
-
-            let chunked_read_response = ChunkedReadResponse {
-                chunked_series: vec![ChunkedSeries {
-                    labels: vec![Label {
-                        name: "__name__".to_string(),
-                        value: "canard".to_string(),
-                    }],
-                    chunks: vec![Chunk {
-                        min_time_ms: start,
-                        max_time_ms: end,
-                        r#type: chunk::Encoding::Xor as i32,
-                        data: chunk_buffer,
-                    }],
-                }],
-                query_index: i as i64,
-            };
-
-            // convert to bytes
-            let mut proto_buffer: Vec<u8> = Vec::new();
-            chunked_read_response.encode(&mut proto_buffer).unwrap();
-
-            let mut buffer: Vec<u8> = Vec::new();
-            write_uvarint(proto_buffer.len() as u64, &mut buffer).unwrap();
-
-            write_crc32c(&proto_buffer, &mut buffer).unwrap();
-            buffer.write_all(&proto_buffer).unwrap();
-
-            // just to let it go
-            if buffer.len() > 0 {
-                return Ok((StatusCode::OK, headers.clone(), buffer.into()));
-            }
-        } else {
-            let read_response = ReadResponse {
-                results: vec![QueryResult {
-                    timeseries: vec![TimeSeries {
-                        labels: vec![Label {
-                            name: "__name__".to_string(),
-                            value: "canard".to_string(),
-                        }],
-                        samples: samples
-                            .into_iter()
-                            .map(|sample| Sample {
-                                timestamp: sample.datetime.to_unix_milliseconds().floor() as i64,
-                                value: sample.value,
-                            })
-                            .collect(),
-                    }],
-                }],
-            };
-
-            // convert to bytes
-            let mut proto_buffer: Vec<u8> = Vec::new();
-            read_response.encode(&mut proto_buffer).unwrap();
-
-            // snappy it
-            let mut encoder = snap::raw::Encoder::new();
-            let buffer = encoder.compress_vec(&proto_buffer).unwrap();
-
-            if buffer.len() > 0 {
-                return Ok((StatusCode::OK, headers.clone(), buffer.into()));
-            }
-        }
-    }
-
-    Ok((StatusCode::NO_CONTENT, headers, Bytes::new()))
+    Ok((StatusCode::OK, headers, body))
 }

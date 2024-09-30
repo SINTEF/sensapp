@@ -3,6 +3,7 @@ use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::Json;
 use serde_json::json;
+use std::fmt;
 
 // Anyhow error handling with axum
 // https://github.com/tokio-rs/axum/blob/d3112a40d55f123bc5e65f995e2068e245f12055/examples/anyhow-error-response/src/main.rs
@@ -36,5 +37,15 @@ where
 {
     fn from(err: E) -> Self {
         Self::InternalServerError(err.into())
+    }
+}
+
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AppError::InternalServerError(error) => write!(f, "Internal Server Error: {}", error),
+            AppError::NotFound(error) => write!(f, "Not Found: {}", error),
+            AppError::BadRequest(error) => write!(f, "Bad Request: {}", error),
+        }
     }
 }
