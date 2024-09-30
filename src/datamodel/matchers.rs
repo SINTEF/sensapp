@@ -53,6 +53,10 @@ pub struct LabelMatcher {
 }
 
 impl LabelMatcher {
+    pub fn new(name: String, matcher: StringMatcher) -> Self {
+        Self { name, matcher }
+    }
+
     fn from_prometheus_label(label: PrometheusLabel) -> Self {
         let name = label.key;
         let matcher = StringMatcher::from_prometheus_label_op(label.op, label.value);
@@ -82,6 +86,13 @@ pub struct SensorMatcher {
 }
 
 impl SensorMatcher {
+    pub fn new(name_matcher: StringMatcher, label_matchers: Option<Vec<LabelMatcher>>) -> Self {
+        Self {
+            name_matcher,
+            label_matchers,
+        }
+    }
+
     /// Create a new sensor matcher from a prometheus query.
     ///
     /// PLease note that this is a subset of the prometheus query language.

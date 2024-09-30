@@ -1,3 +1,6 @@
+pub mod remote_read_request_models;
+pub mod remote_read_request_parser;
+pub mod remote_read_response;
 pub mod remote_write_models;
 pub mod remote_write_parser;
 

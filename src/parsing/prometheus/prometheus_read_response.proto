@@ -1,0 +1,67 @@
+// https://prometheus.io/docs/prometheus/latest/querying/remote_read_api/
+//
+// Status: copy pasted from https://github.com/prometheus/prometheus/blob/b09eaf8acd9f06ec372826b752a7df929012505a/prompb/remote.proto
+
+syntax = "proto3";
+
+// ReadResponse is a response when response_type equals SAMPLES.
+message ReadResponse {
+  // In same order as the request's queries.
+  repeated QueryResult results = 1;
+}
+
+// ChunkedReadResponse is a response when response_type equals STREAMED_XOR_CHUNKS.
+// We strictly stream full series after series, optionally split by time. This means that a single frame can contain
+// partition of the single series, but once a new series is started to be streamed it means that no more chunks will
+// be sent for previous one. Series are returned sorted in the same way TSDB block are internally.
+message ChunkedReadResponse {
+  repeated ChunkedSeries chunked_series = 1;
+
+  // query_index represents an index of the query from ReadRequest.queries these chunks relates to.
+  int64 query_index = 2;
+}
+
+message QueryResult {
+  // Samples within a time series must be ordered by time.
+  repeated TimeSeries timeseries = 1;
+}
+
+// ChunkedSeries represents single, encoded time series.
+message ChunkedSeries {
+  // Labels should be sorted.
+  repeated Label labels = 1;
+  // Chunks will be in start time order and may overlap.
+  repeated Chunk chunks = 2;
+}
+
+message TimeSeries {
+  repeated Label labels   = 1;
+  repeated Sample samples = 2;
+}
+
+message Label {
+  string name  = 1;
+  string value = 2;
+}
+
+message Sample {
+  double value    = 1;
+  int64 timestamp = 2;
+}
+
+// Chunk represents a TSDB chunk.
+// Time range [min, max] is inclusive.
+message Chunk {
+  int64 min_time_ms = 1;
+  int64 max_time_ms = 2;
+
+  // We require this to match chunkenc.Encoding.
+  enum Encoding {
+    UNKNOWN         = 0;
+    XOR             = 1;
+    HISTOGRAM       = 2;
+    FLOAT_HISTOGRAM = 3;
+  }
+  Encoding type  = 3;
+  bytes data     = 4;
+}
