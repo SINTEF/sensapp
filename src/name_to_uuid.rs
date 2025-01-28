@@ -6,10 +6,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 type NameToUuidKey = [u8; 32];
-static UUID_HASH_MAC: OnceCell<Arc<NameToUuidKey>> = OnceCell::new();
+static UUID_KEY: OnceCell<Arc<NameToUuidKey>> = OnceCell::new();
 
-fn initialise_uuid_hash_mac() -> Result<Arc<[u8; 32]>, Error> {
-    const KEY_CONTEXT: &str = "SENSAPP uuid hash mac 2024-01-19 strings to unique ids";
+fn initialise_uuid_key() -> Result<Arc<[u8; 32]>, Error> {
+    const KEY_CONTEXT: &str = "SENSAPP uuid key 2024-01-19 strings to unique ids";
     let salt = config::get()?.sensor_salt.clone();
     let key = blake3::derive_key(KEY_CONTEXT, salt.as_bytes());
 
@@ -27,7 +27,7 @@ pub fn uuid_v8_blake3(name: &str, uuid_buffer: Vec<u8>) -> Result<Uuid, Error> {
     // Using a UUID v5 (SHA1) or v3 (MD5) is too easy to implement.
     // It's friday, let's take terrible decisions and use Blake3 instead.
 
-    let key = UUID_HASH_MAC.get_or_try_init(initialise_uuid_hash_mac)?;
+    let key = UUID_KEY.get_or_try_init(initialise_uuid_key)?;
 
     // Hash the sensor name only to get a 32-bits beginning
     let mut hash_name_output = [0; 4];
@@ -56,9 +56,9 @@ mod tests {
     use crate::config::load_configuration;
 
     #[test]
-    fn test_initialise_uuid_hash_mac() {
+    fn test_initialise_uuid_key() {
         _ = load_configuration();
-        let result = initialise_uuid_hash_mac();
+        let result = initialise_uuid_key();
         assert!(result.is_ok());
     }
 
