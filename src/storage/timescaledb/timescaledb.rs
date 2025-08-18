@@ -2,11 +2,11 @@ use super::{
     super::storage::StorageInstance, timescaledb_publishers::*,
     timescaledb_utilities::get_sensor_id_or_create_sensor,
 };
-use crate::datamodel::{batch::Batch, TypedSamples};
+use crate::datamodel::{TypedSamples, batch::Batch};
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
-use sqlx::{postgres::PgConnectOptions, PgPool};
+use sqlx::{PgPool, postgres::PgConnectOptions};
 use std::time::Duration;
 use std::{str::FromStr, sync::Arc};
 use tokio::time::timeout;

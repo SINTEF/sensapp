@@ -1,18 +1,18 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use big_decimal_byte_string_encoder::encode_bigdecimal_to_bigquery_bytes;
 use bigdecimal::BigDecimal;
 use hybridmap::HybridMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use super::BigQueryStorage;
 use super::bigquery_prost_structs::{BlobValue, IntegerValue, JsonValue, LocationValue};
 use super::bigquery_table_descriptors::{
     BLOB_VALUES_DESCRIPTOR, INTEGER_VALUES_DESCRIPTOR, JSON_VALUES_DESCRIPTOR,
 };
 use super::bigquery_utilities::publish_rows;
-use super::BigQueryStorage;
 use crate::datamodel::SensAppVec;
-use crate::datamodel::{batch::Batch, SensorType, TypedSamples};
+use crate::datamodel::{SensorType, TypedSamples, batch::Batch};
 use crate::storage::bigquery::bigquery_prost_structs::{
     BooleanValue, FloatValue, NumericValue, StringValue,
 };

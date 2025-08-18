@@ -1,6 +1,6 @@
-use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::TypedSamples;
-use anyhow::{bail, Context, Result};
+use crate::datamodel::batch::{Batch, SingleSensorBatch};
+use anyhow::{Context, Result, bail};
 use async_broadcast::Sender;
 use async_trait::async_trait;
 use duckdb::Connection;

@@ -1,7 +1,7 @@
 use super::postgresql_utilities::get_string_value_id_or_create;
 use crate::datamodel::Sample;
 use anyhow::Result;
-use sqlx::{prelude::*, Postgres, Transaction};
+use sqlx::{Postgres, Transaction, prelude::*};
 
 pub async fn publish_integer_values(
     transaction: &mut Transaction<'_, Postgres>,

@@ -1,6 +1,6 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
@@ -13,9 +13,9 @@ use tokio::sync::Mutex;
 use crate::datamodel::SensAppVec;
 
 use super::{
-    bigquery_prost_structs::StringValueDictionary,
+    BigQueryStorage, bigquery_prost_structs::StringValueDictionary,
     bigquery_table_descriptors::STRINGS_VALUES_DICTIONARY_DESCRIPTOR,
-    bigquery_utilities::publish_rows, BigQueryStorage,
+    bigquery_utilities::publish_rows,
 };
 
 static STRING_VALUES_CACHE: Lazy<Mutex<CLruCache<String, i64>>> =

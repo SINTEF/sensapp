@@ -2,14 +2,14 @@ use crate::{
     datamodel::{Sensor, SensorType, TypedSamples},
     storage::storage::StorageInstance,
 };
-use anyhow::{anyhow, bail, Result};
-use axum::async_trait;
+use anyhow::{Result, anyhow, bail};
+use async_trait::async_trait;
 use rrdcached_client::{
+    RRDCachedClient,
     batch_update::BatchUpdate,
     consolidation_function::ConsolidationFunction,
     create::{CreateArguments, CreateDataSource, CreateDataSourceType, CreateRoundRobinArchive},
     errors::RRDCachedClientError,
-    RRDCachedClient,
 };
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::{sync::RwLock, time::timeout};

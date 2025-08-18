@@ -7,22 +7,20 @@ use crate::config;
 use crate::importers::csv::publish_csv_async;
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
-use axum::extract::Request;
 //use axum::extract::Multipart;
 //use axum::extract::Path;
 use crate::ingestors::http::crud::__path_list_sensors;
 use crate::ingestors::http::influxdb::__path_publish_influxdb;
 use crate::ingestors::http::prometheus::__path_publish_prometheus;
-use axum::extract::State;
-use axum::http::header;
-use axum::http::StatusCode;
-use axum::routing::get;
-use axum::routing::post;
 use axum::Json;
 use axum::Router;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::http::header;
+use axum::routing::get;
+use axum::routing::post;
 use futures::TryStreamExt;
 use polars::prelude::*;
-use sentry::integrations::tower::NewSentryLayer;
 use std::io;
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -31,7 +29,7 @@ use std::time::Duration;
 use tokio_util::bytes::Bytes;
 use tower::ServiceBuilder;
 use tower_http::trace;
-use tower_http::{timeout::TimeoutLayer, trace::TraceLayer, ServiceBuilderExt};
+use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::Level;
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable as ScalarServable};
@@ -80,29 +78,26 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .route("/", get(frontpage))
         //.route("/api-docs/openapi.json", get(openapi))
         .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
-        .route(
-            "/publish",
-            post(publish_handler).layer(max_body_layer.clone()),
-        )
+        .route("/publish", post(publish_handler).layer(max_body_layer))
         .route(
             "/sensors/:sensor_name_or_uuid/publish_csv",
             post(publish_csv),
         )
         .route(
             "/sensors/:sensor_name_or_uuid/publish_multipart",
-            post(publish_multipart).layer(max_body_layer.clone()),
+            post(publish_multipart).layer(max_body_layer),
         )
         // Boring Sensor CRUD
         .route("/sensors", get(list_sensors))
         // InfluxDB Write API
         .route(
             "/api/v2/write",
-            post(publish_influxdb).layer(max_body_layer.clone()),
+            post(publish_influxdb).layer(max_body_layer),
         )
         // Prometheus Remote Write API
         .route(
             "/api/v1/prometheus_remote_write",
-            post(publish_prometheus).layer(max_body_layer.clone()),
+            post(publish_prometheus).layer(max_body_layer),
         )
         .layer(middleware)
         .with_state(state);
@@ -155,7 +150,7 @@ async fn publish_csv(
     // let uuid = name_to_uuid(sensor_name_or_uuid.as_str())?;
     // Convert the body in a stream
     let stream = body.into_data_stream();
-    let stream = stream.map_err(|err| io::Error::new(io::ErrorKind::Other, err));
+    let stream = stream.map_err(io::Error::other);
     let reader = stream.into_async_read();
     //let reader = BufReader::new(stream.into_async_read());
     // csv_async already uses a BufReader internally
@@ -164,8 +159,8 @@ async fn publish_csv(
         .delimiter(b';')
         .create_reader(reader);
 
-    //publish_csv_async(csv_reader, 100, state.event_bus.clone()).await?;
-    publish_csv_async(csv_reader, 8192, state.event_bus.clone()).await?;
+    //publish_csv_async(csv_reader, 100, state.storage.clone()).await?;
+    publish_csv_async(csv_reader, 8192, state.storage.clone()).await?;
 
     Ok("ok".to_string())
 }
@@ -191,8 +186,8 @@ async fn publish_handler(bytes: Bytes) -> Result<Json<String>, (StatusCode, Stri
     }
 }
 
-async fn publish_multipart(/*mut multipart: Multipart*/
-) -> Result<Json<String>, (StatusCode, String)> {
+async fn publish_multipart(/*mut multipart: Multipart*/)
+ -> Result<Json<String>, (StatusCode, String)> {
     Ok(Json("ok".to_string()))
 }
 
@@ -202,13 +197,12 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::{bus::EventBus, storage::sqlite::SqliteStorage};
+    use crate::storage::sqlite::SqliteStorage;
 
     #[tokio::test]
     async fn test_handler() {
         let state = HttpServerState {
             name: Arc::new("hello world".to_string()),
-            event_bus: Arc::new(EventBus::init("test".to_string())),
             storage: Arc::new(SqliteStorage::connect("sqlite::memory:").await.unwrap()),
         };
         let app = Router::new().route("/", get(frontpage)).with_state(state);

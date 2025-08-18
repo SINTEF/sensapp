@@ -5,9 +5,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use self::{mqtt::MqttConfig, opcua::OpcuaConfig};
+use self::mqtt::MqttConfig;
 pub mod mqtt;
-pub mod opcua;
 
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
@@ -26,6 +25,7 @@ pub struct SensAppConfig {
     pub http_server_timeout_seconds: u64,
 
     #[config(env = "SENSAPP_MAX_INFERENCES_ROWS", default = 128)]
+    #[allow(dead_code)]
     pub max_inference_rows: usize,
 
     #[config(env = "SENSAPP_BATCH_SIZE", default = 8192)]
@@ -34,17 +34,30 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_SENSOR_SALT", default = "sensapp")]
     pub sensor_salt: String,
 
+    #[cfg(feature = "sqlite")]
     #[config(env = "SENSAPP_SQLITE_CONNECTION_STRING")]
     pub sqlite_connection_string: Option<String>,
 
+    #[cfg(feature = "postgres")]
     #[config(env = "SENSAPP_POSTGRES_CONNECTION_STRING")]
+    #[allow(dead_code)]
     pub postgres_connection_string: Option<String>,
 
+    #[cfg(feature = "timescaledb")]
     #[config(env = "SENSAPP_TIMESCALEDB_CONNECTION_STRING")]
     pub timescaledb_connection_string: Option<String>,
 
-    #[config(env = "SENSAPP_OPC_UA")]
-    pub opcua: Option<Vec<OpcuaConfig>>,
+    #[cfg(feature = "duckdb")]
+    #[config(env = "SENSAPP_DUCKDB_CONNECTION_STRING")]
+    pub duckdb_connection_string: Option<String>,
+
+    #[cfg(feature = "bigquery")]
+    #[config(env = "SENSAPP_BIGQUERY_CONNECTION_STRING")]
+    pub bigquery_connection_string: Option<String>,
+
+    #[cfg(feature = "rrdcached")]
+    #[config(env = "SENSAPP_RRDCACHED_CONNECTION_STRING")]
+    pub rrdcached_connection_string: Option<String>,
 
     #[config(env = "SENSAPP_MQTT")]
     pub mqtt: Option<Vec<MqttConfig>>,
@@ -56,14 +69,6 @@ impl SensAppConfig {
             .env()
             .file("settings.toml")
             .load()?;
-
-        // Print the names of the opc_ua configurations
-        if let Some(opc_ua) = &c.opcua {
-            println!("OPC UA Configurations:");
-            for opc_ua in opc_ua {
-                println!("OPC UA Name: {}", opc_ua.application_name);
-            }
-        }
 
         Ok(c)
     }

@@ -1,6 +1,6 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
@@ -13,6 +13,7 @@ use tokio::sync::Mutex;
 use crate::datamodel::SensAppVec;
 
 use super::{
+    BigQueryStorage,
     bigquery_prost_structs::{
         LabelDescriptionDictionary as ProstLabelDescriptionDictionary,
         LabelNameDictionary as ProstLabelNameDictionary,
@@ -21,7 +22,6 @@ use super::{
         LABELS_DESCRIPTION_DICTIONARY_DESCRIPTOR, LABELS_NAME_DICTIONARY_DESCRIPTOR,
     },
     bigquery_utilities::publish_rows,
-    BigQueryStorage,
 };
 
 static LABELS_NAME_CACHE: Lazy<Mutex<CLruCache<String, i64>>> =

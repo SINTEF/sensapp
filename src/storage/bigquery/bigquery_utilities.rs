@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use gcp_bigquery_client::{
     google::cloud::bigquery::storage::v1::AppendRowsResponse, storage::TableDescriptor,
 };

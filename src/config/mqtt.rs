@@ -1,11 +1,11 @@
 use serde::Deserialize;
 use serde_inline_default::serde_inline_default;
 
-
-
 #[derive(Debug, Deserialize, Clone)]
 pub struct MqttSubscription {
+    #[allow(dead_code)]
     pub topic: String,
+    #[allow(dead_code)]
     pub qos: u8,
 }
 

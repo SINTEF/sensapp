@@ -1,4 +1,4 @@
-use anyhow::{bail, Error};
+use anyhow::{Error, bail};
 
 pub struct StringDataGrid {
     pub column_names: Vec<String>,

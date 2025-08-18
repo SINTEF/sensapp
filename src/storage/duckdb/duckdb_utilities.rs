@@ -1,14 +1,15 @@
-use crate::datamodel::unit::Unit;
 use crate::datamodel::Sensor;
+use crate::datamodel::unit::Unit;
 use anyhow::Result;
 use cached::proc_macro::cached;
-use duckdb::{params, CachedStatement, OptionalExt, Transaction};
+use duckdb::{CachedStatement, OptionalExt, Transaction, params};
+use std::time::Duration;
 use uuid::Uuid;
 
 #[cached(
     time = 120,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ label_name.to_string() }"#
 )]
@@ -33,7 +34,7 @@ pub fn get_label_name_id_or_create(transaction: &Transaction, label_name: &str) 
 #[cached(
     time = 120,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ label_description.to_string() }"#
 )]
@@ -63,7 +64,7 @@ pub fn get_label_description_id_or_create(
 #[cached(
     time = 120,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ unit.name.clone() }"#
 )]
@@ -89,7 +90,7 @@ pub fn get_unit_id_or_create(transaction: &Transaction, unit: &Unit) -> Result<i
 #[cached(
     time = 120,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "Uuid",
     convert = r#"{ sensor.uuid }"#
 )]
@@ -137,7 +138,7 @@ pub fn get_sensor_id_or_create_sensor(transaction: &Transaction, sensor: &Sensor
 #[cached(
     time = 120,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ string_value.to_string() }"#
 )]

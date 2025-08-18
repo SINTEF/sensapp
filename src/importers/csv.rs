@@ -1,24 +1,24 @@
 use crate::{
-    bus::{wait_for_all::WaitForAll, EventBus},
     datamodel::{
-        batch::{Batch, SingleSensorBatch},
         //batch_builder::BatchBuilder,
         Sample,
         SensAppDateTime,
         Sensor,
         TypedSamples,
+        batch::{Batch, SingleSensorBatch},
     },
+    storage::StorageInstance,
 };
 use anyhow::Result;
 use csv_async::AsyncReader;
-use futures::{io, StreamExt};
+use futures::{StreamExt, io};
 use smallvec::smallvec;
 use std::sync::Arc;
 
 pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
     mut csv_reader: AsyncReader<R>,
     batch_size: usize,
-    event_bus: Arc<EventBus>,
+    storage: Arc<dyn StorageInstance>,
 ) -> Result<()> {
     println!("{:?}", csv_reader.has_headers());
     println!("{:?}", csv_reader.headers().await.unwrap());
@@ -27,13 +27,12 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
     let mut current_samples: Vec<Sample<i64>> = vec![];
 
     //let mut batch_builder = BatchBuilder::new()?;
-    let mut all_batches_waiter = WaitForAll::new();
 
     let mut i = 0;
 
     println!("Reading CSV");
     while let Some(record) = records.next().await {
-        let record = record.unwrap();
+        let _record = record.unwrap();
         //println!("{:?}", record);
 
         current_samples.push(Sample {
@@ -56,10 +55,9 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
             let batch = Batch {
                 sensors: smallvec![single_sensor_batch],
             };
-            let sync_receiver = event_bus.publish(batch).await?;
-            //sync_receiver.activate().recv().await?;
+            let (sync_sender, _sync_receiver) = async_broadcast::broadcast(1);
+            storage.publish(Arc::new(batch), sync_sender).await?;
             current_samples = vec![];
-            all_batches_waiter.add(sync_receiver.activate()).await;
         }
     }
 
@@ -76,12 +74,9 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
         let batch = Batch {
             sensors: smallvec![single_sensor_batch],
         };
-        let sync_receiver = event_bus.publish(batch).await?;
-        all_batches_waiter.add(sync_receiver.activate()).await;
+        let (sync_sender, _sync_receiver) = async_broadcast::broadcast(1);
+        storage.publish(Arc::new(batch), sync_sender).await?;
     }
-
-    // Wait for all batches to sync
-    all_batches_waiter.wait().await?;
 
     println!("Done reading CSV");
     Ok(())

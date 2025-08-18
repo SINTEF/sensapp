@@ -1,7 +1,7 @@
 use super::sqlite_utilities::get_string_value_id_or_create;
 use crate::datamodel::Sample;
 use anyhow::Result;
-use sqlx::{prelude::*, Sqlite, Transaction};
+use sqlx::{Sqlite, Transaction, prelude::*};
 
 /*
 Obviously not the most beautiful code,

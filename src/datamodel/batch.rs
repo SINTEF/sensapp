@@ -1,4 +1,4 @@
-use super::{sensapp_vec::SensAppVec, Sensor, TypedSamples};
+use super::{Sensor, TypedSamples, sensapp_vec::SensAppVec};
 use anyhow::Error;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -15,6 +15,7 @@ pub struct Batch {
 }
 
 impl Batch {
+    #[allow(dead_code)]
     pub fn new(sensors: SensAppVec<SingleSensorBatch>) -> Self {
         Self { sensors }
     }
@@ -25,6 +26,7 @@ impl Batch {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn len(&self) -> usize {
         let sensors_len = self.sensors.len();
         if sensors_len == 0 {
@@ -53,46 +55,28 @@ impl SingleSensorBatch {
 
         // Beautiful code right there
         match (old_samples, &mut new_samples) {
-            (
-                TypedSamples::Integer(ref mut old_samples),
-                TypedSamples::Integer(ref mut new_samples),
-            ) => {
+            (TypedSamples::Integer(old_samples), TypedSamples::Integer(new_samples)) => {
                 old_samples.append(&mut *new_samples);
             }
-            (
-                TypedSamples::Numeric(ref mut old_samples),
-                TypedSamples::Numeric(ref mut new_samples),
-            ) => {
+            (TypedSamples::Numeric(old_samples), TypedSamples::Numeric(new_samples)) => {
                 old_samples.append(new_samples);
             }
-            (
-                TypedSamples::Float(ref mut old_samples),
-                TypedSamples::Float(ref mut new_samples),
-            ) => {
+            (TypedSamples::Float(old_samples), TypedSamples::Float(new_samples)) => {
                 old_samples.append(new_samples);
             }
-            (
-                TypedSamples::String(ref mut old_samples),
-                TypedSamples::String(ref mut new_samples),
-            ) => {
+            (TypedSamples::String(old_samples), TypedSamples::String(new_samples)) => {
                 old_samples.append(new_samples);
             }
-            (
-                TypedSamples::Boolean(ref mut old_samples),
-                TypedSamples::Boolean(ref mut new_samples),
-            ) => {
+            (TypedSamples::Boolean(old_samples), TypedSamples::Boolean(new_samples)) => {
                 old_samples.append(new_samples);
             }
-            (
-                TypedSamples::Location(ref mut old_samples),
-                TypedSamples::Location(ref mut new_samples),
-            ) => {
+            (TypedSamples::Location(old_samples), TypedSamples::Location(new_samples)) => {
                 old_samples.append(new_samples);
             }
-            (TypedSamples::Blob(ref mut old_samples), TypedSamples::Blob(ref mut new_samples)) => {
+            (TypedSamples::Blob(old_samples), TypedSamples::Blob(new_samples)) => {
                 old_samples.append(new_samples);
             }
-            (TypedSamples::Json(ref mut old_samples), TypedSamples::Json(ref mut new_samples)) => {
+            (TypedSamples::Json(old_samples), TypedSamples::Json(new_samples)) => {
                 old_samples.append(new_samples);
             }
             _ => {
@@ -120,8 +104,7 @@ impl SingleSensorBatch {
         let mut samples_guard = self.samples.write().await;
         let samples = &*samples_guard;
         let replacement = samples.clone_empty();
-        let samples = std::mem::replace(&mut *samples_guard, replacement);
-        samples
+        std::mem::replace(&mut *samples_guard, replacement)
     }
 }
 

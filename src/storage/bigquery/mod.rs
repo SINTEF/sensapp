@@ -1,5 +1,5 @@
 use crate::storage::storage::StorageInstance;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use bigquery_publishers::{
     publish_blob_values, publish_boolean_values, publish_float_values, publish_integer_values,
@@ -157,8 +157,10 @@ impl StorageInstance for BigQueryStorage {
             .query(&self.project_id, QueryRequest::new(parametrized_init_sql))
             .await?;
 
-        if rs.row_count() > 0 {
-            bail!("BigQuery should not return any rows on the schema creation query");
+        if let Some(total_rows) = rs.total_rows() {
+            if total_rows > 0 {
+                bail!("BigQuery should not return any rows on the schema creation query");
+            }
         }
 
         Ok(())

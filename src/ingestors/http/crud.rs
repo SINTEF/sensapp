@@ -1,7 +1,7 @@
 use crate::ingestors::http::app_error::AppError;
 use crate::ingestors::http::state::HttpServerState;
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 
 /// List all the sensors.
 #[utoipa::path(

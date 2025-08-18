@@ -1,13 +1,13 @@
 use super::sqlite_publishers::*;
 use super::sqlite_utilities::get_sensor_id_or_create_sensor;
-use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::TypedSamples;
+use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::storage::storage::StorageInstance;
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
-use sqlx::{prelude::*, Sqlite, Transaction};
-use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
+use sqlx::{Sqlite, Transaction, prelude::*};
+use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;

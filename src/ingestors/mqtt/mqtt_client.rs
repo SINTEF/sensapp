@@ -1,12 +1,11 @@
-use crate::{bus::EventBus, config::mqtt::MqttConfig};
-use anyhow::{bail, Context, Result};
-use rand::distributions::Alphanumeric;
-use rand::Rng;
+use crate::{config::mqtt::MqttConfig, storage::StorageInstance};
+use anyhow::{Context, Result, bail};
+use rand::{Rng, distr::Alphanumeric, rng};
 use rumqttc::{AsyncClient, MqttOptions, Transport};
 use std::{sync::Arc, time::Duration};
 
 fn random_client_id() -> String {
-    rand::thread_rng()
+    rng()
         .sample_iter(&Alphanumeric)
         .take(12)
         .map(char::from)
@@ -83,7 +82,7 @@ fn configure_mqtt_options(
     Ok(mqtt_options)
 }
 
-pub async fn mqtt_client(config: MqttConfig, event_bus: Arc<EventBus>) -> Result<()> {
+pub async fn mqtt_client(config: MqttConfig, _storage: Arc<dyn StorageInstance>) -> Result<()> {
     let mqtt_options = make_client_options(&config)?;
 
     let (client, mut event_loop) = AsyncClient::new(mqtt_options, 16);

@@ -1,9 +1,11 @@
 use std::{
+    fmt,
     hash::Hash,
     io::{self, Write},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum SensorType {
     Integer = 1,
     Numeric = 20,
@@ -15,19 +17,20 @@ pub enum SensorType {
     Blob = 80,
 }
 
-// Implement to_string() for SensorType
-impl ToString for SensorType {
-    fn to_string(&self) -> String {
-        match self {
-            SensorType::Integer => "Integer".to_string(),
-            SensorType::Numeric => "Numeric".to_string(),
-            SensorType::Float => "Float".to_string(),
-            SensorType::String => "String".to_string(),
-            SensorType::Boolean => "Boolean".to_string(),
-            SensorType::Location => "Location".to_string(),
-            SensorType::Json => "JSON".to_string(),
-            SensorType::Blob => "Blob".to_string(),
-        }
+// Implement Display for SensorType (preferred over ToString)
+impl fmt::Display for SensorType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            SensorType::Integer => "Integer",
+            SensorType::Numeric => "Numeric",
+            SensorType::Float => "Float",
+            SensorType::String => "String",
+            SensorType::Boolean => "Boolean",
+            SensorType::Location => "Location",
+            SensorType::Json => "JSON",
+            SensorType::Blob => "Blob",
+        };
+        write!(f, "{}", s)
     }
 }
 

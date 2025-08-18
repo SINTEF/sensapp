@@ -1,24 +1,16 @@
 #![forbid(unsafe_code)]
-use crate::bus::message;
 use crate::config::load_configuration;
-use crate::ingestors::amqp::amqp_example;
 use crate::ingestors::http::server::run_http_server;
 use crate::ingestors::http::state::HttpServerState;
-use axum::http::StatusCode;
-use futures::stream::StreamExt;
-use futures::TryStreamExt;
-use rustls::crypto::CryptoProvider;
-use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use storage::storage::StorageInstance;
 use storage::storage_factory::create_storage_from_connection_string;
 //use storage::duckdb::DuckDBStorage;
 //use storage::postgresql::postgresql::PostgresStorage;
+#[cfg(feature = "sqlite")]
 use storage::sqlite::sqlite::SqliteStorage;
-use tracing::event;
 use tracing::Level;
-mod bus;
+use tracing::event;
 mod config;
 mod datamodel;
 mod importers;
@@ -51,8 +43,6 @@ fn main() {
 
 async fn async_main() {
     // sentry::capture_message("Hello, Sentry 2!", sentry::Level::Info);
-
-    // amqp_example().await.expect("Failed to start AMQP example");
 
     // Load configuration
     load_configuration().expect("Failed to load configuration");
@@ -104,7 +94,7 @@ async fn async_main() {
     //let storage = create_storage_from_connection_string(
     //    "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_3",
     //)
-    let storage = create_storage_from_connection_string("rrdcached://localhost:42217?preset=munin")
+    let storage = create_storage_from_connection_string("sqlite://test.db")
         .await
         .expect("Failed to create storage");
 
@@ -156,15 +146,6 @@ async fn async_main() {
     let _ = infer::datetime_guesser::likely_datetime_column(&vec![], &vec![]);
     let _ = infer::geo_guesser::likely_geo_columns(&vec![], &vec![]);*/
 
-    /*let event_bus = event_bus::EVENT_BUS
-        .get_or_init(|| event_bus::init_event_bus())
-        .await;
-    */
-
-    let event_bus = bus::event_bus::init_event_bus();
-    let mut wololo = event_bus.main_bus_receiver.activate_cloned();
-    // let mut wololo2 = event_bus.main_bus_receiver.activate_cloned();
-
     // Exit the program if a panic occurs
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -172,106 +153,12 @@ async fn async_main() {
         std::process::exit(1);
     }));
 
-    let storage_for_publish = storage.clone();
-
-    // spawn a task that prints the events to stdout
-    tokio::spawn(async move {
-        while let Ok(message) = wololo.recv().await {
-            println!("Received event a: {:?}", message);
-
-            use crate::storage::storage::StorageInstance;
-            //let toto: &dyn StorageInstance = &storage;
-            let toto: &dyn StorageInstance = storage_for_publish.as_ref();
-
-            match message {
-                message::Message::Publish(message::PublishMessage {
-                    batch,
-                    sync_receiver: _,
-                    sync_sender,
-                }) => {
-                    let start_time = std::time::Instant::now();
-                    toto.publish(batch, sync_sender)
-                        .await
-                        .expect("Failed to publish batch sqlite");
-                    let elapsed = start_time.elapsed();
-                    //println!("Published batch sqlite: {:?}", elapsed);
-                    println!("Published batch bigquery: {:?}", elapsed);
-                    //sync_receiver.activate().recv().await.unwrap();
-                } /*message::Message::SyncRequest(message::RequestSyncMessage { sender }) => {
-                      println!("Received sync request");
-                      toto.sync().await.unwrap();
-                      sender.broadcast(()).await.unwrap();
-                  }*/
-            }
-        }
-        println!("Done");
-        // exit program
-        std::process::exit(0);
-    });
-    /*tokio::spawn(async move {
-        while let Ok(message) = wololo2.recv().await {
-            //println!("Received event a: {:?}", message);
-
-            use crate::storage::storage::StorageInstance;
-            //let toto: &dyn StorageInstance = &postgres_storage;
-            //let toto: &dyn StorageInstance = &timescaledb_storage;
-            let toto: &dyn StorageInstance = &duckdb_storage;
-
-            match message {
-                message::Message::Publish(message::PublishMessage {
-                    batch,
-                    sync_receiver: _,
-                    sync_sender,
-                }) => {
-                    let start_time = std::time::Instant::now();
-                    toto.publish(batch, sync_sender)
-                        .await
-                        .expect("Failed to publish batch duckdb");
-                    let elapsed = start_time.elapsed();
-                    println!("Published batch duckdb: {:?}", elapsed);
-                    //sync_receiver.activate().recv().await.unwrap();
-                } /*message::Message::SyncRequest(message::RequestSyncMessage { sender }) => {
-                      println!("Received sync request");
-                      toto.sync().await.unwrap();
-                      sender.broadcast(()).await.unwrap();
-                  }*/
-            }
-        }
-        println!("Done");
-        // exit program
-        std::process::exit(0);
-    });*/
-    /*tokio::spawn(async move {
-        while let Some(event) = wololo2.recv().await.ok() {
-            println!("Received event b: {:?}", event);
-        }
-    });*/
-
-    let wololo = config.clone();
-    let opcua_event_bus = event_bus.clone();
-    //tokio::task::spawn_blocking(move || {
-    if let Some(opcua_configs) = wololo.opcua.as_ref() {
-        for opcua_config in opcua_configs {
-            let cloned_config = opcua_config.clone();
-            let cloned_event_bus = opcua_event_bus.clone();
-            tokio::spawn(async move {
-                ingestors::opcua::opcua_client(cloned_config, cloned_event_bus)
-                    .await
-                    .expect("Failed to start OPC UA client");
-            });
-            //.await
-            //.expect("Failed to start OPC UA client");
-        }
-        println!("OPC UA clients started");
-    }
-
-    let mqtt_event_bus = event_bus.clone();
     if let Some(mqtt_configs) = config.mqtt.as_ref() {
         for mqtt_config in mqtt_configs {
             let cloned_config = mqtt_config.clone();
-            let cloned_event_bus = mqtt_event_bus.clone();
+            let cloned_storage = storage.clone();
             tokio::spawn(async move {
-                ingestors::mqtt::mqtt_client(cloned_config, cloned_event_bus)
+                ingestors::mqtt::mqtt_client(cloned_config, cloned_storage)
                     .await
                     .expect("Failed to start MQTT client");
             });
@@ -288,8 +175,6 @@ async fn async_main() {
     match run_http_server(
         HttpServerState {
             name: Arc::new("SensApp".to_string()),
-            event_bus,
-            //storage: storage.clone(),
             storage,
         },
         SocketAddr::from((endpoint, port)),

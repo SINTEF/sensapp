@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
     query_parameter_value::QueryParameterValue, query_request::QueryRequest,
@@ -10,6 +10,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::{
+    BigQueryStorage,
     bigquery_labels_utilities::{
         get_or_create_labels_description_ids, get_or_create_labels_name_ids,
     },
@@ -17,10 +18,9 @@ use super::{
     bigquery_table_descriptors::LABELS_DESCRIPTOR,
     bigquery_units_utilities::get_or_create_units_ids,
     bigquery_utilities::publish_rows,
-    BigQueryStorage,
 };
 use crate::{
-    datamodel::{unit::Unit, SensAppVec, Sensor},
+    datamodel::{SensAppVec, Sensor, unit::Unit},
     storage::bigquery::bigquery_table_descriptors::SENSORS_DESCRIPTOR,
 };
 

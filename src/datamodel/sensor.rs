@@ -1,7 +1,7 @@
 use crate::config;
 
-use super::{sensapp_vec::SensAppLabels, unit::Unit, SensorType};
-use anyhow::{anyhow, Error};
+use super::{SensorType, sensapp_vec::SensAppLabels, unit::Unit};
+use anyhow::{Error, anyhow};
 use cached::proc_macro::cached;
 use once_cell::sync::OnceCell;
 use smallvec::SmallVec;
@@ -144,7 +144,7 @@ fn compute_uuid_buffer(
 }
 
 #[cached(
-    sync_writes = true,
+    sync_writes = "default",
     size = 1024,
     result = true,
     key = "Vec<u8>",
@@ -178,6 +178,7 @@ fn uuid_v8_blake3(name: &str, uuid_buffer: Vec<u8>) -> Result<Uuid, Error> {
 }
 
 impl Sensor {
+    #[allow(dead_code)]
     pub fn new(
         uuid: Uuid,
         name: String,
