@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     hash::Hash,
     io::{self, Write},
+    str::FromStr,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub enum SensorType {
     Integer = 1,
@@ -42,6 +44,24 @@ impl SensorType {
     pub fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         let v = self.to_u8().to_le_bytes();
         writer.write_all(&v)
+    }
+}
+
+impl FromStr for SensorType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "integer" => Ok(SensorType::Integer),
+            "numeric" => Ok(SensorType::Numeric),
+            "float" => Ok(SensorType::Float),
+            "string" => Ok(SensorType::String),
+            "boolean" => Ok(SensorType::Boolean),
+            "location" => Ok(SensorType::Location),
+            "json" => Ok(SensorType::Json),
+            "blob" => Ok(SensorType::Blob),
+            _ => Err(format!("Unknown sensor type: {}", s)),
+        }
     }
 }
 

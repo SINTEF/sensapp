@@ -1,5 +1,5 @@
 use super::{
-    super::storage::StorageInstance, timescaledb_publishers::*,
+    super::StorageInstance, timescaledb_publishers::*,
     timescaledb_utilities::get_sensor_id_or_create_sensor,
 };
 use crate::datamodel::{TypedSamples, batch::Batch};
@@ -66,6 +66,16 @@ impl StorageInstance for TimeScaleDBStorage {
 
     async fn list_sensors(&self) -> Result<Vec<String>> {
         unimplemented!();
+    }
+
+    async fn query_sensor_data(
+        &self,
+        _sensor_name: &str,
+        _start_time: Option<i64>,
+        _end_time: Option<i64>,
+        _limit: Option<usize>,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        unimplemented!("TimescaleDB sensor data querying not yet implemented");
     }
 }
 

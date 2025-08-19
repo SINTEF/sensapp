@@ -76,6 +76,17 @@ impl StorageInstance for PostgresStorage {
 
         Ok(sensor_names)
     }
+
+    async fn query_sensor_data(
+        &self,
+        _sensor_name: &str,
+        _start_time: Option<i64>,
+        _end_time: Option<i64>,
+        _limit: Option<usize>,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        // TODO: Implement PostgreSQL sensor data querying
+        unimplemented!("PostgreSQL sensor data querying not yet implemented");
+    }
 }
 
 impl PostgresStorage {

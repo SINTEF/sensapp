@@ -34,6 +34,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["multipart", "macros"] }
 #axum-streams = { version = "0.12", features = ["json", "csv", "text"] }
+base64 = "0.22"
 #bytes = "1.5"
 futures = "0.3"
 #futures-util = { version = "0.3", features = ["io"] }
@@ -101,3 +102,6 @@ utoipa = { version = "5.4", features = ["axum_extras"] }
 utoipa-scalar = { version = "0.3", features = ["axum"] }
 rrdcached-client = { version = "0.1", optional = true }
 rustls = "0.23"
+
+[dev-dependencies]
+temp-env = "0.3"

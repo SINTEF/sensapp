@@ -238,4 +238,14 @@ impl StorageInstance for BigQueryStorage {
     async fn list_sensors(&self) -> Result<Vec<String>> {
         unimplemented!();
     }
+
+    async fn query_sensor_data(
+        &self,
+        _sensor_name: &str,
+        _start_time: Option<i64>,
+        _end_time: Option<i64>,
+        _limit: Option<usize>,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        unimplemented!("BigQuery sensor data querying not yet implemented");
+    }
 }

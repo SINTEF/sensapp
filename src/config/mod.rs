@@ -91,67 +91,57 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "Test modifies environment variables - unsafe in forbid(unsafe_code) project"]
     fn test_load_config() {
         let config = SensAppConfig::load().unwrap();
 
         assert_eq!(config.port, 3000);
         assert_eq!(config.endpoint, IpAddr::from([127, 0, 0, 1]));
 
-        // set env PORT - Commented out due to unsafe_code restriction
-        // std::env::set_var("SENSAPP_PORT", "8080");
-        // let config = SensAppConfig::load().unwrap();
-        // assert_eq!(config.port, 8080);
+        temp_env::with_var("SENSAPP_PORT", Some("8080"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.port, 8080);
+        });
     }
 
     #[test]
-    #[ignore = "Test modifies environment variables - unsafe in forbid(unsafe_code) project"]
     fn test_parse_http_body_limit() {
         let config = SensAppConfig::load().unwrap();
         assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
 
-        // Commented out due to unsafe_code restriction
-        // unsafe {
-        //     std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "12345");
-        // }
-        // let config = SensAppConfig::load().unwrap();
-        // assert_eq!(config.parse_http_body_limit().unwrap(), 12345);
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("12345"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.parse_http_body_limit().unwrap(), 12345);
+        });
 
-        // unsafe {
-        //     std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "10m");
-        // }
-        // let config = SensAppConfig::load().unwrap();
-        // assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("10m"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+        });
 
-        // unsafe {
-        //     std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "10mb");
-        // }
-        // let config = SensAppConfig::load().unwrap();
-        // assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("10mb"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+        });
 
-        // unsafe {
-        //     std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "10MiB");
-        // }
-        // let config = SensAppConfig::load().unwrap();
-        // assert_eq!(config.parse_http_body_limit().unwrap(), 10485760);
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("10MiB"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.parse_http_body_limit().unwrap(), 10485760);
+        });
 
-        // unsafe {
-        //     std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "1.5gb");
-        // }
-        // let config = SensAppConfig::load().unwrap();
-        // assert_eq!(config.parse_http_body_limit().unwrap(), 1500000000);
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("1.5gb"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.parse_http_body_limit().unwrap(), 1500000000);
+        });
 
-        // unsafe {
-        //     std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "1tb");
-        // }
-        // let config = SensAppConfig::load().unwrap();
-        // assert!(config.parse_http_body_limit().is_err());
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("1tb"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert!(config.parse_http_body_limit().is_err());
+        });
 
-        // unsafe {
-        //     std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "-5mb");
-        // }
-        // let config = SensAppConfig::load().unwrap();
-        // assert!(config.parse_http_body_limit().is_err());
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("-5mb"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert!(config.parse_http_body_limit().is_err());
+        });
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::{
     datamodel::{Sensor, SensorType, TypedSamples},
-    storage::storage::StorageInstance,
+    storage::StorageInstance,
 };
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
@@ -325,5 +325,15 @@ impl StorageInstance for RrdCachedStorage {
 
     async fn list_sensors(&self) -> Result<Vec<String>> {
         unimplemented!();
+    }
+
+    async fn query_sensor_data(
+        &self,
+        _sensor_name: &str,
+        _start_time: Option<i64>,
+        _end_time: Option<i64>,
+        _limit: Option<usize>,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        unimplemented!("RRDCached sensor data querying not yet implemented");
     }
 }

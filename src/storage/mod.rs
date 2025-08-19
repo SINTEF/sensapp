@@ -17,6 +17,15 @@ pub trait StorageInstance: Send + Sync + Debug {
     async fn vacuum(&self) -> Result<()>;
 
     async fn list_sensors(&self) -> Result<Vec<String>>;
+
+    /// Query sensor data by name with optional time range and limit
+    async fn query_sensor_data(
+        &self,
+        sensor_name: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<Option<crate::datamodel::SensorData>>;
 }
 
 pub mod storage_factory;

@@ -13,6 +13,8 @@ pub enum AppError {
     InternalServerError(anyhow::Error),
     #[schema(example = "Bad Request", value_type = String)]
     BadRequest(anyhow::Error),
+    #[schema(example = "Not Found", value_type = String)]
+    NotFound(anyhow::Error),
 }
 
 impl IntoResponse for AppError {
@@ -26,6 +28,7 @@ impl IntoResponse for AppError {
                 )
             }
             AppError::BadRequest(error) => (StatusCode::BAD_REQUEST, error.to_string()),
+            AppError::NotFound(error) => (StatusCode::NOT_FOUND, error.to_string()),
         };
         let body = Json(json!({ "error": message }));
         (status, body).into_response()
@@ -47,5 +50,9 @@ impl AppError {
 
     pub fn internal_server_error(err: impl Into<anyhow::Error>) -> Self {
         Self::InternalServerError(err.into())
+    }
+
+    pub fn not_found(err: impl Into<anyhow::Error>) -> Self {
+        Self::NotFound(err.into())
     }
 }

@@ -13,6 +13,7 @@ use tracing::Level;
 use tracing::event;
 mod config;
 mod datamodel;
+mod exporters;
 mod importers;
 mod infer;
 mod ingestors;
