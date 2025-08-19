@@ -39,65 +39,194 @@ pub struct SensorDataQuery {
     pub start: Option<i64>,
     pub end: Option<i64>,
     pub limit: Option<usize>,
+    pub format: Option<String>,
 }
 
-/// List all sensors in DCAT catalog format.
+/// List unique metrics (measurement types) with aggregated information in DCAT catalog format.
 #[utoipa::path(
     get,
-    path = "/sensors",
+    path = "/metrics",
     tag = "SensApp",
     responses(
-        (status = 200, description = "Sensors catalog in DCAT format", body = Value)
+        (status = 200, description = "Metrics catalog in DCAT format", body = Value)
     )
 )]
-pub async fn list_sensors(State(state): State<HttpServerState>) -> Result<Json<Value>, AppError> {
-    // Get the simple sensor names and create a DCAT catalog
-    let sensor_names = state.storage.list_sensors().await?;
+pub async fn list_metrics(State(state): State<HttpServerState>) -> Result<Json<Value>, AppError> {
+    let metrics = state.storage.list_metrics().await?;
 
-    // Create DCAT catalog structure
-    let datasets: Vec<Value> = sensor_names
+    // Create DCAT catalog structure for metrics
+    let datasets: Vec<Value> = metrics
         .iter()
         .enumerate()
-        .map(|(index, sensor_name)| {
-            json!({
+        .map(|(index, metric)| {
+            // Create keywords from metric type and label dimensions
+            let mut keywords = vec!["metric", "aggregated", "time-series"];
+            keywords.push(match metric.sensor_type {
+                crate::datamodel::SensorType::Integer => "integer",
+                crate::datamodel::SensorType::Float => "float",
+                crate::datamodel::SensorType::String => "string",
+                crate::datamodel::SensorType::Boolean => "boolean",
+                crate::datamodel::SensorType::Location => "location",
+                crate::datamodel::SensorType::Json => "json",
+                crate::datamodel::SensorType::Blob => "blob",
+                crate::datamodel::SensorType::Numeric => "numeric",
+            });
+
+            // Add label dimensions as keywords
+            for label_key in &metric.label_keys {
+                keywords.push(label_key);
+            }
+
+            let mut dataset = json!({
                 "@type": "dcat:Dataset",
-                "@id": format!("sensor_{}", index + 1),
-                "dct:identifier": sensor_name,
-                "dct:title": sensor_name,
-                "dct:description": format!("Sensor data from {}", sensor_name),
-                "dcat:keyword": ["sensor", "IoT", "time-series"],
-                "dct:format": "JSON",
+                "@id": format!("metric_{}", index + 1),
+                "dct:identifier": format!("metric:{}", metric.name),
+                "dct:title": metric.name,
+                "dct:description": format!("Aggregated metric '{}' containing {} time series with dimensions: {}", 
+                    metric.name, 
+                    metric.series_count,
+                    if metric.label_keys.is_empty() { 
+                        "none".to_string() 
+                    } else { 
+                        metric.label_keys.join(", ") 
+                    }
+                ),
+                "dcat:keyword": keywords,
+                "dct:format": "DCAT",
                 "dcat:mediaType": "application/json",
+                "sensor:type": metric.sensor_type,
+                "sensor:seriesCount": metric.series_count,
+                "sensor:labelDimensions": metric.label_keys,
                 "dct:temporal": {
                     "@type": "dct:PeriodOfTime"
                 },
                 "dcat:distribution": [
                     {
                         "@type": "dcat:Distribution",
-                        "dcat:downloadURL": format!("/sensors/{}.json", sensor_name),
+                        "dcat:accessURL": format!("/series?metric={}", urlencoding::encode(&metric.name)),
+                        "dcat:mediaType": "application/json",
+                        "dct:format": "DCAT Series Catalog",
+                        "dct:description": format!("All {} time series for this metric", metric.series_count)
+                    }
+                ]
+            });
+
+            // Only include the unit field if the metric has a unit
+            if let Some(unit) = &metric.unit {
+                dataset["sensor:unit"] = json!(unit.name);
+            }
+
+            dataset
+        })
+        .collect();
+
+    let catalog = json!({
+        "@context": {
+            "dcat": "http://www.w3.org/ns/dcat#",
+            "dct": "http://purl.org/dc/terms/",
+            "foaf": "http://xmlns.com/foaf/0.1/",
+            "sensor": "http://sensapp.io/ns/sensor#"
+        },
+        "@type": "dcat:Catalog",
+        "@id": "sensapp_metrics_catalog",
+        "dct:title": "SensApp Metrics Catalog",
+        "dct:description": "Catalog of aggregated metrics available in SensApp platform",
+        "dct:publisher": {
+            "@type": "foaf:Organization",
+            "foaf:name": "SensApp"
+        },
+        "dcat:dataset": datasets
+    });
+
+    Ok(Json(catalog))
+}
+
+/// List all sensors (time series) in DCAT catalog format.
+#[utoipa::path(
+    get,
+    path = "/series",
+    tag = "SensApp",
+    responses(
+        (status = 200, description = "Time series catalog in DCAT format", body = Value)
+    )
+)]
+pub async fn list_sensors(State(state): State<HttpServerState>) -> Result<Json<Value>, AppError> {
+    // Get the sensor metadata including labels and UUIDs
+    let sensors = state.storage.list_sensors().await?;
+
+    // Create DCAT catalog structure
+    let datasets: Vec<Value> = sensors
+        .iter()
+        .enumerate()
+        .map(|(index, sensor)| {
+            // Create keywords from sensor type, unit, and labels
+            let mut keywords = vec!["sensor", "IoT", "time-series"];
+            keywords.push(match sensor.sensor_type {
+                crate::datamodel::SensorType::Integer => "integer",
+                crate::datamodel::SensorType::Float => "float",
+                crate::datamodel::SensorType::String => "string",
+                crate::datamodel::SensorType::Boolean => "boolean",
+                crate::datamodel::SensorType::Location => "location",
+                crate::datamodel::SensorType::Json => "json",
+                crate::datamodel::SensorType::Blob => "blob",
+                crate::datamodel::SensorType::Numeric => "numeric",
+            });
+
+            // Add label keys as keywords
+            for (key, _) in sensor.labels.iter() {
+                keywords.push(key);
+            }
+
+            let sensor_uuid = sensor.uuid.to_string();
+
+            let mut dataset = json!({
+                "@type": "dcat:Dataset",
+                "@id": format!("sensor_{}", index + 1),
+                "dct:identifier": sensor_uuid,
+                "dct:title": sensor.name,
+                "dct:description": format!("Sensor data from {} ({})", sensor.name, sensor.sensor_type),
+                "dcat:keyword": keywords,
+                "dct:format": "JSON",
+                "dcat:mediaType": "application/json",
+                "sensor:type": sensor.sensor_type,
+                "sensor:labels": sensor.labels.iter().map(|(k, v)| json!({k: v})).collect::<Vec<_>>(),
+                "dct:temporal": {
+                    "@type": "dct:PeriodOfTime"
+                },
+                "dcat:distribution": [
+                    {
+                        "@type": "dcat:Distribution",
+                        "dcat:downloadURL": format!("/sensors/{}?format=json", sensor_uuid),
                         "dcat:mediaType": "application/json",
                         "dct:format": "SenML JSON"
                     },
                     {
                         "@type": "dcat:Distribution",
-                        "dcat:downloadURL": format!("/sensors/{}.senml", sensor_name),
+                        "dcat:downloadURL": format!("/sensors/{}?format=senml", sensor_uuid),
                         "dcat:mediaType": "application/json",
                         "dct:format": "SenML"
                     },
                     {
                         "@type": "dcat:Distribution",
-                        "dcat:downloadURL": format!("/sensors/{}.csv", sensor_name),
+                        "dcat:downloadURL": format!("/sensors/{}?format=csv", sensor_uuid),
                         "dcat:mediaType": "text/csv",
                         "dct:format": "CSV"
                     },
                     {
                         "@type": "dcat:Distribution",
-                        "dcat:downloadURL": format!("/sensors/{}.jsonl", sensor_name),
+                        "dcat:downloadURL": format!("/sensors/{}?format=jsonl", sensor_uuid),
                         "dcat:mediaType": "application/jsonlines",
                         "dct:format": "JSON Lines"
                     }
                 ]
-            })
+            });
+
+            // Only include the unit field if the sensor has a unit
+            if let Some(unit) = &sensor.unit {
+                dataset["sensor:unit"] = json!(unit.name);
+            }
+
+            dataset
         })
         .collect();
 
@@ -121,13 +250,14 @@ pub async fn list_sensors(State(state): State<HttpServerState>) -> Result<Json<V
     Ok(Json(catalog))
 }
 
-/// Get sensor data in various formats based on file extension.
+/// Get sensor data in various formats based on query parameter.
 #[utoipa::path(
     get,
-    path = "/sensors/{sensor_name_with_ext}",
+    path = "/series/{sensor_uuid}",
     tag = "SensApp",
     params(
-        ("sensor_name_with_ext" = String, Path, description = "Name of the sensor with format extension (.json, .senml, .csv, .jsonl)"),
+        ("sensor_uuid" = String, Path, description = "UUID of the sensor"),
+        ("format" = Option<String>, Query, description = "Output format: json, senml, csv, or jsonl (default: json)"),
         ("start" = Option<i64>, Query, description = "Start timestamp in milliseconds"),
         ("end" = Option<i64>, Query, description = "End timestamp in milliseconds"),
         ("limit" = Option<usize>, Query, description = "Maximum number of samples")
@@ -140,33 +270,28 @@ pub async fn list_sensors(State(state): State<HttpServerState>) -> Result<Json<V
 )]
 pub async fn get_sensor_data(
     State(state): State<HttpServerState>,
-    Path(sensor_name_with_ext): Path<String>,
+    Path(sensor_uuid): Path<String>,
     Query(query): Query<SensorDataQuery>,
 ) -> Result<axum::response::Response, AppError> {
-    // Parse sensor name and format from path
-    let (sensor_name, format) = if let Some(dot_pos) = sensor_name_with_ext.rfind('.') {
-        let sensor_name = sensor_name_with_ext[..dot_pos].to_string();
-        let ext = &sensor_name_with_ext[dot_pos + 1..];
-        let format = ExportFormat::from_extension(ext)
-            .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("Unsupported format: {}", ext)))?;
-        (sensor_name, format)
-    } else {
-        // Default to SenML if no extension
-        (sensor_name_with_ext, ExportFormat::Senml)
+    // Parse format from query parameter, default to SenML/JSON
+    let format = match query.format.as_deref() {
+        Some(format_str) => ExportFormat::from_extension(format_str)
+            .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("Unsupported export format '{}'. Supported formats: senml, csv, jsonl", format_str)))?,
+        None => ExportFormat::Senml, // Default to SenML/JSON format
     };
 
-    // Query sensor data from storage
+    // Query sensor data from storage by UUID
     let sensor_data = state
         .storage
-        .query_sensor_data(&sensor_name, query.start, query.end, query.limit)
+        .query_sensor_data_by_uuid(&sensor_uuid, query.start, query.end, query.limit)
         .await?;
 
     let sensor_data = match sensor_data {
         Some(data) => data,
         None => {
             return Err(AppError::not_found(anyhow::anyhow!(
-                "Sensor '{}' not found",
-                sensor_name
+                "Sensor with UUID '{}' not found",
+                sensor_uuid
             )));
         }
     };

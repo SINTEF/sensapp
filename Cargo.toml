@@ -32,6 +32,7 @@ all-storage = [
 anyhow = "1.0"
 #async-stream = "0.3"
 async-trait = "0.1"
+thiserror = "2.0"
 axum = { version = "0.8", features = ["multipart", "macros"] }
 #axum-streams = { version = "0.12", features = ["json", "csv", "text"] }
 base64 = "0.22"

@@ -180,7 +180,7 @@ pub async fn publish_string_values(
         .map(|row| {
             let string_id = ids_map
                 .get(&row.value_string)
-                .expect("String value not found in the map, this should not happen");
+                .expect("Internal consistency error: String value missing from cached map");
             StringValue {
                 sensor_id: row.sensor_id,
                 timestamp: row.timestamp,

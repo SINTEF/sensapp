@@ -1,5 +1,5 @@
 use super::app_error::AppError;
-use super::crud::{get_sensor_data, list_sensors};
+use super::crud::{get_sensor_data, list_sensors, list_metrics};
 use super::influxdb::publish_influxdb;
 use super::prometheus::publish_prometheus;
 use super::state::HttpServerState;
@@ -9,7 +9,7 @@ use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
 //use axum::extract::Multipart;
 //use axum::extract::Path;
-use crate::ingestors::http::crud::{__path_get_sensor_data, __path_list_sensors};
+use crate::ingestors::http::crud::{__path_get_sensor_data, __path_list_sensors, __path_list_metrics};
 use crate::ingestors::http::influxdb::__path_publish_influxdb;
 use crate::ingestors::http::prometheus::__path_publish_prometheus;
 use axum::Json;
@@ -41,7 +41,7 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
         (name = "InfluxDB", description = "InfluxDB Write API"),
         (name = "Prometheus", description = "Prometheus Remote Write API"),
     ),
-    paths(frontpage, list_sensors, get_sensor_data, publish_influxdb, publish_prometheus),
+    paths(frontpage, list_metrics, list_sensors, get_sensor_data, publish_influxdb, publish_prometheus),
 )]
 struct ApiDoc;
 
@@ -84,9 +84,13 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             "/sensors/{sensor_name_or_uuid}/publish_multipart",
             post(publish_multipart).layer(max_body_layer),
         )
-        // Boring Sensor CRUD
+        // Metrics and Series CRUD  
+        .route("/metrics", get(list_metrics))
+        .route("/series", get(list_sensors))
+        .route("/series/{sensor_uuid}", get(get_sensor_data))
+        // Legacy endpoints (for backward compatibility during transition)
         .route("/sensors", get(list_sensors))
-        .route("/sensors/:sensor_name_with_ext", get(get_sensor_data))
+        .route("/sensors/{sensor_uuid}", get(get_sensor_data))
         // InfluxDB Write API
         .route(
             "/api/v2/write",

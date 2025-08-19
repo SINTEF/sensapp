@@ -4,6 +4,7 @@ use axum::response::IntoResponse;
 use axum::response::Response;
 use serde_json::json;
 use utoipa::ToSchema;
+use crate::storage::StorageError;
 
 // Anyhow error handling with axum
 // https://github.com/tokio-rs/axum/blob/d3112a40d55f123bc5e65f995e2068e245f12055/examples/anyhow-error-response/src/main.rs
@@ -15,6 +16,8 @@ pub enum AppError {
     BadRequest(anyhow::Error),
     #[schema(example = "Not Found", value_type = String)]
     NotFound(anyhow::Error),
+    #[schema(example = "Storage Error", value_type = String)]
+    Storage(StorageError),
 }
 
 impl IntoResponse for AppError {
@@ -29,17 +32,41 @@ impl IntoResponse for AppError {
             }
             AppError::BadRequest(error) => (StatusCode::BAD_REQUEST, error.to_string()),
             AppError::NotFound(error) => (StatusCode::NOT_FOUND, error.to_string()),
+            AppError::Storage(storage_error) => {
+                match &storage_error {
+                    StorageError::SensorNotFound { .. } | StorageError::MetricNotFound { .. } => {
+                        (StatusCode::NOT_FOUND, storage_error.to_string())
+                    }
+                    StorageError::MissingRequiredField { .. } | StorageError::InvalidDataFormat { .. } => {
+                        eprintln!("Data integrity issue: {}", storage_error);
+                        (StatusCode::BAD_REQUEST, storage_error.to_string())
+                    }
+                    StorageError::Configuration(_) => {
+                        eprintln!("Storage configuration error: {}", storage_error);
+                        (StatusCode::INTERNAL_SERVER_ERROR, "Storage configuration error".to_string())
+                    }
+                    StorageError::Database(_) | StorageError::OperationFailed { .. } => {
+                        eprintln!("Storage operation failed: {}", storage_error);
+                        (StatusCode::INTERNAL_SERVER_ERROR, "Storage operation failed".to_string())
+                    }
+                }
+            }
         };
         let body = Json(json!({ "error": message }));
         (status, body).into_response()
     }
 }
-impl<E> From<E> for AppError
-where
-    E: Into<anyhow::Error>,
-{
-    fn from(err: E) -> Self {
-        Self::InternalServerError(err.into())
+// Specific conversion for StorageError to maintain error categorization
+impl From<StorageError> for AppError {
+    fn from(err: StorageError) -> Self {
+        Self::Storage(err)
+    }
+}
+
+// Generic conversion for anyhow::Error specifically
+impl From<anyhow::Error> for AppError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::InternalServerError(err)
     }
 }
 

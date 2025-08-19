@@ -78,3 +78,12 @@ SensApp is a **sensor data platform** built with Rust that scales from edge depl
 - **Storage-agnostic** design with trait-based abstractions
 - **Type safety** for sensor data with compile-time guarantees
 - **Scalable deployment** patterns from single-node to distributed clusters
+
+## Tips
+
+- postgresql database name is sensapp
+- DATABASE_URL="postgres://postgres:postgres@localhost:5432/sensapp" sqlx migrate run --source src/storage/postgresql/migrations
+- DATABASE_URL="postgres://postgres:postgres@localhost:5432/sensapp" cargo sqlx prepare
+- do focus on postgresql, AND NOT OTHER STORAGE BACKENDS FOR NOW.
+- Backward compatibility is not a concern. The project is new.
+- You are an excellent and experienced software engineer.

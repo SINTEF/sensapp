@@ -1,6 +1,7 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
 use anyhow::{Result, anyhow};
+use crate::storage::StorageError;
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
@@ -142,10 +143,10 @@ async fn get_existing_string_values_ids(
     let mut results_map = HybridMap::with_capacity(result.row_count());
 
     while result.next_row() {
-        let id = result.get_i64(0)?.ok_or_else(|| anyhow!("id is null"))?;
+        let id = result.get_i64(0)?.ok_or_else(|| anyhow::Error::from(StorageError::missing_field("string_value_id", None, None)))?;
         let value = result
             .get_string(1)?
-            .ok_or_else(|| anyhow!("value is null"))?;
+            .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("string_value", None, None)))?;
 
         results_map.insert(value, id);
     }
@@ -169,7 +170,7 @@ async fn create_string_values(
         .map(|string_value| StringValueDictionary {
             id: *map
                 .get(&string_value)
-                .expect("String value not found in the map, this should not happen"),
+                .expect("Internal consistency error: String value missing from cached map"),
             value: string_value,
         })
         .collect::<Vec<_>>();

@@ -3,6 +3,7 @@ use crate::{
     storage::StorageInstance,
 };
 use anyhow::{Result, anyhow, bail};
+use crate::storage::StorageError;
 use async_trait::async_trait;
 use rrdcached_client::{
     RRDCachedClient,
@@ -132,8 +133,8 @@ impl RrdCachedStorage {
         match scheme {
             "rrdcached" | "rrdcached+tcp" => {
                 // extract host and port
-                let host = url.host_str().ok_or_else(|| anyhow!("No host in URL"))?;
-                let port = url.port().ok_or_else(|| anyhow!("No port in URL"))?;
+                let host = url.host_str().ok_or_else(|| anyhow::Error::from(StorageError::configuration("RRDCached connection URL missing host")))?;
+                let port = url.port().ok_or_else(|| anyhow::Error::from(StorageError::configuration("RRDCached connection URL missing port")))?;
 
                 let client = RRDCachedClient::connect_tcp(&format!("{}:{}", host, port)).await?;
                 Ok(Self {

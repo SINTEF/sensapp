@@ -3,6 +3,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::fmt::Debug;
 
+pub mod error;
+pub use error::StorageError;
+
 #[async_trait]
 pub trait StorageInstance: Send + Sync + Debug {
     #[allow(dead_code)]
@@ -16,12 +19,23 @@ pub trait StorageInstance: Send + Sync + Debug {
     #[allow(dead_code)]
     async fn vacuum(&self) -> Result<()>;
 
-    async fn list_sensors(&self) -> Result<Vec<String>>;
+    async fn list_sensors(&self) -> Result<Vec<crate::datamodel::Sensor>>;
+    
+    async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>>;
 
     /// Query sensor data by name with optional time range and limit
     async fn query_sensor_data(
         &self,
         sensor_name: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<Option<crate::datamodel::SensorData>>;
+
+    /// Query sensor data by UUID with optional time range and limit
+    async fn query_sensor_data_by_uuid(
+        &self,
+        sensor_uuid: &str,
         start_time: Option<i64>,
         end_time: Option<i64>,
         limit: Option<usize>,

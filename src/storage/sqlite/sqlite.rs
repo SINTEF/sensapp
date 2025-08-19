@@ -3,7 +3,7 @@ use super::sqlite_utilities::get_sensor_id_or_create_sensor;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::unit::Unit;
 use crate::datamodel::{
-    Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples,
+    Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, Metric,
     sensapp_vec::SensAppLabels,
 };
 use crate::storage::StorageInstance;
@@ -85,8 +85,68 @@ impl StorageInstance for SqliteStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
-        unimplemented!();
+    async fn list_sensors(&self) -> Result<Vec<crate::datamodel::Sensor>> {
+        // Query all sensors with their metadata
+        let sensor_rows = sqlx::query!(
+            r#"
+            SELECT s.sensor_id, s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
+            FROM sensors s
+            LEFT JOIN units u ON s.unit = u.id
+            ORDER BY s.created_at ASC, s.uuid ASC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut sensors = Vec::new();
+
+        for sensor_row in sensor_rows {
+            // Parse sensor metadata
+            let sensor_uuid =
+                Uuid::parse_str(&sensor_row.uuid).context("Failed to parse sensor UUID")?;
+            let sensor_type =
+                SensorType::from_str(&sensor_row.r#type).context("Failed to parse sensor type")?;
+            let unit = sensor_row
+                .unit_name
+                .map(|name| Unit::new(name, sensor_row.unit_description));
+
+            // Query labels for this sensor
+            let labels_rows = sqlx::query!(
+                r#"
+                SELECT lnd.name as label_name, ldd.description as label_value
+                FROM labels l
+                JOIN labels_name_dictionary lnd ON l.name = lnd.id
+                JOIN labels_description_dictionary ldd ON l.description = ldd.id
+                WHERE l.sensor_id = ?
+                "#,
+                sensor_row.sensor_id
+            )
+            .fetch_all(&self.pool)
+            .await?;
+
+            let mut labels: SensAppLabels = smallvec![];
+            for label_row in labels_rows {
+                labels.push((label_row.label_name, label_row.label_value));
+            }
+
+            let sensor = Sensor::new(
+                sensor_uuid,
+                sensor_row.name,
+                sensor_type,
+                unit,
+                Some(labels),
+            );
+
+            sensors.push(sensor);
+        }
+
+        Ok(sensors)
+    }
+
+    async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {
+        // TODO: Implement metrics aggregation for SQLite
+        // For now, return empty list since we're focusing on PostgreSQL
+        Ok(vec![])
     }
 
     async fn query_sensor_data(
@@ -154,6 +214,107 @@ impl StorageInstance for SqliteStorage {
 
         let sensor = Sensor::new(
             sensor_uuid,
+            sensor_row.name,
+            sensor_type.clone(),
+            unit,
+            Some(labels),
+        );
+
+        // Query samples based on sensor type
+        let samples = match sensor_type {
+            SensorType::Integer => {
+                self.query_integer_samples(sensor_id, start_time, end_time, limit)
+                    .await?
+            }
+            SensorType::Numeric => {
+                self.query_numeric_samples(sensor_id, start_time, end_time, limit)
+                    .await?
+            }
+            SensorType::Float => {
+                self.query_float_samples(sensor_id, start_time, end_time, limit)
+                    .await?
+            }
+            SensorType::String => {
+                self.query_string_samples(sensor_id, start_time, end_time, limit)
+                    .await?
+            }
+            SensorType::Boolean => {
+                self.query_boolean_samples(sensor_id, start_time, end_time, limit)
+                    .await?
+            }
+            SensorType::Location => {
+                self.query_location_samples(sensor_id, start_time, end_time, limit)
+                    .await?
+            }
+            SensorType::Json => {
+                self.query_json_samples(sensor_id, start_time, end_time, limit)
+                    .await?
+            }
+            SensorType::Blob => {
+                self.query_blob_samples(sensor_id, start_time, end_time, limit)
+                    .await?
+            }
+        };
+
+        Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    async fn query_sensor_data_by_uuid(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<Option<SensorData>> {
+        // Query sensor metadata by UUID
+        let sensor_row = sqlx::query!(
+            r#"
+            SELECT s.sensor_id, s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
+            FROM sensors s
+            LEFT JOIN units u ON s.unit = u.id
+            WHERE s.uuid = ?
+            "#,
+            sensor_uuid
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let sensor_row = match sensor_row {
+            Some(row) => row,
+            None => return Ok(None),
+        };
+
+        // Parse sensor metadata
+        let parsed_sensor_uuid =
+            Uuid::parse_str(&sensor_row.uuid).context("Failed to parse sensor UUID")?;
+        let sensor_type =
+            SensorType::from_str(&sensor_row.r#type).context("Failed to parse sensor type")?;
+        let unit = sensor_row
+            .unit_name
+            .map(|name| Unit::new(name, sensor_row.unit_description));
+
+        // Query labels for this sensor
+        let sensor_id = sensor_row.sensor_id;
+        let labels_rows = sqlx::query!(
+            r#"
+            SELECT lnd.name as label_name, ldd.description as label_value
+            FROM labels l
+            JOIN labels_name_dictionary lnd ON l.name = lnd.id
+            JOIN labels_description_dictionary ldd ON l.description = ldd.id
+            WHERE l.sensor_id = ?
+            "#,
+            sensor_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut labels: SensAppLabels = smallvec![];
+        for label_row in labels_rows {
+            labels.push((label_row.label_name, label_row.label_value));
+        }
+
+        let sensor = Sensor::new(
+            parsed_sensor_uuid,
             sensor_row.name,
             sensor_type.clone(),
             unit,

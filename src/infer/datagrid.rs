@@ -18,7 +18,7 @@ impl StringDataGrid {
     pub fn detect_header(rows: Vec<Vec<String>>) -> Result<Self, Error> {
         let column_names = rows
             .first()
-            .ok_or_else(|| anyhow::anyhow!("No rows in data grid"))?
+            .ok_or_else(|| anyhow::anyhow!("Cannot detect header: CSV data grid contains no rows"))?
             .clone();
         let rows = rows[1..].to_vec();
         Self::new(column_names, rows)

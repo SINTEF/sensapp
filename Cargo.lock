@@ -5052,6 +5052,7 @@ dependencies = [
  "snap",
  "sqlx",
  "temp-env",
+ "thiserror 2.0.15",
  "tokio",
  "tokio-stream",
  "tokio-util",

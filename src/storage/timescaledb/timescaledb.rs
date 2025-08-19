@@ -64,8 +64,9 @@ impl StorageInstance for TimeScaleDBStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
-        unimplemented!();
+    async fn list_sensors(&self) -> Result<Vec<crate::datamodel::Sensor>> {
+        // TODO: Implement TimescaleDB sensor listing with full metadata
+        unimplemented!("TimescaleDB sensor listing not yet implemented");
     }
 
     async fn query_sensor_data(
@@ -76,6 +77,17 @@ impl StorageInstance for TimeScaleDBStorage {
         _limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
         unimplemented!("TimescaleDB sensor data querying not yet implemented");
+    }
+
+    async fn query_sensor_data_by_uuid(
+        &self,
+        _sensor_uuid: &str,
+        _start_time: Option<i64>,
+        _end_time: Option<i64>,
+        _limit: Option<usize>,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        // TODO: Implement TimescaleDB UUID-based sensor data querying
+        unimplemented!("TimescaleDB UUID-based sensor data querying not yet implemented");
     }
 }
 
@@ -128,7 +140,304 @@ impl TimeScaleDBStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
-        unimplemented!();
+    async fn query_integer_samples(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        use crate::datamodel::{Sample, SensAppDateTime};
+        use smallvec::smallvec;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT timestamp_ms, value FROM integer_values 
+            WHERE sensor_id = $1 
+            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
+            ORDER BY timestamp_ms ASC
+            LIMIT $4
+            "#,
+            sensor_id,
+            start_time,
+            end_time,
+            limit.unwrap_or(1000) as i64
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut samples = smallvec![];
+        for row in rows {
+            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms);
+            let value = row.value;
+            samples.push(Sample { datetime, value });
+        }
+
+        Ok(TypedSamples::Integer(samples))
+    }
+
+    async fn query_numeric_samples(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        use crate::datamodel::{Sample, SensAppDateTime};
+        use rust_decimal::Decimal;
+        use smallvec::smallvec;
+        use std::str::FromStr;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT timestamp_ms, value FROM numeric_values 
+            WHERE sensor_id = $1 
+            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
+            ORDER BY timestamp_ms ASC
+            LIMIT $4
+            "#,
+            sensor_id,
+            start_time,
+            end_time,
+            limit.unwrap_or(1000) as i64
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut samples = smallvec![];
+        for row in rows {
+            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms);
+            let value = Decimal::from_str(&row.value.to_string())
+                .context("Failed to parse decimal value")?;
+            samples.push(Sample { datetime, value });
+        }
+
+        Ok(TypedSamples::Numeric(samples))
+    }
+
+    async fn query_float_samples(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        use crate::datamodel::{Sample, SensAppDateTime};
+        use smallvec::smallvec;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT timestamp_ms, value FROM float_values 
+            WHERE sensor_id = $1 
+            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
+            ORDER BY timestamp_ms ASC
+            LIMIT $4
+            "#,
+            sensor_id,
+            start_time,
+            end_time,
+            limit.unwrap_or(1000) as i64
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut samples = smallvec![];
+        for row in rows {
+            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms);
+            let value = row.value;
+            samples.push(Sample { datetime, value });
+        }
+
+        Ok(TypedSamples::Float(samples))
+    }
+
+    async fn query_string_samples(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        use crate::datamodel::{Sample, SensAppDateTime};
+        use smallvec::smallvec;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT sv.timestamp_ms, svd.value as string_value
+            FROM string_values sv
+            JOIN strings_values_dictionary svd ON sv.value = svd.id
+            WHERE sv.sensor_id = $1 
+            AND ($2::BIGINT IS NULL OR sv.timestamp_ms >= $2)
+            AND ($3::BIGINT IS NULL OR sv.timestamp_ms <= $3)
+            ORDER BY sv.timestamp_ms ASC
+            LIMIT $4
+            "#,
+            sensor_id,
+            start_time,
+            end_time,
+            limit.unwrap_or(1000) as i64
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut samples = smallvec![];
+        for row in rows {
+            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms);
+            let value = row.string_value;
+            samples.push(Sample { datetime, value });
+        }
+
+        Ok(TypedSamples::String(samples))
+    }
+
+    async fn query_boolean_samples(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        use crate::datamodel::{Sample, SensAppDateTime};
+        use smallvec::smallvec;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT timestamp_ms, value FROM boolean_values 
+            WHERE sensor_id = $1 
+            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
+            ORDER BY timestamp_ms ASC
+            LIMIT $4
+            "#,
+            sensor_id,
+            start_time,
+            end_time,
+            limit.unwrap_or(1000) as i64
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut samples = smallvec![];
+        for row in rows {
+            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms);
+            let value = row.value.unwrap_or(false);
+            samples.push(Sample { datetime, value });
+        }
+
+        Ok(TypedSamples::Boolean(samples))
+    }
+
+    async fn query_location_samples(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        use crate::datamodel::{Sample, SensAppDateTime};
+        use smallvec::smallvec;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT timestamp_ms, latitude, longitude FROM location_values 
+            WHERE sensor_id = $1 
+            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
+            ORDER BY timestamp_ms ASC
+            LIMIT $4
+            "#,
+            sensor_id,
+            start_time,
+            end_time,
+            limit.unwrap_or(1000) as i64
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut samples = smallvec![];
+        for row in rows {
+            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms);
+            let value = geo::Point::new(row.longitude, row.latitude);
+            samples.push(Sample { datetime, value });
+        }
+
+        Ok(TypedSamples::Location(samples))
+    }
+
+    async fn query_json_samples(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        use crate::datamodel::{Sample, SensAppDateTime};
+        use smallvec::smallvec;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT timestamp_ms, value FROM json_values 
+            WHERE sensor_id = $1 
+            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
+            ORDER BY timestamp_ms ASC
+            LIMIT $4
+            "#,
+            sensor_id,
+            start_time,
+            end_time,
+            limit.unwrap_or(1000) as i64
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut samples = smallvec![];
+        for row in rows {
+            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms);
+            let value: serde_json::Value = row.value;
+            samples.push(Sample { datetime, value });
+        }
+
+        Ok(TypedSamples::Json(samples))
+    }
+
+    async fn query_blob_samples(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        use crate::datamodel::{Sample, SensAppDateTime};
+        use smallvec::smallvec;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT timestamp_ms, value FROM blob_values 
+            WHERE sensor_id = $1 
+            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
+            ORDER BY timestamp_ms ASC
+            LIMIT $4
+            "#,
+            sensor_id,
+            start_time,
+            end_time,
+            limit.unwrap_or(1000) as i64
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut samples = smallvec![];
+        for row in rows {
+            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms);
+            let value = row.value;
+            samples.push(Sample { datetime, value });
+        }
+
+        Ok(TypedSamples::Blob(samples))
     }
 }
