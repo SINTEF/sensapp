@@ -31,7 +31,6 @@ pub async fn publish_numeric_values(
 ) -> Result<()> {
     for value in values {
         let timestamp_ms = value.datetime.to_unix_milliseconds().floor() as i64;
-        let string_value = value.value.to_string();
         let query = sqlx::query(
             r#"
             INSERT INTO numeric_values (sensor_id, timestamp_ms, value)
@@ -40,7 +39,7 @@ pub async fn publish_numeric_values(
         )
         .bind(sensor_id)
         .bind(timestamp_ms)
-        .bind(string_value);
+        .bind(value.value);
         transaction.execute(query).await?;
     }
     Ok(())

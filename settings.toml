@@ -1,8 +1,21 @@
 
-sqlite_connection_string = "sqlite:test.db"
-#postgres_connection_string = "postgres://localhost:5432/postgres"
-postgres_connection_string = "postgres://postgres:postgres@localhost:5432/postgres"
-timescaledb_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp"
+# Storage Configuration
+# Choose ONE storage backend by setting the connection string
+storage_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp"
 
+# Alternative storage backends (uncomment one to use):
+# storage_connection_string = "sqlite://sensapp.db"
+# storage_connection_string = "duckdb://sensapp.db" 
+# storage_connection_string = "bigquery://key.json?project_id=PROJECT&dataset_id=DATASET"
+# storage_connection_string = "rrdcached://localhost:42217?preset=munin"
+
+# Network Configuration
 #endpoint = "0.0.0.0"
+
+# MQTT Configuration (optional)
+# Uncomment and configure to enable MQTT ingestion:
+# [[mqtt]]
+# url = "mqtt://localhost:1883"
+# client_id = "sensapp-001"
+# topics = ["sensors/+/temperature", "sensors/+/humidity"]
 

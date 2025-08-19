@@ -2,7 +2,7 @@ use super::sqlite_publishers::*;
 use super::sqlite_utilities::get_sensor_id_or_create_sensor;
 use crate::datamodel::TypedSamples;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
-use crate::storage::storage::StorageInstance;
+use crate::storage::StorageInstance;
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;

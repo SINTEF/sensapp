@@ -68,7 +68,13 @@ impl StorageInstance for PostgresStorage {
     }
 
     async fn list_sensors(&self) -> Result<Vec<String>> {
-        unimplemented!();
+        let sensor_names: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM sensors ORDER BY name")
+                .fetch_all(&self.pool)
+                .await
+                .context("Failed to list sensors from database")?;
+
+        Ok(sensor_names)
     }
 }
 

@@ -51,10 +51,7 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
     let timeout_seconds = config.http_server_timeout_seconds;
 
     // Initialize tracing
-    /*tracing_subscriber::fmt()
-    .with_target(false)
-    .compact()
-    .init();*/
+    // Note: tracing subscriber is initialized in main.rs
 
     // List of headers that shouldn't be logged
     let sensitive_headers: Arc<[_]> = vec![header::AUTHORIZATION, header::COOKIE].into();
@@ -80,11 +77,11 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
         .route("/publish", post(publish_handler).layer(max_body_layer))
         .route(
-            "/sensors/:sensor_name_or_uuid/publish_csv",
+            "/sensors/{sensor_name_or_uuid}/publish_csv",
             post(publish_csv),
         )
         .route(
-            "/sensors/:sensor_name_or_uuid/publish_multipart",
+            "/sensors/{sensor_name_or_uuid}/publish_multipart",
             post(publish_multipart).layer(max_body_layer),
         )
         // Boring Sensor CRUD
@@ -102,8 +99,19 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .layer(middleware)
         .with_state(state);
 
-    // Run our application
-    let listener = tokio::net::TcpListener::bind(address).await?;
+    // Bind to the address with improved error handling
+    let listener = match tokio::net::TcpListener::bind(address).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Cannot start HTTP server on {}: {} (port {} may already be in use)",
+                address,
+                e,
+                address.port()
+            ));
+        }
+    };
+
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
@@ -192,6 +200,7 @@ async fn publish_multipart(/*mut multipart: Multipart*/)
 }
 
 #[cfg(test)]
+#[cfg(feature = "sqlite")]
 mod tests {
     use axum::{body::Body, http::Request};
     use tower::ServiceExt;

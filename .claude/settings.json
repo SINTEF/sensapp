@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE_PATH=$(jq -r '.tool_input.file_path // empty'); if [[ \"$FILE_PATH\" =~ \\.rs$ ]]; then echo \"Running cargo fmt on $FILE_PATH\"; cargo fmt -- \"$FILE_PATH\"; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -258,9 +258,6 @@ pub async fn publish_influxdb(
         }
     }
 
-    // TODO: Remove this println once debugged
-    println!("INfluxDB: Sending to the event bus soon");
-
     match batch_builder.send_what_is_left(state.storage.clone()).await {
         Ok(true) => {
             println!("INfluxDB: Batch sent successfully");
@@ -279,6 +276,7 @@ pub async fn publish_influxdb(
 }
 
 #[cfg(test)]
+#[cfg(feature = "sqlite")]
 mod tests {
     use crate::storage::sqlite::SqliteStorage;
 

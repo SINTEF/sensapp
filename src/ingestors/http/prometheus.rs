@@ -167,7 +167,6 @@ pub async fn publish_prometheus(
         );
 
         batch_builder.add(Arc::new(sensor), samples).await?;
-        // batch_builder.send_if_batch_full(event_bus.clone()).await?;
     }
 
     match batch_builder.send_what_is_left(state.storage.clone()).await {

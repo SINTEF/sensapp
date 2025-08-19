@@ -16,7 +16,6 @@ mod datamodel;
 mod importers;
 mod infer;
 mod ingestors;
-mod name_to_uuid;
 mod parsing;
 mod storage;
 
@@ -42,6 +41,14 @@ fn main() {
 }
 
 async fn async_main() {
+    // Initialize tracing subscriber for HTTP request logging
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,tower_http=info".into()),
+        )
+        .init();
+
     // sentry::capture_message("Hello, Sentry 2!", sentry::Level::Info);
 
     // Load configuration
@@ -53,98 +60,21 @@ async fn async_main() {
         .await
         .unwrap();
 
-    /*let (tx, rx) = tokio::sync::mpsc::channel(100); // Channel with buffer size 100
-
-    // Simulate event emitter
-    tokio::spawn(async move {
-        for i in 1..=1004 {
-            tx.send(i).await.unwrap(); // Send events
-        }
-    });
-
-    // Create a stream from the receiver and buffer it in chunks
-    use futures::stream::StreamExt;
-
-    //let mut buffered_stream = rx.chunks(10); // Buffer size of 10
-    let mut buffered_stream = ReceiverStream::new(rx).chunks(10); // Chunk size of 10
-
-    // Process chunks of events
-    while let Some(events) = buffered_stream.next().await {
-        // `events` is a Vec containing a chunk of events
-        println!("Handling chunk of events: {:?}", events);
-    }*/
-
-    /*let sqlite_connection_string = config.sqlite_connection_string.clone();
-    if sqlite_connection_string.is_none() {
-        eprintln!("No SQLite connection string provided");
-        std::process::exit(1);
-    }
-    let sqlite_storage = SqliteStorage::connect(sqlite_connection_string.unwrap().as_str())
-        .await
-        .expect("Failed to connect to SQLite");
-
-    sqlite_storage
-        .create_or_migrate()
-        .await
-        .expect("Failed to create or migrate database");*/
-
-    //let storage = create_storage_from_connection_string("sqlite://toto.db")
-    //let storage = create_storage_from_connection_string("postgres://localhost:5432/postgres")
-    //let storage = create_storage_from_connection_string("duckdb://caca.db")
-    //let storage = create_storage_from_connection_string(
-    //    "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_3",
-    //)
-    let storage = create_storage_from_connection_string("sqlite://test.db")
+    // Initialize storage backend
+    println!(
+        "🗄️  Connecting to storage: {}",
+        config.storage_connection_string
+    );
+    let storage = create_storage_from_connection_string(&config.storage_connection_string)
         .await
         .expect("Failed to create storage");
 
-    /*storage
-    .create_or_migrate()
-    .await
-    .expect("Failed to create or migrate database");*/
-
-    /*let duckdb_storage = DuckDBStorage::connect("sensapp.db")
-        .await
-        .expect("Failed to connect to DuckDB");
-
-    duckdb_storage
-        .create_or_migrate()
-        .await
-        .expect("Failed to create or migrate database");*/
-
-    /*let postgres_connection_string = config.postgres_connection_string.clone();
-    if postgres_connection_string.is_none() {
-        eprintln!("No PostgreSQL connection string provided");
-        std::process::exit(1);
-    }
-    let postgres_storage = PostgresStorage::connect(postgres_connection_string.unwrap().as_str())
-        .await
-        .expect("Failed to connect to PostgreSQL");
-
-    postgres_storage
-        .create_or_migrate()
-        .await
-        .expect("Failed to create or migrate database");*/
-
-    /*let timescaledb_connection_string = config.timescaledb_connection_string.clone();
-    if timescaledb_connection_string.is_none() {
-        eprintln!("No TimescaleDB connection string provided");
-        std::process::exit(1);
-    }
-    let timescaledb_storage = storage::timescaledb::timescaledb::TimeScaleDBStorage::connect(
-        timescaledb_connection_string.unwrap().as_str(),
-    )
-    .await
-    .expect("Failed to connect to TimescaleDB");
-
-    timescaledb_storage
+    // Initialize database schema
+    storage
         .create_or_migrate()
         .await
         .expect("Failed to create or migrate database");
-
-    let columns = infer::columns::infer_column(vec![], false, true);
-    let _ = infer::datetime_guesser::likely_datetime_column(&vec![], &vec![]);
-    let _ = infer::geo_guesser::likely_geo_columns(&vec![], &vec![]);*/
+    println!("✅ Storage backend initialized successfully");
 
     // Exit the program if a panic occurs
     let default_panic = std::panic::take_hook();
@@ -153,8 +83,10 @@ async fn async_main() {
         std::process::exit(1);
     }));
 
+    // Start MQTT clients if configured
     if let Some(mqtt_configs) = config.mqtt.as_ref() {
-        for mqtt_config in mqtt_configs {
+        println!("📡 Starting {} MQTT client(s)...", mqtt_configs.len());
+        for (i, mqtt_config) in mqtt_configs.iter().enumerate() {
             let cloned_config = mqtt_config.clone();
             let cloned_storage = storage.clone();
             tokio::spawn(async move {
@@ -162,30 +94,35 @@ async fn async_main() {
                     .await
                     .expect("Failed to start MQTT client");
             });
+            println!("✅ MQTT client {} started", i + 1);
         }
-        println!("MQTT clients started");
+    } else {
+        println!("ℹ️  No MQTT configuration found, skipping MQTT clients");
     }
-    //});
-    //.await
-    //.expect("Failed to start OPC UA clients");
 
     let endpoint = config.endpoint;
     let port = config.port;
-    println!("📡 HTTP server listening on {}:{}", endpoint, port);
+    let address = SocketAddr::from((endpoint, port));
+
+    println!("📡 Starting HTTP server on {}...", address);
     match run_http_server(
         HttpServerState {
             name: Arc::new("SensApp".to_string()),
             storage,
         },
-        SocketAddr::from((endpoint, port)),
+        address,
     )
     .await
     {
         Ok(_) => {
-            event!(Level::INFO, "HTTP server stopped");
+            event!(Level::INFO, "HTTP server stopped gracefully");
+            println!("✅ HTTP server stopped gracefully");
         }
         Err(err) => {
-            event!(Level::ERROR, "HTTP server failed: {:?}", err);
+            event!(Level::ERROR, "HTTP server failed: {}", err);
+            eprintln!("❌ HTTP server failed to start:");
+            eprintln!("{}", err);
+            std::process::exit(1);
         }
     }
 }
