@@ -92,7 +92,7 @@ impl StorageInstance for DuckDBStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
+    async fn list_series(&self) -> Result<Vec<crate::datamodel::Sensor>> {
         unimplemented!();
     }
 

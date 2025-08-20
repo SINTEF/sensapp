@@ -1,11 +1,11 @@
 mod common;
 
 use anyhow::Result;
-use sensapp::datamodel::*;
 use sensapp::datamodel::batch::{Batch, SingleSensorBatch};
 use sensapp::datamodel::batch_builder::BatchBuilder;
+use sensapp::datamodel::sensapp_vec::{SensAppLabels, SensAppVec};
 use sensapp::datamodel::unit::Unit;
-use sensapp::datamodel::sensapp_vec::{SensAppVec, SensAppLabels};
+use sensapp::datamodel::*;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -20,7 +20,10 @@ mod core_datamodel_tests {
             uuid,
             name: "temperature_sensor".to_string(),
             sensor_type: SensorType::Float,
-            unit: Some(Unit::new("°C".to_string(), Some("Celsius temperature".to_string()))),
+            unit: Some(Unit::new(
+                "°C".to_string(),
+                Some("Celsius temperature".to_string()),
+            )),
             labels: SensAppLabels::new(),
         };
 
@@ -71,11 +74,17 @@ mod core_datamodel_tests {
     fn test_typed_samples_creation() {
         // Integer samples
         let integer_samples = vec![
-            Sample { datetime: SensAppDateTime::from_unix_seconds(0.0), value: 42i64 },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(1.0), value: 43i64 },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: 42i64,
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: 43i64,
+            },
         ];
         let typed_int = TypedSamples::Integer(integer_samples.into());
-        
+
         if let TypedSamples::Integer(samples) = typed_int {
             assert_eq!(samples.len(), 2);
             assert_eq!(samples[0].value, 42);
@@ -85,11 +94,17 @@ mod core_datamodel_tests {
 
         // Float samples
         let float_samples = vec![
-            Sample { datetime: SensAppDateTime::from_unix_seconds(0.0), value: 20.5f64 },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(1.0), value: 21.0f64 },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: 20.5f64,
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: 21.0f64,
+            },
         ];
         let typed_float = TypedSamples::Float(float_samples.into());
-        
+
         if let TypedSamples::Float(samples) = typed_float {
             assert_eq!(samples.len(), 2);
             assert_eq!(samples[0].value, 20.5);
@@ -99,11 +114,17 @@ mod core_datamodel_tests {
 
         // Boolean samples
         let bool_samples = vec![
-            Sample { datetime: SensAppDateTime::from_unix_seconds(0.0), value: true },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(1.0), value: false },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: true,
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: false,
+            },
         ];
         let typed_bool = TypedSamples::Boolean(bool_samples.into());
-        
+
         if let TypedSamples::Boolean(samples) = typed_bool {
             assert_eq!(samples.len(), 2);
             assert!(samples[0].value);
@@ -114,11 +135,17 @@ mod core_datamodel_tests {
 
         // String samples
         let string_samples = vec![
-            Sample { datetime: SensAppDateTime::from_unix_seconds(0.0), value: "hello".to_string() },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(1.0), value: "world".to_string() },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: "hello".to_string(),
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: "world".to_string(),
+            },
         ];
         let typed_string = TypedSamples::String(string_samples.into());
-        
+
         if let TypedSamples::String(samples) = typed_string {
             assert_eq!(samples.len(), 2);
             assert_eq!(samples[0].value, "hello");
@@ -132,15 +159,15 @@ mod core_datamodel_tests {
     fn test_sensapp_datetime_operations() {
         let datetime1 = SensAppDateTime::from_unix_seconds(1609459200.0); // 2021-01-01
         let datetime2 = SensAppDateTime::from_unix_seconds(1609459260.0); // 2021-01-01 + 1 min
-        
+
         assert_eq!(datetime1.to_unix_seconds(), 1609459200.0);
         assert_eq!(datetime2.to_unix_seconds(), 1609459260.0);
-        
+
         // Test ordering
         assert!(datetime1 < datetime2);
         assert!(datetime2 > datetime1);
         assert_ne!(datetime1, datetime2);
-        
+
         let datetime1_copy = SensAppDateTime::from_unix_seconds(1609459200.0);
         assert_eq!(datetime1, datetime1_copy);
     }
@@ -166,7 +193,7 @@ mod core_datamodel_tests {
                 unit: None,
                 labels: SensAppLabels::new(),
             };
-            
+
             assert_eq!(sensor.sensor_type, sensor_type);
         }
     }
@@ -189,7 +216,7 @@ mod batch_tests {
 
         let samples = fixtures::create_test_float_samples(5, 20.0);
         let batch = SingleSensorBatch::new(sensor.clone(), samples);
-        
+
         assert_eq!(batch.sensor.name, "test_sensor");
         assert_eq!(batch.len().await, 5);
     }
@@ -206,13 +233,13 @@ mod batch_tests {
 
         let initial_samples = fixtures::create_test_float_samples(3, 20.0);
         let mut batch = SingleSensorBatch::new(sensor.clone(), initial_samples);
-        
+
         assert_eq!(batch.len().await, 3);
 
         // Append more samples of the same type
         let additional_samples = fixtures::create_test_float_samples(2, 25.0);
         batch.append(additional_samples).await?;
-        
+
         assert_eq!(batch.len().await, 5);
         Ok(())
     }
@@ -229,12 +256,15 @@ mod batch_tests {
 
         let float_samples = fixtures::create_test_float_samples(3, 20.0);
         let mut batch = SingleSensorBatch::new(sensor.clone(), float_samples);
-        
+
         // Try to append integer samples to float batch - should fail
         let integer_samples = fixtures::create_test_integer_samples(2, 42);
         let result = batch.append(integer_samples).await;
-        
-        assert!(result.is_err(), "Should fail when appending incompatible types");
+
+        assert!(
+            result.is_err(),
+            "Should fail when appending incompatible types"
+        );
     }
 
     #[tokio::test]
@@ -294,44 +324,47 @@ mod batch_builder_tests {
     #[tokio::test]
     async fn test_batch_builder_creation() -> Result<()> {
         setup_test_config().await;
-        
+
         let batch_builder = BatchBuilder::new();
-        assert!(batch_builder.is_ok(), "Batch builder should be created successfully");
+        assert!(
+            batch_builder.is_ok(),
+            "Batch builder should be created successfully"
+        );
         Ok(())
     }
 
     #[tokio::test]
     async fn test_batch_builder_add_samples() -> Result<()> {
         setup_test_config().await;
-        
+
         let mut batch_builder = BatchBuilder::new()?;
         let sensor = fixtures::create_test_sensor("temperature", SensorType::Float);
         let samples = fixtures::create_test_float_samples(5, 20.0);
-        
+
         batch_builder.add(sensor.clone(), samples).await?;
-        
+
         // Add more samples for the same sensor
         let more_samples = fixtures::create_test_float_samples(3, 25.0);
         batch_builder.add(sensor.clone(), more_samples).await?;
-        
+
         Ok(())
     }
 
     #[tokio::test]
     async fn test_batch_builder_multiple_sensors() -> Result<()> {
         setup_test_config().await;
-        
+
         let mut batch_builder = BatchBuilder::new()?;
-        
+
         let temp_sensor = fixtures::create_test_sensor("temperature", SensorType::Float);
         let humidity_sensor = fixtures::create_test_sensor("humidity", SensorType::Float);
-        
+
         let temp_samples = fixtures::create_test_float_samples(5, 20.0);
         let humidity_samples = fixtures::create_test_float_samples(5, 65.0);
-        
+
         batch_builder.add(temp_sensor, temp_samples).await?;
         batch_builder.add(humidity_sensor, humidity_samples).await?;
-        
+
         Ok(())
     }
 
@@ -353,22 +386,28 @@ mod batch_builder_tests {
 /// Test typed samples edge cases and conversions
 mod typed_samples_tests {
     use super::*;
-    use rust_decimal::Decimal;
     use geo::Point;
+    use rust_decimal::Decimal;
     use std::str::FromStr;
 
     #[test]
     fn test_location_samples() {
         let location1 = Point::new(10.7522, 59.9139); // Oslo coordinates
         let location2 = Point::new(-74.0060, 40.7128); // NYC coordinates
-        
+
         let location_samples = vec![
-            Sample { datetime: SensAppDateTime::from_unix_seconds(0.0), value: location1 },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(1.0), value: location2 },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: location1,
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: location2,
+            },
         ];
-        
+
         let typed_location = TypedSamples::Location(location_samples.into());
-        
+
         if let TypedSamples::Location(samples) = typed_location {
             assert_eq!(samples.len(), 2);
             assert_eq!(samples[0].value.x(), 10.7522);
@@ -382,20 +421,29 @@ mod typed_samples_tests {
 
     #[test]
     fn test_numeric_samples_precision() {
-        let precise_values = vec![
+        let precise_values = [
             Decimal::from_str("123.456789").unwrap(),
             Decimal::from_str("987.654321").unwrap(),
             Decimal::from_str("0.000001").unwrap(),
         ];
-        
+
         let numeric_samples = vec![
-            Sample { datetime: SensAppDateTime::from_unix_seconds(0.0), value: precise_values[0] },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(1.0), value: precise_values[1] },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(2.0), value: precise_values[2] },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: precise_values[0],
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: precise_values[1],
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(2.0),
+                value: precise_values[2],
+            },
         ];
-        
+
         let typed_numeric = TypedSamples::Numeric(numeric_samples.into());
-        
+
         if let TypedSamples::Numeric(samples) = typed_numeric {
             assert_eq!(samples.len(), 3);
             assert_eq!(samples[0].value.to_string(), "123.456789");
@@ -410,14 +458,20 @@ mod typed_samples_tests {
     fn test_json_samples() {
         let json1 = serde_json::json!({"temperature": 20.5, "humidity": 65});
         let json2 = serde_json::json!({"temperature": 21.0, "humidity": 64});
-        
+
         let json_samples = vec![
-            Sample { datetime: SensAppDateTime::from_unix_seconds(0.0), value: json1 },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(1.0), value: json2 },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: json1,
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: json2,
+            },
         ];
-        
+
         let typed_json = TypedSamples::Json(json_samples.into());
-        
+
         if let TypedSamples::Json(samples) = typed_json {
             assert_eq!(samples.len(), 2);
             assert_eq!(samples[0].value["temperature"], 20.5);
@@ -431,14 +485,20 @@ mod typed_samples_tests {
     fn test_blob_samples() {
         let blob1 = vec![0x01, 0x02, 0x03, 0x04];
         let blob2 = vec![0xFF, 0xFE, 0xFD, 0xFC];
-        
+
         let blob_samples = vec![
-            Sample { datetime: SensAppDateTime::from_unix_seconds(0.0), value: blob1.clone() },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(1.0), value: blob2.clone() },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: blob1.clone(),
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: blob2.clone(),
+            },
         ];
-        
+
         let typed_blob = TypedSamples::Blob(blob_samples.into());
-        
+
         if let TypedSamples::Blob(samples) = typed_blob {
             assert_eq!(samples.len(), 2);
             assert_eq!(samples[0].value, blob1);
@@ -458,12 +518,12 @@ mod sensapp_vec_tests {
         let mut vec = SensAppVec::new();
         assert_eq!(vec.len(), 0);
         assert!(vec.is_empty());
-        
+
         vec.push("item1".to_string());
         vec.push("item2".to_string());
         assert_eq!(vec.len(), 2);
         assert!(!vec.is_empty());
-        
+
         // Test iteration
         let items: Vec<String> = vec.iter().cloned().collect();
         assert_eq!(items, vec!["item1".to_string(), "item2".to_string()]);
@@ -473,7 +533,7 @@ mod sensapp_vec_tests {
     fn test_sensapp_vec_from_iter() {
         let items = vec!["a", "b", "c"];
         let vec = SensAppVec::from_iter(items.into_iter().map(|s| s.to_string()));
-        
+
         assert_eq!(vec.len(), 3);
         assert_eq!(vec.iter().next().unwrap(), "a");
     }
@@ -482,12 +542,12 @@ mod sensapp_vec_tests {
     fn test_sensapp_labels() {
         let mut labels = SensAppLabels::new();
         assert_eq!(labels.len(), 0);
-        
+
         labels.push(("key1".to_string(), "value1".to_string()));
         labels.push(("key2".to_string(), "value2".to_string()));
-        
+
         assert_eq!(labels.len(), 2);
-        
+
         // Test that we can find our labels
         let label_pairs: Vec<_> = labels.iter().collect();
         assert!(label_pairs.contains(&&("key1".to_string(), "value1".to_string())));
@@ -509,7 +569,7 @@ mod edge_cases_tests {
             unit: None,
             labels: SensAppLabels::new(),
         };
-        
+
         assert_eq!(sensor.name.len(), 1000);
         assert_eq!(sensor.name, long_name);
     }
@@ -521,16 +581,16 @@ mod edge_cases_tests {
             datetime: SensAppDateTime::from_unix_seconds(0.0),
             value: 42i64,
         };
-        
+
         // Far future timestamp
         let future_sample = Sample {
             datetime: SensAppDateTime::from_unix_seconds(4000000000.0), // Year 2096
             value: 84i64,
         };
-        
+
         let samples = vec![old_sample, future_sample];
         let typed_samples = TypedSamples::Integer(samples.into());
-        
+
         if let TypedSamples::Integer(samples) = typed_samples {
             assert_eq!(samples.len(), 2);
             assert_eq!(samples[0].datetime.to_unix_seconds(), 0.0);
@@ -544,13 +604,22 @@ mod edge_cases_tests {
     fn test_empty_sensor_values() {
         // Test sensors with empty string values
         let empty_samples = vec![
-            Sample { datetime: SensAppDateTime::from_unix_seconds(0.0), value: "".to_string() },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(1.0), value: "non-empty".to_string() },
-            Sample { datetime: SensAppDateTime::from_unix_seconds(2.0), value: "".to_string() },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(0.0),
+                value: "".to_string(),
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: "non-empty".to_string(),
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(2.0),
+                value: "".to_string(),
+            },
         ];
-        
+
         let typed_string = TypedSamples::String(empty_samples.into());
-        
+
         if let TypedSamples::String(samples) = typed_string {
             assert_eq!(samples.len(), 3);
             assert_eq!(samples[0].value, "");

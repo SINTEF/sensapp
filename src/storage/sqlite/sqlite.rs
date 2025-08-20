@@ -85,7 +85,7 @@ impl StorageInstance for SqliteStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<crate::datamodel::Sensor>> {
+    async fn list_series(&self) -> Result<Vec<crate::datamodel::Sensor>> {
         // Query all sensors with their metadata
         let sensor_rows = sqlx::query!(
             r#"

@@ -64,7 +64,7 @@ impl StorageInstance for TimeScaleDBStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<crate::datamodel::Sensor>> {
+    async fn list_series(&self) -> Result<Vec<crate::datamodel::Sensor>> {
         // TODO: Implement TimescaleDB sensor listing with full metadata
         unimplemented!("TimescaleDB sensor listing not yet implemented");
     }

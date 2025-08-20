@@ -2,9 +2,9 @@ mod common;
 
 use anyhow::Result;
 use axum::http::StatusCode;
-use common::{fixtures, TestDb, TestHelpers};
-use common::http::TestApp;
 use common::db::DbHelpers;
+use common::http::TestApp;
+use common::{TestDb, TestHelpers, fixtures};
 
 /// Test CSV data ingestion end-to-end
 #[tokio::test]
@@ -27,13 +27,16 @@ async fn test_csv_ingestion_temperature_sensor() -> Result<()> {
     let sensor = DbHelpers::get_sensor_by_name(&storage, "temperature")
         .await?
         .expect("Temperature sensor should exist");
-    
+
     assert_eq!(sensor.name, "temperature");
-    assert_eq!(sensor.unit.as_ref().map(|u| &u.name), Some(&"°C".to_string()));
+    assert_eq!(
+        sensor.unit.as_ref().map(|u| &u.name),
+        Some(&"°C".to_string())
+    );
 
     // And: All samples should be stored
     let sensor_data = DbHelpers::verify_sensor_data(&storage, "temperature", 5).await?;
-    
+
     // Verify the first sample
     if let sensapp::datamodel::TypedSamples::Float(samples) = &sensor_data.samples {
         assert_eq!(samples[0].value, 20.5);
@@ -108,7 +111,7 @@ async fn test_sensor_query_after_ingestion() -> Result<()> {
     let test_db = TestDb::new().await?;
     let storage = test_db.storage();
     let app = TestApp::new(storage.clone()).await;
-    
+
     // Ingest some test data first
     let csv_data = fixtures::temperature_sensor_csv();
     app.post_csv("/sensors/publish", csv_data).await?;
@@ -137,7 +140,10 @@ async fn test_malformed_csv_handling() -> Result<()> {
     let response = app.post_csv("/sensors/publish", malformed_csv).await?;
 
     // Then: Response should indicate an error
-    assert!(!response.is_success(), "Expected error response for malformed CSV");
+    assert!(
+        !response.is_success(),
+        "Expected error response for malformed CSV"
+    );
 
     // And: No sensors should be created
     storage.expect_sensor_count(0).await?;

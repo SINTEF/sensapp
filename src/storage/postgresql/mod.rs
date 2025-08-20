@@ -73,7 +73,7 @@ impl StorageInstance for PostgresStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<crate::datamodel::Sensor>> {
+    async fn list_series(&self) -> Result<Vec<crate::datamodel::Sensor>> {
 
         // Query all sensors with their metadata using the catalog view
         let sensor_rows = sqlx::query!(

@@ -19,7 +19,7 @@ pub trait StorageInstance: Send + Sync + Debug {
     #[allow(dead_code)]
     async fn vacuum(&self) -> Result<()>;
 
-    async fn list_sensors(&self) -> Result<Vec<crate::datamodel::Sensor>>;
+    async fn list_series(&self) -> Result<Vec<crate::datamodel::Sensor>>;
     
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>>;
 

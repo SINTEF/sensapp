@@ -1,9 +1,9 @@
-/// Test data fixtures for consistent testing
-use sensapp::datamodel::{Sensor, SensorType, Sample, TypedSamples, unit::Unit};
+use hifitime::Epoch;
 use sensapp::datamodel::sensapp_vec::SensAppLabels;
+/// Test data fixtures for consistent testing
+use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples, unit::Unit};
 use std::sync::Arc;
 use uuid::Uuid;
-use hifitime::Epoch;
 
 /// Sample CSV data for temperature sensor
 pub fn temperature_sensor_csv() -> &'static str {

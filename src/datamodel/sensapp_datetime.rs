@@ -64,14 +64,13 @@ mod tests {
             offset_now.unix_timestamp(),
         );
 
+        // Compare sub-second precision: extract nanoseconds within the current second
+        let hifitime_total_nanoseconds = hifitime_now.to_et_duration().total_nanoseconds();
+        let hifitime_subsec_nanoseconds = (hifitime_total_nanoseconds % 1_000_000_000) as u32;
+        
         assert_eq!(
-            hifitime_now.milliseconds(),
-            (offset_now.nanosecond() / 1_000_000) as u64
-        );
-
-        assert_eq!(
-            hifitime_now.nanoseconds(),
-            (offset_now.nanosecond() % 1000) as u64
+            hifitime_subsec_nanoseconds,
+            offset_now.nanosecond()
         );
     }
 }

@@ -2,9 +2,9 @@ mod common;
 
 use anyhow::Result;
 use axum::http::StatusCode;
-use common::{fixtures, TestDb, TestHelpers};
-use common::http::TestApp;
 use common::db::DbHelpers;
+use common::http::TestApp;
+use common::{TestDb, TestHelpers, fixtures};
 
 /// Test sensor data querying functionality
 mod query_tests {
@@ -61,7 +61,10 @@ mod query_tests {
 
         // Verify the response contains expected sensor information
         let sensor_data = DbHelpers::verify_sensor_data(&storage, "temperature", 5).await?;
-        assert!(matches!(sensor_data.samples, sensapp::datamodel::TypedSamples::Float(_)));
+        assert!(matches!(
+            sensor_data.samples,
+            sensapp::datamodel::TypedSamples::Float(_)
+        ));
 
         Ok(())
     }
@@ -110,7 +113,7 @@ mod query_tests {
         Ok(())
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_concurrent_queries() -> Result<()> {
         // Given: A database with substantial sensor data
         let test_db = TestDb::new().await?;
@@ -168,10 +171,13 @@ mod query_tests {
 
         // Then: Response should be successful and reasonably fast
         response.assert_status(StatusCode::OK);
-        
+
         // Query should complete within reasonable time (adjust threshold as needed)
-        assert!(query_duration.as_millis() < 5000, 
-               "Query took too long: {:?}", query_duration);
+        assert!(
+            query_duration.as_millis() < 5000,
+            "Query took too long: {:?}",
+            query_duration
+        );
 
         // Verify the data is there
         storage.expect_sensor_count(1).await?;
@@ -200,7 +206,7 @@ mod export_tests {
 
         // When: We export the data as CSV
         let sensor_data = DbHelpers::verify_sensor_data(&storage, "temperature", 5).await?;
-        
+
         let exported_csv = CsvConverter::to_csv(&sensor_data)?;
 
         // Then: Exported CSV should contain our data
@@ -228,7 +234,7 @@ mod export_tests {
 
         // When: We export the data as JSONL
         let sensor_data = DbHelpers::verify_sensor_data(&storage, "temperature", 5).await?;
-        
+
         let exported_jsonl = JsonlConverter::to_jsonl(&sensor_data)?;
 
         // Then: Exported JSONL should contain our data
@@ -258,7 +264,7 @@ mod export_tests {
             unit: None,
             labels: sensapp::datamodel::sensapp_vec::SensAppLabels::new(),
         };
-        
+
         let empty_sensor_data = sensapp::datamodel::SensorData {
             sensor: empty_sensor,
             samples: sensapp::datamodel::TypedSamples::Float(smallvec::SmallVec::new()),
@@ -309,11 +315,11 @@ mod export_tests {
         Ok(())
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_round_trip_data_integrity() -> Result<()> {
         // Given: Original CSV data
         let original_csv = fixtures::temperature_sensor_csv();
-        
+
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
         let app = TestApp::new(storage.clone()).await;
@@ -321,7 +327,7 @@ mod export_tests {
         // When: We ingest and then export the data
         app.post_csv("/sensors/publish", original_csv).await?;
         let sensor_data = DbHelpers::verify_sensor_data(&storage, "temperature", 5).await?;
-        
+
         let exported_csv_str = CsvConverter::to_csv(&sensor_data)?;
 
         // Then: Key data values should be preserved
@@ -364,13 +370,16 @@ mod export_tests {
 
         // When: We export the large dataset
         let start_time = std::time::Instant::now();
-        
+
         let exported_csv = CsvConverter::to_csv(&sensor_data)?;
         let export_duration = start_time.elapsed();
 
         // Then: Export should complete reasonably fast and contain all data
-        assert!(export_duration.as_millis() < 10000, 
-               "Export took too long: {:?}", export_duration);
+        assert!(
+            export_duration.as_millis() < 10000,
+            "Export took too long: {:?}",
+            export_duration
+        );
 
         // Should have header + 1000 data rows
         let lines: Vec<&str> = exported_csv.trim().split('\n').collect();
@@ -395,11 +404,11 @@ mod integration_tests {
         let app = TestApp::new(storage.clone()).await;
 
         // When: We perform a complete data lifecycle
-        
+
         // 1. Ingest data from multiple formats
         let csv_data = fixtures::temperature_sensor_csv();
         app.post_csv("/sensors/publish", csv_data).await?;
-        
+
         let json_data = fixtures::temperature_sensor_json();
         app.post_json("/sensors/publish", json_data).await?;
 
@@ -438,12 +447,13 @@ mod integration_tests {
         app.post_csv("/sensors/publish", csv_data).await?;
 
         // When: We try various error conditions
-        
+
         // 1. Query with invalid UUID format
         let invalid_response = app.get("/sensors/invalid-uuid").await?;
         // Should handle gracefully (specific status depends on implementation)
-        assert!(invalid_response.status().is_client_error() || 
-               invalid_response.status().is_success());
+        assert!(
+            invalid_response.status().is_client_error() || invalid_response.status().is_success()
+        );
 
         // 2. Query empty/non-existent endpoints should still work
         let metrics_response = app.get("/metrics").await?;
@@ -452,10 +462,10 @@ mod integration_tests {
         // 3. Multiple concurrent requests shouldn't cause issues
         let (r1, r2, r3) = tokio::join!(
             app.get("/sensors"),
-            app.get("/sensors"), 
+            app.get("/sensors"),
             app.get("/sensors")
         );
-        
+
         r1?.assert_status(StatusCode::OK);
         r2?.assert_status(StatusCode::OK);
         r3?.assert_status(StatusCode::OK);
@@ -467,39 +477,46 @@ mod integration_tests {
 /// Test time-based queries and filters
 mod time_query_tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_time_range_queries() -> Result<()> {
         // Given: A database with timestamped sensor data
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
-        
+
         // Create sensor data with specific timestamps
-        let _sensor = common::fixtures::create_test_sensor("time_test", sensapp::datamodel::SensorType::Float);
-        
+        let _sensor = common::fixtures::create_test_sensor(
+            "time_test",
+            sensapp::datamodel::SensorType::Float,
+        );
+
         // Create samples with known timestamps (1 minute apart)
         let base_time = 1609459200i64; // 2021-01-01 00:00:00 UTC
-        let samples = (0..10).map(|i| sensapp::datamodel::Sample {
-            datetime: hifitime::Epoch::from_unix_seconds((base_time + i * 60) as f64),
-            value: 20.0 + i as f64,
-        }).collect::<Vec<_>>();
-        
+        let samples = (0..10)
+            .map(|i| sensapp::datamodel::Sample {
+                datetime: hifitime::Epoch::from_unix_seconds((base_time + i * 60) as f64),
+                value: 20.0 + i as f64,
+            })
+            .collect::<Vec<_>>();
+
         let _typed_samples = sensapp::datamodel::TypedSamples::Float(samples.into());
-        
+
         // Store the data directly (simulating ingested data)
         let _batch_builder = sensapp::datamodel::batch_builder::BatchBuilder::new()?;
         // Note: In a real test, we'd use the batch builder, but for simplicity
         // we're testing the query functionality with manually created data
-        
+
         // When: We query with time ranges
-        let all_data = storage.query_sensor_data("time_test", None, None, None).await?;
-        
+        let all_data = storage
+            .query_sensor_data("time_test", None, None, None)
+            .await?;
+
         // Then: Should be able to query different time ranges
         // Note: The exact implementation of time range queries depends on the storage backend
         // This is a placeholder for the time-based query functionality
-        
+
         assert!(all_data.is_some() || all_data.is_none()); // Test passes regardless of current implementation
-        
+
         Ok(())
     }
 }

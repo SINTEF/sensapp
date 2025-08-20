@@ -1,10 +1,9 @@
 use anyhow::{Result, anyhow};
-use sensapp::storage::{storage_factory::create_storage_from_connection_string, StorageInstance};
+use sensapp::storage::{StorageInstance, storage_factory::create_storage_from_connection_string};
 use std::sync::Arc;
-use uuid::Uuid;
 
-pub mod fixtures;
 pub mod db;
+pub mod fixtures;
 pub mod http;
 
 /// Test database manager that creates isolated test databases
@@ -15,41 +14,34 @@ pub struct TestDb {
 }
 
 impl TestDb {
-    /// Create a new test database with a unique name
+    /// Create a new test database connection using the existing sensapp database
     pub async fn new() -> Result<Self> {
-        let db_name = format!("sensapp_test_{}", Uuid::new_v4().simple());
-        
-        // Use environment variable or default to localhost
-        let base_url = std::env::var("TEST_DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432".to_string());
-        
-        // Create the database
-        let admin_connection_string = format!("{}/postgres", base_url);
-        let _admin_storage = create_storage_from_connection_string(&admin_connection_string).await?;
-        
-        // Create test database (we'll implement this in the storage trait later)
-        let connection_string = format!("{}/{}", base_url, db_name);
-        
-        // For now, just connect to the test database
+        let db_name = "sensapp".to_string();
+
+        // Use environment variable or default to localhost with sensapp database
+        let connection_string = std::env::var("TEST_DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/sensapp".to_string());
+
+        // Connect to the sensapp database
         let storage = create_storage_from_connection_string(&connection_string).await?;
-        
-        // Run migrations
+
+        // Run migrations to ensure database is up to date
         storage.create_or_migrate().await?;
-        
+
         Ok(Self {
-            db_name: db_name.clone(),
+            db_name,
             storage,
             connection_string,
         })
     }
-    
+
     /// Clean up the test database
     pub async fn cleanup(&self) -> Result<()> {
         // We'll implement database cleanup later
         // For now, just ensure we have proper separation
         Ok(())
     }
-    
+
     /// Get the storage instance for testing
     pub fn storage(&self) -> Arc<dyn StorageInstance> {
         self.storage.clone()
@@ -65,12 +57,15 @@ impl Drop for TestDb {
 
 /// Helper trait for easier testing
 pub trait TestHelpers {
-    fn expect_sensor_count(&self, expected: usize) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn expect_sensor_count(
+        &self,
+        expected: usize,
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
 impl TestHelpers for Arc<dyn StorageInstance> {
     async fn expect_sensor_count(&self, expected: usize) -> Result<()> {
-        let sensors = self.list_sensors().await?;
+        let sensors = self.list_series().await?;
         if sensors.len() != expected {
             return Err(anyhow!(
                 "Expected {} sensors, found {}. Sensors: {:#?}",

@@ -235,7 +235,7 @@ impl StorageInstance for BigQueryStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<crate::datamodel::Sensor>> {
+    async fn list_series(&self) -> Result<Vec<crate::datamodel::Sensor>> {
         use crate::datamodel::{Sensor, SensorType, sensapp_vec::SensAppLabels, unit::Unit};
         use gcp_bigquery_client::model::query_request::QueryRequest;
         use smallvec::smallvec;
