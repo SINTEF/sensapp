@@ -1,15 +1,11 @@
 #![forbid(unsafe_code)]
-use anyhow::{Context, Result};
 use crate::config::load_configuration;
 use crate::ingestors::http::server::run_http_server;
 use crate::ingestors::http::state::HttpServerState;
+use anyhow::{Context, Result};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use storage::storage_factory::create_storage_from_connection_string;
-//use storage::duckdb::DuckDBStorage;
-//use storage::postgresql::postgresql::PostgresStorage;
-#[cfg(feature = "sqlite")]
-use storage::sqlite::sqlite::SqliteStorage;
 use tracing::Level;
 use tracing::event;
 mod config;
@@ -30,7 +26,7 @@ fn main() -> Result<()> {
         .enable_all()
         .build()
         .context("Failed to create Tokio runtime")?;
-    
+
     runtime.block_on(async_main())
 }
 
@@ -48,17 +44,18 @@ async fn async_main() -> Result<()> {
     let config = config::get().context("Failed to get configuration")?;
 
     // Initialize Sentry if DSN is provided
-    let _sentry = config.sentry_dsn.as_ref().map(|dsn| sentry::init((
+    let _sentry = config.sentry_dsn.as_ref().map(|dsn| {
+        sentry::init((
             dsn.clone(),
             sentry::ClientOptions {
                 release: sentry::release_name!(),
                 debug: true,
                 ..Default::default()
             },
-        )));
+        ))
+    });
 
-    sinteflake::set_instance_id(config.instance_id)
-        .context("Failed to set instance ID")?;
+    sinteflake::set_instance_id(config.instance_id).context("Failed to set instance ID")?;
     sinteflake::set_instance_id_async(config.instance_id)
         .await
         .context("Failed to set async instance ID")?;
@@ -130,53 +127,3 @@ async fn async_main() -> Result<()> {
         }
     }
 }
-
-// async fn handler() -> &'static str {
-//     "Hello, world!"
-// }
-
-// async fn publish_stream_handler(body: axum::body::Body) -> Result<String, (StatusCode, String)> {
-//     let mut count = 0usize;
-//     let mut stream = body.into_data_stream();
-
-//     loop {
-//         let chunk = stream.try_next().await;
-//         match chunk {
-//             Ok(bytes) => match bytes {
-//                 Some(bytes) => count += bytes.into_iter().filter(|b| *b == b'\n').count(),
-//                 None => break,
-//             },
-//             Err(_) => {
-//                 return Err((
-//                     StatusCode::INTERNAL_SERVER_ERROR,
-//                     "Error reading body".to_string(),
-//                 ))
-//             }
-//         }
-//     }
-
-//     Ok(count.to_string())
-// }
-
-// async fn publish_csv(body: axum::body::Body) -> Result<String, (StatusCode, String)> {
-//     let stream = body.into_data_stream();
-//     let stream = stream.map_err(|err| io::Error::new(io::ErrorKind::Other, err));
-//     let reader = stream.into_async_read();
-//     let mut csv_reader = csv_async::AsyncReaderBuilder::new()
-//         .has_headers(true)
-//         .delimiter(b';')
-//         .create_reader(reader);
-
-//     println!("{:?}", csv_reader.has_headers());
-//     println!("{:?}", csv_reader.headers().await.unwrap());
-//     let mut records = csv_reader.records();
-
-//     println!("Reading CSV");
-//     while let Some(record) = records.next().await {
-//         let record = record.unwrap();
-//         println!("{:?}", record);
-//     }
-//     println!("Done reading CSV");
-
-//     Ok("ok".to_string())
-// }

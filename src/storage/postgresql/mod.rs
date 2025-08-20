@@ -66,7 +66,11 @@ impl StorageInstance for PostgresStorage {
     }
 
     async fn vacuum(&self) -> Result<()> {
-        self.vacuum().await?;
+        sqlx::query("VACUUM")
+            .execute(&self.pool)
+            .await
+            .context("Failed to vacuum database")?;
+        
         Ok(())
     }
 
@@ -557,15 +561,6 @@ impl PostgresStorage {
                 publish_json_values(transaction, sensor_id, values).await?;
             }
         }
-
-        Ok(())
-    }
-
-    async fn vacuum(&self) -> Result<()> {
-        sqlx::query("VACUUM")
-            .execute(&self.pool)
-            .await
-            .context("Failed to vacuum database")?;
 
         Ok(())
     }

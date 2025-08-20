@@ -10,7 +10,6 @@ pub mod common;
 
 #[async_trait]
 pub trait StorageInstance: Send + Sync + Debug {
-    #[allow(dead_code)]
     async fn create_or_migrate(&self) -> Result<()>;
     async fn publish(
         &self,
@@ -18,11 +17,11 @@ pub trait StorageInstance: Send + Sync + Debug {
         sync_sender: async_broadcast::Sender<()>,
     ) -> Result<()>;
     async fn sync(&self, sync_sender: async_broadcast::Sender<()>) -> Result<()>;
-    #[allow(dead_code)]
+
     async fn vacuum(&self) -> Result<()>;
 
     async fn list_series(&self) -> Result<Vec<crate::datamodel::Sensor>>;
-    
+
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>>;
 
     /// Query sensor data by name with optional time range and limit

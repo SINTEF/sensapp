@@ -22,24 +22,6 @@ use super::bigquery::BigQueryStorage;
 #[cfg(feature = "rrdcached")]
 use super::rrdcached::RrdCachedStorage;
 
-/*#[enum_delegate::implement(StorageInstance)]
-pub enum StorageDelegate {
-    Sqlite(SqliteStorage),
-    Postgres(PostgresStorage),
-}
-
-pub async fn create_storage_from_connection_string(
-    connection_string: &str,
-) -> Result<StorageDelegate> {
-    Ok(match connection_string {
-        s if s.starts_with("sqlite:") => StorageDelegate::Sqlite(SqliteStorage::connect(s).await?),
-        s if s.starts_with("postgres:") => {
-            StorageDelegate::Postgres(PostgresStorage::connect(s).await?)
-        }
-        _ => bail!("Unsupported storage type: {}", connection_string),
-    })
-}*/
-
 pub async fn create_storage_from_connection_string(
     connection_string: &str,
 ) -> Result<Arc<dyn StorageInstance>> {

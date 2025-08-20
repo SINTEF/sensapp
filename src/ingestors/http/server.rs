@@ -45,8 +45,9 @@ type JsonSensorDataMap = std::collections::HashMap<String, (crate::datamodel::Se
         (name = "SensApp", description = "SensApp API"),
         (name = "InfluxDB", description = "InfluxDB Write API"),
         (name = "Prometheus", description = "Prometheus Remote Write API"),
+        (name = "Admin", description = "Administrative operations"),
     ),
-    paths(frontpage, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus),
+    paths(frontpage, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, vacuum_database),
 )]
 struct ApiDoc;
 
@@ -104,6 +105,8 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             "/api/v1/prometheus_remote_write",
             post(publish_prometheus).layer(max_body_layer),
         )
+        // Admin API
+        .route("/api/v1/admin/vacuum", post(vacuum_database))
         .layer(middleware)
         .with_state(state);
 
@@ -322,6 +325,20 @@ async fn publish_handler(bytes: Bytes) -> Result<Json<String>, (StatusCode, Stri
             "Error reading CSV".to_string(),
         )),
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/vacuum",
+    tag = "Admin",
+    responses(
+        (status = 200, description = "Database vacuum completed successfully", body = String),
+        (status = 500, description = "Failed to vacuum database", body = String)
+    )
+)]
+async fn vacuum_database(State(state): State<HttpServerState>) -> Result<Json<String>, AppError> {
+    state.storage.vacuum().await?;
+    Ok(Json("Database vacuum completed successfully".to_string()))
 }
 
 async fn publish_multipart(/*mut multipart: Multipart*/)
