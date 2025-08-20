@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+use anyhow::{Context, Result};
 use crate::config::load_configuration;
 use crate::ingestors::http::server::run_http_server;
 use crate::ingestors::http::state::HttpServerState;
@@ -20,7 +21,7 @@ mod ingestors;
 mod parsing;
 mod storage;
 
-fn main() {
+fn main() -> Result<()> {
     let _sentry = sentry::init((
         "https://94bc3d0bd0424707898d420ed4ad6a3d@feil.sintef.cloud/5",
         sentry::ClientOptions {
@@ -32,16 +33,17 @@ fn main() {
 
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
-        .expect("Failed to install CryptoProvider");
+        .map_err(|e| anyhow::anyhow!("Failed to install CryptoProvider: {:?}", e))?;
 
-    tokio::runtime::Builder::new_multi_thread()
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .expect("Failed to create Tokio runtime")
-        .block_on(async_main());
+        .context("Failed to create Tokio runtime")?;
+    
+    runtime.block_on(async_main())
 }
 
-async fn async_main() {
+async fn async_main() -> Result<()> {
     // Initialize tracing subscriber for HTTP request logging
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -53,13 +55,14 @@ async fn async_main() {
     // sentry::capture_message("Hello, Sentry 2!", sentry::Level::Info);
 
     // Load configuration
-    load_configuration().expect("Failed to load configuration");
-    let config = config::get().expect("Failed to get configuration");
+    load_configuration().context("Failed to load configuration")?;
+    let config = config::get().context("Failed to get configuration")?;
 
-    sinteflake::set_instance_id(config.instance_id).unwrap();
+    sinteflake::set_instance_id(config.instance_id)
+        .context("Failed to set instance ID")?;
     sinteflake::set_instance_id_async(config.instance_id)
         .await
-        .unwrap();
+        .context("Failed to set async instance ID")?;
 
     // Initialize storage backend
     println!(
@@ -68,13 +71,13 @@ async fn async_main() {
     );
     let storage = create_storage_from_connection_string(&config.storage_connection_string)
         .await
-        .expect("Failed to create storage");
+        .context("Failed to create storage backend")?;
 
     // Initialize database schema
     storage
         .create_or_migrate()
         .await
-        .expect("Failed to create or migrate database");
+        .context("Failed to create or migrate database schema")?;
     println!("✅ Storage backend initialized successfully");
 
     // Exit the program if a panic occurs
@@ -91,9 +94,10 @@ async fn async_main() {
             let cloned_config = mqtt_config.clone();
             let cloned_storage = storage.clone();
             tokio::spawn(async move {
-                ingestors::mqtt::mqtt_client(cloned_config, cloned_storage)
-                    .await
-                    .expect("Failed to start MQTT client");
+                if let Err(e) = ingestors::mqtt::mqtt_client(cloned_config, cloned_storage).await {
+                    eprintln!("❌ MQTT client {} failed: {}", i + 1, e);
+                    event!(Level::ERROR, "MQTT client {} failed: {}", i + 1, e);
+                }
             });
             println!("✅ MQTT client {} started", i + 1);
         }
@@ -118,12 +122,12 @@ async fn async_main() {
         Ok(_) => {
             event!(Level::INFO, "HTTP server stopped gracefully");
             println!("✅ HTTP server stopped gracefully");
+            Ok(())
         }
         Err(err) => {
             event!(Level::ERROR, "HTTP server failed: {}", err);
-            eprintln!("❌ HTTP server failed to start:");
-            eprintln!("{}", err);
-            std::process::exit(1);
+            eprintln!("❌ HTTP server failed to start: {}", err);
+            Err(err.into())
         }
     }
 }
