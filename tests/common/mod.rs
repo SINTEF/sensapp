@@ -9,12 +9,15 @@ pub mod http;
 /// Test database manager that creates isolated test databases
 pub struct TestDb {
     pub db_name: String,
+    #[allow(dead_code)] // Used by some tests
     pub storage: Arc<dyn StorageInstance>,
+    #[allow(dead_code)] // Used by some tests
     pub connection_string: String,
 }
 
 impl TestDb {
     /// Create a new test database connection using the existing sensapp database
+    #[allow(dead_code)] // Used by some tests
     pub async fn new() -> Result<Self> {
         let db_name = "sensapp".to_string();
 
@@ -28,6 +31,10 @@ impl TestDb {
         // Run migrations to ensure database is up to date
         storage.create_or_migrate().await?;
 
+        // Clean up any existing test data to ensure test isolation
+        #[cfg(any(test, feature = "test-utils"))]
+        storage.cleanup_test_data().await?;
+
         Ok(Self {
             db_name,
             storage,
@@ -36,6 +43,7 @@ impl TestDb {
     }
 
     /// Clean up the test database
+    #[allow(dead_code)] // Used by some tests
     pub async fn cleanup(&self) -> Result<()> {
         // We'll implement database cleanup later
         // For now, just ensure we have proper separation
@@ -43,6 +51,7 @@ impl TestDb {
     }
 
     /// Get the storage instance for testing
+    #[allow(dead_code)] // Used by some tests
     pub fn storage(&self) -> Arc<dyn StorageInstance> {
         self.storage.clone()
     }
@@ -57,6 +66,7 @@ impl Drop for TestDb {
 
 /// Helper trait for easier testing
 pub trait TestHelpers {
+    #[allow(dead_code)] // Test helper method
     fn expect_sensor_count(
         &self,
         expected: usize,

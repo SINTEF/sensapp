@@ -97,7 +97,7 @@ pub fn likely_datetime_column(
         .iter()
         .zip(columns.iter())
         .map(|(column_name, column)| (column_name, datetime_guesser(column_name, column)))
-        .filter(|(_, score)| *score > 0)
+        .filter(|(_, score)| *score >= 5) // Require minimum confidence threshold
         .max_by_key(|(_, score)| *score);
 
     match best_candidate {

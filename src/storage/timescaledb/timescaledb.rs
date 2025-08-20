@@ -65,7 +65,7 @@ impl StorageInstance for TimeScaleDBStorage {
     }
 
     async fn list_series(&self) -> Result<Vec<crate::datamodel::Sensor>> {
-        // TODO: Implement TimescaleDB sensor listing with full metadata
+        // Note: TimescaleDB sensor listing not yet implemented
         unimplemented!("TimescaleDB sensor listing not yet implemented");
     }
 
@@ -86,8 +86,42 @@ impl StorageInstance for TimeScaleDBStorage {
         _end_time: Option<i64>,
         _limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
-        // TODO: Implement TimescaleDB UUID-based sensor data querying
+        // Note: TimescaleDB UUID-based sensor data querying not yet implemented
         unimplemented!("TimescaleDB UUID-based sensor data querying not yet implemented");
+    }
+
+    /// Clean up all test data from the database (TimescaleDB implementation)
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn cleanup_test_data(&self) -> Result<()> {
+        // TimescaleDB is PostgreSQL-based, so we use similar approach as PostgreSQL
+        let mut tx = self.pool.begin().await?;
+
+        // Delete all value tables in dependency order
+        sqlx::query("DELETE FROM blob_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM json_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM location_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM boolean_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM string_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM float_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM numeric_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM integer_values").execute(&mut *tx).await?;
+
+        // Delete metadata tables
+        sqlx::query("DELETE FROM labels").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM sensors").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM strings_values_dictionary").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM labels_description_dictionary").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM labels_name_dictionary").execute(&mut *tx).await?;
+
+        // Preserve units and ensure common test units exist
+        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT (name) DO NOTHING")
+            .execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT (name) DO NOTHING")
+            .execute(&mut *tx).await?;
+
+        tx.commit().await.context("Failed to commit test data cleanup transaction")?;
+
+        Ok(())
     }
 }
 

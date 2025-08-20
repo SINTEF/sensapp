@@ -468,6 +468,59 @@ impl StorageInstance for PostgresStorage {
 
         Ok(Some(SensorData::new(sensor, samples)))
     }
+
+    /// Clean up all test data from the database
+    /// This removes all sensor data but keeps the schema intact
+    /// Uses DELETE statements in dependency order to avoid foreign key conflicts
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn cleanup_test_data(&self) -> Result<()> {
+        // Use a transaction to ensure atomicity
+        let mut tx = self.pool.begin().await?;
+
+        // Step 1: Delete all value tables (they reference sensors but nothing references them)
+        sqlx::query("DELETE FROM blob_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM json_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM location_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM boolean_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM string_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM float_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM numeric_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM integer_values").execute(&mut *tx).await?;
+
+        // Step 2: Delete labels (references sensors and dictionaries)
+        sqlx::query("DELETE FROM labels").execute(&mut *tx).await?;
+
+        // Step 3: Delete sensors (references units, but we'll preserve units for tests)
+        sqlx::query("DELETE FROM sensors").execute(&mut *tx).await?;
+
+        // Step 4: Delete dictionary tables (but preserve units for test data)
+        sqlx::query("DELETE FROM strings_values_dictionary").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM labels_description_dictionary").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM labels_name_dictionary").execute(&mut *tx).await?;
+
+        // Note: We preserve the units table to avoid foreign key violations in tests
+        // But we need to ensure common test units exist
+        
+        // Insert common test units if they don't exist (using ON CONFLICT DO NOTHING for idempotency)
+        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT (name) DO NOTHING")
+            .execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT (name) DO NOTHING")
+            .execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO units (name, description) VALUES ('m', 'Meters') ON CONFLICT (name) DO NOTHING")
+            .execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO units (name, description) VALUES ('kg', 'Kilograms') ON CONFLICT (name) DO NOTHING")
+            .execute(&mut *tx).await?;
+
+        // Reset sequences for clean test data
+        sqlx::query("ALTER SEQUENCE sensors_sensor_id_seq RESTART WITH 1").execute(&mut *tx).await?;
+        sqlx::query("ALTER SEQUENCE strings_values_dictionary_id_seq RESTART WITH 1").execute(&mut *tx).await?;
+        sqlx::query("ALTER SEQUENCE labels_description_dictionary_id_seq RESTART WITH 1").execute(&mut *tx).await?;
+        sqlx::query("ALTER SEQUENCE labels_name_dictionary_id_seq RESTART WITH 1").execute(&mut *tx).await?;
+
+        tx.commit().await.context("Failed to commit test data cleanup transaction")?;
+
+        Ok(())
+    }
 }
 
 impl PostgresStorage {

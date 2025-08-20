@@ -14,16 +14,23 @@ pub struct Batch {
     pub sensors: SensAppVec<SingleSensorBatch>,
 }
 
+impl Default for Batch {
+    fn default() -> Self {
+        Self {
+            sensors: SensAppVec::new(),
+        }
+    }
+}
+
 impl Batch {
     #[allow(dead_code)]
     pub fn new(sensors: SensAppVec<SingleSensorBatch>) -> Self {
         Self { sensors }
     }
 
-    pub fn default() -> Self {
-        Self {
-            sensors: SensAppVec::new(),
-        }
+    #[allow(dead_code)]
+    pub async fn is_empty(&self) -> bool {
+        self.len().await == 0
     }
 
     #[allow(dead_code)]
@@ -84,6 +91,11 @@ impl SingleSensorBatch {
             }
         }
         Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub async fn is_empty(&self) -> bool {
+        self.len().await == 0
     }
 
     pub async fn len(&self) -> usize {

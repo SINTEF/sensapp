@@ -5,13 +5,25 @@ use axum::http::StatusCode;
 use common::http::TestApp;
 use common::{TestDb, fixtures};
 use serde_json::Value;
+use sensapp::config::load_configuration_for_tests;
+use serial_test::serial;
+
+// Ensure configuration is loaded once for all tests in this module
+static INIT: std::sync::Once = std::sync::Once::new();
+fn ensure_config() {
+    INIT.call_once(|| {
+        load_configuration_for_tests().expect("Failed to load configuration for tests");
+    });
+}
 
 /// Test CRUD/DCAT API functionality with new series terminology
 mod crud_dcat_tests {
     use super::*;
 
     #[tokio::test]
+    #[serial]
     async fn test_list_metrics_endpoint() -> Result<()> {
+        ensure_config();
         // Given: A database with ingested sensor data
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
@@ -19,7 +31,7 @@ mod crud_dcat_tests {
 
         // Ingest data from multiple sensors with same name but different labels
         let csv_data = fixtures::multi_sensor_csv();
-        app.post_csv("/sensors/publish", csv_data).await?;
+        app.post_csv("/sensors/publish", &csv_data).await?;
 
         // When: We query the metrics endpoint
         let response = app.get("/metrics").await?;
@@ -43,7 +55,9 @@ mod crud_dcat_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_list_series_endpoint() -> Result<()> {
+        ensure_config();
         // Given: A database with ingested sensor data
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
@@ -51,7 +65,7 @@ mod crud_dcat_tests {
 
         // Ingest temperature sensor data
         let csv_data = fixtures::temperature_sensor_csv();
-        app.post_csv("/sensors/publish", csv_data).await?;
+        app.post_csv("/sensors/publish", &csv_data).await?;
 
         // When: We query the series endpoint
         let response = app.get("/series").await?;
@@ -79,7 +93,7 @@ mod crud_dcat_tests {
 
             // Should contain the metric name or be a valid Prometheus-style ID
             assert!(
-                id.contains("temperature") || id == "temperature" || id.contains("{") || datasets.len() > 0,
+                id.contains("temperature") || id == "temperature" || id.contains("{") || !datasets.is_empty(),
                 "Expected series to contain temperature or be valid Prometheus ID, got: {}",
                 id
             );
@@ -92,7 +106,9 @@ mod crud_dcat_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_series_data_endpoint_senml_format() -> Result<()> {
+        ensure_config();
         // Given: A database with ingested sensor data
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
@@ -100,7 +116,7 @@ mod crud_dcat_tests {
 
         // Ingest temperature sensor data
         let csv_data = fixtures::temperature_sensor_csv();
-        app.post_csv("/sensors/publish", csv_data).await?;
+        app.post_csv("/sensors/publish", &csv_data).await?;
 
         // Get the first sensor UUID
         let sensors_response = app.get("/series").await?;
@@ -117,7 +133,6 @@ mod crud_dcat_tests {
 
         // Then: Response should be successful with correct content type
         response.assert_status(StatusCode::OK);
-        // TODO: Add content type assertion
 
         // Should return valid JSON (SenML format)
         let _data: Value = response.json()?;
@@ -126,7 +141,9 @@ mod crud_dcat_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_series_data_endpoint_csv_format() -> Result<()> {
+        ensure_config();
         // Given: A database with ingested sensor data
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
@@ -134,7 +151,7 @@ mod crud_dcat_tests {
 
         // Ingest temperature sensor data
         let csv_data = fixtures::temperature_sensor_csv();
-        app.post_csv("/sensors/publish", csv_data).await?;
+        app.post_csv("/sensors/publish", &csv_data).await?;
 
         // Get the first sensor UUID
         let sensors_response = app.get("/series").await?;
@@ -151,7 +168,6 @@ mod crud_dcat_tests {
 
         // Then: Response should be successful with correct content type
         response.assert_status(StatusCode::OK);
-        // TODO: Add content type assertion
 
         let csv_content = response.body();
         assert!(!csv_content.is_empty());
@@ -161,7 +177,9 @@ mod crud_dcat_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_series_data_endpoint_jsonl_format() -> Result<()> {
+        ensure_config();
         // Given: A database with ingested sensor data
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
@@ -169,7 +187,7 @@ mod crud_dcat_tests {
 
         // Ingest temperature sensor data
         let csv_data = fixtures::temperature_sensor_csv();
-        app.post_csv("/sensors/publish", csv_data).await?;
+        app.post_csv("/sensors/publish", &csv_data).await?;
 
         // Get the first sensor UUID
         let sensors_response = app.get("/series").await?;
@@ -186,7 +204,6 @@ mod crud_dcat_tests {
 
         // Then: Response should be successful with correct content type
         response.assert_status(StatusCode::OK);
-        // TODO: Add content type assertion
 
         let jsonl_content = response.body();
         assert!(!jsonl_content.is_empty());
@@ -195,7 +212,9 @@ mod crud_dcat_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_prometheus_style_ids_in_series_catalog() -> Result<()> {
+        ensure_config();
         // Given: A database with sensor data having labels
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
@@ -203,7 +222,7 @@ mod crud_dcat_tests {
 
         // Ingest data with labels (using multi-sensor CSV which should have varied data)
         let csv_data = fixtures::multi_sensor_csv();
-        app.post_csv("/sensors/publish", csv_data).await?;
+        app.post_csv("/sensors/publish", &csv_data).await?;
 
         // When: We query the series endpoint
         let response = app.get("/series").await?;
@@ -247,7 +266,9 @@ mod crud_dcat_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_dcat_distribution_formats() -> Result<()> {
+        ensure_config();
         // Given: A database with sensor data
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
@@ -255,7 +276,7 @@ mod crud_dcat_tests {
 
         // Ingest temperature sensor data
         let csv_data = fixtures::temperature_sensor_csv();
-        app.post_csv("/sensors/publish", csv_data).await?;
+        app.post_csv("/sensors/publish", &csv_data).await?;
 
         // When: We query the series endpoint
         let response = app.get("/series").await?;
@@ -308,7 +329,9 @@ mod crud_dcat_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_nonexistent_series_returns_404() -> Result<()> {
+        ensure_config();
         // Given: A clean database
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
@@ -325,7 +348,9 @@ mod crud_dcat_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_invalid_format_returns_400() -> Result<()> {
+        ensure_config();
         // Given: A database with sensor data
         let test_db = TestDb::new().await?;
         let storage = test_db.storage();
@@ -333,7 +358,7 @@ mod crud_dcat_tests {
 
         // Ingest some data
         let csv_data = fixtures::temperature_sensor_csv();
-        app.post_csv("/sensors/publish", csv_data).await?;
+        app.post_csv("/sensors/publish", &csv_data).await?;
 
         // Get a valid sensor UUID
         let sensors_response = app.get("/series").await?;

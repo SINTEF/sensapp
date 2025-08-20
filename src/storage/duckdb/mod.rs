@@ -105,6 +105,33 @@ impl StorageInstance for DuckDBStorage {
     ) -> Result<Option<crate::datamodel::SensorData>> {
         unimplemented!("DuckDB sensor data querying not yet implemented");
     }
+
+    /// Clean up all test data from the database (DuckDB implementation)
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn cleanup_test_data(&self) -> Result<()> {
+        // DuckDB implementation - delete all data from tables
+        let connection = self.connection.lock().await;
+        
+        // Delete all value tables
+        connection.execute("DELETE FROM blob_values", []).ok();
+        connection.execute("DELETE FROM json_values", []).ok();
+        connection.execute("DELETE FROM location_values", []).ok();
+        connection.execute("DELETE FROM boolean_values", []).ok();
+        connection.execute("DELETE FROM string_values", []).ok();
+        connection.execute("DELETE FROM float_values", []).ok();
+        connection.execute("DELETE FROM numeric_values", []).ok();
+        connection.execute("DELETE FROM integer_values", []).ok();
+
+        // Delete metadata tables
+        connection.execute("DELETE FROM labels", []).ok();
+        connection.execute("DELETE FROM sensors", []).ok();
+        connection.execute("DELETE FROM strings_values_dictionary", []).ok();
+        connection.execute("DELETE FROM labels_description_dictionary", []).ok();
+        connection.execute("DELETE FROM labels_name_dictionary", []).ok();
+        connection.execute("DELETE FROM units", []).ok();
+
+        Ok(())
+    }
 }
 
 fn publish_single_sensor_batch(

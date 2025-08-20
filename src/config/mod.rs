@@ -86,6 +86,30 @@ pub fn load_configuration() -> Result<(), Error> {
     Ok(())
 }
 
+use std::sync::Mutex;
+
+// Used by integration tests - must be always available for test compilation
+#[allow(dead_code)] // Used by integration tests, not visible in cargo check
+static TEST_CONFIG_INIT: Mutex<()> = Mutex::new(());
+
+/// Test-only function to ensure configuration is loaded exactly once per test run
+/// Available for both unit tests and integration tests
+#[allow(dead_code)] // Used by integration tests, not visible in cargo check
+pub fn load_configuration_for_tests() -> Result<(), Error> {
+    let _guard = TEST_CONFIG_INIT.lock().unwrap();
+    
+    // If config is already loaded, return success
+    if SENSAPP_CONFIG.get().is_some() {
+        return Ok(());
+    }
+
+    // Load default configuration for tests
+    let config = SensAppConfig::load()?;
+    SENSAPP_CONFIG.get_or_init(|| Arc::new(config));
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

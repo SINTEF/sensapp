@@ -24,6 +24,7 @@ pub trait StorageInstance: Send + Sync + Debug {
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>>;
 
     /// Query sensor data by name with optional time range and limit
+    #[allow(dead_code)]
     async fn query_sensor_data(
         &self,
         sensor_name: &str,
@@ -40,6 +41,12 @@ pub trait StorageInstance: Send + Sync + Debug {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>>;
+
+    /// Clean up all test data from the database
+    /// This method is intended for testing purposes only
+    #[cfg(any(test, feature = "test-utils"))]
+    #[allow(dead_code)]
+    async fn cleanup_test_data(&self) -> Result<()>;
 }
 
 pub mod storage_factory;

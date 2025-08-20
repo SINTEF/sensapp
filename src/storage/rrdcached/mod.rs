@@ -337,4 +337,15 @@ impl StorageInstance for RrdCachedStorage {
     ) -> Result<Option<crate::datamodel::SensorData>> {
         unimplemented!("RRDCached sensor data querying not yet implemented");
     }
+
+    /// Clean up all test data from the database (RRDCached implementation)
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn cleanup_test_data(&self) -> Result<()> {
+        // RRDCached doesn't have a traditional database cleanup mechanism
+        // For tests, we would typically use separate RRD files or instances
+        // Clear the created sensors set as a minimal cleanup
+        let mut created_sensors = self.created_sensors.write().await;
+        created_sensors.clear();
+        Ok(())
+    }
 }

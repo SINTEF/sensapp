@@ -516,4 +516,13 @@ impl StorageInstance for BigQueryStorage {
 
         Ok(Some(SensorData::new(sensor, samples)))
     }
+
+    /// Clean up all test data from the database (BigQuery implementation)
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn cleanup_test_data(&self) -> Result<()> {
+        // BigQuery doesn't support traditional TRUNCATE/DELETE operations well
+        // For now, this is a no-op since tests typically use separate datasets
+        // In a real implementation, you might recreate the dataset or use partitioned tables
+        Ok(())
+    }
 }

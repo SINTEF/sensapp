@@ -24,22 +24,26 @@ pub enum StorageError {
 
     /// Sensor not found
     #[error("Sensor not found: {sensor_id}")]
+    #[allow(dead_code)] // Part of error API, will be used for sensor operations
     SensorNotFound {
         sensor_id: String,
     },
 
     /// Metric not found  
     #[error("Metric not found: {metric_name}")]
+    #[allow(dead_code)] // Part of error API, will be used for metric operations
     MetricNotFound {
         metric_name: String,
     },
 
     /// Configuration error
     #[error("Configuration error: {0}")]
+    #[allow(dead_code)] // Part of error API, will be used for storage config errors
     Configuration(String),
 
     /// Generic storage operation error with context
     #[error("Storage operation failed: {operation} - {details}")]
+    #[allow(dead_code)] // Part of error API, will be used for generic storage operations
     OperationFailed {
         operation: String,
         details: String,
@@ -77,28 +81,4 @@ impl StorageError {
         }
     }
 
-    /// Create a sensor not found error
-    pub fn sensor_not_found(sensor_id: &str) -> Self {
-        StorageError::SensorNotFound {
-            sensor_id: sensor_id.to_string(),
-        }
-    }
-
-    /// Create a metric not found error
-    pub fn metric_not_found(metric_name: &str) -> Self {
-        StorageError::MetricNotFound {
-            metric_name: metric_name.to_string(),
-        }
-    }
-
-    /// Create an operation failed error
-    pub fn operation_failed(operation: &str, details: &str) -> Self {
-        StorageError::OperationFailed {
-            operation: operation.to_string(),
-            details: details.to_string(),
-        }
-    }
 }
-
-/// Result type alias for storage operations
-pub type StorageResult<T> = Result<T, StorageError>;

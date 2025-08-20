@@ -144,8 +144,8 @@ impl StorageInstance for SqliteStorage {
     }
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {
-        // TODO: Implement metrics aggregation for SQLite
-        // For now, return empty list since we're focusing on PostgreSQL
+        // Note: Metrics aggregation not yet implemented for SQLite
+        // Current focus is on PostgreSQL backend
         Ok(vec![])
     }
 
@@ -358,6 +358,39 @@ impl StorageInstance for SqliteStorage {
         };
 
         Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    /// Clean up all test data from the database (SQLite implementation)
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn cleanup_test_data(&self) -> Result<()> {
+        // Simple implementation for SQLite - just delete all data
+        // SQLite doesn't have the same foreign key complexity as PostgreSQL when foreign keys are disabled
+        let mut tx = self.pool.begin().await?;
+
+        // Delete all data tables
+        sqlx::query("DELETE FROM blob_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM json_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM location_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM boolean_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM string_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM float_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM numeric_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM integer_values").execute(&mut *tx).await?;
+
+        // Delete metadata tables
+        sqlx::query("DELETE FROM labels").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM sensors").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM strings_values_dictionary").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM labels_description_dictionary").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM labels_name_dictionary").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM units").execute(&mut *tx).await?;
+
+        // Reset SQLite sequences (if any)
+        sqlx::query("DELETE FROM sqlite_sequence").execute(&mut *tx).await.ok(); // Ignore errors if table doesn't exist
+
+        tx.commit().await.context("Failed to commit test data cleanup transaction")?;
+
+        Ok(())
     }
 }
 

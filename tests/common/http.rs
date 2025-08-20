@@ -5,18 +5,21 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::routing::{get, post};
 use sensapp::ingestors::http::crud::{get_series_data, list_series, list_metrics};
+use sensapp::ingestors::http::server::publish_json_data;
 use sensapp::ingestors::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
 use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot` and `ready`
 
 /// HTTP test client for making requests to our app
+#[allow(dead_code)] // Test helper struct
 pub struct TestApp {
     app: axum::Router,
 }
 
 impl TestApp {
     /// Create a new test app with the provided storage
+    #[allow(dead_code)] // Test helper method
     pub async fn new(storage: Arc<dyn StorageInstance>) -> Self {
         let state = HttpServerState {
             name: Arc::new("SensApp Test".to_string()),
@@ -26,7 +29,7 @@ impl TestApp {
         // Create a minimal router for testing (without middleware that might interfere)
         // We'll define simple test handlers that delegate to the import functions
         let app = Router::new()
-            .route("/sensors/publish", post(test_publish_csv_handler))
+            .route("/sensors/publish", post(test_publish_handler))
             .route("/metrics", get(list_metrics))
             .route("/series", get(list_series))
             .route("/series/{series_uuid}", get(get_series_data))
@@ -36,6 +39,7 @@ impl TestApp {
     }
 
     /// Send a POST request with CSV data
+    #[allow(dead_code)] // Test helper method
     pub async fn post_csv(&self, path: &str, csv_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -48,6 +52,7 @@ impl TestApp {
     }
 
     /// Send a POST request with JSON data
+    #[allow(dead_code)] // Test helper method
     pub async fn post_json(&self, path: &str, json_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -60,6 +65,7 @@ impl TestApp {
     }
 
     /// Send a GET request
+    #[allow(dead_code)] // Test helper method
     pub async fn get(&self, path: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("GET")
@@ -71,6 +77,7 @@ impl TestApp {
     }
 
     /// Send a POST request with SenML data
+    #[allow(dead_code)] // Test helper method
     pub async fn post_senml(&self, path: &str, senml_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -83,6 +90,7 @@ impl TestApp {
     }
 
     /// Send a POST request with InfluxDB line protocol data
+    #[allow(dead_code)] // Test helper method
     pub async fn post_influxdb(&self, path: &str, influx_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -128,6 +136,7 @@ impl TestResponse {
     }
 
     /// Parse response body as JSON
+    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
     pub fn json<T>(&self) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
@@ -136,6 +145,7 @@ impl TestResponse {
     }
 
     /// Assert status code
+    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
     pub fn assert_status(&self, expected: StatusCode) -> &Self {
         assert_eq!(
             self.status, expected,
@@ -145,18 +155,9 @@ impl TestResponse {
         self
     }
 
-    /// Assert response is successful
-    pub fn assert_success(&self) -> &Self {
-        assert!(
-            self.is_success(),
-            "Expected success response, got {}. Body: {}",
-            self.status,
-            self.body
-        );
-        self
-    }
 
     /// Assert response body contains text
+    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
     pub fn assert_body_contains(&self, text: &str) -> &Self {
         assert!(
             self.body.contains(text),
@@ -168,30 +169,53 @@ impl TestResponse {
     }
 }
 
-/// Simple CSV publish handler for testing
-async fn test_publish_csv_handler(
+/// Unified publish handler for testing - handles both CSV and JSON based on content type
+async fn test_publish_handler(
     axum::extract::State(state): axum::extract::State<HttpServerState>,
+    headers: axum::http::HeaderMap,
     body: Body,
 ) -> Result<String, (StatusCode, String)> {
     use futures::TryStreamExt;
-    use sensapp::importers::csv::publish_csv_async;
     use std::io;
 
-    // Convert the body to a CSV reader (same way as the actual server)
-    let stream = body.into_data_stream();
-    let stream = stream.map_err(io::Error::other);
-    let reader = stream.into_async_read();
+    let content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("text/csv");
 
-    let csv_reader = csv_async::AsyncReaderBuilder::new()
-        .has_headers(true)
-        .delimiter(b',') // Use comma for tests, semicolon is the server default
-        .create_reader(reader);
+    if content_type.contains("application/json") {
+        // Handle JSON data
+        let body_bytes = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to read body: {}", e)))?;
+        
+        let json_str = String::from_utf8(body_bytes.to_vec())
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid UTF-8: {}", e)))?;
 
-    publish_csv_async(csv_reader, 1000, state.storage.clone())
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        // Use the real JSON ingestion logic
+        publish_json_data(&json_str, state.storage.clone()).await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("JSON ingestion failed: {:?}", e)))?;
+        
+        Ok("ok".to_string())
+    } else {
+        // Handle CSV data (default)
+        use sensapp::importers::csv::publish_csv_async;
 
-    Ok("ok".to_string())
+        let stream = body.into_data_stream();
+        let stream = stream.map_err(io::Error::other);
+        let reader = stream.into_async_read();
+
+        let csv_reader = csv_async::AsyncReaderBuilder::new()
+            .has_headers(true)
+            .delimiter(b',') // Use comma for tests, semicolon is the server default
+            .create_reader(reader);
+
+        publish_csv_async(csv_reader, 1000, state.storage.clone())
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        Ok("CSV data ingested successfully".to_string())
+    }
 }
 
 #[cfg(test)]

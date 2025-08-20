@@ -23,7 +23,7 @@ pub enum InferedValue {
     DateTime(hifitime::Epoch),
     //Location,
     //Blob(Vec<u8>),
-    // todo: booleans and dates and timestamps
+    // Future: Add support for boolean and additional date/timestamp formats
 }
 
 pub fn parse_integer(data: &str) -> IResult<&str, InferedValue> {
@@ -33,7 +33,13 @@ pub fn parse_integer(data: &str) -> IResult<&str, InferedValue> {
 pub fn parse_float(data: &str) -> IResult<&str, InferedValue> {
     // We use the "double" parser from nom, that returns a f64.
     // The parser named "float" from nom returns a f32.
-    map(double, InferedValue::Float).parse(data)
+    // However, we reject special values like inf and NaN to treat them as strings
+    let (rest, value) = double(data)?;
+    if value.is_infinite() || value.is_nan() {
+        Err(Err::Error(nom::error::Error::new(data, nom::error::ErrorKind::Float)))
+    } else {
+        Ok((rest, InferedValue::Float(value)))
+    }
 }
 
 pub fn parse_numeric(data: &str) -> IResult<&str, InferedValue> {

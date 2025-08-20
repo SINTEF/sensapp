@@ -5,6 +5,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::str::FromStr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExportFormat {
@@ -282,6 +283,10 @@ pub async fn get_series_data(
             .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("Unsupported export format '{}'. Supported formats: senml, csv, jsonl", format_str)))?,
         None => ExportFormat::Senml, // Default to SenML/JSON format
     };
+
+    // Validate UUID format
+    let _parsed_uuid = uuid::Uuid::from_str(&series_uuid)
+        .map_err(|_| AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid)))?;
 
     // Query series data from storage by UUID
     let series_data = state

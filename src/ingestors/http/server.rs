@@ -5,6 +5,7 @@ use super::prometheus::publish_prometheus;
 use super::state::HttpServerState;
 use crate::config;
 use crate::importers::csv::publish_csv_async;
+use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
 //use axum::extract::Multipart;
@@ -19,6 +20,7 @@ use axum::http::StatusCode;
 use axum::http::header;
 use axum::routing::get;
 use axum::routing::post;
+use axum::http::HeaderMap;
 use futures::TryStreamExt;
 use polars::prelude::*;
 use std::io;
@@ -33,6 +35,9 @@ use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::Level;
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable as ScalarServable};
+
+// Type alias to simplify complex HashMap type for clippy
+type JsonSensorDataMap = std::collections::HashMap<String, (crate::datamodel::SensorType, Option<String>, Vec<(crate::datamodel::SensAppDateTime, f64)>)>;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -76,6 +81,7 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         //.route("/api-docs/openapi.json", get(openapi))
         .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
         .route("/publish", post(publish_handler).layer(max_body_layer))
+        .route("/sensors/publish", post(publish_sensors_data).layer(max_body_layer))
         .route(
             "/sensors/{sensor_name_or_uuid}/publish_csv",
             post(publish_csv),
@@ -173,6 +179,128 @@ async fn publish_csv(
     publish_csv_async(csv_reader, 8192, state.storage.clone()).await?;
 
     Ok("ok".to_string())
+}
+
+async fn publish_sensors_data(
+    State(state): State<HttpServerState>,
+    headers: HeaderMap,
+    body: axum::body::Body,
+) -> Result<String, AppError> {
+    // Determine content type from headers
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("text/csv"); // Default to CSV
+
+    if content_type.contains("application/json") {
+        // Handle JSON data
+        let body_bytes = axum::body::to_bytes(body, usize::MAX).await
+            .map_err(|e| AppError::bad_request(anyhow::anyhow!("Failed to read JSON body: {}", e)))?;
+        
+        let json_str = String::from_utf8(body_bytes.to_vec())
+            .map_err(|e| AppError::bad_request(anyhow::anyhow!("Invalid UTF-8 in JSON: {}", e)))?;
+        
+        // Parse and ingest JSON data
+        publish_json_data(&json_str, state.storage.clone()).await?;
+    } else {
+        // Handle CSV data (existing logic)
+        let stream = body.into_data_stream();
+        let stream = stream.map_err(io::Error::other);
+        let reader = stream.into_async_read();
+        
+        let csv_reader = csv_async::AsyncReaderBuilder::new()
+            .has_headers(true)
+            .delimiter(b',') // Use comma for standard CSV
+            .create_reader(reader);
+
+        publish_csv_async(csv_reader, 8192, state.storage.clone()).await?;
+    }
+
+    Ok("ok".to_string())
+}
+
+/// Handle JSON data ingestion
+/// Expected format: [{"datetime": "ISO8601", "sensor_name": "name", "value": number, "unit": "optional"}]
+pub async fn publish_json_data(json_str: &str, storage: Arc<dyn StorageInstance>) -> Result<(), AppError> {
+    use serde_json::Value;
+    use crate::datamodel::{SensorType, Sample, TypedSamples, unit::Unit, batch_builder::BatchBuilder, Sensor};
+    
+    // Parse JSON array
+    let json_value: Value = serde_json::from_str(json_str)
+        .map_err(|e| AppError::bad_request(anyhow::anyhow!("Invalid JSON: {}", e)))?;
+    
+    let json_array = json_value.as_array()
+        .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("JSON must be an array")))?;
+    
+    if json_array.is_empty() {
+        return Err(AppError::bad_request(anyhow::anyhow!("JSON array is empty")));
+    }
+    
+    // Group data by sensor
+    let mut sensors_data: JsonSensorDataMap = std::collections::HashMap::new();
+    
+    for item in json_array {
+        let obj = item.as_object()
+            .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("Each JSON item must be an object")))?;
+        
+        // Extract required fields
+        let sensor_name = obj.get("sensor_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("Missing 'sensor_name' field")))?
+            .to_string();
+        
+        let datetime_str = obj.get("datetime")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("Missing 'datetime' field")))?;
+        
+        let value = obj.get("value")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("Missing or invalid 'value' field")))?;
+        
+        let unit = obj.get("unit").and_then(|v| v.as_str()).map(|s| s.to_string());
+        
+        // Parse datetime using the infer module
+        use crate::infer::parsing::{parse_iso8601_datetime, InferedValue};
+        let datetime = match parse_iso8601_datetime(datetime_str) {
+            Ok((_, InferedValue::DateTime(dt))) => dt,
+            _ => return Err(AppError::bad_request(anyhow::anyhow!("Invalid datetime format: {}", datetime_str)))
+        };
+        
+        // Group by sensor
+        sensors_data.entry(sensor_name)
+            .or_insert_with(|| (SensorType::Float, unit.clone(), Vec::new()))
+            .2.push((datetime, value));
+    }
+    
+    // Create sensors and ingest data
+    let mut batch_builder = BatchBuilder::new()
+        .map_err(AppError::internal_server_error)?;
+    
+    for (sensor_name, (sensor_type, unit_name, samples)) in sensors_data {
+        // Create sensor
+        let unit = unit_name.map(|name| Unit::new(name, None));
+        let sensor = Arc::new(Sensor::new_without_uuid(sensor_name, sensor_type, unit, None)
+            .map_err(AppError::internal_server_error)?);
+        
+        // Convert samples to TypedSamples
+        let typed_samples = match sensor_type {
+            SensorType::Float => {
+                let float_samples = samples.into_iter()
+                    .map(|(datetime, value)| Sample { datetime, value })
+                    .collect();
+                TypedSamples::Float(float_samples)
+            }
+            _ => return Err(AppError::bad_request(anyhow::anyhow!("Unsupported sensor type for JSON ingestion")))
+        };
+        
+        batch_builder.add(sensor, typed_samples).await
+            .map_err(AppError::internal_server_error)?;
+    }
+    
+    batch_builder.send_what_is_left(storage).await
+        .map_err(AppError::internal_server_error)?;
+    
+    Ok(())
 }
 
 async fn publish_handler(bytes: Bytes) -> Result<Json<String>, (StatusCode, String)> {

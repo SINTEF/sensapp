@@ -5,10 +5,12 @@ use sensapp::storage::StorageInstance;
 use std::sync::Arc;
 
 /// Database test helpers
+#[allow(dead_code)] // Test helper struct
 pub struct DbHelpers;
 
 impl DbHelpers {
     /// Count total number of sensor samples in the database
+    #[allow(dead_code)] // Test helper method
     pub async fn count_total_samples(storage: &Arc<dyn StorageInstance>) -> Result<usize> {
         let sensors = storage.list_series().await?;
         let mut total = 0;
@@ -35,6 +37,7 @@ impl DbHelpers {
     }
 
     /// Get sensor by name for testing
+    #[allow(dead_code)] // Test helper method
     pub async fn get_sensor_by_name(
         storage: &Arc<dyn StorageInstance>,
         name: &str,
@@ -44,6 +47,7 @@ impl DbHelpers {
     }
 
     /// Verify sensor data exists and has expected sample count
+    #[allow(dead_code)] // Test helper method
     pub async fn verify_sensor_data(
         storage: &Arc<dyn StorageInstance>,
         sensor_name: &str,
@@ -78,17 +82,12 @@ impl DbHelpers {
     }
 
     /// Get all sensor names in the database
+    #[allow(dead_code)] // Test helper method
     pub async fn get_sensor_names(storage: &Arc<dyn StorageInstance>) -> Result<Vec<String>> {
         let sensors = storage.list_series().await?;
         Ok(sensors.into_iter().map(|s| s.name).collect())
     }
 
-    /// Clean up all data in test database (for test isolation)
-    pub async fn clean_all_data(_storage: &Arc<dyn StorageInstance>) -> Result<()> {
-        // For now, we rely on database isolation
-        // In the future, we might implement a truncate all tables operation
-        Ok(())
-    }
 }
 
 #[cfg(test)]

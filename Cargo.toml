@@ -25,6 +25,8 @@ all-storage = [
   "bigquery",
   "rrdcached",
 ]
+# Test utilities
+test-utils = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -108,3 +110,5 @@ rustls = "0.23"
 temp-env = "0.3"
 tokio-test = "0.4"
 serial_test = "3.1"
+# Re-import the same crate with test-utils feature for integration tests
+sensapp = { path = ".", features = ["test-utils"] }

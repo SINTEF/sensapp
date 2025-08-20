@@ -5056,6 +5056,7 @@ dependencies = [
  "rumqttc",
  "rust_decimal",
  "rustls 0.23.31",
+ "sensapp",
  "sentry",
  "serde",
  "serde-inline-default",

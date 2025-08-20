@@ -21,7 +21,7 @@ impl TypedSamples {
     pub fn one_numeric(value: rust_decimal::Decimal, datetime: SensAppDateTime) -> Self {
         Self::Numeric(smallvec![Sample { datetime, value }])
     }
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Will be used for MQTT ingestion
     pub fn one_float(value: f64, datetime: SensAppDateTime) -> Self {
         Self::Float(smallvec![Sample { datetime, value }])
     }
@@ -31,15 +31,15 @@ impl TypedSamples {
     pub fn one_boolean(value: bool, datetime: SensAppDateTime) -> Self {
         Self::Boolean(smallvec![Sample { datetime, value }])
     }
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Will be used for MQTT location data
     pub fn one_location(value: geo::Point, datetime: SensAppDateTime) -> Self {
         Self::Location(smallvec![Sample { datetime, value }])
     }
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Will be used for MQTT binary data
     pub fn one_blob(value: Vec<u8>, datetime: SensAppDateTime) -> Self {
         Self::Blob(smallvec![Sample { datetime, value }])
     }
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Will be used for MQTT JSON data
     pub fn one_json(value: serde_json::Value, datetime: SensAppDateTime) -> Self {
         Self::Json(smallvec![Sample { datetime, value }])
     }
@@ -55,6 +55,11 @@ impl TypedSamples {
             TypedSamples::Blob(vec) => vec.len(),
             TypedSamples::Json(vec) => vec.len(),
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn clone_empty(&self) -> Self {
