@@ -1,15 +1,14 @@
 use super::{
-    super::StorageInstance, timescaledb_publishers::*,
+    super::{StorageInstance, common::sync_with_timeout}, timescaledb_publishers::*,
     timescaledb_utilities::get_sensor_id_or_create_sensor,
 };
 use crate::datamodel::{TypedSamples, batch::Batch};
+use crate::config;
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
 use sqlx::{PgPool, postgres::PgConnectOptions};
-use std::time::Duration;
 use std::{str::FromStr, sync::Arc};
-use tokio::time::timeout;
 
 #[derive(Debug)]
 pub struct TimeScaleDBStorage {
@@ -53,10 +52,8 @@ impl StorageInstance for TimeScaleDBStorage {
     async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
         // timescaledb doesn't need to do anything special for sync
         // as we use transaction
-        if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
-            let _ = timeout(Duration::from_secs(15), sync_sender.broadcast(())).await?;
-        }
-        Ok(())
+        let config = config::get().context("Failed to get configuration")?;
+        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {

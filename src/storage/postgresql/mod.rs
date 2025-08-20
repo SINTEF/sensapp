@@ -1,6 +1,7 @@
-use super::{StorageInstance, StorageError};
+use super::{StorageInstance, StorageError, common::sync_with_timeout};
 use crate::datamodel::{TypedSamples, batch::Batch, Sensor, SensorData, SensorType, Sample, SensAppDateTime, Metric};
 use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
+use crate::config;
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
@@ -9,9 +10,7 @@ use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 use sqlx::{PgPool, postgres::PgConnectOptions};
-use std::time::Duration;
 use std::{str::FromStr, sync::Arc};
-use tokio::time::timeout;
 use uuid::Uuid;
 
 pub mod postgresql_publishers;
@@ -62,10 +61,8 @@ impl StorageInstance for PostgresStorage {
     async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
         // PostgreSQL doesn't need to do anything special for sync
         // as we use transaction
-        if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
-            let _ = timeout(Duration::from_secs(15), sync_sender.broadcast(())).await?;
-        }
-        Ok(())
+        let config = config::get().context("Failed to get configuration")?;
+        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {

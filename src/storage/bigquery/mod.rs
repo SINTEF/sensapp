@@ -1,5 +1,6 @@
-use crate::storage::storage::StorageInstance;
-use anyhow::{Result, bail};
+use crate::storage::{StorageInstance, common::sync_with_timeout};
+use crate::config;
+use anyhow::{Result, bail, Context};
 use async_trait::async_trait;
 use bigquery_publishers::{
     publish_blob_values, publish_boolean_values, publish_float_values, publish_integer_values,
@@ -14,8 +15,8 @@ use gcp_bigquery_client::{
 };
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
-use tokio::{sync::RwLock, time::timeout};
+use std::{future::Future, pin::Pin, sync::Arc};
+use tokio::sync::RwLock;
 use url::Url;
 
 mod bigquery_labels_utilities;
@@ -222,12 +223,10 @@ impl StorageInstance for BigQueryStorage {
     }
 
     async fn sync(&self, sync_sender: async_broadcast::Sender<()>) -> Result<()> {
-        // SQLite doesn't need to do anything special for sync
-        // As we use transactions and the WAL mode.
-        if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
-            let _ = timeout(Duration::from_secs(15), sync_sender.broadcast(())).await?;
-        }
-        Ok(())
+        // BigQuery doesn't need to do anything special for sync
+        // as we use transactions and streaming inserts
+        let config = config::get().context("Failed to get configuration")?;
+        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {

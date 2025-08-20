@@ -6,6 +6,8 @@ use std::fmt::Debug;
 pub mod error;
 pub use error::StorageError;
 
+pub mod common;
+
 #[async_trait]
 pub trait StorageInstance: Send + Sync + Debug {
     #[allow(dead_code)]

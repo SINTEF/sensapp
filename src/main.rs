@@ -22,15 +22,6 @@ mod parsing;
 mod storage;
 
 fn main() -> Result<()> {
-    let _sentry = sentry::init((
-        "https://94bc3d0bd0424707898d420ed4ad6a3d@feil.sintef.cloud/5",
-        sentry::ClientOptions {
-            release: sentry::release_name!(),
-            debug: true,
-            ..Default::default()
-        },
-    ));
-
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .map_err(|e| anyhow::anyhow!("Failed to install CryptoProvider: {:?}", e))?;
@@ -52,11 +43,19 @@ async fn async_main() -> Result<()> {
         )
         .init();
 
-    // sentry::capture_message("Hello, Sentry 2!", sentry::Level::Info);
-
     // Load configuration
     load_configuration().context("Failed to load configuration")?;
     let config = config::get().context("Failed to get configuration")?;
+
+    // Initialize Sentry if DSN is provided
+    let _sentry = config.sentry_dsn.as_ref().map(|dsn| sentry::init((
+            dsn.clone(),
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                debug: true,
+                ..Default::default()
+            },
+        )));
 
     sinteflake::set_instance_id(config.instance_id)
         .context("Failed to set instance ID")?;
@@ -127,7 +126,7 @@ async fn async_main() -> Result<()> {
         Err(err) => {
             event!(Level::ERROR, "HTTP server failed: {}", err);
             eprintln!("❌ HTTP server failed to start: {}", err);
-            Err(err.into())
+            Err(err)
         }
     }
 }

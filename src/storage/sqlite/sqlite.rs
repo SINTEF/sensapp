@@ -6,7 +6,8 @@ use crate::datamodel::{
     Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, Metric,
     sensapp_vec::SensAppLabels,
 };
-use crate::storage::StorageInstance;
+use crate::storage::{StorageInstance, common::sync_with_timeout};
+use crate::config;
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
@@ -17,7 +18,6 @@ use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::timeout;
 use uuid::Uuid;
 
 // SQLite implementation
@@ -74,10 +74,8 @@ impl StorageInstance for SqliteStorage {
     async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
         // SQLite doesn't need to do anything special for sync
         // As we use transactions and the WAL mode.
-        if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
-            let _ = timeout(Duration::from_secs(15), sync_sender.broadcast(())).await?;
-        }
-        Ok(())
+        let config = config::get().context("Failed to get configuration")?;
+        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {

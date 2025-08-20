@@ -12,6 +12,13 @@ storage_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp
 # Network Configuration
 #endpoint = "0.0.0.0"
 
+# Optional Configuration
+# Sentry DSN for error tracking (leave commented to disable)
+# sentry_dsn = "https://your-dsn@your-sentry-instance/project-id"
+
+# Storage sync timeout in seconds (default: 15)
+# storage_sync_timeout_seconds = 30
+
 # MQTT Configuration (optional)
 # Uncomment and configure to enable MQTT ingestion:
 # [[mqtt]]

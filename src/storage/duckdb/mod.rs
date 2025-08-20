@@ -1,5 +1,6 @@
 use crate::datamodel::TypedSamples;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
+use crate::config;
 use anyhow::{Context, Result, bail};
 use async_broadcast::Sender;
 use async_trait::async_trait;
@@ -7,12 +8,10 @@ use duckdb::Connection;
 use duckdb_publishers::*;
 use duckdb_utilities::get_sensor_id_or_create_sensor;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
-use tokio::time::timeout;
 
-use super::StorageInstance;
+use super::{StorageInstance, common::sync_with_timeout};
 
 mod duckdb_publishers;
 mod duckdb_utilities;
@@ -66,12 +65,10 @@ impl StorageInstance for DuckDBStorage {
     }
 
     async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
-        // SQLite doesn't need to do anything special for sync
-        // As we use transactions and the WAL mode.
-        if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
-            let _ = timeout(Duration::from_secs(15), sync_sender.broadcast(())).await?;
-        }
-        Ok(())
+        // DuckDB doesn't need to do anything special for sync
+        // As we use transactions
+        let config = config::get().context("Failed to get configuration")?;
+        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {

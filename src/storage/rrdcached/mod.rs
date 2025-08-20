@@ -1,8 +1,9 @@
 use crate::{
     datamodel::{Sensor, SensorType, TypedSamples},
-    storage::StorageInstance,
+    storage::{StorageInstance, common::sync_with_timeout},
+    config,
 };
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail, Context};
 use crate::storage::StorageError;
 use async_trait::async_trait;
 use rrdcached_client::{
@@ -12,8 +13,8 @@ use rrdcached_client::{
     create::{CreateArguments, CreateDataSource, CreateDataSourceType, CreateRoundRobinArchive},
     errors::RRDCachedClientError,
 };
-use std::{collections::HashSet, sync::Arc, time::Duration};
-use tokio::{sync::RwLock, time::timeout};
+use std::{collections::HashSet, sync::Arc};
+use tokio::sync::RwLock;
 use url::Url;
 use uuid::Uuid;
 
@@ -313,9 +314,8 @@ impl StorageInstance for RrdCachedStorage {
             client.flush_all().await?;
         }
 
-        if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
-            let _ = timeout(Duration::from_secs(15), sync_sender.broadcast(())).await?;
-        }
+        let config = config::get().context("Failed to get configuration")?;
+        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await?;
 
         Ok(())
     }
