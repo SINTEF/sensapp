@@ -43,6 +43,11 @@ pub struct SensorDataQuery {
     pub format: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SeriesQuery {
+    pub metric: Option<String>,
+}
+
 /// List unique metrics (measurement types) with aggregated information in DCAT catalog format.
 #[utoipa::path(
     get,
@@ -146,13 +151,19 @@ pub async fn list_metrics(State(state): State<HttpServerState>) -> Result<Json<V
     get,
     path = "/series",
     tag = "SensApp",
+    params(
+        ("metric" = Option<String>, Query, description = "Filter series by metric name")
+    ),
     responses(
         (status = 200, description = "Time series catalog in DCAT format", body = Value)
     )
 )]
-pub async fn list_series(State(state): State<HttpServerState>) -> Result<Json<Value>, AppError> {
-    // Get the series metadata including labels and UUIDs
-    let sensors = state.storage.list_series().await?;
+pub async fn list_series(
+    State(state): State<HttpServerState>,
+    Query(query): Query<SeriesQuery>,
+) -> Result<Json<Value>, AppError> {
+    // Get the series metadata including labels and UUIDs, optionally filtered by metric
+    let sensors = state.storage.list_series(query.metric.as_deref()).await?;
 
     // Create DCAT catalog structure
     let datasets: Vec<Value> = sensors

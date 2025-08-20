@@ -74,15 +74,17 @@ impl StorageInstance for PostgresStorage {
         Ok(())
     }
 
-    async fn list_series(&self) -> Result<Vec<crate::datamodel::Sensor>> {
+    async fn list_series(&self, metric_filter: Option<&str>) -> Result<Vec<crate::datamodel::Sensor>> {
 
-        // Query all sensors with their metadata using the catalog view
+        // Query sensors with their metadata using the catalog view, optionally filtered by metric name
         let sensor_rows = sqlx::query!(
             r#"
             SELECT sensor_id, uuid, name, type, unit_name, unit_description
             FROM sensor_catalog_view
+            WHERE ($1::TEXT IS NULL OR name = $1)
             ORDER BY uuid ASC
-            "#
+            "#,
+            metric_filter
         )
         .fetch_all(&self.pool)
         .await?;
@@ -849,3 +851,6 @@ impl PostgresStorage {
     }
 
 }
+
+// Unit tests are covered by the integration tests in tests/crud_dcat_api.rs
+// which test the full end-to-end functionality including the HTTP endpoints

@@ -75,7 +75,7 @@ pub trait TestHelpers {
 
 impl TestHelpers for Arc<dyn StorageInstance> {
     async fn expect_sensor_count(&self, expected: usize) -> Result<()> {
-        let sensors = self.list_series().await?;
+        let sensors = self.list_series(None).await?;
         if sensors.len() != expected {
             return Err(anyhow!(
                 "Expected {} sensors, found {}. Sensors: {:#?}",
