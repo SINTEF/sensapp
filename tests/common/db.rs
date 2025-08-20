@@ -96,12 +96,4 @@ mod tests {
     // These tests would need a real database connection to run
     // They serve as documentation of the API we expect
 
-    #[tokio::test]
-    #[ignore] // Run with --ignored when database is available
-    async fn test_db_helpers() {
-        // This test would need actual database setup
-        // let storage = setup_test_storage().await.unwrap();
-        // let count = DbHelpers::count_total_samples(&storage).await.unwrap();
-        // assert_eq!(count, 0);
-    }
 }

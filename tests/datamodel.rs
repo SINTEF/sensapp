@@ -320,28 +320,6 @@ mod batch_builder_tests {
     use super::*;
     use common::fixtures;
 
-    #[ignore] // FIXME: Test conflicts with global config loading - needs redesign
-    #[tokio::test]
-    async fn test_batch_builder_zero_batch_size_error() {
-        // This test needs special handling because it tests configuration errors
-        // We'll test the BatchBuilder error handling with a manually created config
-        
-        // Create a zero batch size scenario by setting environment variable
-        temp_env::with_var("SENSAPP_BATCH_SIZE", Some("0"), || {
-            temp_env::with_var("SENSAPP_INSTANCE_ID", Some("42"), || {
-                // Create a new config with zero batch size
-                let config = sensapp::config::SensAppConfig::load().expect("Config should load");
-                assert_eq!(config.batch_size, 0, "Batch size should be 0 from env var");
-                
-                // Test that BatchBuilder detects the zero batch size error
-                let result = BatchBuilder::new();
-                assert!(result.is_err(), "Should fail with zero batch size");
-                if let Err(e) = result {
-                    assert!(e.to_string().contains("Batch size is 0"));
-                }
-            });
-        });
-    }
 
 
     #[tokio::test]
