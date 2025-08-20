@@ -183,8 +183,8 @@ impl TimeScaleDBStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM integer_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM integer_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -222,8 +222,8 @@ impl TimeScaleDBStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM numeric_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM numeric_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -260,8 +260,8 @@ impl TimeScaleDBStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM float_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM float_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -300,7 +300,7 @@ impl TimeScaleDBStorage {
             SELECT sv.timestamp_ms, svd.value as string_value
             FROM string_values sv
             JOIN strings_values_dictionary svd ON sv.value = svd.id
-            WHERE sv.sensor_id = $1 
+            WHERE sv.sensor_id = $1
             AND ($2::BIGINT IS NULL OR sv.timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR sv.timestamp_ms <= $3)
             ORDER BY sv.timestamp_ms ASC
@@ -336,8 +336,8 @@ impl TimeScaleDBStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM boolean_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM boolean_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -373,8 +373,8 @@ impl TimeScaleDBStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, latitude, longitude FROM location_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, latitude, longitude FROM location_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -410,8 +410,8 @@ impl TimeScaleDBStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM json_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM json_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -447,8 +447,8 @@ impl TimeScaleDBStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM blob_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM blob_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC

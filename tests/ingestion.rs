@@ -47,7 +47,7 @@ async fn test_csv_ingestion_temperature_sensor() -> Result<()> {
     } else {
         return Err(anyhow::anyhow!("CSV has no data rows"));
     };
-    
+
     let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
         .await?
         .expect("Temperature sensor should exist");
@@ -93,7 +93,8 @@ async fn test_csv_ingestion_multiple_sensors() -> Result<()> {
     // Extract sensor names from CSV data to check specific sensors exist
     let csv_lines: Vec<&str> = csv_data.lines().collect();
     let mut expected_sensors = std::collections::HashSet::new();
-    for line in csv_lines.iter().skip(1) { // Skip header
+    for line in csv_lines.iter().skip(1) {
+        // Skip header
         let parts: Vec<&str> = line.split(',').collect();
         if parts.len() > 1 {
             expected_sensors.insert(parts[1].to_string());
@@ -105,17 +106,27 @@ async fn test_csv_ingestion_multiple_sensors() -> Result<()> {
         let sensor = DbHelpers::get_sensor_by_name(&storage, sensor_name)
             .await?
             .unwrap_or_else(|| panic!("Sensor {} should exist", sensor_name));
-        
+
         if sensor_name.starts_with("temperature_") {
-            assert_eq!(sensor.unit.as_ref().map(|u| &u.name), Some(&"°C".to_string()));
+            assert_eq!(
+                sensor.unit.as_ref().map(|u| &u.name),
+                Some(&"°C".to_string())
+            );
             DbHelpers::verify_sensor_data(&storage, sensor_name, 3).await?;
         } else if sensor_name.starts_with("humidity_") {
-            assert_eq!(sensor.unit.as_ref().map(|u| &u.name), Some(&"%".to_string()));
+            assert_eq!(
+                sensor.unit.as_ref().map(|u| &u.name),
+                Some(&"%".to_string())
+            );
             DbHelpers::verify_sensor_data(&storage, sensor_name, 3).await?;
         }
     }
 
-    assert_eq!(expected_sensors.len(), 2, "Should have exactly 2 unique sensors");
+    assert_eq!(
+        expected_sensors.len(),
+        2,
+        "Should have exactly 2 unique sensors"
+    );
 
     Ok(())
 }
@@ -139,13 +150,14 @@ async fn test_json_ingestion() -> Result<()> {
 
     // Extract sensor name from JSON data and verify it exists
     let json_value: serde_json::Value = serde_json::from_str(&json_data)?;
-    let sensor_name = json_value[0]["sensor_name"].as_str()
+    let sensor_name = json_value[0]["sensor_name"]
+        .as_str()
         .ok_or_else(|| anyhow::anyhow!("Could not parse sensor name from JSON"))?;
-    
+
     let sensor = DbHelpers::get_sensor_by_name(&storage, sensor_name)
         .await?
         .expect("Temperature sensor should exist");
-        
+
     assert!(sensor.name.starts_with("temperature_"));
     DbHelpers::verify_sensor_data(&storage, sensor_name, 3).await?;
 
@@ -234,9 +246,12 @@ async fn test_large_csv_ingestion() -> Result<()> {
     let sensor = DbHelpers::get_sensor_by_name(&storage, "temperature_bulk")
         .await?
         .expect("Bulk temperature sensor should exist");
-        
+
     assert_eq!(sensor.name, "temperature_bulk");
-    assert_eq!(sensor.unit.as_ref().map(|u| &u.name), Some(&"°C".to_string()));
+    assert_eq!(
+        sensor.unit.as_ref().map(|u| &u.name),
+        Some(&"°C".to_string())
+    );
     DbHelpers::verify_sensor_data(&storage, "temperature_bulk", 1000).await?;
 
     Ok(())

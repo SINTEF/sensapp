@@ -8,7 +8,6 @@ use sensapp::infer::parsing::{InferedValue, infer_type, infer_type_with_trim};
 use std::str::FromStr;
 use std::sync::Arc;
 
-
 /// Test edge cases for CSV parsing and type inference
 mod parsing_edge_cases {
     use super::*;

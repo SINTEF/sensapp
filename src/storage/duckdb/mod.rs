@@ -108,7 +108,7 @@ impl StorageInstance for DuckDBStorage {
     async fn cleanup_test_data(&self) -> Result<()> {
         // DuckDB implementation - delete all data from tables
         let connection = self.connection.lock().await;
-        
+
         // Delete all value tables
         connection.execute("DELETE FROM blob_values", []).ok();
         connection.execute("DELETE FROM json_values", []).ok();

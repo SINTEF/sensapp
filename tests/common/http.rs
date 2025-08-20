@@ -4,7 +4,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::routing::{get, post};
-use sensapp::ingestors::http::crud::{get_series_data, list_series, list_metrics};
+use sensapp::ingestors::http::crud::{get_series_data, list_metrics, list_series};
 use sensapp::ingestors::http::server::publish_json_data;
 use sensapp::ingestors::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
@@ -155,7 +155,6 @@ impl TestResponse {
         self
     }
 
-
     /// Assert response body contains text
     #[allow(dead_code)] // Used across test files, not visible to individual test compilation
     pub fn assert_body_contains(&self, text: &str) -> &Self {
@@ -185,17 +184,26 @@ async fn test_publish_handler(
 
     if content_type.contains("application/json") {
         // Handle JSON data
-        let body_bytes = axum::body::to_bytes(body, usize::MAX)
-            .await
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to read body: {}", e)))?;
-        
+        let body_bytes = axum::body::to_bytes(body, usize::MAX).await.map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Failed to read body: {}", e),
+            )
+        })?;
+
         let json_str = String::from_utf8(body_bytes.to_vec())
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid UTF-8: {}", e)))?;
 
         // Use the real JSON ingestion logic
-        publish_json_data(&json_str, state.storage.clone()).await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("JSON ingestion failed: {:?}", e)))?;
-        
+        publish_json_data(&json_str, state.storage.clone())
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("JSON ingestion failed: {:?}", e),
+                )
+            })?;
+
         Ok("ok".to_string())
     } else {
         // Handle CSV data (default)

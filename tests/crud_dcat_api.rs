@@ -4,8 +4,8 @@ use anyhow::Result;
 use axum::http::StatusCode;
 use common::http::TestApp;
 use common::{TestDb, fixtures};
-use serde_json::Value;
 use sensapp::config::load_configuration_for_tests;
+use serde_json::Value;
 use serial_test::serial;
 
 // Ensure configuration is loaded once for all tests in this module
@@ -89,11 +89,20 @@ mod crud_dcat_tests {
 
             // Debug: print what we actually got
             println!("Found series ID: {}", id);
-            println!("All series IDs: {:?}", datasets.iter().map(|d| d["@id"].as_str().unwrap()).collect::<Vec<_>>());
+            println!(
+                "All series IDs: {:?}",
+                datasets
+                    .iter()
+                    .map(|d| d["@id"].as_str().unwrap())
+                    .collect::<Vec<_>>()
+            );
 
             // Should contain the metric name or be a valid Prometheus-style ID
             assert!(
-                id.contains("temperature") || id == "temperature" || id.contains("{") || !datasets.is_empty(),
+                id.contains("temperature")
+                    || id == "temperature"
+                    || id.contains("{")
+                    || !datasets.is_empty(),
                 "Expected series to contain temperature or be valid Prometheus ID, got: {}",
                 id
             );
@@ -402,12 +411,15 @@ mod crud_dcat_tests {
         let total_series_count = all_datasets.len();
 
         // Should have series from both temperature and humidity
-        assert!(total_series_count >= 2, "Should have at least 2 series (temperature and humidity)");
+        assert!(
+            total_series_count >= 2,
+            "Should have at least 2 series (temperature and humidity)"
+        );
 
         // Get the actual sensor names from the ingested data
         let mut temp_sensor_name = None;
         let mut humidity_sensor_name = None;
-        
+
         for dataset in all_datasets {
             let title = dataset["dct:title"].as_str().unwrap();
             if title.starts_with("temperature") {
@@ -416,54 +428,76 @@ mod crud_dcat_tests {
                 humidity_sensor_name = Some(title.to_string());
             }
         }
-        
+
         let temp_name = temp_sensor_name.expect("Should have found a temperature sensor");
         let humidity_name = humidity_sensor_name.expect("Should have found a humidity sensor");
 
         // When: We filter by the actual temperature metric name
-        let temp_response = app.get(&format!("/series?metric={}", urlencoding::encode(&temp_name))).await?;
+        let temp_response = app
+            .get(&format!(
+                "/series?metric={}",
+                urlencoding::encode(&temp_name)
+            ))
+            .await?;
         temp_response.assert_status(StatusCode::OK);
         let temp_catalog: Value = temp_response.json()?;
 
         // Then: Should only return temperature series
         assert_eq!(temp_catalog["@type"], "dcat:Catalog");
         assert_eq!(temp_catalog["@id"], "sensapp_series_catalog");
-        
+
         let temp_datasets = temp_catalog["dcat:dataset"].as_array().unwrap();
         assert!(!temp_datasets.is_empty(), "Should have temperature series");
-        
+
         // All returned series should be the temperature sensor
         for dataset in temp_datasets {
             let title = dataset["dct:title"].as_str().unwrap();
-            assert_eq!(title, temp_name, "All filtered series should be the temperature sensor");
-            
+            assert_eq!(
+                title, temp_name,
+                "All filtered series should be the temperature sensor"
+            );
+
             let id = dataset["@id"].as_str().unwrap();
-            assert!(id.starts_with(&temp_name), "Series ID should start with temperature sensor name");
+            assert!(
+                id.starts_with(&temp_name),
+                "Series ID should start with temperature sensor name"
+            );
         }
 
         // When: We filter by humidity metric
-        let humidity_response = app.get(&format!("/series?metric={}", urlencoding::encode(&humidity_name))).await?;
+        let humidity_response = app
+            .get(&format!(
+                "/series?metric={}",
+                urlencoding::encode(&humidity_name)
+            ))
+            .await?;
         humidity_response.assert_status(StatusCode::OK);
         let humidity_catalog: Value = humidity_response.json()?;
-        
+
         let humidity_datasets = humidity_catalog["dcat:dataset"].as_array().unwrap();
         assert!(!humidity_datasets.is_empty(), "Should have humidity series");
-        
+
         // All returned series should be humidity
         for dataset in humidity_datasets {
             let title = dataset["dct:title"].as_str().unwrap();
-            assert_eq!(title, humidity_name, "All filtered series should be humidity");
+            assert_eq!(
+                title, humidity_name,
+                "All filtered series should be humidity"
+            );
         }
 
         // When: We filter by non-existent metric
         let empty_response = app.get("/series?metric=nonexistent").await?;
         empty_response.assert_status(StatusCode::OK);
         let empty_catalog: Value = empty_response.json()?;
-        
+
         // Then: Should return empty dataset array
         let empty_datasets = empty_catalog["dcat:dataset"].as_array().unwrap();
-        assert!(empty_datasets.is_empty(), "Should have no series for non-existent metric");
-        
+        assert!(
+            empty_datasets.is_empty(),
+            "Should have no series for non-existent metric"
+        );
+
         // But catalog structure should still be valid
         assert_eq!(empty_catalog["@type"], "dcat:Catalog");
         assert_eq!(empty_catalog["@id"], "sensapp_series_catalog");
@@ -471,8 +505,10 @@ mod crud_dcat_tests {
         // Verify that filtered results + empty results = total when combined
         let temp_count = temp_datasets.len();
         let humidity_count = humidity_datasets.len();
-        assert!(temp_count + humidity_count <= total_series_count, 
-               "Filtered counts should not exceed total");
+        assert!(
+            temp_count + humidity_count <= total_series_count,
+            "Filtered counts should not exceed total"
+        );
 
         Ok(())
     }

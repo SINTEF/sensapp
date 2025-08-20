@@ -1,6 +1,6 @@
 -- Create a view for sensor catalog that preserves nullable unit fields
 CREATE VIEW sensor_catalog_view AS
-SELECT 
+SELECT
     s.sensor_id,
     s.uuid,
     s.name,

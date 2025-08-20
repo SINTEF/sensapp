@@ -13,7 +13,8 @@ fn generate_test_id() -> String {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_millis() % 10000; // Use last 4 digits to keep names shorter
+        .as_millis()
+        % 10000; // Use last 4 digits to keep names shorter
     format!("{}_{}", timestamp, id)
 }
 
@@ -62,8 +63,12 @@ pub fn multi_sensor_csv_with_names() -> (String, String, String) {
 2024-01-01T00:01:00Z,{},64.5,%
 2024-01-01T00:02:00Z,{},21.5,°C
 2024-01-01T00:02:00Z,{},64.0,%"#,
-        temperature_name, humidity_name, temperature_name, 
-        humidity_name, temperature_name, humidity_name
+        temperature_name,
+        humidity_name,
+        temperature_name,
+        humidity_name,
+        temperature_name,
+        humidity_name
     );
     (csv_data, temperature_name, humidity_name)
 }

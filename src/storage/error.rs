@@ -29,7 +29,7 @@ pub enum StorageError {
         sensor_id: String,
     },
 
-    /// Metric not found  
+    /// Metric not found
     #[error("Metric not found: {metric_name}")]
     #[allow(dead_code)] // Part of error API, will be used for metric operations
     MetricNotFound {
@@ -59,7 +59,7 @@ impl StorageError {
             (None, Some(name)) => format!("name='{}'", name),
             (None, None) => "unknown sensor".to_string(),
         };
-        
+
         StorageError::MissingRequiredField {
             field: field.to_string(),
             context,
@@ -74,7 +74,7 @@ impl StorageError {
             (None, Some(name)) => format!("name='{}'", name),
             (None, None) => "unknown sensor".to_string(),
         };
-        
+
         StorageError::InvalidDataFormat {
             message: message.to_string(),
             sensor_context,

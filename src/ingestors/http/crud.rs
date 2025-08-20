@@ -87,13 +87,13 @@ pub async fn list_metrics(State(state): State<HttpServerState>) -> Result<Json<V
                 "@id": metric.name.clone(),
                 "dct:identifier": format!("metric:{}", metric.name),
                 "dct:title": metric.name,
-                "dct:description": format!("Aggregated metric '{}' containing {} time series with dimensions: {}", 
-                    metric.name, 
+                "dct:description": format!("Aggregated metric '{}' containing {} time series with dimensions: {}",
+                    metric.name,
                     metric.series_count,
-                    if metric.label_keys.is_empty() { 
-                        "none".to_string() 
-                    } else { 
-                        metric.label_keys.join(", ") 
+                    if metric.label_keys.is_empty() {
+                        "none".to_string()
+                    } else {
+                        metric.label_keys.join(", ")
                     }
                 ),
                 "dcat:keyword": keywords,
@@ -188,7 +188,7 @@ pub async fn list_series(
             }
 
             let sensor_uuid = sensor.uuid.to_string();
-            
+
             // Build Prometheus-style ID like: metric_name{label1="value1",label2="value2"}
             let prometheus_id = if sensor.labels.is_empty() {
                 sensor.name.clone()
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_dcat_catalog_structure() {
-        
+
         // Test metrics catalog structure
         let metrics_catalog = json!({
             "@context": {
@@ -478,7 +478,7 @@ mod tests {
         assert_eq!(metrics_catalog["@type"], "dcat:Catalog");
         assert_eq!(metrics_catalog["@id"], "sensapp_metrics_catalog");
         assert!(metrics_catalog["dcat:dataset"].is_array());
-        
+
         // Test series catalog structure
         let series_catalog = json!({
             "@context": {
@@ -507,7 +507,7 @@ mod tests {
         assert_eq!(series_catalog["@type"], "dcat:Catalog");
         assert_eq!(series_catalog["@id"], "sensapp_series_catalog");
         assert!(series_catalog["dcat:dataset"].is_array());
-        
+
         // Validate distribution format
         let distribution = &series_catalog["dcat:dataset"][0]["dcat:distribution"][0];
         assert_eq!(distribution["dcat:mediaType"], "application/senml+json");

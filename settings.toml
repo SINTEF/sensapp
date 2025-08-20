@@ -5,7 +5,7 @@ storage_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp
 
 # Alternative storage backends (uncomment one to use):
 # storage_connection_string = "sqlite://sensapp.db"
-# storage_connection_string = "duckdb://sensapp.db" 
+# storage_connection_string = "duckdb://sensapp.db"
 # storage_connection_string = "bigquery://key.json?project_id=PROJECT&dataset_id=DATASET"
 # storage_connection_string = "rrdcached://localhost:42217?preset=munin"
 
@@ -25,4 +25,3 @@ storage_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp
 # url = "mqtt://localhost:1883"
 # client_id = "sensapp-001"
 # topics = ["sensors/+/temperature", "sensors/+/humidity"]
-

@@ -345,7 +345,7 @@ mod export_tests {
         assert!(temp_csv_str.lines().count() > 1); // At least header + data
 
         assert!(humidity_csv_str.contains("65")); // First humidity value (formatted as integer)
-        assert!(humidity_csv_str.contains("64.5")); // Second humidity value  
+        assert!(humidity_csv_str.contains("64.5")); // Second humidity value
         assert!(humidity_csv_str.contains("timestamp,value")); // Header
         assert!(humidity_csv_str.lines().count() > 1); // At least header + data
 
@@ -372,7 +372,7 @@ mod export_tests {
         // Debug: Print CSV to see actual format
         println!("Round trip CSV: {}", exported_csv_str);
 
-        // Then: Key data values should be preserved  
+        // Then: Key data values should be preserved
         // Note: Format might be different (e.g., datetime format), but values should match
         assert!(exported_csv_str.contains("20.5")); // Should contain the first temperature value
         assert!(exported_csv_str.contains("timestamp,value")); // Should have CSV header
@@ -405,7 +405,8 @@ mod export_tests {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_millis() % 10000;
+            .as_millis()
+            % 10000;
         let sensor_name = format!("export_perf_test_{}_{}", timestamp, id);
 
         // Create and ingest large dataset
@@ -468,7 +469,7 @@ mod integration_tests {
         let (csv_data, sensor_name_csv) = fixtures::temperature_sensor_csv_with_name();
         app.post_csv("/sensors/publish", &csv_data).await?;
 
-        let (json_data, _sensor_name_json) = fixtures::temperature_sensor_json_with_name();  
+        let (json_data, _sensor_name_json) = fixtures::temperature_sensor_json_with_name();
         app.post_json("/sensors/publish", &json_data).await?;
 
         // 2. Query the data
@@ -477,11 +478,11 @@ mod integration_tests {
 
         // 3. Verify data is correctly stored
         // Note: We now have 2 sensors because CSV and JSON use different names
-        storage.expect_sensor_count(2).await?; 
+        storage.expect_sensor_count(2).await?;
         let total_samples = DbHelpers::count_total_samples(&storage).await?;
         assert_eq!(total_samples, 8); // 5 from CSV + 3 from JSON
 
-        // 4. Export data from the CSV sensor 
+        // 4. Export data from the CSV sensor
         let sensor_data = storage
             .query_sensor_data(&sensor_name_csv, None, None, None)
             .await?
@@ -489,7 +490,7 @@ mod integration_tests {
 
         let exported_csv = sensapp::exporters::csv::CsvConverter::to_csv(&sensor_data)?;
 
-        // Then: Exported data should contain samples from CSV ingestion  
+        // Then: Exported data should contain samples from CSV ingestion
         let lines: Vec<&str> = exported_csv.trim().split('\n').collect();
         assert_eq!(lines.len(), 6); // Header + 5 data rows from CSV
 
@@ -522,11 +523,7 @@ mod integration_tests {
         metrics_response.assert_status(StatusCode::OK);
 
         // 3. Multiple concurrent requests shouldn't cause issues
-        let (r1, r2, r3) = tokio::join!(
-            app.get("/series"),
-            app.get("/series"),
-            app.get("/series")
-        );
+        let (r1, r2, r3) = tokio::join!(app.get("/series"), app.get("/series"), app.get("/series"));
 
         r1?.assert_status(StatusCode::OK);
         r2?.assert_status(StatusCode::OK);

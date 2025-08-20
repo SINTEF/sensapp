@@ -70,7 +70,7 @@ impl StorageInstance for PostgresStorage {
             .execute(&self.pool)
             .await
             .context("Failed to vacuum database")?;
-        
+
         Ok(())
     }
 
@@ -96,15 +96,15 @@ impl StorageInstance for PostgresStorage {
             let sensor_uuid = sensor_row.uuid.ok_or_else(|| {
                 StorageError::missing_field("UUID", None, sensor_row.name.as_deref())
             }).map_err(anyhow::Error::from)?;
-            
+
             let sensor_name = sensor_row.name.ok_or_else(|| {
                 StorageError::missing_field("name", Some(sensor_uuid), None)
             }).map_err(anyhow::Error::from)?;
-            
+
             let sensor_type_str = sensor_row.r#type.ok_or_else(|| {
                 StorageError::missing_field("type", Some(sensor_uuid), Some(&sensor_name))
             }).map_err(anyhow::Error::from)?;
-            
+
             let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
                 anyhow::Error::from(StorageError::invalid_data_format(
                     &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
@@ -112,7 +112,7 @@ impl StorageInstance for PostgresStorage {
                     Some(&sensor_name),
                 ))
             })?;
-            
+
             let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
                 (Some(name), description) => Some(Unit::new(name, description)),
                 _ => None,
@@ -121,12 +121,12 @@ impl StorageInstance for PostgresStorage {
             // Query labels for this sensor with proper error context
             let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
                 anyhow::Error::from(StorageError::missing_field(
-                    "sensor_id", 
-                    Some(sensor_uuid), 
+                    "sensor_id",
+                    Some(sensor_uuid),
                     Some(&sensor_name)
                 ))
             })?;
-            
+
             let labels_rows = sqlx::query!(
                 r#"
                 SELECT lnd.name as label_name, ldd.description as label_value
@@ -178,11 +178,11 @@ impl StorageInstance for PostgresStorage {
             let metric_name = metrics_row.metric_name.ok_or_else(|| {
                 anyhow::Error::from(StorageError::missing_field("metric_name", None, None))
             })?;
-            
+
             let sensor_type_str = metrics_row.r#type.ok_or_else(|| {
                 anyhow::Error::from(StorageError::missing_field("type", None, Some(&metric_name)))
             })?;
-            
+
             let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
                 anyhow::Error::from(StorageError::invalid_data_format(
                     &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
@@ -190,7 +190,7 @@ impl StorageInstance for PostgresStorage {
                     Some(&metric_name),
                 ))
             })?;
-            
+
             let unit = match (metrics_row.unit_name, metrics_row.unit_description) {
                 (Some(name), description) => Some(Unit::new(name, description)),
                 _ => None,
@@ -198,12 +198,12 @@ impl StorageInstance for PostgresStorage {
 
             let series_count = metrics_row.series_count.ok_or_else(|| {
                 anyhow::Error::from(StorageError::missing_field(
-                    "series_count", 
-                    None, 
+                    "series_count",
+                    None,
                     Some(&metric_name)
                 ))
             })?;
-            
+
             // Handle optional label_keys array
             let label_keys = metrics_row.label_keys.unwrap_or_default();
 
@@ -250,15 +250,15 @@ impl StorageInstance for PostgresStorage {
         let sensor_uuid = sensor_row.uuid.ok_or_else(|| {
             anyhow::Error::from(StorageError::missing_field("UUID", None, sensor_row.name.as_deref()))
         })?;
-        
+
         let sensor_name = sensor_row.name.ok_or_else(|| {
             anyhow::Error::from(StorageError::missing_field("name", Some(sensor_uuid), None))
         })?;
-        
+
         let sensor_type_str = sensor_row.r#type.ok_or_else(|| {
             anyhow::Error::from(StorageError::missing_field("type", Some(sensor_uuid), Some(&sensor_name)))
         })?;
-        
+
         let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
             anyhow::Error::from(StorageError::invalid_data_format(
                 &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
@@ -266,7 +266,7 @@ impl StorageInstance for PostgresStorage {
                 Some(&sensor_name),
             ))
         })?;
-        
+
         let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
             (Some(name), description) => Some(Unit::new(name, description)),
             _ => None,
@@ -275,8 +275,8 @@ impl StorageInstance for PostgresStorage {
         // Query labels for this sensor with proper context
         let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
             anyhow::Error::from(StorageError::missing_field(
-                "sensor_id", 
-                Some(sensor_uuid), 
+                "sensor_id",
+                Some(sensor_uuid),
                 Some(&sensor_name)
             ))
         })?;
@@ -377,15 +377,15 @@ impl StorageInstance for PostgresStorage {
         let sensor_uuid = sensor_row.uuid.ok_or_else(|| {
             anyhow::Error::from(StorageError::missing_field("UUID", None, sensor_row.name.as_deref()))
         })?;
-        
+
         let sensor_name = sensor_row.name.ok_or_else(|| {
             anyhow::Error::from(StorageError::missing_field("name", Some(sensor_uuid), None))
         })?;
-        
+
         let sensor_type_str = sensor_row.r#type.ok_or_else(|| {
             anyhow::Error::from(StorageError::missing_field("type", Some(sensor_uuid), Some(&sensor_name)))
         })?;
-        
+
         let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
             anyhow::Error::from(StorageError::invalid_data_format(
                 &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
@@ -393,7 +393,7 @@ impl StorageInstance for PostgresStorage {
                 Some(&sensor_name),
             ))
         })?;
-        
+
         let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
             (Some(name), description) => Some(Unit::new(name, description)),
             _ => None,
@@ -402,8 +402,8 @@ impl StorageInstance for PostgresStorage {
         // Query labels for this sensor with proper context
         let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
             anyhow::Error::from(StorageError::missing_field(
-                "sensor_id", 
-                Some(sensor_uuid), 
+                "sensor_id",
+                Some(sensor_uuid),
                 Some(&sensor_name)
             ))
         })?;
@@ -503,7 +503,7 @@ impl StorageInstance for PostgresStorage {
 
         // Note: We preserve the units table to avoid foreign key violations in tests
         // But we need to ensure common test units exist
-        
+
         // Insert common test units if they don't exist (using ON CONFLICT DO NOTHING for idempotency)
         sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT (name) DO NOTHING")
             .execute(&mut *tx).await?;
@@ -532,7 +532,7 @@ impl PostgresStorage {
         transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         single_sensor_batch: &crate::datamodel::batch::SingleSensorBatch,
     ) -> Result<()> {
-        
+
         let sensor_id =
             get_sensor_id_or_create_sensor(transaction, &single_sensor_batch.sensor).await?;
 
@@ -577,8 +577,8 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM integer_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM integer_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -612,8 +612,8 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM numeric_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM numeric_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -648,8 +648,8 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM float_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM float_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -686,7 +686,7 @@ impl PostgresStorage {
             SELECT sv.timestamp_ms, svd.value as string_value
             FROM string_values sv
             JOIN strings_values_dictionary svd ON sv.value = svd.id
-            WHERE sv.sensor_id = $1 
+            WHERE sv.sensor_id = $1
             AND ($2::BIGINT IS NULL OR sv.timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR sv.timestamp_ms <= $3)
             ORDER BY sv.timestamp_ms ASC
@@ -720,8 +720,8 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM boolean_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM boolean_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -755,8 +755,8 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, latitude, longitude FROM location_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, latitude, longitude FROM location_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -790,8 +790,8 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM json_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM json_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC
@@ -825,8 +825,8 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM blob_values 
-            WHERE sensor_id = $1 
+            SELECT timestamp_ms, value FROM blob_values
+            WHERE sensor_id = $1
             AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
             AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
             ORDER BY timestamp_ms ASC

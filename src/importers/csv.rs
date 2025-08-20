@@ -32,10 +32,10 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
     // Read all CSV data into a StringDataGrid
     let headers = csv_reader.headers().await?.clone();
     let column_names = headers.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    
+
     let mut rows = Vec::new();
     let mut records = csv_reader.records();
-    
+
     while let Some(record) = records.next().await {
         let record = record?;
         let row = record.iter().map(|s| s.to_string()).collect::<Vec<_>>();
@@ -43,20 +43,20 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
     }
 
     let data_grid = StringDataGrid::new(column_names.clone(), rows)?;
-    
+
     // Parse the CSV data
     let parsed_data = parse_csv_data_grid(data_grid)?;
-    
+
     // Use BatchBuilder to publish the data
     let mut batch_builder = BatchBuilder::new()?;
-    
+
     for (_sensor_name, (sensor, samples)) in parsed_data {
         batch_builder.add(sensor, samples).await?;
     }
-    
+
     // Send all batches to storage
     batch_builder.send_what_is_left(storage).await?;
-    
+
     Ok(())
 }
 
@@ -64,15 +64,15 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
 fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
     let column_names = &data_grid.column_names;
     let rows = &data_grid.rows;
-    
+
     if rows.is_empty() {
         return Err(anyhow!("CSV contains no data rows"));
     }
-    
+
     if column_names.len() < 2 {
         return Err(anyhow!("CSV must have at least 2 columns (datetime and values)"));
     }
-    
+
     // Convert rows to columns for type inference
     let mut columns = vec![Vec::new(); column_names.len()];
     for row in rows {
@@ -82,24 +82,24 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
             }
         }
     }
-    
+
     // Infer column types
     let inferred_columns: Vec<InferedColumn> = columns.iter()
         .map(|col| infer_column(col.clone(), true, false))
         .collect();
-    
+
     // Try to identify datetime column
     let datetime_column = likely_datetime_column(column_names, &inferred_columns);
-    
+
     // Find sensor name and value columns
     let sensor_name_idx = find_column_index(column_names, &["sensor_name", "metric", "name", "sensor"]);
     let value_idx = find_column_index(column_names, &["value", "reading", "measurement"]);
     let unit_idx = find_column_index(column_names, &["unit", "units"]);
     let datetime_idx = datetime_column.as_ref()
         .and_then(|name| column_names.iter().position(|col| col == name));
-    
+
     let mut sensors_data: SensorDataMap = HashMap::new();
-    
+
     // Process each row
     for (row_idx, row) in rows.iter().enumerate() {
         let datetime = if let Some(dt_idx) = datetime_idx {
@@ -108,17 +108,17 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
             // Use row index as timestamp if no datetime column
             SensAppDateTime::from_unix_seconds(row_idx as f64)
         };
-        
+
         if let (Some(sensor_name_idx), Some(value_idx)) = (sensor_name_idx, value_idx) {
             // Long format: one row per sample
             let sensor_name = row[sensor_name_idx].clone();
             if sensor_name.trim().is_empty() {
                 return Err(anyhow!("Empty sensor name found in row {}", row_idx + 1));
             }
-            
+
             let value = parse_value_from_inferred(&inferred_columns[value_idx], row_idx)?;
             let unit_name = unit_idx.map(|idx| row[idx].clone()).filter(|s| !s.is_empty());
-            
+
             sensors_data.entry(sensor_name.clone())
                 .or_insert_with(|| {
                     let sensor_type = inferred_value_to_sensor_type(&value);
@@ -139,10 +139,10 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
                 if Some(col_idx) == datetime_idx {
                     continue; // Skip datetime column
                 }
-                
+
                 let value = parse_value_from_inferred(&inferred_columns[col_idx], row_idx)?;
                 let sensor_name = col_name.clone();
-                
+
                 sensors_data.entry(sensor_name.clone())
                     .or_insert_with(|| {
                         let sensor_type = inferred_value_to_sensor_type(&value);
@@ -157,7 +157,7 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
                     .1.push((datetime, value));
                 sensor_count += 1;
             }
-            
+
             if sensor_count == 0 {
                 return Err(anyhow!("No sensor columns found - CSV format unclear"));
             }
@@ -168,28 +168,28 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
             ));
         }
     }
-    
+
     // Convert to final format
     if sensors_data.is_empty() {
         return Err(anyhow!("No sensors or data found in CSV"));
     }
-    
+
     let mut result = HashMap::new();
     for (sensor_name, (sensor, samples)) in sensors_data {
         if samples.is_empty() {
             return Err(anyhow!("Sensor '{}' has no data samples", sensor_name));
         }
-        
+
         let typed_samples = convert_samples_to_typed_samples(samples, &sensor.sensor_type)?;
         result.insert(sensor_name, (sensor, typed_samples));
     }
-    
+
     Ok(result)
 }
 
 fn find_column_index(column_names: &[String], candidates: &[&str]) -> Option<usize> {
     for candidate in candidates {
-        if let Some(idx) = column_names.iter().position(|name| 
+        if let Some(idx) = column_names.iter().position(|name|
             name.to_lowercase() == candidate.to_lowercase()
         ) {
             return Some(idx);

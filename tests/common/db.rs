@@ -87,7 +87,6 @@ impl DbHelpers {
         let sensors = storage.list_series(None).await?;
         Ok(sensors.into_iter().map(|s| s.name).collect())
     }
-
 }
 
 #[cfg(test)]
@@ -95,5 +94,4 @@ mod tests {
 
     // These tests would need a real database connection to run
     // They serve as documentation of the API we expect
-
 }

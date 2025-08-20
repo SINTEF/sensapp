@@ -17,7 +17,7 @@ jobs:
   build_and_test:
     name: Rust project with PostgreSQL
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:15
@@ -32,7 +32,7 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-    
+
     steps:
       - uses: actions/checkout@v3
       - run: rustup toolchain install stable --profile minimal --component clippy llvm-tools-preview --no-self-update
@@ -40,25 +40,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-all-crates: "true"
-      
+
       # Install sqlx-cli for PostgreSQL
       - run: cargo install sqlx-cli --no-default-features --features postgres
-      
+
       # Run PostgreSQL migrations and prepare
       - run: cargo sqlx migrate run --source src/storage/postgresql/migrations --database-url $DATABASE_URL
       - run: cargo sqlx prepare --database-url $DATABASE_URL
-      
+
       # Run linting
       - run: cargo clippy --verbose
-      
+
       # Run tests with coverage
       - run: cargo llvm-cov --verbose --lcov --output-path lcov.info
-      
+
       # Run integration tests
       - run: cargo test --test ingestion --verbose
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432
-      
+
       # Upload coverage
       - uses: VeryGoodOpenSource/very_good_coverage@v2
         with:

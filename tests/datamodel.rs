@@ -1,6 +1,7 @@
 mod common;
 
 use anyhow::Result;
+use sensapp::config::load_configuration_for_tests;
 use sensapp::datamodel::batch::{Batch, SingleSensorBatch};
 use sensapp::datamodel::batch_builder::BatchBuilder;
 use sensapp::datamodel::sensapp_vec::{SensAppLabels, SensAppVec};
@@ -8,7 +9,6 @@ use sensapp::datamodel::unit::Unit;
 use sensapp::datamodel::*;
 use std::sync::Arc;
 use uuid::Uuid;
-use sensapp::config::load_configuration_for_tests;
 
 // Ensure configuration is loaded once for all tests in this module
 static INIT: std::sync::Once = std::sync::Once::new();
@@ -320,8 +320,6 @@ mod batch_builder_tests {
     use super::*;
     use common::fixtures;
 
-
-
     #[tokio::test]
     async fn test_batch_builder_creation() -> Result<()> {
         ensure_config();
@@ -368,7 +366,6 @@ mod batch_builder_tests {
 
         Ok(())
     }
-
 }
 
 /// Test typed samples edge cases and conversions

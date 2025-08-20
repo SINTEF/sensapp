@@ -6,16 +6,16 @@ use serde::{Deserialize, Serialize};
 pub struct Metric {
     /// The metric name (e.g., "temperature", "humidity")
     pub name: String,
-    
+
     /// The data type of this metric
     pub sensor_type: SensorType,
-    
+
     /// The unit of measurement (optional)
     pub unit: Option<Unit>,
-    
+
     /// Total number of time series for this metric
     pub series_count: i64,
-    
+
     /// Common label keys used across series of this metric
     pub label_keys: Vec<String>,
 }

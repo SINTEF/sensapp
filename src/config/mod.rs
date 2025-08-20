@@ -103,7 +103,7 @@ static TEST_CONFIG_INIT: Mutex<()> = Mutex::new(());
 #[allow(dead_code)] // Used by integration tests, not visible in cargo check
 pub fn load_configuration_for_tests() -> Result<(), Error> {
     let _guard = TEST_CONFIG_INIT.lock().unwrap();
-    
+
     // If config is already loaded, return success
     if SENSAPP_CONFIG.get().is_some() {
         return Ok(());

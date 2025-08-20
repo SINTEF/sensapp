@@ -471,8 +471,8 @@ impl SqliteStorage {
     ) -> Result<TypedSamples> {
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM integer_values 
-            WHERE sensor_id = ? 
+            SELECT timestamp_ms, value FROM integer_values
+            WHERE sensor_id = ?
             AND (? IS NULL OR timestamp_ms >= ?)
             AND (? IS NULL OR timestamp_ms <= ?)
             ORDER BY timestamp_ms ASC
@@ -507,8 +507,8 @@ impl SqliteStorage {
     ) -> Result<TypedSamples> {
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM numeric_values 
-            WHERE sensor_id = ? 
+            SELECT timestamp_ms, value FROM numeric_values
+            WHERE sensor_id = ?
             AND (? IS NULL OR timestamp_ms >= ?)
             AND (? IS NULL OR timestamp_ms <= ?)
             ORDER BY timestamp_ms ASC
@@ -543,8 +543,8 @@ impl SqliteStorage {
     ) -> Result<TypedSamples> {
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM float_values 
-            WHERE sensor_id = ? 
+            SELECT timestamp_ms, value FROM float_values
+            WHERE sensor_id = ?
             AND (? IS NULL OR timestamp_ms >= ?)
             AND (? IS NULL OR timestamp_ms <= ?)
             ORDER BY timestamp_ms ASC
@@ -582,7 +582,7 @@ impl SqliteStorage {
             SELECT sv.timestamp_ms, svd.value as string_value
             FROM string_values sv
             JOIN strings_values_dictionary svd ON sv.value = svd.id
-            WHERE sv.sensor_id = ? 
+            WHERE sv.sensor_id = ?
             AND (? IS NULL OR sv.timestamp_ms >= ?)
             AND (? IS NULL OR sv.timestamp_ms <= ?)
             ORDER BY sv.timestamp_ms ASC
@@ -617,8 +617,8 @@ impl SqliteStorage {
     ) -> Result<TypedSamples> {
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM boolean_values 
-            WHERE sensor_id = ? 
+            SELECT timestamp_ms, value FROM boolean_values
+            WHERE sensor_id = ?
             AND (? IS NULL OR timestamp_ms >= ?)
             AND (? IS NULL OR timestamp_ms <= ?)
             ORDER BY timestamp_ms ASC
@@ -653,8 +653,8 @@ impl SqliteStorage {
     ) -> Result<TypedSamples> {
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, latitude, longitude FROM location_values 
-            WHERE sensor_id = ? 
+            SELECT timestamp_ms, latitude, longitude FROM location_values
+            WHERE sensor_id = ?
             AND (? IS NULL OR timestamp_ms >= ?)
             AND (? IS NULL OR timestamp_ms <= ?)
             ORDER BY timestamp_ms ASC
@@ -689,8 +689,8 @@ impl SqliteStorage {
     ) -> Result<TypedSamples> {
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM json_values 
-            WHERE sensor_id = ? 
+            SELECT timestamp_ms, value FROM json_values
+            WHERE sensor_id = ?
             AND (? IS NULL OR timestamp_ms >= ?)
             AND (? IS NULL OR timestamp_ms <= ?)
             ORDER BY timestamp_ms ASC
@@ -726,8 +726,8 @@ impl SqliteStorage {
     ) -> Result<TypedSamples> {
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM blob_values 
-            WHERE sensor_id = ? 
+            SELECT timestamp_ms, value FROM blob_values
+            WHERE sensor_id = ?
             AND (? IS NULL OR timestamp_ms >= ?)
             AND (? IS NULL OR timestamp_ms <= ?)
             ORDER BY timestamp_ms ASC
