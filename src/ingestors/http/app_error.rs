@@ -1,10 +1,10 @@
+use crate::storage::StorageError;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use serde_json::json;
 use utoipa::ToSchema;
-use crate::storage::StorageError;
 
 // Anyhow error handling with axum
 // https://github.com/tokio-rs/axum/blob/d3112a40d55f123bc5e65f995e2068e245f12055/examples/anyhow-error-response/src/main.rs
@@ -32,25 +32,30 @@ impl IntoResponse for AppError {
             }
             AppError::BadRequest(error) => (StatusCode::BAD_REQUEST, error.to_string()),
             AppError::NotFound(error) => (StatusCode::NOT_FOUND, error.to_string()),
-            AppError::Storage(storage_error) => {
-                match &storage_error {
-                    StorageError::SensorNotFound { .. } | StorageError::MetricNotFound { .. } => {
-                        (StatusCode::NOT_FOUND, storage_error.to_string())
-                    }
-                    StorageError::MissingRequiredField { .. } | StorageError::InvalidDataFormat { .. } => {
-                        eprintln!("Data integrity issue: {}", storage_error);
-                        (StatusCode::BAD_REQUEST, storage_error.to_string())
-                    }
-                    StorageError::Configuration(_) => {
-                        eprintln!("Storage configuration error: {}", storage_error);
-                        (StatusCode::INTERNAL_SERVER_ERROR, "Storage configuration error".to_string())
-                    }
-                    StorageError::Database(_) | StorageError::OperationFailed { .. } => {
-                        eprintln!("Storage operation failed: {}", storage_error);
-                        (StatusCode::INTERNAL_SERVER_ERROR, "Storage operation failed".to_string())
-                    }
+            AppError::Storage(storage_error) => match &storage_error {
+                StorageError::SensorNotFound { .. } | StorageError::MetricNotFound { .. } => {
+                    (StatusCode::NOT_FOUND, storage_error.to_string())
                 }
-            }
+                StorageError::MissingRequiredField { .. }
+                | StorageError::InvalidDataFormat { .. } => {
+                    eprintln!("Data integrity issue: {}", storage_error);
+                    (StatusCode::BAD_REQUEST, storage_error.to_string())
+                }
+                StorageError::Configuration(_) => {
+                    eprintln!("Storage configuration error: {}", storage_error);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Storage configuration error".to_string(),
+                    )
+                }
+                StorageError::Database(_) | StorageError::OperationFailed { .. } => {
+                    eprintln!("Storage operation failed: {}", storage_error);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Storage operation failed".to_string(),
+                    )
+                }
+            },
         };
         let body = Json(json!({ "error": message }));
         (status, body).into_response()

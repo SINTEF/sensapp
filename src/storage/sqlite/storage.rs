@@ -1,51 +1,65 @@
-use super::{
+use super::sqlite_publishers::*;
+use super::sqlite_utilities::get_sensor_id_or_create_sensor;
+use crate::config;
+use crate::datamodel::batch::{Batch, SingleSensorBatch};
+use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+use crate::datamodel::unit::Unit;
+use crate::datamodel::{
+    Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples,
+    sensapp_vec::SensAppLabels,
+};
+use crate::storage::{
     DEFAULT_QUERY_LIMIT, StorageError, StorageInstance,
     common::{datetime_to_micros, sync_with_timeout},
 };
-use crate::config;
-use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
-use crate::datamodel::{
-    Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
-};
-use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
 use geo::Point;
+use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
 use smallvec::smallvec;
-use sqlx::{PgPool, postgres::PgConnectOptions};
-use std::{str::FromStr, sync::Arc};
+use sqlx::{Sqlite, Transaction, prelude::*};
+use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
-pub mod postgresql_publishers;
-pub mod postgresql_utilities;
-
-use postgresql_publishers::*;
-use postgresql_utilities::get_sensor_id_or_create_sensor;
-
+// SQLite implementation
 #[derive(Debug)]
-pub struct PostgresStorage {
-    pool: PgPool,
+pub struct SqliteStorage {
+    pool: SqlitePool,
 }
 
-impl PostgresStorage {
+impl SqliteStorage {
     pub async fn connect(connection_string: &str) -> Result<Self> {
-        let connect_options = PgConnectOptions::from_str(connection_string)
-            .context("Failed to create postgres connection options")?;
+        let connect_options = SqliteConnectOptions::from_str(connection_string)
+            .context("Failed to create sqlite connection options")?
+            // Create the database file if it doesn't exist
+            .create_if_missing(true)
+            // The Wall mode should perform better for SensApp
+            // It is the default in sqlx, but we want to make sure it stays that way
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            // Foreign keys have a performance impact, they are disabled by default
+            // in SQLite, but we want to make sure they stay disabled.
+            .foreign_keys(false)
+            // Set a busy timeout of 5 seconds
+            .busy_timeout(Duration::from_secs(5));
 
-        let pool = PgPool::connect_with(connect_options)
+        let pool = sqlx::SqlitePool::connect_with(connect_options)
             .await
-            .context("Failed to create postgres pool")?;
+            .context("Failed to create sqlite pool")?;
 
         Ok(Self { pool })
     }
 }
 
 #[async_trait]
-impl StorageInstance for PostgresStorage {
+impl StorageInstance for SqliteStorage {
     async fn create_or_migrate(&self) -> Result<()> {
-        sqlx::migrate!("src/storage/postgresql/migrations")
+        // Implement schema creation or migration logic here
+        sqlx::migrate!("src/storage/sqlite/migrations")
             .run(&self.pool)
             .await
             .context("Failed to migrate database")?;
@@ -64,18 +78,18 @@ impl StorageInstance for PostgresStorage {
     }
 
     async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
-        // PostgreSQL doesn't need to do anything special for sync
-        // as we use transaction
+        // SQLite doesn't need to do anything special for sync
+        // As we use transactions and the WAL mode.
         let config = config::get().context("Failed to get configuration")?;
         sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {
+        // Vacuum the SQLite database to reclaim space and optimize performance
         sqlx::query("VACUUM")
             .execute(&self.pool)
             .await
             .context("Failed to vacuum database")?;
-
         Ok(())
     }
 
@@ -86,9 +100,9 @@ impl StorageInstance for PostgresStorage {
         #[derive(sqlx::FromRow)]
         struct SensorRow {
             sensor_id: Option<i64>,
-            uuid: Option<Uuid>,
-            name: Option<String>,
-            r#type: Option<String>,
+            uuid: String,
+            name: String,
+            r#type: String,
             unit_name: Option<String>,
             unit_description: Option<String>,
         }
@@ -98,7 +112,7 @@ impl StorageInstance for PostgresStorage {
             r#"
             SELECT sensor_id, uuid, name, type, unit_name, unit_description
             FROM sensor_catalog_view
-            WHERE ($1::TEXT IS NULL OR name = $1)
+            WHERE (?1 IS NULL OR name = ?1)
             ORDER BY uuid ASC
             "#,
         )
@@ -110,35 +124,29 @@ impl StorageInstance for PostgresStorage {
 
         for sensor_row in sensor_rows {
             // Parse sensor metadata with improved error handling
-            let sensor_uuid = sensor_row
-                .uuid
-                .ok_or_else(|| {
-                    StorageError::missing_field("UUID", None, sensor_row.name.as_deref())
-                })
-                .map_err(anyhow::Error::from)?;
-
-            let sensor_name = sensor_row
-                .name
-                .ok_or_else(|| StorageError::missing_field("name", Some(sensor_uuid), None))
-                .map_err(anyhow::Error::from)?;
-
-            let sensor_type_str = sensor_row
-                .r#type
-                .ok_or_else(|| {
-                    StorageError::missing_field("type", Some(sensor_uuid), Some(&sensor_name))
-                })
-                .map_err(anyhow::Error::from)?;
-
-            let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
+            let sensor_uuid = Uuid::parse_str(&sensor_row.uuid).map_err(|e| {
                 anyhow::Error::from(StorageError::invalid_data_format(
-                    &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
-                    Some(sensor_uuid),
-                    Some(&sensor_name),
+                    &format!("Failed to parse sensor UUID '{}': {}", sensor_row.uuid, e),
+                    None,
+                    Some(&sensor_row.name),
                 ))
             })?;
 
-            let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
-                (Some(name), description) => Some(Unit::new(name, description)),
+            let sensor_name = &sensor_row.name;
+            let sensor_type_str = &sensor_row.r#type;
+
+            let sensor_type = SensorType::from_str(sensor_type_str).map_err(|e| {
+                anyhow::Error::from(StorageError::invalid_data_format(
+                    &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
+                    Some(sensor_uuid),
+                    Some(sensor_name),
+                ))
+            })?;
+
+            let unit = match sensor_row.unit_name {
+                Some(name) if !name.is_empty() => {
+                    Some(Unit::new(name, sensor_row.unit_description))
+                }
                 _ => None,
             };
 
@@ -147,7 +155,7 @@ impl StorageInstance for PostgresStorage {
                 anyhow::Error::from(StorageError::missing_field(
                     "sensor_id",
                     Some(sensor_uuid),
-                    Some(&sensor_name),
+                    Some(sensor_name),
                 ))
             })?;
 
@@ -163,7 +171,7 @@ impl StorageInstance for PostgresStorage {
                 FROM labels l
                 JOIN labels_name_dictionary lnd ON l.name = lnd.id
                 JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                WHERE l.sensor_id = $1
+                WHERE l.sensor_id = ?
                 "#,
             )
             .bind(sensor_id)
@@ -181,7 +189,13 @@ impl StorageInstance for PostgresStorage {
                 labels.push((label_row.label_name, label_row.label_value));
             }
 
-            let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
+            let sensor = Sensor::new(
+                sensor_uuid,
+                sensor_name.to_string(),
+                sensor_type,
+                unit,
+                Some(labels),
+            );
 
             sensors.push(sensor);
         }
@@ -194,10 +208,10 @@ impl StorageInstance for PostgresStorage {
         struct MetricsRow {
             metric_name: Option<String>,
             r#type: Option<String>,
-            unit_name: Option<String>,
+            unit_name: String,
             unit_description: Option<String>,
-            series_count: Option<i64>,
-            label_keys: Option<Vec<String>>,
+            series_count: i64,
+            label_keys: Option<String>,
         }
 
         // Query metrics summary using the view
@@ -234,21 +248,29 @@ impl StorageInstance for PostgresStorage {
                 ))
             })?;
 
-            let unit = match (metrics_row.unit_name, metrics_row.unit_description) {
-                (Some(name), description) => Some(Unit::new(name, description)),
-                _ => None,
+            // Handle unit - SQLite returns concrete String or NULL
+            let unit = if !metrics_row.unit_name.is_empty() {
+                Some(Unit::new(
+                    metrics_row.unit_name,
+                    metrics_row.unit_description,
+                ))
+            } else {
+                None
             };
 
-            let series_count = metrics_row.series_count.ok_or_else(|| {
-                anyhow::Error::from(StorageError::missing_field(
-                    "series_count",
-                    None,
-                    Some(&metric_name),
-                ))
-            })?;
+            // Handle series_count - it's already an i64
+            let series_count = metrics_row.series_count;
 
-            // Handle optional label_keys array
-            let label_keys = metrics_row.label_keys.unwrap_or_default();
+            // Handle label_keys - SQLite uses GROUP_CONCAT which returns a string
+            let label_keys = metrics_row
+                .label_keys
+                .map(|keys| {
+                    keys.as_str()
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
 
             let metric = Metric::new(metric_name, sensor_type, unit, series_count, label_keys);
 
@@ -264,29 +286,31 @@ impl StorageInstance for PostgresStorage {
         start_time: Option<SensAppDateTime>,
         end_time: Option<SensAppDateTime>,
         limit: Option<usize>,
-    ) -> Result<Option<crate::datamodel::SensorData>> {
+    ) -> Result<Option<SensorData>> {
         // Parse UUID
         let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
 
         #[derive(sqlx::FromRow)]
         struct SensorMetadataRow {
             sensor_id: Option<i64>,
-            uuid: Option<Uuid>,
-            name: Option<String>,
-            r#type: Option<String>,
+            uuid: String,
+            name: String,
+            r#type: String,
             unit_name: Option<String>,
             unit_description: Option<String>,
         }
 
-        // Query sensor metadata by UUID using the catalog view
+        // Query sensor metadata by UUID
+        let uuid_string = parsed_uuid.to_string();
         let sensor_row: Option<SensorMetadataRow> = sqlx::query_as(
             r#"
-            SELECT sensor_id, uuid, name, type, unit_name, unit_description
-            FROM sensor_catalog_view
-            WHERE uuid = $1
-            "#,
+            SELECT s.sensor_id, s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
+            FROM sensors s
+            LEFT JOIN units u ON s.unit = u.id
+            WHERE s.uuid = ?
+            "#
         )
-        .bind(parsed_uuid)
+        .bind(&uuid_string)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -296,47 +320,39 @@ impl StorageInstance for PostgresStorage {
         };
 
         // Parse sensor metadata with improved error handling
-        let sensor_uuid = sensor_row.uuid.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field(
-                "UUID",
+        let sensor_uuid = Uuid::parse_str(&sensor_row.uuid).map_err(|e| {
+            anyhow::Error::from(StorageError::invalid_data_format(
+                &format!("Failed to parse sensor UUID '{}': {}", sensor_row.uuid, e),
                 None,
-                sensor_row.name.as_deref(),
+                Some(&sensor_row.name),
             ))
         })?;
 
-        let sensor_name = sensor_row.name.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field("name", Some(sensor_uuid), None))
-        })?;
+        let sensor_name = &sensor_row.name;
+        let sensor_type_str = &sensor_row.r#type;
 
-        let sensor_type_str = sensor_row.r#type.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field(
-                "type",
-                Some(sensor_uuid),
-                Some(&sensor_name),
-            ))
-        })?;
-
-        let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
+        let sensor_type = SensorType::from_str(sensor_type_str).map_err(|e| {
             anyhow::Error::from(StorageError::invalid_data_format(
                 &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
                 Some(sensor_uuid),
-                Some(&sensor_name),
+                Some(sensor_name),
             ))
         })?;
 
         let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
-            (Some(name), description) => Some(Unit::new(name, description)),
+            (Some(name), description) if !name.is_empty() => Some(Unit::new(name, description)),
             _ => None,
         };
 
-        // Query labels for this sensor with proper context
+        // Query labels for this sensor with proper error context
         let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
             anyhow::Error::from(StorageError::missing_field(
                 "sensor_id",
                 Some(sensor_uuid),
-                Some(&sensor_name),
+                Some(sensor_name),
             ))
         })?;
+
         #[derive(sqlx::FromRow)]
         struct LabelRow {
             label_name: String,
@@ -349,56 +365,68 @@ impl StorageInstance for PostgresStorage {
             FROM labels l
             JOIN labels_name_dictionary lnd ON l.name = lnd.id
             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-            WHERE l.sensor_id = $1
+            WHERE l.sensor_id = ?
             "#,
         )
         .bind(sensor_id)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to query labels for sensor UUID={} name='{}'",
+                sensor_uuid, sensor_name
+            )
+        })?;
 
         let mut labels: SensAppLabels = smallvec![];
         for label_row in labels_rows {
             labels.push((label_row.label_name, label_row.label_value));
         }
 
-        let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
+        let sensor = Sensor::new(
+            sensor_uuid,
+            sensor_name.to_string(),
+            sensor_type,
+            unit,
+            Some(labels),
+        );
 
-        // Convert SensAppDateTime to microseconds for database queries using common utility
-        let start_time_us = start_time.as_ref().map(datetime_to_micros);
-        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+        // Convert datetime parameters to microseconds for database queries
+        let start_time_micros = start_time.as_ref().map(datetime_to_micros);
+        let end_time_micros = end_time.as_ref().map(datetime_to_micros);
 
         // Query samples based on sensor type
-        let samples = match sensor.sensor_type {
+        let samples = match sensor_type {
             SensorType::Integer => {
-                self.query_integer_samples(sensor_id, start_time_us, end_time_us, limit)
+                self.query_integer_samples(sensor_id, start_time_micros, end_time_micros, limit)
                     .await?
             }
             SensorType::Numeric => {
-                self.query_numeric_samples(sensor_id, start_time_us, end_time_us, limit)
+                self.query_numeric_samples(sensor_id, start_time_micros, end_time_micros, limit)
                     .await?
             }
             SensorType::Float => {
-                self.query_float_samples(sensor_id, start_time_us, end_time_us, limit)
+                self.query_float_samples(sensor_id, start_time_micros, end_time_micros, limit)
                     .await?
             }
             SensorType::String => {
-                self.query_string_samples(sensor_id, start_time_us, end_time_us, limit)
+                self.query_string_samples(sensor_id, start_time_micros, end_time_micros, limit)
                     .await?
             }
             SensorType::Boolean => {
-                self.query_boolean_samples(sensor_id, start_time_us, end_time_us, limit)
+                self.query_boolean_samples(sensor_id, start_time_micros, end_time_micros, limit)
                     .await?
             }
             SensorType::Location => {
-                self.query_location_samples(sensor_id, start_time_us, end_time_us, limit)
+                self.query_location_samples(sensor_id, start_time_micros, end_time_micros, limit)
                     .await?
             }
             SensorType::Json => {
-                self.query_json_samples(sensor_id, start_time_us, end_time_us, limit)
+                self.query_json_samples(sensor_id, start_time_micros, end_time_micros, limit)
                     .await?
             }
             SensorType::Blob => {
-                self.query_blob_samples(sensor_id, start_time_us, end_time_us, limit)
+                self.query_blob_samples(sensor_id, start_time_micros, end_time_micros, limit)
                     .await?
             }
         };
@@ -460,29 +488,23 @@ impl StorageInstance for PostgresStorage {
         // Note: We preserve the units table to avoid foreign key violations in tests
         // But we need to ensure common test units exist
 
-        // Insert common test units if they don't exist (using ON CONFLICT DO NOTHING for idempotency)
-        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT (name) DO NOTHING")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT (name) DO NOTHING")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('m', 'Meters') ON CONFLICT (name) DO NOTHING")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('kg', 'Kilograms') ON CONFLICT (name) DO NOTHING")
-            .execute(&mut *tx).await?;
+        // Insert common test units if they don't exist (using INSERT OR IGNORE for idempotency)
+        sqlx::query("INSERT OR IGNORE INTO units (name, description) VALUES ('°C', 'Celsius')")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT OR IGNORE INTO units (name, description) VALUES ('%', 'Percentage')")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT OR IGNORE INTO units (name, description) VALUES ('m', 'Meters')")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT OR IGNORE INTO units (name, description) VALUES ('kg', 'Kilograms')")
+            .execute(&mut *tx)
+            .await?;
 
-        // Reset sequences for clean test data
-        sqlx::query("ALTER SEQUENCE sensors_sensor_id_seq RESTART WITH 1")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("ALTER SEQUENCE strings_values_dictionary_id_seq RESTART WITH 1")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("ALTER SEQUENCE labels_description_dictionary_id_seq RESTART WITH 1")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("ALTER SEQUENCE labels_name_dictionary_id_seq RESTART WITH 1")
-            .execute(&mut *tx)
-            .await?;
+        // Reset SQLite sequences for clean test data
+        sqlx::query("DELETE FROM sqlite_sequence WHERE name IN ('sensors', 'strings_values_dictionary', 'labels_description_dictionary', 'labels_name_dictionary')")
+            .execute(&mut *tx).await.ok(); // Ignore errors if table doesn't exist
 
         tx.commit()
             .await
@@ -492,42 +514,73 @@ impl StorageInstance for PostgresStorage {
     }
 }
 
-impl PostgresStorage {
+impl SqliteStorage {
     async fn publish_single_sensor_batch(
         &self,
-        transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        single_sensor_batch: &crate::datamodel::batch::SingleSensorBatch,
+        transaction: &mut Transaction<'_, Sqlite>,
+        single_sensor_batch: &SingleSensorBatch,
     ) -> Result<()> {
         let sensor_id =
             get_sensor_id_or_create_sensor(transaction, &single_sensor_batch.sensor).await?;
-
-        let samples_guard = single_sensor_batch.samples.read().await;
-        match &*samples_guard {
-            TypedSamples::Integer(values) => {
-                publish_integer_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::Numeric(values) => {
-                publish_numeric_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::Float(values) => {
-                publish_float_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::String(values) => {
-                publish_string_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::Boolean(values) => {
-                publish_boolean_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::Location(values) => {
-                publish_location_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::Blob(values) => {
-                publish_blob_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::Json(values) => {
-                publish_json_values(transaction, sensor_id, values).await?;
+        {
+            let samples_guard = single_sensor_batch.samples.read().await;
+            match &*samples_guard {
+                TypedSamples::Integer(samples) => {
+                    publish_integer_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Numeric(samples) => {
+                    publish_numeric_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Float(samples) => {
+                    publish_float_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::String(samples) => {
+                    publish_string_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Boolean(samples) => {
+                    publish_boolean_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Location(samples) => {
+                    publish_location_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Blob(samples) => {
+                    publish_blob_values(transaction, sensor_id, samples).await?;
+                }
+                TypedSamples::Json(samples) => {
+                    publish_json_values(transaction, sensor_id, samples).await?;
+                }
             }
         }
+        Ok(())
+    }
+
+    #[allow(dead_code)] // May be used for maintenance operations in the future
+    async fn deduplicate(&self) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        transaction
+            .execute(sqlx::query(
+                r#"
+            DELETE FROM integer_values WHERE rowid NOT IN (
+                SELECT MIN(rowid) FROM integer_values GROUP BY sensor_id, timestamp_us, value
+            )
+            "#,
+            ))
+            .await?;
+
+        transaction
+            .execute(sqlx::query(
+                r#"
+            DELETE FROM float_values WHERE rowid NOT IN (
+                SELECT MIN(rowid) FROM float_values GROUP BY sensor_id, timestamp_us, value
+            )
+            "#,
+            ))
+            .await?;
+
+        transaction.commit().await?;
+
+        let vacuum = sqlx::query("VACUUM");
+        vacuum.execute(&self.pool).await?;
 
         Ok(())
     }
@@ -545,20 +598,23 @@ impl PostgresStorage {
             value: i64,
         }
 
+        let limit_value = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
         let rows: Vec<IntegerValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_us, value FROM integer_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            WHERE sensor_id = ?
+            AND (? IS NULL OR timestamp_us >= ?)
+            AND (? IS NULL OR timestamp_us <= ?)
             ORDER BY timestamp_us ASC
-            LIMIT $4
+            LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
+        .bind(start_time)
         .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
+        .bind(end_time)
+        .bind(limit_value)
         .fetch_all(&self.pool)
         .await?;
 
@@ -582,30 +638,33 @@ impl PostgresStorage {
         #[derive(sqlx::FromRow)]
         struct NumericValueRow {
             timestamp_us: i64,
-            value: rust_decimal::Decimal,
+            value: String,
         }
 
+        let limit_value = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
         let rows: Vec<NumericValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_us, value FROM numeric_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            WHERE sensor_id = ?
+            AND (? IS NULL OR timestamp_us >= ?)
+            AND (? IS NULL OR timestamp_us <= ?)
             ORDER BY timestamp_us ASC
-            LIMIT $4
+            LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
+        .bind(start_time)
         .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
+        .bind(end_time)
+        .bind(limit_value)
         .fetch_all(&self.pool)
         .await?;
 
         let mut samples = smallvec![];
         for row in rows {
             let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = row.value;
+            let value = Decimal::from_str(&row.value).context("Failed to parse decimal value")?;
             samples.push(Sample { datetime, value });
         }
 
@@ -625,20 +684,23 @@ impl PostgresStorage {
             value: f64,
         }
 
+        let limit_value = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
         let rows: Vec<FloatValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_us, value FROM float_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            WHERE sensor_id = ?
+            AND (? IS NULL OR timestamp_us >= ?)
+            AND (? IS NULL OR timestamp_us <= ?)
             ORDER BY timestamp_us ASC
-            LIMIT $4
+            LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
+        .bind(start_time)
         .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
+        .bind(end_time)
+        .bind(limit_value)
         .fetch_all(&self.pool)
         .await?;
 
@@ -665,22 +727,25 @@ impl PostgresStorage {
             string_value: String,
         }
 
+        let limit_value = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
         let rows: Vec<StringValueRow> = sqlx::query_as(
             r#"
             SELECT sv.timestamp_us, svd.value as string_value
             FROM string_values sv
             JOIN strings_values_dictionary svd ON sv.value = svd.id
-            WHERE sv.sensor_id = $1
-            AND ($2::BIGINT IS NULL OR sv.timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR sv.timestamp_us <= $3)
+            WHERE sv.sensor_id = ?
+            AND (? IS NULL OR sv.timestamp_us >= ?)
+            AND (? IS NULL OR sv.timestamp_us <= ?)
             ORDER BY sv.timestamp_us ASC
-            LIMIT $4
+            LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
+        .bind(start_time)
         .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
+        .bind(end_time)
+        .bind(limit_value)
         .fetch_all(&self.pool)
         .await?;
 
@@ -704,30 +769,33 @@ impl PostgresStorage {
         #[derive(sqlx::FromRow)]
         struct BooleanValueRow {
             timestamp_us: i64,
-            value: bool,
+            value: i64,
         }
 
+        let limit_value = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
         let rows: Vec<BooleanValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_us, value FROM boolean_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            WHERE sensor_id = ?
+            AND (? IS NULL OR timestamp_us >= ?)
+            AND (? IS NULL OR timestamp_us <= ?)
             ORDER BY timestamp_us ASC
-            LIMIT $4
+            LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
+        .bind(start_time)
         .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
+        .bind(end_time)
+        .bind(limit_value)
         .fetch_all(&self.pool)
         .await?;
 
         let mut samples = smallvec![];
         for row in rows {
             let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = row.value;
+            let value = row.value != 0;
             samples.push(Sample { datetime, value });
         }
 
@@ -748,20 +816,23 @@ impl PostgresStorage {
             longitude: f64,
         }
 
+        let limit_value = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
         let rows: Vec<LocationValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_us, latitude, longitude FROM location_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            WHERE sensor_id = ?
+            AND (? IS NULL OR timestamp_us >= ?)
+            AND (? IS NULL OR timestamp_us <= ?)
             ORDER BY timestamp_us ASC
-            LIMIT $4
+            LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
+        .bind(start_time)
         .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
+        .bind(end_time)
+        .bind(limit_value)
         .fetch_all(&self.pool)
         .await?;
 
@@ -785,30 +856,34 @@ impl PostgresStorage {
         #[derive(sqlx::FromRow)]
         struct JsonValueRow {
             timestamp_us: i64,
-            value: JsonValue,
+            value: Vec<u8>,
         }
 
+        let limit_value = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
         let rows: Vec<JsonValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_us, value FROM json_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            WHERE sensor_id = ?
+            AND (? IS NULL OR timestamp_us >= ?)
+            AND (? IS NULL OR timestamp_us <= ?)
             ORDER BY timestamp_us ASC
-            LIMIT $4
+            LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
+        .bind(start_time)
         .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
+        .bind(end_time)
+        .bind(limit_value)
         .fetch_all(&self.pool)
         .await?;
 
         let mut samples = smallvec![];
         for row in rows {
             let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value: JsonValue = row.value;
+            let value: JsonValue =
+                serde_json::from_slice(&row.value).context("Failed to parse JSON value")?;
             samples.push(Sample { datetime, value });
         }
 
@@ -828,20 +903,23 @@ impl PostgresStorage {
             value: Vec<u8>,
         }
 
+        let limit_value = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
         let rows: Vec<BlobValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_us, value FROM blob_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            WHERE sensor_id = ?
+            AND (? IS NULL OR timestamp_us >= ?)
+            AND (? IS NULL OR timestamp_us <= ?)
             ORDER BY timestamp_us ASC
-            LIMIT $4
+            LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
+        .bind(start_time)
         .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
+        .bind(end_time)
+        .bind(limit_value)
         .fetch_all(&self.pool)
         .await?;
 
@@ -855,6 +933,3 @@ impl PostgresStorage {
         Ok(TypedSamples::Blob(samples))
     }
 }
-
-// Unit tests are covered by the integration tests in tests/crud_dcat_api.rs
-// which test the full end-to-end functionality including the HTTP endpoints

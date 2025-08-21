@@ -1,8 +1,12 @@
 use super::{app_error::AppError, state::HttpServerState};
+#[cfg(all(test, feature = "sqlite"))]
+use crate::config::load_configuration;
 use crate::datamodel::{
     SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
     sensapp_datetime::SensAppDateTimeExt, sensapp_vec::SensAppLabels,
 };
+#[cfg(all(test, feature = "sqlite"))]
+use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::{
     debug_handler,
@@ -79,8 +83,12 @@ fn influxdb_field_to_sensapp(
         FieldValue::F64(value) => Ok((
             SensorType::Numeric,
             TypedSamples::one_numeric(
-                Decimal::from_f64_retain(value)
-                    .ok_or_else(|| anyhow::anyhow!("Failed to convert f64 value {} to Decimal - precision may be too high", value))?,
+                Decimal::from_f64_retain(value).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Failed to convert f64 value {} to Decimal - precision may be too high",
+                        value
+                    )
+                })?,
                 datetime,
             ),
         )),
@@ -320,9 +328,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_influxdb() {
+        _ = load_configuration();
+
+        let storage = SqliteStorage::connect("sqlite::memory:").await.unwrap();
+        storage.create_or_migrate().await.unwrap();
         let state = State(HttpServerState {
             name: Arc::new("influxdb test".to_string()),
-            storage: Arc::new(SqliteStorage::connect("sqlite::memory:").await.unwrap()),
+            storage: Arc::new(storage),
         });
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
@@ -505,7 +517,10 @@ mod tests {
         let result = influxdb_field_to_sensapp(FieldValue::F64(42.0), datetime).unwrap();
         assert_eq!(
             result,
-            (SensorType::Float, TypedSamples::one_float(42.0, datetime))
+            (
+                SensorType::Numeric,
+                TypedSamples::one_numeric(Decimal::from_f64_retain(42.0).unwrap(), datetime)
+            )
         );
 
         let result =

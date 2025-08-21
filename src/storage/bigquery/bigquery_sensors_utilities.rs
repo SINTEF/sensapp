@@ -1,5 +1,5 @@
-use anyhow::{Result, anyhow};
 use crate::storage::StorageError;
+use anyhow::{Result, anyhow};
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
     query_parameter_value::QueryParameterValue, query_request::QueryRequest,
@@ -151,13 +151,11 @@ async fn get_existing_sensors_ids_from_uuids(
     while result.next_row() {
         let uuid = result
             .get_string(0)?
-            .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("uuid", None, None)))?
-        let sensor_id = result
-            .get_i64(1)?
-            .ok_or_else(|| {
-                let parsed_uuid = Uuid::parse_str(&uuid).ok();
-                anyhow::Error::from(StorageError::missing_field("sensor_id", parsed_uuid, None))
-            })?
+            .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("uuid", None, None)))?;
+        let sensor_id = result.get_i64(1)?.ok_or_else(|| {
+            let parsed_uuid = Uuid::parse_str(&uuid).ok();
+            anyhow::Error::from(StorageError::missing_field("sensor_id", parsed_uuid, None))
+        })?;
         println!("Found sensor: {} with id: {}", uuid, sensor_id);
         results_map.insert(Uuid::parse_str(&uuid)?, sensor_id);
     }
@@ -196,9 +194,13 @@ async fn create_sensors(
     let rows = sensors
         .iter()
         .map(|sensor| {
-            let sensor_id = map
-                .get(&sensor.uuid)
-                .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("sensor_id", Some(sensor.uuid), Some(&sensor.name))))?
+            let sensor_id = map.get(&sensor.uuid).ok_or_else(|| {
+                anyhow::Error::from(StorageError::missing_field(
+                    "sensor_id",
+                    Some(sensor.uuid),
+                    Some(&sensor.name),
+                ))
+            })?;
             let unit = sensor
                 .unit
                 .as_ref()
@@ -218,16 +220,28 @@ async fn create_sensors(
     // create the labels
     let mut labels_rows = Vec::new();
     for sensor in sensors {
-        let sensor_id = map
-            .get(&sensor.uuid)
-            .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("sensor_id", Some(sensor.uuid), Some(&sensor.name))))?;
+        let sensor_id = map.get(&sensor.uuid).ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "sensor_id",
+                Some(sensor.uuid),
+                Some(&sensor.name),
+            ))
+        })?;
         for (name, description) in sensor.labels.iter() {
-            let name_id = labels_names_map
-                .get(name)
-                .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("label_name_id", Some(sensor.uuid), Some(&sensor.name))))?;
-            let description_id = labels_descriptions_map
-                .get(description)
-                .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("label_description_id", Some(sensor.uuid), Some(&sensor.name))))?;
+            let name_id = labels_names_map.get(name).ok_or_else(|| {
+                anyhow::Error::from(StorageError::missing_field(
+                    "label_name_id",
+                    Some(sensor.uuid),
+                    Some(&sensor.name),
+                ))
+            })?;
+            let description_id = labels_descriptions_map.get(description).ok_or_else(|| {
+                anyhow::Error::from(StorageError::missing_field(
+                    "label_description_id",
+                    Some(sensor.uuid),
+                    Some(&sensor.name),
+                ))
+            })?;
             labels_rows.push(ProstLabel {
                 sensor_id: *sensor_id,
                 name: *name_id,

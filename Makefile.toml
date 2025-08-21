@@ -1,0 +1,167 @@
+[config]
+default_to_workspace = false
+skip_core_tasks = true
+
+# Main tasks
+[tasks.default]
+alias = "check-all"
+
+[tasks.check-all]
+description = "Run all checks for working features (PostgreSQL and SQLite)"
+dependencies = [
+    "check-sqlite",
+    "check-postgres"
+]
+
+# SQLite checks
+[tasks.check-sqlite]
+description = "Run all SQLite checks"
+dependencies = [
+    "build-sqlite",
+    "test-sqlite",
+    "clippy-sqlite",
+    "clippy-test-sqlite"
+]
+
+[tasks.build-sqlite]
+description = "Build with SQLite feature"
+command = "cargo"
+args = ["build", "--features", "sqlite", "--no-default-features"]
+
+[tasks.test-sqlite]
+description = "Test with SQLite feature"
+env = { "TEST_DATABASE_URL" = "sqlite://test.db" }
+command = "cargo"
+args = ["test", "--features", "sqlite", "--no-default-features"]
+
+[tasks.clippy-sqlite]
+description = "Clippy with SQLite feature"
+command = "cargo"
+args = ["clippy", "--features", "sqlite", "--no-default-features", "--", "-D", "warnings"]
+
+[tasks.clippy-test-sqlite]
+description = "Clippy tests with SQLite feature"
+command = "cargo"
+args = ["clippy", "--tests", "--features", "sqlite", "--no-default-features", "--", "-D", "warnings"]
+
+# PostgreSQL checks
+[tasks.check-postgres]
+description = "Run all PostgreSQL checks"
+dependencies = [
+    "build-postgres",
+    "test-postgres",
+    "clippy-postgres",
+    "clippy-test-postgres"
+]
+
+[tasks.build-postgres]
+description = "Build with PostgreSQL feature"
+command = "cargo"
+args = ["build", "--features", "postgres", "--no-default-features"]
+
+[tasks.test-postgres]
+description = "Test with PostgreSQL feature"
+env = { "TEST_DATABASE_URL" = "postgres://postgres:postgres@localhost:5432/sensapp" }
+command = "cargo"
+args = ["test", "--features", "postgres", "--no-default-features"]
+
+[tasks.clippy-postgres]
+description = "Clippy with PostgreSQL feature"
+command = "cargo"
+args = ["clippy", "--features", "postgres", "--no-default-features", "--", "-D", "warnings"]
+
+[tasks.clippy-test-postgres]
+description = "Clippy tests with PostgreSQL feature"
+command = "cargo"
+args = ["clippy", "--tests", "--features", "postgres", "--no-default-features", "--", "-D", "warnings"]
+
+# Working features only (PostgreSQL + SQLite) to avoid compilation errors
+[tasks.check-working-features]
+description = "Run checks with both PostgreSQL and SQLite features"
+dependencies = [
+    "build-working",
+    "test-working",
+    "clippy-working",
+    "clippy-test-working"
+]
+
+[tasks.build-working]
+description = "Build with working features (postgres + sqlite)"
+command = "cargo"
+args = ["build", "--features", "postgres,sqlite", "--no-default-features"]
+
+[tasks.test-working]
+description = "Test with working features (defaults to PostgreSQL)"
+env = { "TEST_DATABASE_URL" = "postgres://postgres:postgres@localhost:5432/sensapp" }
+command = "cargo"
+args = ["test", "--features", "postgres,sqlite", "--no-default-features"]
+
+[tasks.clippy-working]
+description = "Clippy with working features"
+command = "cargo"
+args = ["clippy", "--features", "postgres,sqlite", "--no-default-features", "--", "-D", "warnings"]
+
+[tasks.clippy-test-working]
+description = "Clippy tests with working features"
+command = "cargo"
+args = ["clippy", "--tests", "--features", "postgres,sqlite", "--no-default-features", "--", "-D", "warnings"]
+
+# Format checking
+[tasks.fmt-check]
+description = "Check code formatting"
+command = "cargo"
+args = ["fmt", "--", "--check"]
+
+# Quick CI task
+[tasks.ci]
+description = "Run full CI pipeline"
+dependencies = [
+    "fmt-check",
+    "check-all"
+]
+
+# Extended CI task with working features
+[tasks.ci-extended]
+description = "Run extended CI pipeline with combined features"
+dependencies = [
+    "fmt-check",
+    "check-all",
+    "check-working-features"
+]
+
+# Clean task
+[tasks.clean]
+description = "Clean all build artifacts and test databases"
+script = '''
+cargo clean
+rm -f test.db test.db-shm test.db-wal
+'''
+
+# Migration tasks
+[tasks.migrate-sqlite]
+description = "Run SQLite migrations"
+env = { "DATABASE_URL" = "sqlite://test.db" }
+script = '''
+sqlx database create
+sqlx migrate run --source src/storage/sqlite/migrations
+'''
+
+[tasks.migrate-postgres]
+description = "Run PostgreSQL migrations"
+env = { "DATABASE_URL" = "postgres://postgres:postgres@localhost:5432/sensapp" }
+script = '''
+sqlx migrate run --source src/storage/postgresql/migrations
+'''
+
+# SQLx prepare tasks
+[tasks.prepare-sqlite]
+description = "Prepare SQLx for SQLite"
+env = { "DATABASE_URL" = "sqlite://test.db" }
+command = "cargo"
+args = ["sqlx", "prepare", "--", "--features", "sqlite", "--no-default-features"]
+
+[tasks.prepare-postgres]
+description = "Prepare SQLx for PostgreSQL"
+env = { "DATABASE_URL" = "postgres://postgres:postgres@localhost:5432/sensapp" }
+command = "cargo"
+args = ["sqlx", "prepare", "--", "--features", "postgres", "--no-default-features"]

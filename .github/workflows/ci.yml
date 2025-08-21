@@ -1,4 +1,4 @@
-name: Cargo Build & Test
+name: SensApp CI with cargo-make
 
 on:
   push:
@@ -11,13 +11,26 @@ env:
   POSTGRES_USER: postgres
   POSTGRES_DB: sensapp
   DATABASE_URL: postgres://postgres:postgres@localhost:5432/sensapp
-  TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432
+  TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/sensapp
 
 jobs:
-  build_and_test:
-    name: Rust project with PostgreSQL
+  test_sqlite:
+    name: SQLite Tests
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: rustup toolchain install stable --profile minimal --component clippy --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+      - name: Install cargo-make
+        run: cargo install cargo-make
+      - name: Run SQLite tests
+        run: cargo make check-sqlite
 
+  test_postgresql:
+    name: PostgreSQL Tests
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:15
@@ -32,7 +45,38 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+    steps:
+      - uses: actions/checkout@v3
+      - run: rustup toolchain install stable --profile minimal --component clippy --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+      - name: Install cargo-make
+        run: cargo install cargo-make
+      - name: Install sqlx-cli for PostgreSQL
+        run: cargo install sqlx-cli --no-default-features --features postgres
+      - name: Run PostgreSQL migrations
+        run: cargo sqlx migrate run --source src/storage/postgresql/migrations --database-url $DATABASE_URL
+      - name: Run PostgreSQL tests
+        run: cargo make check-postgres
 
+  test_combined:
+    name: Combined Features Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: sensapp
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v3
       - run: rustup toolchain install stable --profile minimal --component clippy llvm-tools-preview --no-self-update
@@ -40,27 +84,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-all-crates: "true"
-
-      # Install sqlx-cli for PostgreSQL
-      - run: cargo install sqlx-cli --no-default-features --features postgres
-
-      # Run PostgreSQL migrations and prepare
-      - run: cargo sqlx migrate run --source src/storage/postgresql/migrations --database-url $DATABASE_URL
-      - run: cargo sqlx prepare --database-url $DATABASE_URL
-
-      # Run linting
-      - run: cargo clippy --verbose
-
-      # Run tests with coverage
-      - run: cargo llvm-cov --verbose --lcov --output-path lcov.info
-
-      # Run integration tests
-      - run: cargo test --test ingestion --verbose
-        env:
-          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432
-
-      # Upload coverage
-      - uses: VeryGoodOpenSource/very_good_coverage@v2
+      - name: Install cargo-make
+        run: cargo install cargo-make
+      - name: Install sqlx-cli for PostgreSQL
+        run: cargo install sqlx-cli --no-default-features --features postgres
+      - name: Run PostgreSQL migrations
+        run: cargo sqlx migrate run --source src/storage/postgresql/migrations --database-url $DATABASE_URL
+      - name: Run format check
+        run: cargo make fmt-check
+      - name: Run combined features test
+        run: cargo make check-working-features
+      - name: Generate test coverage
+        run: cargo llvm-cov --features postgres,sqlite --no-default-features --verbose --lcov --output-path lcov.info
+      - name: Upload coverage
+        uses: VeryGoodOpenSource/very_good_coverage@v2
         with:
           path: lcov.info
           min_coverage: 50

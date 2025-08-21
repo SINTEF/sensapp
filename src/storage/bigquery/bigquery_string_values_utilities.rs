@@ -1,7 +1,7 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
-use anyhow::{Result, anyhow};
 use crate::storage::StorageError;
+use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
@@ -143,10 +143,12 @@ async fn get_existing_string_values_ids(
     let mut results_map = HybridMap::with_capacity(result.row_count());
 
     while result.next_row() {
-        let id = result.get_i64(0)?.ok_or_else(|| anyhow::Error::from(StorageError::missing_field("string_value_id", None, None)))?;
-        let value = result
-            .get_string(1)?
-            .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("string_value", None, None)))?;
+        let id = result.get_i64(0)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("string_value_id", None, None))
+        })?;
+        let value = result.get_string(1)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("string_value", None, None))
+        })?;
 
         results_map.insert(value, id);
     }

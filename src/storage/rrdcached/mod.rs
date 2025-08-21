@@ -1,10 +1,10 @@
+use crate::storage::StorageError;
 use crate::{
+    config,
     datamodel::{Sensor, SensorType, TypedSamples},
     storage::{StorageInstance, common::sync_with_timeout},
-    config,
 };
-use anyhow::{Result, anyhow, bail, Context};
-use crate::storage::StorageError;
+use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use rrdcached_client::{
     RRDCachedClient,
@@ -134,8 +134,16 @@ impl RrdCachedStorage {
         match scheme {
             "rrdcached" | "rrdcached+tcp" => {
                 // extract host and port
-                let host = url.host_str().ok_or_else(|| anyhow::Error::from(StorageError::configuration("RRDCached connection URL missing host")))?;
-                let port = url.port().ok_or_else(|| anyhow::Error::from(StorageError::configuration("RRDCached connection URL missing port")))?;
+                let host = url.host_str().ok_or_else(|| {
+                    anyhow::Error::from(StorageError::configuration(
+                        "RRDCached connection URL missing host",
+                    ))
+                })?;
+                let port = url.port().ok_or_else(|| {
+                    anyhow::Error::from(StorageError::configuration(
+                        "RRDCached connection URL missing port",
+                    ))
+                })?;
 
                 let client = RRDCachedClient::connect_tcp(&format!("{}:{}", host, port)).await?;
                 Ok(Self {
@@ -324,7 +332,7 @@ impl StorageInstance for RrdCachedStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
+    async fn list_series(&self) -> Result<Vec<String>> {
         unimplemented!();
     }
 

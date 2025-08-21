@@ -1,9 +1,10 @@
 use super::{
-    super::{StorageInstance, common::sync_with_timeout}, timescaledb_publishers::*,
+    super::{DEFAULT_QUERY_LIMIT, StorageInstance, common::sync_with_timeout},
+    timescaledb_publishers::*,
     timescaledb_utilities::get_sensor_id_or_create_sensor,
 };
-use crate::datamodel::{TypedSamples, batch::Batch};
 use crate::config;
+use crate::datamodel::{TypedSamples, batch::Batch};
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
 use async_trait::async_trait;
@@ -61,7 +62,10 @@ impl StorageInstance for TimeScaleDBStorage {
         Ok(())
     }
 
-    async fn list_series(&self, _metric_filter: Option<&str>) -> Result<Vec<crate::datamodel::Sensor>> {
+    async fn list_series(
+        &self,
+        _metric_filter: Option<&str>,
+    ) -> Result<Vec<crate::datamodel::Sensor>> {
         // Note: TimescaleDB sensor listing not yet implemented
         unimplemented!("TimescaleDB sensor listing not yet implemented");
     }
@@ -83,21 +87,43 @@ impl StorageInstance for TimeScaleDBStorage {
         let mut tx = self.pool.begin().await?;
 
         // Delete all value tables in dependency order
-        sqlx::query("DELETE FROM blob_values").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM json_values").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM location_values").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM boolean_values").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM string_values").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM float_values").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM numeric_values").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM integer_values").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM blob_values")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM json_values")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM location_values")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM boolean_values")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM string_values")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM float_values")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM numeric_values")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM integer_values")
+            .execute(&mut *tx)
+            .await?;
 
         // Delete metadata tables
         sqlx::query("DELETE FROM labels").execute(&mut *tx).await?;
         sqlx::query("DELETE FROM sensors").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM strings_values_dictionary").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM labels_description_dictionary").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM labels_name_dictionary").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM strings_values_dictionary")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM labels_description_dictionary")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM labels_name_dictionary")
+            .execute(&mut *tx)
+            .await?;
 
         // Preserve units and ensure common test units exist
         sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT (name) DO NOTHING")
@@ -105,7 +131,9 @@ impl StorageInstance for TimeScaleDBStorage {
         sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT (name) DO NOTHING")
             .execute(&mut *tx).await?;
 
-        tx.commit().await.context("Failed to commit test data cleanup transaction")?;
+        tx.commit()
+            .await
+            .context("Failed to commit test data cleanup transaction")?;
 
         Ok(())
     }
@@ -170,7 +198,13 @@ impl TimeScaleDBStorage {
         use crate::datamodel::{Sample, SensAppDateTime};
         use smallvec::smallvec;
 
-        let rows = sqlx::query!(
+        #[derive(sqlx::FromRow)]
+        struct IntegerValueRow {
+            timestamp_ms: i64,
+            value: i64,
+        }
+
+        let rows: Vec<IntegerValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_ms, value FROM integer_values
             WHERE sensor_id = $1
@@ -179,11 +213,11 @@ impl TimeScaleDBStorage {
             ORDER BY timestamp_ms ASC
             LIMIT $4
             "#,
-            sensor_id,
-            start_time,
-            end_time,
-            limit.unwrap_or(1000) as i64
         )
+        .bind(sensor_id)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
         .fetch_all(&self.pool)
         .await?;
 
@@ -209,7 +243,13 @@ impl TimeScaleDBStorage {
         use smallvec::smallvec;
         use std::str::FromStr;
 
-        let rows = sqlx::query!(
+        #[derive(sqlx::FromRow)]
+        struct NumericValueRow {
+            timestamp_ms: i64,
+            value: rust_decimal::Decimal,
+        }
+
+        let rows: Vec<NumericValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_ms, value FROM numeric_values
             WHERE sensor_id = $1
@@ -218,19 +258,18 @@ impl TimeScaleDBStorage {
             ORDER BY timestamp_ms ASC
             LIMIT $4
             "#,
-            sensor_id,
-            start_time,
-            end_time,
-            limit.unwrap_or(1000) as i64
         )
+        .bind(sensor_id)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
         .fetch_all(&self.pool)
         .await?;
 
         let mut samples = smallvec![];
         for row in rows {
             let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms);
-            let value = Decimal::from_str(&row.value.to_string())
-                .context("Failed to parse decimal value")?;
+            let value = row.value;
             samples.push(Sample { datetime, value });
         }
 
@@ -247,7 +286,13 @@ impl TimeScaleDBStorage {
         use crate::datamodel::{Sample, SensAppDateTime};
         use smallvec::smallvec;
 
-        let rows = sqlx::query!(
+        #[derive(sqlx::FromRow)]
+        struct FloatValueRow {
+            timestamp_ms: i64,
+            value: f64,
+        }
+
+        let rows: Vec<FloatValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_ms, value FROM float_values
             WHERE sensor_id = $1
@@ -256,11 +301,11 @@ impl TimeScaleDBStorage {
             ORDER BY timestamp_ms ASC
             LIMIT $4
             "#,
-            sensor_id,
-            start_time,
-            end_time,
-            limit.unwrap_or(1000) as i64
         )
+        .bind(sensor_id)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
         .fetch_all(&self.pool)
         .await?;
 
@@ -284,7 +329,13 @@ impl TimeScaleDBStorage {
         use crate::datamodel::{Sample, SensAppDateTime};
         use smallvec::smallvec;
 
-        let rows = sqlx::query!(
+        #[derive(sqlx::FromRow)]
+        struct StringValueRow {
+            timestamp_ms: i64,
+            string_value: String,
+        }
+
+        let rows: Vec<StringValueRow> = sqlx::query_as(
             r#"
             SELECT sv.timestamp_ms, svd.value as string_value
             FROM string_values sv
@@ -295,11 +346,11 @@ impl TimeScaleDBStorage {
             ORDER BY sv.timestamp_ms ASC
             LIMIT $4
             "#,
-            sensor_id,
-            start_time,
-            end_time,
-            limit.unwrap_or(1000) as i64
         )
+        .bind(sensor_id)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
         .fetch_all(&self.pool)
         .await?;
 
@@ -323,7 +374,13 @@ impl TimeScaleDBStorage {
         use crate::datamodel::{Sample, SensAppDateTime};
         use smallvec::smallvec;
 
-        let rows = sqlx::query!(
+        #[derive(sqlx::FromRow)]
+        struct BooleanValueRow {
+            timestamp_ms: i64,
+            value: Option<bool>,
+        }
+
+        let rows: Vec<BooleanValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_ms, value FROM boolean_values
             WHERE sensor_id = $1
@@ -332,11 +389,11 @@ impl TimeScaleDBStorage {
             ORDER BY timestamp_ms ASC
             LIMIT $4
             "#,
-            sensor_id,
-            start_time,
-            end_time,
-            limit.unwrap_or(1000) as i64
         )
+        .bind(sensor_id)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
         .fetch_all(&self.pool)
         .await?;
 
@@ -360,7 +417,14 @@ impl TimeScaleDBStorage {
         use crate::datamodel::{Sample, SensAppDateTime};
         use smallvec::smallvec;
 
-        let rows = sqlx::query!(
+        #[derive(sqlx::FromRow)]
+        struct LocationValueRow {
+            timestamp_ms: i64,
+            latitude: f64,
+            longitude: f64,
+        }
+
+        let rows: Vec<LocationValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_ms, latitude, longitude FROM location_values
             WHERE sensor_id = $1
@@ -369,11 +433,11 @@ impl TimeScaleDBStorage {
             ORDER BY timestamp_ms ASC
             LIMIT $4
             "#,
-            sensor_id,
-            start_time,
-            end_time,
-            limit.unwrap_or(1000) as i64
         )
+        .bind(sensor_id)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
         .fetch_all(&self.pool)
         .await?;
 
@@ -397,7 +461,13 @@ impl TimeScaleDBStorage {
         use crate::datamodel::{Sample, SensAppDateTime};
         use smallvec::smallvec;
 
-        let rows = sqlx::query!(
+        #[derive(sqlx::FromRow)]
+        struct JsonValueRow {
+            timestamp_ms: i64,
+            value: serde_json::Value,
+        }
+
+        let rows: Vec<JsonValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_ms, value FROM json_values
             WHERE sensor_id = $1
@@ -406,11 +476,11 @@ impl TimeScaleDBStorage {
             ORDER BY timestamp_ms ASC
             LIMIT $4
             "#,
-            sensor_id,
-            start_time,
-            end_time,
-            limit.unwrap_or(1000) as i64
         )
+        .bind(sensor_id)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
         .fetch_all(&self.pool)
         .await?;
 
@@ -434,7 +504,13 @@ impl TimeScaleDBStorage {
         use crate::datamodel::{Sample, SensAppDateTime};
         use smallvec::smallvec;
 
-        let rows = sqlx::query!(
+        #[derive(sqlx::FromRow)]
+        struct BlobValueRow {
+            timestamp_ms: i64,
+            value: Vec<u8>,
+        }
+
+        let rows: Vec<BlobValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_ms, value FROM blob_values
             WHERE sensor_id = $1
@@ -443,11 +519,11 @@ impl TimeScaleDBStorage {
             ORDER BY timestamp_ms ASC
             LIMIT $4
             "#,
-            sensor_id,
-            start_time,
-            end_time,
-            limit.unwrap_or(1000) as i64
         )
+        .bind(sensor_id)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
         .fetch_all(&self.pool)
         .await?;
 

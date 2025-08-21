@@ -36,7 +36,10 @@ pub fn parse_float(data: &str) -> IResult<&str, InferedValue> {
     // However, we reject special values like inf and NaN to treat them as strings
     let (rest, value) = double(data)?;
     if value.is_infinite() || value.is_nan() {
-        Err(Err::Error(nom::error::Error::new(data, nom::error::ErrorKind::Float)))
+        Err(Err::Error(nom::error::Error::new(
+            data,
+            nom::error::ErrorKind::Float,
+        )))
     } else {
         Ok((rest, InferedValue::Float(value)))
     }

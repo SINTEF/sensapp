@@ -10,10 +10,7 @@ pub enum StorageError {
 
     /// Data integrity issues - missing required fields in database views
     #[error("Data integrity error: Missing {field} for sensor {context}")]
-    MissingRequiredField {
-        field: String,
-        context: String,
-    },
+    MissingRequiredField { field: String, context: String },
 
     /// Invalid data format in database
     #[error("Invalid data format: {message} for sensor {sensor_context}")]
@@ -25,16 +22,12 @@ pub enum StorageError {
     /// Sensor not found
     #[error("Sensor not found: {sensor_id}")]
     #[allow(dead_code)] // Part of error API, will be used for sensor operations
-    SensorNotFound {
-        sensor_id: String,
-    },
+    SensorNotFound { sensor_id: String },
 
     /// Metric not found
     #[error("Metric not found: {metric_name}")]
     #[allow(dead_code)] // Part of error API, will be used for metric operations
-    MetricNotFound {
-        metric_name: String,
-    },
+    MetricNotFound { metric_name: String },
 
     /// Configuration error
     #[error("Configuration error: {0}")]
@@ -44,15 +37,16 @@ pub enum StorageError {
     /// Generic storage operation error with context
     #[error("Storage operation failed: {operation} - {details}")]
     #[allow(dead_code)] // Part of error API, will be used for generic storage operations
-    OperationFailed {
-        operation: String,
-        details: String,
-    },
+    OperationFailed { operation: String, details: String },
 }
 
 impl StorageError {
     /// Create a missing field error with sensor context
-    pub fn missing_field(field: &str, sensor_uuid: Option<Uuid>, sensor_name: Option<&str>) -> Self {
+    pub fn missing_field(
+        field: &str,
+        sensor_uuid: Option<Uuid>,
+        sensor_name: Option<&str>,
+    ) -> Self {
         let context = match (sensor_uuid, sensor_name) {
             (Some(uuid), Some(name)) => format!("UUID={}, name='{}'", uuid, name),
             (Some(uuid), None) => format!("UUID={}", uuid),
@@ -67,7 +61,11 @@ impl StorageError {
     }
 
     /// Create an invalid data format error with sensor context
-    pub fn invalid_data_format(message: &str, sensor_uuid: Option<Uuid>, sensor_name: Option<&str>) -> Self {
+    pub fn invalid_data_format(
+        message: &str,
+        sensor_uuid: Option<Uuid>,
+        sensor_name: Option<&str>,
+    ) -> Self {
         let sensor_context = match (sensor_uuid, sensor_name) {
             (Some(uuid), Some(name)) => format!("UUID={}, name='{}'", uuid, name),
             (Some(uuid), None) => format!("UUID={}", uuid),
@@ -80,5 +78,4 @@ impl StorageError {
             sensor_context,
         }
     }
-
 }

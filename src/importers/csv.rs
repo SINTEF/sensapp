@@ -1,16 +1,11 @@
 use crate::{
     datamodel::{
-        batch_builder::BatchBuilder,
-        Sample,
-        SensAppDateTime,
-        Sensor,
-        SensorType,
-        TypedSamples,
+        Sample, SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
         unit::Unit,
     },
     infer::{
-        datagrid::StringDataGrid,
         columns::{InferedColumn, infer_column},
+        datagrid::StringDataGrid,
         datetime_guesser::likely_datetime_column,
         parsing::InferedValue,
     },
@@ -61,7 +56,9 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
 }
 
 /// Parse CSV data grid into sensors and their samples
-fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
+fn parse_csv_data_grid(
+    data_grid: StringDataGrid,
+) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
     let column_names = &data_grid.column_names;
     let rows = &data_grid.rows;
 
@@ -70,7 +67,9 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
     }
 
     if column_names.len() < 2 {
-        return Err(anyhow!("CSV must have at least 2 columns (datetime and values)"));
+        return Err(anyhow!(
+            "CSV must have at least 2 columns (datetime and values)"
+        ));
     }
 
     // Convert rows to columns for type inference
@@ -84,7 +83,8 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
     }
 
     // Infer column types
-    let inferred_columns: Vec<InferedColumn> = columns.iter()
+    let inferred_columns: Vec<InferedColumn> = columns
+        .iter()
         .map(|col| infer_column(col.clone(), true, false))
         .collect();
 
@@ -92,10 +92,12 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
     let datetime_column = likely_datetime_column(column_names, &inferred_columns);
 
     // Find sensor name and value columns
-    let sensor_name_idx = find_column_index(column_names, &["sensor_name", "metric", "name", "sensor"]);
+    let sensor_name_idx =
+        find_column_index(column_names, &["sensor_name", "metric", "name", "sensor"]);
     let value_idx = find_column_index(column_names, &["value", "reading", "measurement"]);
     let unit_idx = find_column_index(column_names, &["unit", "units"]);
-    let datetime_idx = datetime_column.as_ref()
+    let datetime_idx = datetime_column
+        .as_ref()
         .and_then(|name| column_names.iter().position(|col| col == name));
 
     let mut sensors_data: SensorDataMap = HashMap::new();
@@ -117,21 +119,22 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
             }
 
             let value = parse_value_from_inferred(&inferred_columns[value_idx], row_idx)?;
-            let unit_name = unit_idx.map(|idx| row[idx].clone()).filter(|s| !s.is_empty());
+            let unit_name = unit_idx
+                .map(|idx| row[idx].clone())
+                .filter(|s| !s.is_empty());
 
-            sensors_data.entry(sensor_name.clone())
+            sensors_data
+                .entry(sensor_name.clone())
                 .or_insert_with(|| {
                     let sensor_type = inferred_value_to_sensor_type(&value);
                     let unit = unit_name.map(|name| Unit::new(name, None));
-                    let sensor = Arc::new(Sensor::new_without_uuid(
-                        sensor_name,
-                        sensor_type,
-                        unit,
-                        None,
-                    ).unwrap());
+                    let sensor = Arc::new(
+                        Sensor::new_without_uuid(sensor_name, sensor_type, unit, None).unwrap(),
+                    );
                     (sensor, Vec::new())
                 })
-                .1.push((datetime, value));
+                .1
+                .push((datetime, value));
         } else if datetime_idx.is_some() {
             // Wide format: each column (except datetime) is a sensor
             let mut sensor_count = 0;
@@ -143,18 +146,17 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
                 let value = parse_value_from_inferred(&inferred_columns[col_idx], row_idx)?;
                 let sensor_name = col_name.clone();
 
-                sensors_data.entry(sensor_name.clone())
+                sensors_data
+                    .entry(sensor_name.clone())
                     .or_insert_with(|| {
                         let sensor_type = inferred_value_to_sensor_type(&value);
-                        let sensor = Arc::new(Sensor::new_without_uuid(
-                            sensor_name,
-                            sensor_type,
-                            None,
-                            None,
-                        ).unwrap());
+                        let sensor = Arc::new(
+                            Sensor::new_without_uuid(sensor_name, sensor_type, None, None).unwrap(),
+                        );
                         (sensor, Vec::new())
                     })
-                    .1.push((datetime, value));
+                    .1
+                    .push((datetime, value));
                 sensor_count += 1;
             }
 
@@ -189,9 +191,10 @@ fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc
 
 fn find_column_index(column_names: &[String], candidates: &[&str]) -> Option<usize> {
     for candidate in candidates {
-        if let Some(idx) = column_names.iter().position(|name|
-            name.to_lowercase() == candidate.to_lowercase()
-        ) {
+        if let Some(idx) = column_names
+            .iter()
+            .position(|name| name.to_lowercase() == candidate.to_lowercase())
+        {
             return Some(idx);
         }
     }
@@ -204,17 +207,26 @@ fn parse_datetime_from_inferred(column: &InferedColumn, row_idx: usize) -> Resul
             if row_idx < values.len() {
                 Ok(values[row_idx])
             } else {
-                Err(anyhow!("Row index {} out of bounds for datetime column", row_idx))
+                Err(anyhow!(
+                    "Row index {} out of bounds for datetime column",
+                    row_idx
+                ))
             }
         }
         InferedColumn::Integer(values) => {
             if row_idx < values.len() {
                 Ok(SensAppDateTime::from_unix_seconds(values[row_idx] as f64))
             } else {
-                Err(anyhow!("Row index {} out of bounds for integer datetime column", row_idx))
+                Err(anyhow!(
+                    "Row index {} out of bounds for integer datetime column",
+                    row_idx
+                ))
             }
         }
-        _ => Err(anyhow!("Cannot parse datetime from column type: {:?}", column)),
+        _ => Err(anyhow!(
+            "Cannot parse datetime from column type: {:?}",
+            column
+        )),
     }
 }
 
@@ -290,59 +302,85 @@ fn convert_samples_to_typed_samples(
 ) -> Result<TypedSamples> {
     match sensor_type {
         SensorType::Integer => {
-            let typed_samples = samples.into_iter().map(|(datetime, value)| {
-                match value {
-                    InferedValue::Integer(val) => Sample { datetime, value: val },
+            let typed_samples = samples
+                .into_iter()
+                .map(|(datetime, value)| match value {
+                    InferedValue::Integer(val) => Sample {
+                        datetime,
+                        value: val,
+                    },
                     _ => unreachable!("Sensor type mismatch"),
-                }
-            }).collect();
+                })
+                .collect();
             Ok(TypedSamples::Integer(typed_samples))
         }
         SensorType::Float => {
-            let typed_samples = samples.into_iter().map(|(datetime, value)| {
-                match value {
-                    InferedValue::Float(val) => Sample { datetime, value: val },
+            let typed_samples = samples
+                .into_iter()
+                .map(|(datetime, value)| match value {
+                    InferedValue::Float(val) => Sample {
+                        datetime,
+                        value: val,
+                    },
                     _ => unreachable!("Sensor type mismatch"),
-                }
-            }).collect();
+                })
+                .collect();
             Ok(TypedSamples::Float(typed_samples))
         }
         SensorType::Numeric => {
-            let typed_samples = samples.into_iter().map(|(datetime, value)| {
-                match value {
-                    InferedValue::Numeric(val) => Sample { datetime, value: val },
+            let typed_samples = samples
+                .into_iter()
+                .map(|(datetime, value)| match value {
+                    InferedValue::Numeric(val) => Sample {
+                        datetime,
+                        value: val,
+                    },
                     _ => unreachable!("Sensor type mismatch"),
-                }
-            }).collect();
+                })
+                .collect();
             Ok(TypedSamples::Numeric(typed_samples))
         }
         SensorType::String => {
-            let typed_samples = samples.into_iter().map(|(datetime, value)| {
-                let string_value = match value {
-                    InferedValue::String(val) => val,
-                    InferedValue::DateTime(val) => val.to_rfc3339(),
-                    _ => unreachable!("Sensor type mismatch"),
-                };
-                Sample { datetime, value: string_value }
-            }).collect();
+            let typed_samples = samples
+                .into_iter()
+                .map(|(datetime, value)| {
+                    let string_value = match value {
+                        InferedValue::String(val) => val,
+                        InferedValue::DateTime(val) => val.to_rfc3339(),
+                        _ => unreachable!("Sensor type mismatch"),
+                    };
+                    Sample {
+                        datetime,
+                        value: string_value,
+                    }
+                })
+                .collect();
             Ok(TypedSamples::String(typed_samples))
         }
         SensorType::Boolean => {
-            let typed_samples = samples.into_iter().map(|(datetime, value)| {
-                match value {
-                    InferedValue::Boolean(val) => Sample { datetime, value: val },
+            let typed_samples = samples
+                .into_iter()
+                .map(|(datetime, value)| match value {
+                    InferedValue::Boolean(val) => Sample {
+                        datetime,
+                        value: val,
+                    },
                     _ => unreachable!("Sensor type mismatch"),
-                }
-            }).collect();
+                })
+                .collect();
             Ok(TypedSamples::Boolean(typed_samples))
         }
         SensorType::Json => {
-            let typed_samples = samples.into_iter().map(|(datetime, value)| {
-                match value {
-                    InferedValue::Json(val) => Sample { datetime, value: (*val).clone() },
+            let typed_samples = samples
+                .into_iter()
+                .map(|(datetime, value)| match value {
+                    InferedValue::Json(val) => Sample {
+                        datetime,
+                        value: (*val).clone(),
+                    },
                     _ => unreachable!("Sensor type mismatch"),
-                }
-            }).collect();
+                })
+                .collect();
             Ok(TypedSamples::Json(typed_samples))
         }
         _ => Err(anyhow!("Unsupported sensor type: {:?}", sensor_type)),

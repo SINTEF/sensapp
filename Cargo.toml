@@ -111,4 +111,4 @@ temp-env = "0.3"
 tokio-test = "0.4"
 serial_test = "3.1"
 # Re-import the same crate with test-utils feature for integration tests
-sensapp = { path = ".", features = ["test-utils"] }
+sensapp = { path = ".", features = ["test-utils"], default-features = false }

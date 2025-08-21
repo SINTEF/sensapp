@@ -1,13 +1,17 @@
 // Core storage traits and factory - always available
+use crate::datamodel::SensAppDateTime;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::fmt::Debug;
-use crate::datamodel::SensAppDateTime;
 
 pub mod error;
 pub use error::StorageError;
 
 pub mod common;
+
+/// Default limit for timeseries queries when no limit is specified
+/// Set to 10 million records - appropriate for timeseries data
+pub const DEFAULT_QUERY_LIMIT: usize = 10_000_000;
 
 #[async_trait]
 pub trait StorageInstance: Send + Sync + Debug {
@@ -21,7 +25,10 @@ pub trait StorageInstance: Send + Sync + Debug {
 
     async fn vacuum(&self) -> Result<()>;
 
-    async fn list_series(&self, metric_filter: Option<&str>) -> Result<Vec<crate::datamodel::Sensor>>;
+    async fn list_series(
+        &self,
+        metric_filter: Option<&str>,
+    ) -> Result<Vec<crate::datamodel::Sensor>>;
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>>;
 

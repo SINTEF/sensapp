@@ -1,7 +1,7 @@
+use crate::datamodel::SensAppDateTime;
 use crate::exporters::{CsvConverter, JsonlConverter, SenMLConverter};
 use crate::ingestors::http::app_error::AppError;
 use crate::ingestors::http::state::HttpServerState;
-use crate::datamodel::SensAppDateTime;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;
@@ -289,7 +289,7 @@ pub async fn list_series(
         ("format" = Option<String>, Query, description = "Output format: senml, csv, or jsonl (default: senml)"),
         ("start" = Option<String>, Query, description = "Start datetime in ISO 8601 format (e.g., '2024-01-15T10:30:00Z')"),
         ("end" = Option<String>, Query, description = "End datetime in ISO 8601 format (e.g., '2024-01-15T11:00:00Z')"),
-        ("limit" = Option<usize>, Query, description = "Maximum number of samples")
+        ("limit" = Option<usize>, Query, description = "Maximum number of samples (default: 10,000,000)")
     ),
     responses(
         (status = 200, description = "Series data in requested format", body = Value),
@@ -304,31 +304,35 @@ pub async fn get_series_data(
 ) -> Result<axum::response::Response, AppError> {
     // Parse format from query parameter, default to SenML/JSON
     let format = match query.format.as_deref() {
-        Some(format_str) => ExportFormat::from_extension(format_str)
-            .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("Unsupported export format '{}'. Supported formats: senml, csv, jsonl", format_str)))?,
+        Some(format_str) => ExportFormat::from_extension(format_str).ok_or_else(|| {
+            AppError::bad_request(anyhow::anyhow!(
+                "Unsupported export format '{}'. Supported formats: senml, csv, jsonl",
+                format_str
+            ))
+        })?,
         None => ExportFormat::Senml, // Default to SenML/JSON format
     };
 
     // Validate UUID format
-    let _parsed_uuid = uuid::Uuid::from_str(&series_uuid)
-        .map_err(|_| AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid)))?;
+    let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
+        AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+    })?;
 
     // Parse datetime parameters
     let start_time = match query.start.as_ref() {
-        Some(start_str) => Some(
-            parse_datetime_string(start_str)
-                .map_err(|e| AppError::bad_request(anyhow::anyhow!("Invalid start datetime: {}", e)))?
-        ),
+        Some(start_str) => Some(parse_datetime_string(start_str).map_err(|e| {
+            AppError::bad_request(anyhow::anyhow!("Invalid start datetime: {}", e))
+        })?),
         None => None,
     };
 
-    let end_time = match query.end.as_ref() {
-        Some(end_str) => Some(
-            parse_datetime_string(end_str)
-                .map_err(|e| AppError::bad_request(anyhow::anyhow!("Invalid end datetime: {}", e)))?
-        ),
-        None => None,
-    };
+    let end_time =
+        match query.end.as_ref() {
+            Some(end_str) => Some(parse_datetime_string(end_str).map_err(|e| {
+                AppError::bad_request(anyhow::anyhow!("Invalid end datetime: {}", e))
+            })?),
+            None => None,
+        };
 
     // Query series data from storage by UUID
     let series_data = state
@@ -442,7 +446,7 @@ mod tests {
 
     #[test]
     fn test_parse_datetime_timezone_conversion() {
-        use crate::storage::common::{datetime_to_micros};
+        use crate::storage::common::datetime_to_micros;
 
         // Test that times in different timezones are properly converted to UTC microseconds
         let utc_time = parse_datetime_string("2024-01-15T10:30:00Z").unwrap();
@@ -460,7 +464,7 @@ mod tests {
 
     #[test]
     fn test_parse_datetime_precision() {
-        use crate::storage::common::{datetime_to_micros};
+        use crate::storage::common::datetime_to_micros;
 
         // Test microsecond precision
         let base_time = parse_datetime_string("2024-01-15T10:30:00Z").unwrap();
@@ -481,7 +485,10 @@ mod tests {
 
         // Test non-leap year (should fail)
         let result = parse_datetime_string("2023-02-29T00:00:00Z");
-        assert!(result.is_err(), "Should reject invalid date in non-leap year");
+        assert!(
+            result.is_err(),
+            "Should reject invalid date in non-leap year"
+        );
 
         // Test end of year
         let result = parse_datetime_string("2024-12-31T23:59:59Z");
@@ -490,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_prometheus_id_generation() {
-        use crate::datamodel::{Sensor, SensorType, unit::Unit, sensapp_vec::SensAppLabels};
+        use crate::datamodel::{Sensor, SensorType, sensapp_vec::SensAppLabels, unit::Unit};
         use smallvec::smallvec;
         use uuid::Uuid;
 
@@ -506,7 +513,9 @@ mod tests {
         let prometheus_id = if sensor_no_labels.labels.is_empty() {
             sensor_no_labels.name.clone()
         } else {
-            let labels_str = sensor_no_labels.labels.iter()
+            let labels_str = sensor_no_labels
+                .labels
+                .iter()
                 .map(|(k, v)| format!("{}=\"{}\"", k, v))
                 .collect::<Vec<_>>()
                 .join(",");
@@ -528,7 +537,9 @@ mod tests {
         let prometheus_id = if sensor_single_label.labels.is_empty() {
             sensor_single_label.name.clone()
         } else {
-            let labels_str = sensor_single_label.labels.iter()
+            let labels_str = sensor_single_label
+                .labels
+                .iter()
                 .map(|(k, v)| format!("{}=\"{}\"", k, v))
                 .collect::<Vec<_>>()
                 .join(",");
@@ -551,19 +562,23 @@ mod tests {
         let prometheus_id = if sensor_multiple_labels.labels.is_empty() {
             sensor_multiple_labels.name.clone()
         } else {
-            let labels_str = sensor_multiple_labels.labels.iter()
+            let labels_str = sensor_multiple_labels
+                .labels
+                .iter()
                 .map(|(k, v)| format!("{}=\"{}\"", k, v))
                 .collect::<Vec<_>>()
                 .join(",");
             format!("{}{{{}}}", sensor_multiple_labels.name, labels_str)
         };
         // Labels should be sorted by key (device comes before location)
-        assert_eq!(prometheus_id, "temperature{device=\"sensor1\",location=\"office\"}");
+        assert_eq!(
+            prometheus_id,
+            "temperature{device=\"sensor1\",location=\"office\"}"
+        );
     }
 
     #[test]
     fn test_dcat_catalog_structure() {
-
         // Test metrics catalog structure
         let metrics_catalog = json!({
             "@context": {
@@ -621,6 +636,11 @@ mod tests {
         // Validate distribution format
         let distribution = &series_catalog["dcat:dataset"][0]["dcat:distribution"][0];
         assert_eq!(distribution["dcat:mediaType"], "application/senml+json");
-        assert!(distribution["dcat:downloadURL"].as_str().unwrap().starts_with("/series/"));
+        assert!(
+            distribution["dcat:downloadURL"]
+                .as_str()
+                .unwrap()
+                .starts_with("/series/")
+        );
     }
 }

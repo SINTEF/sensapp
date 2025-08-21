@@ -1,7 +1,7 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
-use anyhow::{Result, anyhow};
 use crate::storage::StorageError;
+use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
@@ -149,10 +149,12 @@ async fn get_existing_labels_name_ids(
     let mut results_map = HybridMap::with_capacity(result.row_count());
 
     while result.next_row() {
-        let id = result.get_i64(0)?.ok_or_else(|| anyhow::Error::from(StorageError::missing_field("label_name_id", None, None)))?;
-        let name = result
-            .get_string(1)?
-            .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("label_name", None, None)))?;
+        let id = result.get_i64(0)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("label_name_id", None, None))
+        })?;
+        let name = result.get_string(1)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("label_name", None, None))
+        })?;
 
         results_map.insert(name, id);
     }
@@ -319,10 +321,12 @@ async fn get_existing_labels_description_ids(
     let mut results_map = HybridMap::with_capacity(result.row_count());
 
     while result.next_row() {
-        let id = result.get_i64(0)?.ok_or_else(|| anyhow::Error::from(StorageError::missing_field("label_name_id", None, None)))?;
-        let description = result
-            .get_string(1)?
-            .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("label_description", None, None)))?;
+        let id = result.get_i64(0)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("label_name_id", None, None))
+        })?;
+        let description = result.get_string(1)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("label_description", None, None))
+        })?;
 
         results_map.insert(description, id);
     }

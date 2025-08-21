@@ -64,7 +64,10 @@ pub fn lat_long_guesser(mode: GeoType, column_name: &str, column: &InferedColumn
                 GeoType::Latitude => (Decimal::new(-90, 0), Decimal::new(90, 0)),
                 GeoType::Longitude => (Decimal::new(-180, 0), Decimal::new(180, 0)),
             };
-            if values.iter().all(|value| *value >= min_val && *value <= max_val) {
+            if values
+                .iter()
+                .all(|value| *value >= min_val && *value <= max_val)
+            {
                 98
             } else {
                 -102

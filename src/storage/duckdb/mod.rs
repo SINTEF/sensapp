@@ -1,6 +1,6 @@
+use crate::config;
 use crate::datamodel::TypedSamples;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
-use crate::config;
 use anyhow::{Context, Result, bail};
 use async_broadcast::Sender;
 use async_trait::async_trait;
@@ -89,7 +89,10 @@ impl StorageInstance for DuckDBStorage {
         Ok(())
     }
 
-    async fn list_series(&self, _metric_filter: Option<&str>) -> Result<Vec<crate::datamodel::Sensor>> {
+    async fn list_series(
+        &self,
+        _metric_filter: Option<&str>,
+    ) -> Result<Vec<crate::datamodel::Sensor>> {
         unimplemented!();
     }
 
@@ -122,9 +125,15 @@ impl StorageInstance for DuckDBStorage {
         // Delete metadata tables
         connection.execute("DELETE FROM labels", []).ok();
         connection.execute("DELETE FROM sensors", []).ok();
-        connection.execute("DELETE FROM strings_values_dictionary", []).ok();
-        connection.execute("DELETE FROM labels_description_dictionary", []).ok();
-        connection.execute("DELETE FROM labels_name_dictionary", []).ok();
+        connection
+            .execute("DELETE FROM strings_values_dictionary", [])
+            .ok();
+        connection
+            .execute("DELETE FROM labels_description_dictionary", [])
+            .ok();
+        connection
+            .execute("DELETE FROM labels_name_dictionary", [])
+            .ok();
         connection.execute("DELETE FROM units", []).ok();
 
         Ok(())

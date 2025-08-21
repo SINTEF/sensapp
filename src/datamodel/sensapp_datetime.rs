@@ -68,9 +68,6 @@ mod tests {
         let hifitime_total_nanoseconds = hifitime_now.to_et_duration().total_nanoseconds();
         let hifitime_subsec_nanoseconds = (hifitime_total_nanoseconds % 1_000_000_000) as u32;
 
-        assert_eq!(
-            hifitime_subsec_nanoseconds,
-            offset_now.nanosecond()
-        );
+        assert_eq!(hifitime_subsec_nanoseconds, offset_now.nanosecond());
     }
 }

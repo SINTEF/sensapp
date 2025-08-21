@@ -1,6 +1,6 @@
-use crate::storage::{StorageInstance, common::sync_with_timeout};
 use crate::config;
-use anyhow::{Result, bail, Context};
+use crate::storage::{StorageInstance, common::sync_with_timeout};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use bigquery_publishers::{
     publish_blob_values, publish_boolean_values, publish_float_values, publish_integer_values,
@@ -234,7 +234,10 @@ impl StorageInstance for BigQueryStorage {
         Ok(())
     }
 
-    async fn list_series(&self, _metric_filter: Option<&str>) -> Result<Vec<crate::datamodel::Sensor>> {
+    async fn list_series(
+        &self,
+        _metric_filter: Option<&str>,
+    ) -> Result<Vec<crate::datamodel::Sensor>> {
         use crate::datamodel::{Sensor, SensorType, sensapp_vec::SensAppLabels, unit::Unit};
         use gcp_bigquery_client::model::query_request::QueryRequest;
         use smallvec::smallvec;
@@ -330,15 +333,15 @@ impl StorageInstance for BigQueryStorage {
         use smallvec::smallvec;
         use std::str::FromStr;
 
-        // Query sensor metadata by name
+        // Query sensor metadata by UUID
         let sensor_query = format!(
             r#"
             SELECT s.sensor_id, s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
             FROM `{}.{}.sensors` s
             LEFT JOIN `{}.{}.units` u ON s.unit = u.id
-            WHERE s.name = '{}'
+            WHERE s.uuid = '{}'
             "#,
-            self.project_id, self.dataset_id, self.project_id, self.dataset_id, sensor_name
+            self.project_id, self.dataset_id, self.project_id, self.dataset_id, sensor_uuid
         );
 
         let sensor_rs = self
