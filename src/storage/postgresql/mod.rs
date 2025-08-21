@@ -1,6 +1,7 @@
-use super::{StorageInstance, StorageError, common::{sync_with_timeout, datetime_to_millis}};
+use super::{StorageInstance, StorageError, common::{sync_with_timeout, datetime_to_micros}};
 use crate::datamodel::{TypedSamples, batch::Batch, Sensor, SensorData, SensorType, Sample, SensAppDateTime, Metric};
 use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
+use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::config;
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
@@ -309,42 +310,42 @@ impl StorageInstance for PostgresStorage {
             Some(labels),
         );
 
-        // Convert SensAppDateTime to milliseconds for database queries using common utility
-        let start_time_ms = start_time.as_ref().map(datetime_to_millis);
-        let end_time_ms = end_time.as_ref().map(datetime_to_millis);
+        // Convert SensAppDateTime to microseconds for database queries using common utility
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
 
         // Query samples based on sensor type
         let samples = match sensor.sensor_type {
             SensorType::Integer => {
-                self.query_integer_samples(sensor_id, start_time_ms, end_time_ms, limit)
+                self.query_integer_samples(sensor_id, start_time_us, end_time_us, limit)
                     .await?
             }
             SensorType::Numeric => {
-                self.query_numeric_samples(sensor_id, start_time_ms, end_time_ms, limit)
+                self.query_numeric_samples(sensor_id, start_time_us, end_time_us, limit)
                     .await?
             }
             SensorType::Float => {
-                self.query_float_samples(sensor_id, start_time_ms, end_time_ms, limit)
+                self.query_float_samples(sensor_id, start_time_us, end_time_us, limit)
                     .await?
             }
             SensorType::String => {
-                self.query_string_samples(sensor_id, start_time_ms, end_time_ms, limit)
+                self.query_string_samples(sensor_id, start_time_us, end_time_us, limit)
                     .await?
             }
             SensorType::Boolean => {
-                self.query_boolean_samples(sensor_id, start_time_ms, end_time_ms, limit)
+                self.query_boolean_samples(sensor_id, start_time_us, end_time_us, limit)
                     .await?
             }
             SensorType::Location => {
-                self.query_location_samples(sensor_id, start_time_ms, end_time_ms, limit)
+                self.query_location_samples(sensor_id, start_time_us, end_time_us, limit)
                     .await?
             }
             SensorType::Json => {
-                self.query_json_samples(sensor_id, start_time_ms, end_time_ms, limit)
+                self.query_json_samples(sensor_id, start_time_us, end_time_us, limit)
                     .await?
             }
             SensorType::Blob => {
-                self.query_blob_samples(sensor_id, start_time_ms, end_time_ms, limit)
+                self.query_blob_samples(sensor_id, start_time_us, end_time_us, limit)
                     .await?
             }
         };
@@ -457,11 +458,11 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM integer_values
+            SELECT timestamp_us, value FROM integer_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
-            ORDER BY timestamp_ms ASC
+            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
             sensor_id,
@@ -474,7 +475,7 @@ impl PostgresStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms as f64);
+            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
             let value = row.value;
             samples.push(Sample { datetime, value });
         }
@@ -492,11 +493,11 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM numeric_values
+            SELECT timestamp_us, value FROM numeric_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
-            ORDER BY timestamp_ms ASC
+            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
             sensor_id,
@@ -509,7 +510,7 @@ impl PostgresStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms as f64);
+            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
             let value = Decimal::from_str(&row.value.to_string())
                 .context("Failed to parse decimal value")?;
             samples.push(Sample { datetime, value });
@@ -528,11 +529,11 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM float_values
+            SELECT timestamp_us, value FROM float_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
-            ORDER BY timestamp_ms ASC
+            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
             sensor_id,
@@ -545,7 +546,7 @@ impl PostgresStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms as f64);
+            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
             let value = row.value;
             samples.push(Sample { datetime, value });
         }
@@ -563,13 +564,13 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT sv.timestamp_ms, svd.value as string_value
+            SELECT sv.timestamp_us, svd.value as string_value
             FROM string_values sv
             JOIN strings_values_dictionary svd ON sv.value = svd.id
             WHERE sv.sensor_id = $1
-            AND ($2::BIGINT IS NULL OR sv.timestamp_ms >= $2)
-            AND ($3::BIGINT IS NULL OR sv.timestamp_ms <= $3)
-            ORDER BY sv.timestamp_ms ASC
+            AND ($2::BIGINT IS NULL OR sv.timestamp_us >= $2)
+            AND ($3::BIGINT IS NULL OR sv.timestamp_us <= $3)
+            ORDER BY sv.timestamp_us ASC
             LIMIT $4
             "#,
             sensor_id,
@@ -582,7 +583,7 @@ impl PostgresStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms as f64);
+            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
             let value = row.string_value;
             samples.push(Sample { datetime, value });
         }
@@ -600,11 +601,11 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM boolean_values
+            SELECT timestamp_us, value FROM boolean_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
-            ORDER BY timestamp_ms ASC
+            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
             sensor_id,
@@ -617,7 +618,7 @@ impl PostgresStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms as f64);
+            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
             let value = row.value;
             samples.push(Sample { datetime, value });
         }
@@ -635,11 +636,11 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, latitude, longitude FROM location_values
+            SELECT timestamp_us, latitude, longitude FROM location_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
-            ORDER BY timestamp_ms ASC
+            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
             sensor_id,
@@ -652,7 +653,7 @@ impl PostgresStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms as f64);
+            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
             let value = Point::new(row.longitude, row.latitude);
             samples.push(Sample { datetime, value });
         }
@@ -670,11 +671,11 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM json_values
+            SELECT timestamp_us, value FROM json_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
-            ORDER BY timestamp_ms ASC
+            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
             sensor_id,
@@ -687,7 +688,7 @@ impl PostgresStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms as f64);
+            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
             let value: JsonValue = row.value;
             samples.push(Sample { datetime, value });
         }
@@ -705,11 +706,11 @@ impl PostgresStorage {
 
         let rows = sqlx::query!(
             r#"
-            SELECT timestamp_ms, value FROM blob_values
+            SELECT timestamp_us, value FROM blob_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_ms >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_ms <= $3)
-            ORDER BY timestamp_ms ASC
+            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
             sensor_id,
@@ -722,7 +723,7 @@ impl PostgresStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            let datetime = SensAppDateTime::from_unix_milliseconds(row.timestamp_ms as f64);
+            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
             let value = row.value;
             samples.push(Sample { datetime, value });
         }

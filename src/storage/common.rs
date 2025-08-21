@@ -20,14 +20,6 @@ pub async fn sync_with_timeout(
     Ok(())
 }
 
-/// Convert SensAppDateTime to Unix milliseconds for database storage
-pub fn datetime_to_millis(datetime: &SensAppDateTime) -> i64 {
-    // Use the same pattern as the working microsecond conversion
-    let unix_seconds = datetime.to_unix_seconds();
-    let subsec_nanos = datetime.to_et_duration().total_nanoseconds() % 1_000_000_000;
-    (unix_seconds as i64) * 1_000 + (subsec_nanos / 1_000_000) as i64
-}
-
 /// Convert SensAppDateTime to Unix microseconds for database storage
 #[allow(dead_code)] // Used by SQLite backend when enabled
 pub fn datetime_to_micros(datetime: &SensAppDateTime) -> i64 {
@@ -41,23 +33,6 @@ pub fn datetime_to_micros(datetime: &SensAppDateTime) -> i64 {
 mod tests {
     use super::*;
     use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
-
-    #[test]
-    fn test_datetime_to_millis() {
-        // Test that the function produces reasonable results
-        let datetime = SensAppDateTime::from_unix_seconds(1705315800.0);
-        let result = datetime_to_millis(&datetime);
-        // Should be in the right ballpark (1705315800 seconds = 1705315800000 millis)
-        assert!((1705315800000..=1705315800999).contains(&result));
-
-        // Test that microsecond precision is truncated to milliseconds
-        let datetime_micros = SensAppDateTime::from_unix_microseconds_i64(1705315800456789);
-        let datetime_millis_from_micros = SensAppDateTime::from_unix_milliseconds_i64(1705315800456);
-        let result1 = datetime_to_millis(&datetime_micros);
-        let result2 = datetime_to_millis(&datetime_millis_from_micros);
-        // Should be within 1ms of each other (truncation)
-        assert!((result1 - result2).abs() <= 1);
-    }
 
     #[test]
     fn test_datetime_to_micros() {
