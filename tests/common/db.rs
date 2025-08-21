@@ -17,7 +17,7 @@ impl DbHelpers {
 
         for sensor in sensors {
             if let Some(sensor_data) = storage
-                .query_sensor_data(&sensor.name, None, None, None)
+                .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
                 .await?
             {
                 match sensor_data.samples {
@@ -53,8 +53,13 @@ impl DbHelpers {
         sensor_name: &str,
         expected_count: usize,
     ) -> Result<SensorData> {
+        // First, find the sensor by name to get its UUID
+        let sensor = Self::get_sensor_by_name(storage, sensor_name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("No sensor found with name: {}", sensor_name))?;
+
         let sensor_data = storage
-            .query_sensor_data(sensor_name, None, None, None)
+            .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
             .await?
             .ok_or_else(|| anyhow::anyhow!("No data found for sensor: {}", sensor_name))?;
 

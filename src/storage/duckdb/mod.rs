@@ -95,9 +95,9 @@ impl StorageInstance for DuckDBStorage {
 
     async fn query_sensor_data(
         &self,
-        _sensor_name: &str,
-        _start_time: Option<i64>,
-        _end_time: Option<i64>,
+        _sensor_uuid: &str,
+        _start_time: Option<crate::datamodel::SensAppDateTime>,
+        _end_time: Option<crate::datamodel::SensAppDateTime>,
         _limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
         unimplemented!("DuckDB sensor data querying not yet implemented");

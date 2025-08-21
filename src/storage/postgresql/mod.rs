@@ -1,4 +1,4 @@
-use super::{StorageInstance, StorageError, common::sync_with_timeout};
+use super::{StorageInstance, StorageError, common::{sync_with_timeout, datetime_to_millis}};
 use crate::datamodel::{TypedSamples, batch::Batch, Sensor, SensorData, SensorType, Sample, SensAppDateTime, Metric};
 use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
 use crate::config;
@@ -223,134 +223,10 @@ impl StorageInstance for PostgresStorage {
 
     async fn query_sensor_data(
         &self,
-        sensor_name: &str,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<Option<crate::datamodel::SensorData>> {
-
-        // Query sensor metadata by name using the catalog view
-        let sensor_row = sqlx::query!(
-            r#"
-            SELECT sensor_id, uuid, name, type, unit_name, unit_description
-            FROM sensor_catalog_view
-            WHERE name = $1
-            "#,
-            sensor_name
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-
-        let sensor_row = match sensor_row {
-            Some(row) => row,
-            None => return Ok(None),
-        };
-
-        // Parse sensor metadata with improved error handling
-        let sensor_uuid = sensor_row.uuid.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field("UUID", None, sensor_row.name.as_deref()))
-        })?;
-
-        let sensor_name = sensor_row.name.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field("name", Some(sensor_uuid), None))
-        })?;
-
-        let sensor_type_str = sensor_row.r#type.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field("type", Some(sensor_uuid), Some(&sensor_name)))
-        })?;
-
-        let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
-            anyhow::Error::from(StorageError::invalid_data_format(
-                &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
-                Some(sensor_uuid),
-                Some(&sensor_name),
-            ))
-        })?;
-
-        let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
-            (Some(name), description) => Some(Unit::new(name, description)),
-            _ => None,
-        };
-
-        // Query labels for this sensor with proper context
-        let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field(
-                "sensor_id",
-                Some(sensor_uuid),
-                Some(&sensor_name)
-            ))
-        })?;
-        let labels_rows = sqlx::query!(
-            r#"
-            SELECT lnd.name as label_name, ldd.description as label_value
-            FROM labels l
-            JOIN labels_name_dictionary lnd ON l.name = lnd.id
-            JOIN labels_description_dictionary ldd ON l.description = ldd.id
-            WHERE l.sensor_id = $1
-            "#,
-            sensor_id
-        )
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut labels: SensAppLabels = smallvec![];
-        for label_row in labels_rows {
-            labels.push((label_row.label_name, label_row.label_value));
-        }
-
-        let sensor = Sensor::new(
-            sensor_uuid,
-            sensor_name,
-            sensor_type,
-            unit,
-            Some(labels),
-        );
-
-        // Query samples based on sensor type
-        let samples = match sensor_type {
-            SensorType::Integer => {
-                self.query_integer_samples(sensor_id, start_time, end_time, limit)
-                    .await?
-            }
-            SensorType::Numeric => {
-                self.query_numeric_samples(sensor_id, start_time, end_time, limit)
-                    .await?
-            }
-            SensorType::Float => {
-                self.query_float_samples(sensor_id, start_time, end_time, limit)
-                    .await?
-            }
-            SensorType::String => {
-                self.query_string_samples(sensor_id, start_time, end_time, limit)
-                    .await?
-            }
-            SensorType::Boolean => {
-                self.query_boolean_samples(sensor_id, start_time, end_time, limit)
-                    .await?
-            }
-            SensorType::Location => {
-                self.query_location_samples(sensor_id, start_time, end_time, limit)
-                    .await?
-            }
-            SensorType::Json => {
-                self.query_json_samples(sensor_id, start_time, end_time, limit)
-                    .await?
-            }
-            SensorType::Blob => {
-                self.query_blob_samples(sensor_id, start_time, end_time, limit)
-                    .await?
-            }
-        };
-
-        Ok(Some(SensorData::new(sensor, samples)))
-    }
-
-    async fn query_sensor_data_by_uuid(
-        &self,
         sensor_uuid: &str,
-        _start_time: Option<i64>,
-        _end_time: Option<i64>,
-        _limit: Option<usize>,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
 
         // Parse UUID
@@ -433,38 +309,42 @@ impl StorageInstance for PostgresStorage {
             Some(labels),
         );
 
+        // Convert SensAppDateTime to milliseconds for database queries using common utility
+        let start_time_ms = start_time.as_ref().map(datetime_to_millis);
+        let end_time_ms = end_time.as_ref().map(datetime_to_millis);
+
         // Query samples based on sensor type
         let samples = match sensor.sensor_type {
             SensorType::Integer => {
-                self.query_integer_samples(sensor_id, _start_time, _end_time, _limit)
+                self.query_integer_samples(sensor_id, start_time_ms, end_time_ms, limit)
                     .await?
             }
             SensorType::Numeric => {
-                self.query_numeric_samples(sensor_id, _start_time, _end_time, _limit)
+                self.query_numeric_samples(sensor_id, start_time_ms, end_time_ms, limit)
                     .await?
             }
             SensorType::Float => {
-                self.query_float_samples(sensor_id, _start_time, _end_time, _limit)
+                self.query_float_samples(sensor_id, start_time_ms, end_time_ms, limit)
                     .await?
             }
             SensorType::String => {
-                self.query_string_samples(sensor_id, _start_time, _end_time, _limit)
+                self.query_string_samples(sensor_id, start_time_ms, end_time_ms, limit)
                     .await?
             }
             SensorType::Boolean => {
-                self.query_boolean_samples(sensor_id, _start_time, _end_time, _limit)
+                self.query_boolean_samples(sensor_id, start_time_ms, end_time_ms, limit)
                     .await?
             }
             SensorType::Location => {
-                self.query_location_samples(sensor_id, _start_time, _end_time, _limit)
+                self.query_location_samples(sensor_id, start_time_ms, end_time_ms, limit)
                     .await?
             }
             SensorType::Json => {
-                self.query_json_samples(sensor_id, _start_time, _end_time, _limit)
+                self.query_json_samples(sensor_id, start_time_ms, end_time_ms, limit)
                     .await?
             }
             SensorType::Blob => {
-                self.query_blob_samples(sensor_id, _start_time, _end_time, _limit)
+                self.query_blob_samples(sensor_id, start_time_ms, end_time_ms, limit)
                     .await?
             }
         };

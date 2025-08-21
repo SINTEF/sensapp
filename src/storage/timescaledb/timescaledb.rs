@@ -68,23 +68,12 @@ impl StorageInstance for TimeScaleDBStorage {
 
     async fn query_sensor_data(
         &self,
-        _sensor_name: &str,
-        _start_time: Option<i64>,
-        _end_time: Option<i64>,
+        _sensor_uuid: &str,
+        _start_time: Option<crate::datamodel::SensAppDateTime>,
+        _end_time: Option<crate::datamodel::SensAppDateTime>,
         _limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
         unimplemented!("TimescaleDB sensor data querying not yet implemented");
-    }
-
-    async fn query_sensor_data_by_uuid(
-        &self,
-        _sensor_uuid: &str,
-        _start_time: Option<i64>,
-        _end_time: Option<i64>,
-        _limit: Option<usize>,
-    ) -> Result<Option<crate::datamodel::SensorData>> {
-        // Note: TimescaleDB UUID-based sensor data querying not yet implemented
-        unimplemented!("TimescaleDB UUID-based sensor data querying not yet implemented");
     }
 
     /// Clean up all test data from the database (TimescaleDB implementation)

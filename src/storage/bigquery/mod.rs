@@ -318,10 +318,10 @@ impl StorageInstance for BigQueryStorage {
 
     async fn query_sensor_data(
         &self,
-        sensor_name: &str,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
+        sensor_uuid: &str,
+        _start_time: Option<crate::datamodel::SensAppDateTime>,
+        _end_time: Option<crate::datamodel::SensAppDateTime>,
+        _limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
         use crate::datamodel::{
             Sensor, SensorData, SensorType, sensapp_vec::SensAppLabels, unit::Unit,
@@ -414,103 +414,6 @@ impl StorageInstance for BigQueryStorage {
 
         // For BigQuery, we'll return sensor metadata only for now
         // Sample querying would require complex BigQuery-specific logic
-        let samples = crate::datamodel::TypedSamples::Integer(smallvec![]);
-
-        Ok(Some(SensorData::new(sensor, samples)))
-    }
-
-    async fn query_sensor_data_by_uuid(
-        &self,
-        sensor_uuid: &str,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<Option<crate::datamodel::SensorData>> {
-        use crate::datamodel::{
-            Sensor, SensorData, SensorType, sensapp_vec::SensAppLabels, unit::Unit,
-        };
-        use gcp_bigquery_client::model::query_request::QueryRequest;
-        use smallvec::smallvec;
-        use std::str::FromStr;
-        use uuid::Uuid;
-
-        let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
-
-        let sensor_query = format!(
-            r#"
-            SELECT s.sensor_id, s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
-            FROM `{}.{}.sensors` s
-            LEFT JOIN `{}.{}.units` u ON s.unit = u.id
-            WHERE s.uuid = '{}'
-            "#,
-            self.project_id, self.dataset_id, self.project_id, self.dataset_id, parsed_uuid
-        );
-
-        let sensor_rs = self
-            .client
-            .read()
-            .await
-            .job()
-            .query(&self.project_id, QueryRequest::new(sensor_query))
-            .await?;
-
-        let sensor_row = match sensor_rs.rows.and_then(|rows| rows.into_iter().next()) {
-            Some(row) => row,
-            None => return Ok(None),
-        };
-
-        let sensor_id: i64 = sensor_row.columns[0]
-            .value
-            .as_ref()
-            .unwrap()
-            .parse()
-            .unwrap();
-        let sensor_type = SensorType::from_str(sensor_row.columns[3].value.as_ref().unwrap())
-            .context("Failed to parse sensor type")?;
-        let sensor_name = sensor_row.columns[2].value.as_ref().unwrap().to_string();
-        let unit = sensor_row.columns[4].value.as_ref().map(|name| {
-            Unit::new(
-                name.to_string(),
-                sensor_row.columns[5].value.as_ref().map(|d| d.to_string()),
-            )
-        });
-
-        // Query labels
-        let labels_query = format!(
-            r#"
-            SELECT lnd.name as label_name, ldd.description as label_value
-            FROM `{}.{}.labels` l
-            JOIN `{}.{}.labels_name_dictionary` lnd ON l.name = lnd.id
-            JOIN `{}.{}.labels_description_dictionary` ldd ON l.description = ldd.id
-            WHERE l.sensor_id = {}
-            "#,
-            self.project_id,
-            self.dataset_id,
-            self.project_id,
-            self.dataset_id,
-            self.project_id,
-            self.dataset_id,
-            sensor_id
-        );
-
-        let labels_rs = self
-            .client
-            .read()
-            .await
-            .job()
-            .query(&self.project_id, QueryRequest::new(labels_query))
-            .await?;
-
-        let mut labels: SensAppLabels = smallvec![];
-        for label_row in labels_rs.rows.unwrap_or_default() {
-            let label_name = label_row.columns[0].value.as_ref().unwrap().to_string();
-            let label_value = label_row.columns[1].value.as_ref().unwrap().to_string();
-            labels.push((label_name, label_value));
-        }
-
-        let sensor = Sensor::new(parsed_uuid, sensor_name, sensor_type, unit, Some(labels));
-
-        // For BigQuery, we'll return sensor metadata only for now
         let samples = crate::datamodel::TypedSamples::Integer(smallvec![]);
 
         Ok(Some(SensorData::new(sensor, samples)))

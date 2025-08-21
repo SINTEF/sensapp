@@ -2,6 +2,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use std::fmt::Debug;
+use crate::datamodel::SensAppDateTime;
 
 pub mod error;
 pub use error::StorageError;
@@ -24,22 +25,12 @@ pub trait StorageInstance: Send + Sync + Debug {
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>>;
 
-    /// Query sensor data by name with optional time range and limit
-    #[allow(dead_code)]
+    /// Query sensor data by UUID with optional time range and limit
     async fn query_sensor_data(
         &self,
-        sensor_name: &str,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<Option<crate::datamodel::SensorData>>;
-
-    /// Query sensor data by UUID with optional time range and limit
-    async fn query_sensor_data_by_uuid(
-        &self,
         sensor_uuid: &str,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>>;
 

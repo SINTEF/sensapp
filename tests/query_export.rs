@@ -483,8 +483,13 @@ mod integration_tests {
         assert_eq!(total_samples, 8); // 5 from CSV + 3 from JSON
 
         // 4. Export data from the CSV sensor
+        // First get the sensor by name to obtain its UUID
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name_csv)
+            .await?
+            .expect("CSV temperature sensor should exist");
+
         let sensor_data = storage
-            .query_sensor_data(&sensor_name_csv, None, None, None)
+            .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
             .await?
             .expect("Should have temperature data");
 
@@ -568,9 +573,15 @@ mod time_query_tests {
         // we're testing the query functionality with manually created data
 
         // When: We query with time ranges
-        let all_data = storage
-            .query_sensor_data("time_test", None, None, None)
-            .await?;
+        // First try to get the sensor by name (if it exists)
+        let sensor = DbHelpers::get_sensor_by_name(&storage, "time_test").await?;
+        let all_data = if let Some(sensor) = sensor {
+            storage
+                .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
+                .await?
+        } else {
+            None // No sensor exists with that name
+        };
 
         // Then: Should be able to query different time ranges
         // Note: The exact implementation of time range queries depends on the storage backend

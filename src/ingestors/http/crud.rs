@@ -1,6 +1,7 @@
 use crate::exporters::{CsvConverter, JsonlConverter, SenMLConverter};
 use crate::ingestors::http::app_error::AppError;
 use crate::ingestors::http::state::HttpServerState;
+use crate::datamodel::SensAppDateTime;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;
@@ -35,10 +36,23 @@ impl ExportFormat {
     }
 }
 
+/// Parse ISO8601/RFC3339 datetime string to SensAppDateTime using hifitime
+///
+/// Supports formats like:
+/// - 2024-01-15T10:30:00Z
+/// - 2024-01-15T10:30:00.123Z
+/// - 2024-01-15T10:30:00+01:00
+/// - 2024-01-15 (date only, treated as midnight UTC)
+fn parse_datetime_string(datetime_str: &str) -> Result<SensAppDateTime, String> {
+    // Use hifitime's built-in parsing
+    SensAppDateTime::from_gregorian_str(datetime_str)
+        .map_err(|e| format!("Invalid datetime format '{}': {}", datetime_str, e))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SensorDataQuery {
-    pub start: Option<i64>,
-    pub end: Option<i64>,
+    pub start: Option<String>,
+    pub end: Option<String>,
     pub limit: Option<usize>,
     pub format: Option<String>,
 }
@@ -273,8 +287,8 @@ pub async fn list_series(
     params(
         ("series_uuid" = String, Path, description = "UUID of the series"),
         ("format" = Option<String>, Query, description = "Output format: senml, csv, or jsonl (default: senml)"),
-        ("start" = Option<i64>, Query, description = "Start timestamp in milliseconds"),
-        ("end" = Option<i64>, Query, description = "End timestamp in milliseconds"),
+        ("start" = Option<String>, Query, description = "Start datetime in ISO 8601 format (e.g., '2024-01-15T10:30:00Z')"),
+        ("end" = Option<String>, Query, description = "End datetime in ISO 8601 format (e.g., '2024-01-15T11:00:00Z')"),
         ("limit" = Option<usize>, Query, description = "Maximum number of samples")
     ),
     responses(
@@ -299,10 +313,27 @@ pub async fn get_series_data(
     let _parsed_uuid = uuid::Uuid::from_str(&series_uuid)
         .map_err(|_| AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid)))?;
 
+    // Parse datetime parameters
+    let start_time = match query.start.as_ref() {
+        Some(start_str) => Some(
+            parse_datetime_string(start_str)
+                .map_err(|e| AppError::bad_request(anyhow::anyhow!("Invalid start datetime: {}", e)))?
+        ),
+        None => None,
+    };
+
+    let end_time = match query.end.as_ref() {
+        Some(end_str) => Some(
+            parse_datetime_string(end_str)
+                .map_err(|e| AppError::bad_request(anyhow::anyhow!("Invalid end datetime: {}", e)))?
+        ),
+        None => None,
+    };
+
     // Query series data from storage by UUID
     let series_data = state
         .storage
-        .query_sensor_data_by_uuid(&series_uuid, query.start, query.end, query.limit)
+        .query_sensor_data(&series_uuid, start_time, end_time, query.limit)
         .await?;
 
     let series_data = match series_data {
@@ -376,6 +407,85 @@ mod tests {
         assert_eq!(ExportFormat::Senml.content_type(), "application/json");
         assert_eq!(ExportFormat::Csv.content_type(), "text/csv");
         assert_eq!(ExportFormat::Jsonl.content_type(), "application/x-ndjson");
+    }
+
+    #[test]
+    fn test_parse_datetime_string() {
+        // Test basic ISO 8601 format
+        let result = parse_datetime_string("2024-01-15T10:30:00Z");
+        assert!(result.is_ok());
+
+        // Test with fractional seconds
+        let result = parse_datetime_string("2024-01-15T10:30:00.123Z");
+        assert!(result.is_ok());
+
+        // Test with timezone offset
+        let result = parse_datetime_string("2024-01-15T10:30:00+01:00");
+        assert!(result.is_ok());
+
+        // Test with negative timezone offset
+        let result = parse_datetime_string("2024-01-15T10:30:00-05:00");
+        assert!(result.is_ok());
+
+        // Test invalid format
+        let result = parse_datetime_string("invalid-date");
+        assert!(result.is_err());
+
+        // Test malformed format
+        let result = parse_datetime_string("2024-13-45T25:75:99Z");
+        assert!(result.is_err());
+
+        // Test date-only format (should succeed - hifitime treats as midnight)
+        let result = parse_datetime_string("2024-01-15");
+        assert!(result.is_ok(), "Date-only format should parse to midnight");
+    }
+
+    #[test]
+    fn test_parse_datetime_timezone_conversion() {
+        use crate::storage::common::{datetime_to_micros};
+
+        // Test that times in different timezones are properly converted to UTC microseconds
+        let utc_time = parse_datetime_string("2024-01-15T10:30:00Z").unwrap();
+        let plus_one_time = parse_datetime_string("2024-01-15T11:30:00+01:00").unwrap();
+        let minus_five_time = parse_datetime_string("2024-01-15T05:30:00-05:00").unwrap();
+
+        // All should be equal when converted to UTC microseconds
+        let utc_micros = datetime_to_micros(&utc_time);
+        let plus_one_micros = datetime_to_micros(&plus_one_time);
+        let minus_five_micros = datetime_to_micros(&minus_five_time);
+
+        assert_eq!(utc_micros, plus_one_micros);
+        assert_eq!(utc_micros, minus_five_micros);
+    }
+
+    #[test]
+    fn test_parse_datetime_precision() {
+        use crate::storage::common::{datetime_to_micros};
+
+        // Test microsecond precision
+        let base_time = parse_datetime_string("2024-01-15T10:30:00Z").unwrap();
+        let with_millis = parse_datetime_string("2024-01-15T10:30:00.001Z").unwrap();
+
+        let base_micros = datetime_to_micros(&base_time);
+        let with_millis_micros = datetime_to_micros(&with_millis);
+
+        // Should differ by 1000 microseconds (1 millisecond)
+        assert_eq!(with_millis_micros - base_micros, 1000);
+    }
+
+    #[test]
+    fn test_parse_datetime_edge_cases() {
+        // Test leap year
+        let result = parse_datetime_string("2024-02-29T00:00:00Z");
+        assert!(result.is_ok(), "Should handle leap year correctly");
+
+        // Test non-leap year (should fail)
+        let result = parse_datetime_string("2023-02-29T00:00:00Z");
+        assert!(result.is_err(), "Should reject invalid date in non-leap year");
+
+        // Test end of year
+        let result = parse_datetime_string("2024-12-31T23:59:59Z");
+        assert!(result.is_ok(), "Should handle end of year");
     }
 
     #[test]
