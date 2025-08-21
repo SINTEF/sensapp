@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow};
+use tracing::{debug, info};
 use big_decimal_byte_string_encoder::encode_bigdecimal_to_bigquery_bytes;
 use bigdecimal::BigDecimal;
 use hybridmap::HybridMap;
@@ -38,7 +39,7 @@ pub async fn publish_integer_values(
                             .get(&single_sensor_batch.sensor.uuid)
                             .ok_or(anyhow!("Sensor not found"))?;
                         let timestamp = value.datetime.to_isoformat();
-                        println!("timestamp: {}", timestamp);
+                        debug!("BigQuery: Publishing integer value with timestamp: {}", timestamp);
                         rows.push(IntegerValue {
                             sensor_id: *sensor_id,
                             timestamp,
@@ -162,11 +163,11 @@ pub async fn publish_string_values(
     }
 
     if tmp_rows.is_empty() {
-        println!("No string values to publish");
+        debug!("BigQuery: No string values to publish");
         return Ok(());
     }
 
-    println!("Publishing {} string values", tmp_rows.len());
+    info!("BigQuery: Publishing {} string values", tmp_rows.len());
 
     let only_string_values = tmp_rows
         .iter()

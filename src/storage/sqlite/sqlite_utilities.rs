@@ -165,7 +165,6 @@ pub async fn get_sensor_id_or_create_sensor(
     transaction: &mut Transaction<'_, Sqlite>,
     sensor: &Sensor,
 ) -> Result<i64> {
-    println!("aaah");
     let uuid_string = sensor.uuid.to_string();
     #[derive(sqlx::FromRow)]
     struct SensorIdRow {

@@ -1,6 +1,7 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
 use crate::storage::StorageError;
+use tracing::{debug, info};
 use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
@@ -53,8 +54,8 @@ pub async fn get_or_create_labels_name_ids(
         }
     }
 
-    println!("Found {} known label names", result.len());
-    println!("Found {} unknown label names", unknown_labels.len());
+    debug!("BigQuery: Found {} known label names", result.len());
+    debug!("BigQuery: Found {} unknown label names", unknown_labels.len());
 
     if unknown_labels.is_empty() {
         return Ok(result);
@@ -83,7 +84,7 @@ pub async fn get_or_create_labels_name_ids(
         return Ok(result);
     }
 
-    println!("Found {} label names to create", labels_to_create.len());
+    info!("BigQuery: Creating {} new label names", labels_to_create.len());
 
     let new_ids = create_labels_name(bqs, labels_to_create).await?;
     {
@@ -222,8 +223,8 @@ pub async fn get_or_create_labels_description_ids(
         }
     }
 
-    println!("Found {} known label descriptions", result.len());
-    println!("Found {} unknown label descriptions", unknown_labels.len());
+    debug!("BigQuery: Found {} known label descriptions", result.len());
+    debug!("BigQuery: Found {} unknown label descriptions", unknown_labels.len());
 
     if unknown_labels.is_empty() {
         return Ok(result);
@@ -252,8 +253,8 @@ pub async fn get_or_create_labels_description_ids(
         return Ok(result);
     }
 
-    println!(
-        "Found {} label descriptions to create",
+    info!(
+        "BigQuery: Creating {} new label descriptions",
         labels_to_create.len()
     );
 

@@ -5,6 +5,7 @@ use axum::response::IntoResponse;
 use axum::response::Response;
 use serde_json::json;
 use utoipa::ToSchema;
+use tracing::error;
 
 // Anyhow error handling with axum
 // https://github.com/tokio-rs/axum/blob/d3112a40d55f123bc5e65f995e2068e245f12055/examples/anyhow-error-response/src/main.rs
@@ -24,7 +25,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
             AppError::InternalServerError(error) => {
-                eprintln!("Internal Server Error: {}", error);
+                error!("Internal Server Error: {}", error);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Internal Server Error".to_string(),
@@ -38,18 +39,18 @@ impl IntoResponse for AppError {
                 }
                 StorageError::MissingRequiredField { .. }
                 | StorageError::InvalidDataFormat { .. } => {
-                    eprintln!("Data integrity issue: {}", storage_error);
+                    error!("Data integrity issue: {}", storage_error);
                     (StatusCode::BAD_REQUEST, storage_error.to_string())
                 }
                 StorageError::Configuration(_) => {
-                    eprintln!("Storage configuration error: {}", storage_error);
+                    error!("Storage configuration error: {}", storage_error);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Storage configuration error".to_string(),
                     )
                 }
                 StorageError::Database(_) | StorageError::OperationFailed { .. } => {
-                    eprintln!("Storage operation failed: {}", storage_error);
+                    error!("Storage operation failed: {}", storage_error);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Storage operation failed".to_string(),

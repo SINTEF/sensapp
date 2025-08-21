@@ -17,6 +17,7 @@ use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
 use url::Url;
 use uuid::Uuid;
+use tracing::{error, debug};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Preset {
@@ -296,12 +297,12 @@ impl StorageInstance for RrdCachedStorage {
             match client.batch(batch_updates).await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Failed to batch update: {:?}", e);
+                    error!("RRDCached: Failed to batch update: {:?}", e);
                     match e {
                         RRDCachedClientError::BatchUpdateErrorResponse(string, errors) => {
-                            println!("Batch update error response: {:?}", string);
+                            error!("RRDCached: Batch update error response: {:?}", string);
                             for error in errors {
-                                println!("Batch update error: {:?}", error);
+                                error!("RRDCached: Batch update error: {:?}", error);
                             }
                         }
                         _ => {}

@@ -1,5 +1,6 @@
 use crate::storage::StorageError;
 use anyhow::{Result, anyhow};
+use tracing::{debug, info};
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
     query_parameter_value::QueryParameterValue, query_request::QueryRequest,
@@ -52,8 +53,8 @@ pub async fn get_sensor_ids_or_create_sensors(
         }
     }
 
-    println!("Found {} known sensors", result.len());
-    println!("Found {} unknown sensors", unknown_sensors.len());
+    debug!("BigQuery: Found {} known sensors", result.len());
+    debug!("BigQuery: Found {} unknown sensors", unknown_sensors.len());
 
     if unknown_sensors.is_empty() {
         return Ok(result);
@@ -82,7 +83,7 @@ pub async fn get_sensor_ids_or_create_sensors(
         return Ok(result);
     }
 
-    println!("Found {} sensors to create", sensors_to_create.len());
+    info!("BigQuery: Creating {} new sensors", sensors_to_create.len());
 
     let new_ids = create_sensors(bqs, &sensors_to_create).await?;
     {
@@ -156,7 +157,7 @@ async fn get_existing_sensors_ids_from_uuids(
             let parsed_uuid = Uuid::parse_str(&uuid).ok();
             anyhow::Error::from(StorageError::missing_field("sensor_id", parsed_uuid, None))
         })?;
-        println!("Found sensor: {} with id: {}", uuid, sensor_id);
+        debug!("BigQuery: Found existing sensor {} with id: {}", uuid, sensor_id);
         results_map.insert(Uuid::parse_str(&uuid)?, sensor_id);
     }
 

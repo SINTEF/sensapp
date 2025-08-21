@@ -21,6 +21,7 @@ use std::str::FromStr;
 use std::{io::Read, str::from_utf8};
 use std::{str, sync::Arc};
 use tokio_util::bytes::Bytes;
+use tracing::{debug, error, info};
 
 #[derive(Debug, Deserialize)]
 pub struct InfluxDBQueryParams {
@@ -164,13 +165,10 @@ pub async fn publish_influxdb(
     }): Query<InfluxDBQueryParams>,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
-    // println!("InfluxDB publish");
-    // println!("bucket: {}", bucket);
-    // println!("org: {:?}", org);
-    // println!("org_id: {:?}", org_id);
-    // println!("precision: {:?}", precision);
-    // println!("bytes: {:?}", bytes);
-    // println!("headers: {:?}", headers);
+    debug!(
+        "InfluxDB publish: bucket={}, org={:?}, org_id={:?}, precision={:?}",
+        bucket, org, org_id, precision
+    );
 
     // Requires org or org_id
     if org.is_none() && org_id.is_none() {
@@ -268,13 +266,13 @@ pub async fn publish_influxdb(
 
     match batch_builder.send_what_is_left(state.storage.clone()).await {
         Ok(true) => {
-            println!("INfluxDB: Batch sent successfully");
+            info!("InfluxDB: Batch sent successfully");
         }
         Ok(false) => {
-            println!("INfluxDB: No data to send");
+            debug!("InfluxDB: No data to send");
         }
         Err(error) => {
-            println!("INfluxDB: Error: {:?}", error);
+            error!("InfluxDB: Error sending batch: {:?}", error);
             return Err(AppError::internal_server_error(error));
         }
     }

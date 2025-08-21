@@ -18,6 +18,7 @@ use regex::Regex;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::RwLock;
 use url::Url;
+use tracing::{info, debug, error};
 
 mod bigquery_labels_utilities;
 mod bigquery_prost_structs;
@@ -85,11 +86,11 @@ impl BigQueryStorage {
     pub async fn connect(connection_string: &str) -> Result<Self> {
         let (gcp_sa_key, project_id, dataset_id) = parse_connection_string(connection_string)?;
 
-        println!(
+        info!(
             "Connecting to BigQuery with project_id: {}, dataset_id: {}",
             project_id, dataset_id
         );
-        println!("File: {}", gcp_sa_key);
+        debug!("Using service account key file: {}", gcp_sa_key);
         let client = Arc::new(RwLock::new(
             gcp_bigquery_client::Client::from_service_account_key_file(&gcp_sa_key).await?,
         ));
@@ -130,10 +131,10 @@ impl StorageInstance for BigQueryStorage {
             .await
         {
             Ok(_) => {
-                println!("Dataset already exists");
+                debug!("BigQuery dataset already exists");
             }
             Err(BQError::ResponseError { error }) if error.error.code == 404 => {
-                println!("Dataset does not exist, creating it");
+                info!("BigQuery dataset does not exist, creating it");
                 let dataset =
                     Dataset::new(&self.project_id, &self.dataset_id).location("europe-north1");
                 self.client.read().await.dataset().create(dataset).await?;
@@ -176,7 +177,7 @@ impl StorageInstance for BigQueryStorage {
             .iter()
             .map(|sensor_batch| sensor_batch.sensor.clone())
             .collect::<Vec<_>>();
-        println!("Publishing batch with {} sensors", sensors.len());
+        debug!("BigQuery: Publishing batch with {} sensors", sensors.len());
         let sensor_ids = Arc::new(get_sensor_ids_or_create_sensors(self, &sensors).await?);
 
         let futures: Vec<Pin<Box<dyn Future<Output = Result<(), _>> + Send>>> = vec![
@@ -214,11 +215,11 @@ impl StorageInstance for BigQueryStorage {
             Box::pin(publish_blob_values(self, batch.clone(), sensor_ids.clone())),
         ];
 
-        println!("Waiting for all publishers to finish");
+        debug!("BigQuery: Waiting for all publishers to finish");
         try_join_all(futures).await?;
-        println!("All publishers finished, syncing");
+        debug!("BigQuery: All publishers finished, syncing");
         self.sync(sync_sender).await?;
-        println!("Sync finished, yo yo yo");
+        debug!("BigQuery: Sync finished");
         Ok(())
     }
 

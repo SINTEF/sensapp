@@ -16,6 +16,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use tokio_util::bytes::Bytes;
+use tracing::{debug, info};
 
 fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
     // Check that we have the right content encoding, that must be snappy
@@ -102,14 +103,7 @@ pub async fn publish_prometheus(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
-    // println!("InfluxDB publish");
-    // println!("bucket: {}", bucket);
-    // println!("org: {:?}", org);
-    // println!("org_id: {:?}", org_id);
-    // println!("precision: {:?}", precision);
-    // println!("bytes: {:?}", bytes);
-
-    println!("Received {} bytes", bytes.len());
+    debug!("Prometheus remote write: received {} bytes", bytes.len());
 
     // Verify headers
     verify_headers(&headers)?;
@@ -123,7 +117,7 @@ pub async fn publish_prometheus(
         return Ok(StatusCode::NO_CONTENT);
     }
 
-    println!("Received {} timeseries", write_request.timeseries.len());
+    debug!("Processing {} timeseries", write_request.timeseries.len());
 
     let mut batch_builder = BatchBuilder::new()?;
     for time_serie in write_request.timeseries {
@@ -170,8 +164,11 @@ pub async fn publish_prometheus(
     }
 
     match batch_builder.send_what_is_left(state.storage.clone()).await {
-        Ok(_sent) => {
-            // Batch processed successfully
+        Ok(true) => {
+            info!("Prometheus: Batch sent successfully");
+        }
+        Ok(false) => {
+            debug!("Prometheus: No data to send");
         }
         Err(error) => {
             return Err(AppError::internal_server_error(error));

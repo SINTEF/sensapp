@@ -34,7 +34,7 @@ use tokio_util::bytes::Bytes;
 use tower::ServiceBuilder;
 use tower_http::trace;
 use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
-use tracing::Level;
+use tracing::{Level, debug};
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable as ScalarServable};
 
@@ -358,9 +358,9 @@ async fn publish_handler(bytes: Bytes) -> Result<Json<String>, (StatusCode, Stri
         .into_reader_with_file_handle(cursor)
         .finish();
 
-    // print the schema
+    // debug the schema
     let schema = df_result.as_ref().unwrap().schema();
-    println!("{:?}", schema);
+    debug!("CSV schema: {:?}", schema);
 
     match df_result {
         Ok(df) => Ok(Json(format!("Number of rows: {}", df.height()))),

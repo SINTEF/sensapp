@@ -1,6 +1,7 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
 use crate::storage::StorageError;
+use tracing::{debug, info};
 use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
@@ -44,9 +45,9 @@ pub async fn get_or_create_string_values_ids(
         }
     }
 
-    println!("Found {} known string values", result.len());
-    println!(
-        "Found {} unknown string values",
+    debug!("BigQuery: Found {} known string values", result.len());
+    debug!(
+        "BigQuery: Found {} unknown string values",
         unknown_string_values.len()
     );
 
@@ -77,7 +78,7 @@ pub async fn get_or_create_string_values_ids(
         return Ok(result);
     }
 
-    println!("Found {} string values to create", values_to_create.len());
+    info!("BigQuery: Creating {} new string values", values_to_create.len());
 
     let new_ids = create_string_values(bqs, values_to_create).await?;
     {

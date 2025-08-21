@@ -91,7 +91,6 @@ async fn async_main() -> Result<()> {
             let cloned_storage = storage.clone();
             tokio::spawn(async move {
                 if let Err(e) = ingestors::mqtt::mqtt_client(cloned_config, cloned_storage).await {
-                    eprintln!("❌ MQTT client {} failed: {}", i + 1, e);
                     event!(Level::ERROR, "MQTT client {} failed: {}", i + 1, e);
                 }
             });
@@ -121,8 +120,7 @@ async fn async_main() -> Result<()> {
             Ok(())
         }
         Err(err) => {
-            event!(Level::ERROR, "HTTP server failed: {}", err);
-            eprintln!("❌ HTTP server failed to start: {}", err);
+            event!(Level::ERROR, "HTTP server failed to start: {}", err);
             Err(err)
         }
     }

@@ -3,6 +3,7 @@ use anyhow::{Context, Result, bail};
 use rand::{Rng, distr::Alphanumeric, rng};
 use rumqttc::{AsyncClient, MqttOptions, Transport};
 use std::{sync::Arc, time::Duration};
+use tracing::debug;
 
 fn random_client_id() -> String {
     rng()
@@ -97,14 +98,13 @@ pub async fn mqtt_client(config: MqttConfig, _storage: Arc<dyn StorageInstance>)
             Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish))) => {
                 let topic = publish.topic;
                 let payload = publish.payload;
-                println!("Received message on topic: {}", topic);
-                println!("Payload: {:?}", payload);
+                debug!("MQTT: Received message on topic: {}, payload size: {} bytes", topic, payload.len());
                 /*let mut geobuf = geobuf::geobuf_pb::Data::new();
                 use protobuf::Message;
                 geobuf.merge_from_bytes(&payload); //.unwrap();
                 match geobuf::decode::Decoder::decode(&geobuf).unwrap() {
                     serde_json::Value::Object(geojson) => {
-                        println!("GeoJSON: {:?}", geojson);
+                        debug!("MQTT: GeoJSON: {:?}", geojson);
                     }
                     _ => {}
                 }*/

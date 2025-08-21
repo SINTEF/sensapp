@@ -1,6 +1,7 @@
 use std::{collections::HashMap, num::NonZeroUsize};
 
 use crate::storage::StorageError;
+use tracing::{debug, info};
 use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
@@ -47,8 +48,8 @@ pub async fn get_or_create_units_ids(
         }
     }
 
-    println!("Found {} known units", result.len());
-    println!("Found {} unknown units", unknown_units.len());
+    debug!("BigQuery: Found {} known units", result.len());
+    debug!("BigQuery: Found {} unknown units", unknown_units.len());
 
     if unknown_units.is_empty() {
         return Ok(result);
@@ -77,7 +78,7 @@ pub async fn get_or_create_units_ids(
         return Ok(result);
     }
 
-    println!("Found {} units to create", units_to_create.len());
+    info!("BigQuery: Creating {} new units", units_to_create.len());
 
     let new_ids = create_units(bqs, units_to_create).await?;
     {
