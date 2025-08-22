@@ -98,7 +98,11 @@ pub async fn mqtt_client(config: MqttConfig, _storage: Arc<dyn StorageInstance>)
             Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish))) => {
                 let topic = publish.topic;
                 let payload = publish.payload;
-                debug!("MQTT: Received message on topic: {}, payload size: {} bytes", topic, payload.len());
+                debug!(
+                    "MQTT: Received message on topic: {}, payload size: {} bytes",
+                    topic,
+                    payload.len()
+                );
                 /*let mut geobuf = geobuf::geobuf_pb::Data::new();
                 use protobuf::Message;
                 geobuf.merge_from_bytes(&payload); //.unwrap();

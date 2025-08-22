@@ -1,4 +1,4 @@
-use crate::datamodel::{Sample, SensAppDateTime, SensorData, TypedSamples};
+use crate::datamodel::{Sample, SensAppDateTime, SensorData, SensorType, TypedSamples};
 use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose};
 use serde_json::{Map, Value, json};
@@ -317,6 +317,209 @@ impl SenMLConverter {
                 json!(record)
             })
             .collect()
+    }
+
+    /// Parse SenML JSON and create sensor data grouped by sensor name
+    pub fn from_senml_json(json_str: &str) -> Result<Vec<(String, SensorData)>> {
+        use crate::datamodel::{
+            Sensor, SensorType, TypedSamples,
+        };
+        use smallvec::SmallVec;
+        use uuid::Uuid;
+
+        let json_value: Value = serde_json::from_str(json_str)?;
+        let senml_array = json_value
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("SenML must be a JSON array"))?;
+
+        if senml_array.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Group records by base name (sensor name)
+        let mut sensors_map: std::collections::HashMap<String, Vec<&Map<String, Value>>> =
+            std::collections::HashMap::new();
+        let mut current_base_name = String::new();
+        let mut current_base_time: Option<f64> = None;
+
+        for record in senml_array {
+            let obj = record
+                .as_object()
+                .ok_or_else(|| anyhow::anyhow!("Each SenML record must be an object"))?;
+
+            // Update base name if present
+            if let Some(bn) = obj.get("bn").and_then(|v| v.as_str()) {
+                current_base_name = bn.to_string();
+            }
+
+            // Update base time if present
+            if let Some(bt) = obj.get("bt").and_then(|v| v.as_f64()) {
+                current_base_time = Some(bt);
+            }
+
+            // Use base name or individual name
+            let sensor_name = if let Some(name) = obj.get("n").and_then(|v| v.as_str()) {
+                format!("{}{}", current_base_name, name)
+            } else {
+                current_base_name.clone()
+            };
+
+            if sensor_name.is_empty() {
+                return Err(anyhow::anyhow!("SenML record must have a name (bn or n)"));
+            }
+
+            sensors_map
+                .entry(sensor_name)
+                .or_default()
+                .push(obj);
+        }
+
+        let mut result = Vec::new();
+
+        for (sensor_name, records) in sensors_map {
+            if records.is_empty() {
+                continue;
+            }
+
+            // Determine sensor type from first record with a value
+            let sensor_type = Self::infer_sensor_type(records.first().unwrap())?;
+
+            // Parse samples based on type
+            let samples = match sensor_type {
+                SensorType::Integer => {
+                    let int_samples: Result<SmallVec<[Sample<i64>; 4]>> = records
+                        .iter()
+                        .map(|record| Self::parse_integer_sample(record, current_base_time))
+                        .collect();
+                    TypedSamples::Integer(int_samples?)
+                }
+                SensorType::Float => {
+                    let float_samples: Result<SmallVec<[Sample<f64>; 4]>> = records
+                        .iter()
+                        .map(|record| Self::parse_float_sample(record, current_base_time))
+                        .collect();
+                    TypedSamples::Float(float_samples?)
+                }
+                SensorType::String => {
+                    let string_samples: Result<SmallVec<[Sample<String>; 4]>> = records
+                        .iter()
+                        .map(|record| Self::parse_string_sample(record, current_base_time))
+                        .collect();
+                    TypedSamples::String(string_samples?)
+                }
+                SensorType::Boolean => {
+                    let bool_samples: Result<SmallVec<[Sample<bool>; 4]>> = records
+                        .iter()
+                        .map(|record| Self::parse_boolean_sample(record, current_base_time))
+                        .collect();
+                    TypedSamples::Boolean(bool_samples?)
+                }
+                _ => return Err(anyhow::anyhow!("Unsupported sensor type for SenML import")),
+            };
+
+            let sensor = Sensor {
+                uuid: Uuid::new_v4(),
+                name: sensor_name.clone(),
+                sensor_type,
+                unit: None, // Could be extracted from SenML "u" field if needed
+                labels: SmallVec::new(),
+            };
+
+            let sensor_data = SensorData::new(sensor, samples);
+            result.push((sensor_name, sensor_data));
+        }
+
+        Ok(result)
+    }
+
+    fn infer_sensor_type(record: &Map<String, Value>) -> Result<SensorType> {
+        if record.contains_key("v") {
+            // Numeric value
+            if let Some(value) = record.get("v") {
+                if value.is_i64() {
+                    Ok(SensorType::Integer)
+                } else if value.is_f64() {
+                    Ok(SensorType::Float)
+                } else {
+                    Err(anyhow::anyhow!("Invalid numeric value in SenML"))
+                }
+            } else {
+                Err(anyhow::anyhow!("Missing value in SenML record"))
+            }
+        } else if record.contains_key("vs") {
+            Ok(SensorType::String)
+        } else if record.contains_key("vb") {
+            Ok(SensorType::Boolean)
+        } else {
+            Err(anyhow::anyhow!(
+                "SenML record must contain a value (v, vs, vb, etc.)"
+            ))
+        }
+    }
+
+    fn parse_timestamp(
+        record: &Map<String, Value>,
+        base_time: Option<f64>,
+    ) -> Result<SensAppDateTime> {
+        let time = if let Some(t) = record.get("t").and_then(|v| v.as_f64()) {
+            // Relative time
+            base_time.unwrap_or(0.0) + t
+        } else {
+            // Use base time or current time
+            base_time.unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as f64)
+        };
+
+        // Convert Unix timestamp to SensAppDateTime
+        Ok(SensAppDateTime::from_unix_seconds(time))
+    }
+
+    fn parse_integer_sample(
+        record: &Map<String, Value>,
+        base_time: Option<f64>,
+    ) -> Result<Sample<i64>> {
+        let datetime = Self::parse_timestamp(record, base_time)?;
+        let value = record
+            .get("v")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| anyhow::anyhow!("Missing or invalid integer value"))?;
+        Ok(Sample { datetime, value })
+    }
+
+    fn parse_float_sample(
+        record: &Map<String, Value>,
+        base_time: Option<f64>,
+    ) -> Result<Sample<f64>> {
+        let datetime = Self::parse_timestamp(record, base_time)?;
+        let value = record
+            .get("v")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("Missing or invalid float value"))?;
+        Ok(Sample { datetime, value })
+    }
+
+    fn parse_string_sample(
+        record: &Map<String, Value>,
+        base_time: Option<f64>,
+    ) -> Result<Sample<String>> {
+        let datetime = Self::parse_timestamp(record, base_time)?;
+        let value = record
+            .get("vs")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing or invalid string value"))?
+            .to_string();
+        Ok(Sample { datetime, value })
+    }
+
+    fn parse_boolean_sample(
+        record: &Map<String, Value>,
+        base_time: Option<f64>,
+    ) -> Result<Sample<bool>> {
+        let datetime = Self::parse_timestamp(record, base_time)?;
+        let value = record
+            .get("vb")
+            .and_then(|v| v.as_bool())
+            .ok_or_else(|| anyhow::anyhow!("Missing or invalid boolean value"))?;
+        Ok(Sample { datetime, value })
     }
 }
 

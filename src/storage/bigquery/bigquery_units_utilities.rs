@@ -1,7 +1,6 @@
 use std::{collections::HashMap, num::NonZeroUsize};
 
 use crate::storage::StorageError;
-use tracing::{debug, info};
 use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
@@ -11,6 +10,7 @@ use gcp_bigquery_client::model::{
 use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
 use tokio::sync::Mutex;
+use tracing::{debug, info};
 
 use crate::datamodel::{SensAppVec, unit::Unit};
 

@@ -1,6 +1,5 @@
 use crate::storage::StorageError;
 use anyhow::{Result, anyhow};
-use tracing::{debug, info};
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
     query_parameter_value::QueryParameterValue, query_request::QueryRequest,
@@ -9,6 +8,7 @@ use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use super::{
@@ -157,7 +157,10 @@ async fn get_existing_sensors_ids_from_uuids(
             let parsed_uuid = Uuid::parse_str(&uuid).ok();
             anyhow::Error::from(StorageError::missing_field("sensor_id", parsed_uuid, None))
         })?;
-        debug!("BigQuery: Found existing sensor {} with id: {}", uuid, sensor_id);
+        debug!(
+            "BigQuery: Found existing sensor {} with id: {}",
+            uuid, sensor_id
+        );
         results_map.insert(Uuid::parse_str(&uuid)?, sensor_id);
     }
 

@@ -1,7 +1,6 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
 use crate::storage::StorageError;
-use tracing::{debug, info};
 use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
@@ -11,6 +10,7 @@ use gcp_bigquery_client::model::{
 use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
 use tokio::sync::Mutex;
+use tracing::{debug, info};
 
 use crate::datamodel::SensAppVec;
 
@@ -78,7 +78,10 @@ pub async fn get_or_create_string_values_ids(
         return Ok(result);
     }
 
-    info!("BigQuery: Creating {} new string values", values_to_create.len());
+    info!(
+        "BigQuery: Creating {} new string values",
+        values_to_create.len()
+    );
 
     let new_ids = create_string_values(bqs, values_to_create).await?;
     {

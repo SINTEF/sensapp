@@ -31,6 +31,11 @@ test-utils = []
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# Apache Arrow support for efficient columnar data format
+arrow = { version = "54", features = ["ipc"] }
+arrow-ipc = "54"
+arrow-schema = "54"
+arrow-array = "54"
 anyhow = "1.0"
 #async-stream = "0.3"
 async-trait = "0.1"

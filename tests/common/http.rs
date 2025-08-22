@@ -2,10 +2,10 @@
 use anyhow::Result;
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
 use sensapp::ingestors::http::crud::{get_series_data, list_metrics, list_series};
-use sensapp::ingestors::http::server::publish_json_data;
+use sensapp::ingestors::http::server::publish_senml_data;
 use sensapp::ingestors::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
 use std::sync::Arc;
@@ -64,6 +64,19 @@ impl TestApp {
         Ok(TestResponse::new(response).await)
     }
 
+    /// Send a POST request with binary data (e.g., Arrow files)
+    #[allow(dead_code)] // Test helper method
+    pub async fn post_binary(&self, path: &str, content_type: &str, data: &[u8]) -> Result<TestResponse> {
+        let request = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", content_type)
+            .body(Body::from(data.to_vec()))?;
+
+        let response = self.app.clone().oneshot(request).await?;
+        Ok(TestResponse::new(response).await)
+    }
+
     /// Send a GET request
     #[allow(dead_code)] // Test helper method
     pub async fn get(&self, path: &str) -> Result<TestResponse> {
@@ -75,6 +88,7 @@ impl TestApp {
         let response = self.app.clone().oneshot(request).await?;
         Ok(TestResponse::new(response).await)
     }
+
 
     /// Send a POST request with SenML data
     #[allow(dead_code)] // Test helper method
@@ -106,18 +120,22 @@ impl TestApp {
 /// Test response wrapper for easier assertions
 pub struct TestResponse {
     status: StatusCode,
+    headers: HeaderMap,
+    body_bytes: Vec<u8>,
     body: String,
 }
 
 impl TestResponse {
     async fn new(response: axum::response::Response) -> Self {
         let status = response.status();
+        let headers = response.headers().clone();
         let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .to_vec();
         let body = String::from_utf8_lossy(&body_bytes).to_string();
 
-        Self { status, body }
+        Self { status, headers, body_bytes, body }
     }
 
     /// Get response status
@@ -128,6 +146,11 @@ impl TestResponse {
     /// Get response body as string
     pub fn body(&self) -> &str {
         &self.body
+    }
+
+    /// Get response body as bytes
+    pub fn body_bytes(&self) -> &[u8] {
+        &self.body_bytes
     }
 
     /// Check if response was successful (2xx)
@@ -166,9 +189,35 @@ impl TestResponse {
         );
         self
     }
+
+    /// Get response headers
+    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
+    pub fn headers(&self) -> &HeaderMap {
+        &self.headers
+    }
+
+    /// Assert specific header value
+    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
+    pub fn assert_header(&self, name: &str, expected: &str) -> &Self {
+        let actual = self.headers.get(name)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("<missing>");
+        assert_eq!(
+            actual, expected,
+            "Expected header '{}' to be '{}', but was '{}'",
+            name, expected, actual
+        );
+        self
+    }
+
+    /// Assert content-type header
+    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
+    pub fn assert_content_type(&self, expected: &str) -> &Self {
+        self.assert_header("content-type", expected)
+    }
 }
 
-/// Unified publish handler for testing - handles both CSV and JSON based on content type
+/// Unified publish handler for testing - handles CSV, JSON, and Arrow based on content type
 async fn test_publish_handler(
     axum::extract::State(state): axum::extract::State<HttpServerState>,
     headers: axum::http::HeaderMap,
@@ -195,7 +244,7 @@ async fn test_publish_handler(
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid UTF-8: {}", e)))?;
 
         // Use the real JSON ingestion logic
-        publish_json_data(&json_str, state.storage.clone())
+        publish_senml_data(&json_str, state.storage.clone())
             .await
             .map_err(|e| {
                 (
@@ -205,6 +254,28 @@ async fn test_publish_handler(
             })?;
 
         Ok("ok".to_string())
+    } else if content_type.contains("application/vnd.apache.arrow.file") {
+        // Handle Arrow data
+        use sensapp::importers::arrow::publish_arrow_async;
+
+        let stream = body.into_data_stream();
+        let stream = stream.map_err(io::Error::other);
+        let reader = stream.into_async_read();
+
+        publish_arrow_async(reader, state.storage.clone())
+            .await
+            .map_err(|e| {
+                // Arrow parsing errors should be bad requests, not internal server errors
+                if e.to_string().contains("Failed to create Arrow file reader") ||
+                   e.to_string().contains("Arrow file contains no data batches") ||
+                   e.to_string().contains("Failed to read Arrow batch") {
+                    (StatusCode::BAD_REQUEST, format!("Invalid Arrow format: {}", e))
+                } else {
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                }
+            })?;
+
+        Ok("Arrow data ingested successfully".to_string())
     } else {
         // Handle CSV data (default)
         use sensapp::importers::csv::publish_csv_async;
@@ -232,13 +303,26 @@ mod tests {
 
     #[test]
     fn test_response_helpers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("content-type", "application/json".parse().unwrap());
+
         let response = TestResponse {
             status: StatusCode::OK,
+            headers,
+            body_bytes: b"test body".to_vec(),
             body: "test body".to_string(),
         };
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.body(), "test body");
+        assert_eq!(response.body_bytes(), b"test body");
         assert!(response.is_success());
+
+        // Test header functionality
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        response.assert_content_type("application/json");
     }
 }

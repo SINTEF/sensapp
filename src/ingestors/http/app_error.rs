@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use serde_json::json;
-use utoipa::ToSchema;
 use tracing::error;
+use utoipa::ToSchema;
 
 // Anyhow error handling with axum
 // https://github.com/tokio-rs/axum/blob/d3112a40d55f123bc5e65f995e2068e245f12055/examples/anyhow-error-response/src/main.rs

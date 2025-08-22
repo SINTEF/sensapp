@@ -15,9 +15,9 @@ use rrdcached_client::{
 };
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
+use tracing::{debug, error};
 use url::Url;
 use uuid::Uuid;
-use tracing::{error, debug};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Preset {

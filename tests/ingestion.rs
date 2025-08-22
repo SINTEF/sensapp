@@ -148,11 +148,11 @@ async fn test_json_ingestion() -> Result<()> {
     // Then: Response should be successful
     response.assert_status(StatusCode::OK);
 
-    // Extract sensor name from JSON data and verify it exists
+    // Extract sensor name from SenML JSON data (bn field) and verify it exists
     let json_value: serde_json::Value = serde_json::from_str(&json_data)?;
-    let sensor_name = json_value[0]["sensor_name"]
+    let sensor_name = json_value[0]["bn"]
         .as_str()
-        .ok_or_else(|| anyhow::anyhow!("Could not parse sensor name from JSON"))?;
+        .ok_or_else(|| anyhow::anyhow!("Could not parse sensor name from SenML JSON"))?;
 
     let sensor = DbHelpers::get_sensor_by_name(&storage, sensor_name)
         .await?

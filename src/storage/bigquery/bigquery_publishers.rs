@@ -1,9 +1,9 @@
 use anyhow::{Result, anyhow};
-use tracing::{debug, info};
 use big_decimal_byte_string_encoder::encode_bigdecimal_to_bigquery_bytes;
 use bigdecimal::BigDecimal;
 use hybridmap::HybridMap;
 use std::sync::Arc;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use super::BigQueryStorage;
@@ -39,7 +39,10 @@ pub async fn publish_integer_values(
                             .get(&single_sensor_batch.sensor.uuid)
                             .ok_or(anyhow!("Sensor not found"))?;
                         let timestamp = value.datetime.to_isoformat();
-                        debug!("BigQuery: Publishing integer value with timestamp: {}", timestamp);
+                        debug!(
+                            "BigQuery: Publishing integer value with timestamp: {}",
+                            timestamp
+                        );
                         rows.push(IntegerValue {
                             sensor_id: *sensor_id,
                             timestamp,

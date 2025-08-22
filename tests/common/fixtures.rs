@@ -91,20 +91,20 @@ pub fn temperature_sensor_csv_with_name() -> (String, String) {
     (csv_data, sensor_name)
 }
 
-/// Sample JSON data for testing
+/// Sample JSON data for testing (SenML format)
 pub fn temperature_sensor_json() -> String {
     let test_id = generate_test_id();
     format!(
         r#"[
-  {{"datetime": "2024-01-01T00:00:00Z", "sensor_name": "temperature_{}", "value": 20.5, "unit": "°C"}},
-  {{"datetime": "2024-01-01T00:01:00Z", "sensor_name": "temperature_{}", "value": 21.0, "unit": "°C"}},
-  {{"datetime": "2024-01-01T00:02:00Z", "sensor_name": "temperature_{}", "value": 21.5, "unit": "°C"}}
+  {{"bn": "temperature_{}", "bt": 1704067200, "v": 20.5, "u": "Cel"}},
+  {{"t": 60, "v": 21.0}},
+  {{"t": 120, "v": 21.5}}
 ]"#,
-        test_id, test_id, test_id
+        test_id
     )
 }
 
-/// Sample JSON data for temperature sensor with known sensor name
+/// Sample JSON data for temperature sensor with known sensor name (SenML format)
 /// Returns (json_data, sensor_name)
 #[allow(dead_code)] // Test fixture
 pub fn temperature_sensor_json_with_name() -> (String, String) {
@@ -112,11 +112,11 @@ pub fn temperature_sensor_json_with_name() -> (String, String) {
     let sensor_name = format!("temperature_{}", test_id);
     let json_data = format!(
         r#"[
-  {{"datetime": "2024-01-01T00:00:00Z", "sensor_name": "{}", "value": 20.5, "unit": "°C"}},
-  {{"datetime": "2024-01-01T00:01:00Z", "sensor_name": "{}", "value": 21.0, "unit": "°C"}},
-  {{"datetime": "2024-01-01T00:02:00Z", "sensor_name": "{}", "value": 21.5, "unit": "°C"}}
+  {{"bn": "{}", "bt": 1704067200, "v": 20.5, "u": "Cel"}},
+  {{"t": 60, "v": 21.0}},
+  {{"t": 120, "v": 21.5}}
 ]"#,
-        sensor_name, sensor_name, sensor_name
+        sensor_name
     );
     (json_data, sensor_name)
 }
@@ -209,6 +209,7 @@ mod tests {
         // Ensure our fixtures are well-formed
         assert!(temperature_sensor_csv().contains("temperature"));
         assert!(temperature_sensor_json().starts_with('['));
+        assert!(temperature_sensor_json().contains("bn")); // JSON fixtures now use SenML format
         assert!(temperature_sensor_senml().contains("bn"));
         assert!(temperature_sensor_influxdb().contains("temperature"));
     }

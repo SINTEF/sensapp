@@ -1,5 +1,5 @@
 use crate::datamodel::SensAppDateTime;
-use crate::exporters::{CsvConverter, JsonlConverter, SenMLConverter};
+use crate::exporters::{ArrowConverter, CsvConverter, JsonlConverter, SenMLConverter};
 use crate::ingestors::http::app_error::AppError;
 use crate::ingestors::http::state::HttpServerState;
 use axum::Json;
@@ -13,6 +13,7 @@ pub enum ExportFormat {
     Senml, // SenML JSON format (RFC 8428) - also accessible as "json"
     Csv,   // Comma-separated values
     Jsonl, // JSON Lines (one JSON object per line)
+    Arrow, // Apache Arrow IPC file format (.arrow)
 }
 
 impl ExportFormat {
@@ -22,6 +23,7 @@ impl ExportFormat {
             "json" | "senml" => Some(ExportFormat::Senml), // Both json and senml map to SenML
             "csv" => Some(ExportFormat::Csv),
             "jsonl" | "ndjson" => Some(ExportFormat::Jsonl), // Support both extensions
+            "arrow" | "ipc" => Some(ExportFormat::Arrow),    // Apache Arrow file format
             _ => None,
         }
     }
@@ -32,6 +34,7 @@ impl ExportFormat {
             ExportFormat::Senml => "application/json", // SenML is JSON
             ExportFormat::Csv => "text/csv",
             ExportFormat::Jsonl => "application/x-ndjson",
+            ExportFormat::Arrow => "application/vnd.apache.arrow.file",
         }
     }
 }
@@ -306,7 +309,7 @@ pub async fn get_series_data(
     let format = match query.format.as_deref() {
         Some(format_str) => ExportFormat::from_extension(format_str).ok_or_else(|| {
             AppError::bad_request(anyhow::anyhow!(
-                "Unsupported export format '{}'. Supported formats: senml, csv, jsonl",
+                "Unsupported export format '{}'. Supported formats: senml, csv, jsonl, arrow",
                 format_str
             ))
         })?,
@@ -351,31 +354,39 @@ pub async fn get_series_data(
     };
 
     // Convert based on requested format
-    let (content, content_type) = match format {
+    let response = match format {
         ExportFormat::Senml => {
             let json_value = SenMLConverter::to_senml_json(&series_data)
                 .map_err(AppError::internal_server_error)?;
-            (json_value.to_string(), format.content_type())
+            axum::response::Response::builder()
+                .header("content-type", format.content_type())
+                .body(json_value.to_string().into())
         }
         ExportFormat::Csv => {
             let csv_content =
                 CsvConverter::to_csv(&series_data).map_err(AppError::internal_server_error)?;
-            (csv_content, format.content_type())
+            axum::response::Response::builder()
+                .header("content-type", format.content_type())
+                .body(csv_content.into())
         }
         ExportFormat::Jsonl => {
             let jsonl_content =
                 JsonlConverter::to_jsonl(&series_data).map_err(AppError::internal_server_error)?;
-            (jsonl_content, format.content_type())
+            axum::response::Response::builder()
+                .header("content-type", format.content_type())
+                .body(jsonl_content.into())
         }
-    };
-
-    // Build response with appropriate content type
-    let response = axum::response::Response::builder()
-        .header("content-type", content_type)
-        .body(content.into())
-        .map_err(|e| {
-            AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
-        })?;
+        ExportFormat::Arrow => {
+            let arrow_bytes = ArrowConverter::to_arrow_file(&series_data)
+                .map_err(AppError::internal_server_error)?;
+            axum::response::Response::builder()
+                .header("content-type", format.content_type())
+                .body(arrow_bytes.into())
+        }
+    }
+    .map_err(|e| {
+        AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
+    })?;
 
     Ok(response)
 }
@@ -403,6 +414,14 @@ mod tests {
             ExportFormat::from_extension("ndjson"),
             Some(ExportFormat::Jsonl)
         );
+        assert_eq!(
+            ExportFormat::from_extension("arrow"),
+            Some(ExportFormat::Arrow)
+        );
+        assert_eq!(
+            ExportFormat::from_extension("ipc"),
+            Some(ExportFormat::Arrow)
+        );
         assert_eq!(ExportFormat::from_extension("txt"), None);
     }
 
@@ -411,6 +430,10 @@ mod tests {
         assert_eq!(ExportFormat::Senml.content_type(), "application/json");
         assert_eq!(ExportFormat::Csv.content_type(), "text/csv");
         assert_eq!(ExportFormat::Jsonl.content_type(), "application/x-ndjson");
+        assert_eq!(
+            ExportFormat::Arrow.content_type(),
+            "application/vnd.apache.arrow.file"
+        );
     }
 
     #[test]

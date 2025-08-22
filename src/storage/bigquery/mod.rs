@@ -17,8 +17,8 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::RwLock;
+use tracing::{debug, error, info};
 use url::Url;
-use tracing::{info, debug, error};
 
 mod bigquery_labels_utilities;
 mod bigquery_prost_structs;
