@@ -321,9 +321,7 @@ impl SenMLConverter {
 
     /// Parse SenML JSON and create sensor data grouped by sensor name
     pub fn from_senml_json(json_str: &str) -> Result<Vec<(String, SensorData)>> {
-        use crate::datamodel::{
-            Sensor, SensorType, TypedSamples,
-        };
+        use crate::datamodel::{Sensor, SensorType, TypedSamples};
         use smallvec::SmallVec;
         use uuid::Uuid;
 
@@ -368,10 +366,7 @@ impl SenMLConverter {
                 return Err(anyhow::anyhow!("SenML record must have a name (bn or n)"));
             }
 
-            sensors_map
-                .entry(sensor_name)
-                .or_default()
-                .push(obj);
+            sensors_map.entry(sensor_name).or_default().push(obj);
         }
 
         let mut result = Vec::new();
@@ -466,7 +461,12 @@ impl SenMLConverter {
             base_time.unwrap_or(0.0) + t
         } else {
             // Use base time or current time
-            base_time.unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as f64)
+            base_time.unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as f64
+            })
         };
 
         // Convert Unix timestamp to SensAppDateTime

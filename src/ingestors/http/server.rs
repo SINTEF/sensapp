@@ -38,7 +38,6 @@ use tracing::{Level, debug};
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable as ScalarServable};
 
-
 #[derive(OpenApi)]
 #[openapi(
     tags(

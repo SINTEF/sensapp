@@ -179,7 +179,11 @@ mod import_tests {
 
         // Upload Arrow data
         let response = app
-            .post_binary("/sensors/publish", "application/vnd.apache.arrow.file", &arrow_bytes)
+            .post_binary(
+                "/sensors/publish",
+                "application/vnd.apache.arrow.file",
+                &arrow_bytes,
+            )
             .await?;
 
         assert_eq!(response.status(), 200);
@@ -224,7 +228,11 @@ mod import_tests {
 
         // Upload Arrow data
         let response = app
-            .post_binary("/sensors/publish", "application/vnd.apache.arrow.file", &arrow_bytes)
+            .post_binary(
+                "/sensors/publish",
+                "application/vnd.apache.arrow.file",
+                &arrow_bytes,
+            )
             .await?;
 
         assert_eq!(response.status(), 200);
@@ -269,7 +277,11 @@ mod import_tests {
 
         // Upload Arrow data
         let response = app
-            .post_binary("/sensors/publish", "application/vnd.apache.arrow.file", &arrow_bytes)
+            .post_binary(
+                "/sensors/publish",
+                "application/vnd.apache.arrow.file",
+                &arrow_bytes,
+            )
             .await?;
 
         assert_eq!(response.status(), 200);
@@ -291,7 +303,11 @@ mod import_tests {
         // Upload invalid Arrow data
         let invalid_data = b"not arrow data";
         let response = app
-            .post_binary("/sensors/publish", "application/vnd.apache.arrow.file", invalid_data)
+            .post_binary(
+                "/sensors/publish",
+                "application/vnd.apache.arrow.file",
+                invalid_data,
+            )
             .await?;
 
         assert_eq!(response.status(), 400); // Should return bad request
@@ -336,7 +352,11 @@ mod roundtrip_tests {
 
         // Re-import the Arrow data
         let import_response = app
-            .post_binary("/sensors/publish", "application/vnd.apache.arrow.file", arrow_bytes)
+            .post_binary(
+                "/sensors/publish",
+                "application/vnd.apache.arrow.file",
+                arrow_bytes,
+            )
             .await?;
 
         assert_eq!(import_response.status(), 200);
@@ -384,11 +404,19 @@ mod roundtrip_tests {
 
         // Re-import both Arrow datasets
         let temp_import_response = app
-            .post_binary("/sensors/publish", "application/vnd.apache.arrow.file", temp_arrow_bytes)
+            .post_binary(
+                "/sensors/publish",
+                "application/vnd.apache.arrow.file",
+                temp_arrow_bytes,
+            )
             .await?;
 
         let humidity_import_response = app
-            .post_binary("/sensors/publish", "application/vnd.apache.arrow.file", humidity_arrow_bytes)
+            .post_binary(
+                "/sensors/publish",
+                "application/vnd.apache.arrow.file",
+                humidity_arrow_bytes,
+            )
             .await?;
 
         assert_eq!(temp_import_response.status(), 200);

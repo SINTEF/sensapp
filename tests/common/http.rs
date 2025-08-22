@@ -66,7 +66,12 @@ impl TestApp {
 
     /// Send a POST request with binary data (e.g., Arrow files)
     #[allow(dead_code)] // Test helper method
-    pub async fn post_binary(&self, path: &str, content_type: &str, data: &[u8]) -> Result<TestResponse> {
+    pub async fn post_binary(
+        &self,
+        path: &str,
+        content_type: &str,
+        data: &[u8],
+    ) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
             .uri(path)
@@ -88,7 +93,6 @@ impl TestApp {
         let response = self.app.clone().oneshot(request).await?;
         Ok(TestResponse::new(response).await)
     }
-
 
     /// Send a POST request with SenML data
     #[allow(dead_code)] // Test helper method
@@ -135,7 +139,12 @@ impl TestResponse {
             .to_vec();
         let body = String::from_utf8_lossy(&body_bytes).to_string();
 
-        Self { status, headers, body_bytes, body }
+        Self {
+            status,
+            headers,
+            body_bytes,
+            body,
+        }
     }
 
     /// Get response status
@@ -199,7 +208,9 @@ impl TestResponse {
     /// Assert specific header value
     #[allow(dead_code)] // Used across test files, not visible to individual test compilation
     pub fn assert_header(&self, name: &str, expected: &str) -> &Self {
-        let actual = self.headers.get(name)
+        let actual = self
+            .headers
+            .get(name)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("<missing>");
         assert_eq!(
@@ -266,10 +277,15 @@ async fn test_publish_handler(
             .await
             .map_err(|e| {
                 // Arrow parsing errors should be bad requests, not internal server errors
-                if e.to_string().contains("Failed to create Arrow file reader") ||
-                   e.to_string().contains("Arrow file contains no data batches") ||
-                   e.to_string().contains("Failed to read Arrow batch") {
-                    (StatusCode::BAD_REQUEST, format!("Invalid Arrow format: {}", e))
+                if e.to_string().contains("Failed to create Arrow file reader")
+                    || e.to_string()
+                        .contains("Arrow file contains no data batches")
+                    || e.to_string().contains("Failed to read Arrow batch")
+                {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Invalid Arrow format: {}", e),
+                    )
                 } else {
                     (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
                 }

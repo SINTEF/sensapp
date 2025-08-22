@@ -72,9 +72,7 @@ fn parse_arrow_file(buffer: &[u8]) -> Result<Vec<RecordBatch>> {
 }
 
 /// Convert Arrow RecordBatch to SensApp sensors and samples
-fn convert_record_batch_to_sensors(
-    batch: &RecordBatch,
-) -> Result<SensorDataMap> {
+fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap> {
     let schema = batch.schema();
 
     // Find required columns
@@ -127,7 +125,7 @@ fn convert_record_batch_to_sensors(
         uuid: sensor_id,
         name: sensor_name.clone(),
         sensor_type,
-        unit: None,   // Unit information not preserved in basic Arrow format
+        unit: None,              // Unit information not preserved in basic Arrow format
         labels: SmallVec::new(), // Labels not preserved in basic Arrow format
     });
 
@@ -346,7 +344,7 @@ fn microseconds_to_sensapp_datetime(micros: i64) -> Option<SensAppDateTime> {
     Some(SensAppDateTime::from_unix_seconds(seconds))
 }
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(test)]
 pub mod test_utils {
     use super::*;
     use crate::datamodel::*;
