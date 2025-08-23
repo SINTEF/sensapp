@@ -68,3 +68,6 @@ pub mod bigquery;
 
 #[cfg(feature = "rrdcached")]
 pub mod rrdcached;
+
+#[cfg(feature = "clickhouse")]
+pub mod clickhouse;

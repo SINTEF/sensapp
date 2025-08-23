@@ -9,6 +9,12 @@ pub enum StorageError {
     Database(#[from] sqlx::Error),
 
     /// Data integrity issues - missing required fields in database views
+    #[cfg(any(
+        feature = "postgres",
+        feature = "sqlite",
+        feature = "timescaledb",
+        feature = "bigquery"
+    ))]
     #[error("Data integrity error: Missing {field} for sensor {context}")]
     MissingRequiredField { field: String, context: String },
 
@@ -42,6 +48,12 @@ pub enum StorageError {
 
 impl StorageError {
     /// Create a missing field error with sensor context
+    #[cfg(any(
+        feature = "postgres",
+        feature = "sqlite",
+        feature = "timescaledb",
+        feature = "bigquery"
+    ))]
     pub fn missing_field(
         field: &str,
         sensor_uuid: Option<Uuid>,

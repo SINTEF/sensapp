@@ -37,9 +37,18 @@ impl IntoResponse for AppError {
                 StorageError::SensorNotFound { .. } | StorageError::MetricNotFound { .. } => {
                     (StatusCode::NOT_FOUND, storage_error.to_string())
                 }
-                StorageError::MissingRequiredField { .. }
-                | StorageError::InvalidDataFormat { .. } => {
-                    error!("Data integrity issue: {}", storage_error);
+                #[cfg(any(
+                    feature = "postgres",
+                    feature = "sqlite",
+                    feature = "timescaledb",
+                    feature = "bigquery"
+                ))]
+                StorageError::MissingRequiredField { .. } => {
+                    error!("Missing required field: {}", storage_error);
+                    (StatusCode::BAD_REQUEST, storage_error.to_string())
+                }
+                StorageError::InvalidDataFormat { .. } => {
+                    error!("Invalid data format: {}", storage_error);
                     (StatusCode::BAD_REQUEST, storage_error.to_string())
                 }
                 StorageError::Configuration(_) => {

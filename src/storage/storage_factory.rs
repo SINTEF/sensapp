@@ -22,6 +22,9 @@ use super::bigquery::BigQueryStorage;
 #[cfg(feature = "rrdcached")]
 use super::rrdcached::RrdCachedStorage;
 
+#[cfg(feature = "clickhouse")]
+use super::clickhouse::ClickHouseStorage;
+
 pub async fn create_storage_from_connection_string(
     connection_string: &str,
 ) -> Result<Arc<dyn StorageInstance>> {
@@ -43,6 +46,9 @@ pub async fn create_storage_from_connection_string(
 
         #[cfg(feature = "rrdcached")]
         s if s.starts_with("rrdcached:") => Arc::new(RrdCachedStorage::connect(s).await?),
+
+        #[cfg(feature = "clickhouse")]
+        s if s.starts_with("clickhouse:") => Arc::new(ClickHouseStorage::connect(s).await?),
 
         // Provide helpful error messages for disabled backends
         #[cfg(not(feature = "bigquery"))]
@@ -73,6 +79,11 @@ pub async fn create_storage_from_connection_string(
         #[cfg(not(feature = "rrdcached"))]
         s if s.starts_with("rrdcached:") => {
             bail!("RRDCached storage backend is not enabled. Enable with --features rrdcached")
+        }
+
+        #[cfg(not(feature = "clickhouse"))]
+        s if s.starts_with("clickhouse:") => {
+            bail!("ClickHouse storage backend is not enabled. Enable with --features clickhouse")
         }
 
         _ => bail!("Unsupported storage type: {}", connection_string),

@@ -11,6 +11,7 @@ pub mod http;
 pub enum DatabaseType {
     PostgreSQL,
     SQLite,
+    ClickHouse,
 }
 
 impl DatabaseType {
@@ -22,6 +23,9 @@ impl DatabaseType {
             }),
             DatabaseType::SQLite => std::env::var("TEST_DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite://test.db".to_string()),
+            DatabaseType::ClickHouse => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+                "clickhouse://default:password@localhost:9000/sensapp_test".to_string()
+            }),
         }
     }
 
@@ -29,6 +33,8 @@ impl DatabaseType {
     pub fn from_connection_string(connection_string: &str) -> Self {
         if connection_string.starts_with("sqlite://") {
             DatabaseType::SQLite
+        } else if connection_string.starts_with("clickhouse://") {
+            DatabaseType::ClickHouse
         } else {
             // Default to PostgreSQL for postgres://, postgresql://, or any other prefix
             DatabaseType::PostgreSQL
@@ -68,6 +74,7 @@ impl TestDb {
         let db_name = match &db_type {
             DatabaseType::PostgreSQL => "sensapp".to_string(),
             DatabaseType::SQLite => "test.db".to_string(),
+            DatabaseType::ClickHouse => "sensapp_test".to_string(),
         };
 
         let connection_string = db_type.default_connection_string();
