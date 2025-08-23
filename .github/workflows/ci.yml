@@ -1,22 +1,70 @@
-name: SensApp CI with cargo-make
+name: CI/CD Pipeline
 
 on:
   push:
+    branches: [main, develop]
+    tags: ['v*']
   pull_request:
+  release:
+    types: [published]
 
 env:
   CARGO_TERM_COLOR: always
-  # PostgreSQL test settings
-  POSTGRES_PASSWORD: postgres
-  POSTGRES_USER: postgres
-  POSTGRES_DB: sensapp
-  DATABASE_URL: postgres://postgres:postgres@localhost:5432/sensapp
-  TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/sensapp
+  RUST_BACKTRACE: 1
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  ci:
-    name: Full CI Pipeline
+  quality-checks:
+    name: Quality Checks
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        uses: moonrepo/setup-rust@v1
+        with:
+          channel: stable
+          components: rustfmt, clippy
+
+      - name: Cache cargo-make
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-make
+          key: cargo-make-${{ runner.os }}
+
+      - name: Install cargo-make
+        run: |
+          if ! command -v cargo-make &> /dev/null; then
+            cargo install cargo-make
+          fi
+
+      - name: Format check
+        run: cargo make fmt-check
+
+      - name: Security audit
+        run: cargo make security-audit
+        continue-on-error: true
+
+  test-matrix:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    needs: quality-checks
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        rust: [stable, beta]
+        feature: [sqlite, postgres, working-features]
+        include:
+          - feature: sqlite
+            test-env: "TEST_DATABASE_URL_SQLITE=sqlite://test.db"
+          - feature: postgres
+            test-env: "TEST_DATABASE_URL_POSTGRES=postgres://postgres:postgres@localhost:5432/sensapp"
+          - feature: working-features
+            test-env: "TEST_DATABASE_URL_POSTGRES=postgres://postgres:postgres@localhost:5432/sensapp"
+
     services:
       postgres:
         image: postgres:15
@@ -31,24 +79,52 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+
     steps:
-      - uses: actions/checkout@v3
-      - run: rustup toolchain install stable --profile minimal --component clippy --no-self-update
-      - uses: Swatinem/rust-cache@v2
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        uses: moonrepo/setup-rust@v1
         with:
-          cache-all-crates: "true"
+          channel: ${{ matrix.rust }}
+          components: clippy
+
+      - name: Cache cargo-make
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-make
+          key: cargo-make-${{ runner.os }}
+
       - name: Install cargo-make
-        run: cargo install cargo-make
-      - name: Install sqlx-cli for PostgreSQL
-        run: cargo install sqlx-cli --no-default-features --features postgres
-      - name: Run PostgreSQL migrations
-        run: cargo sqlx migrate run --source src/storage/postgresql/migrations --database-url $DATABASE_URL
-      - name: Run full CI pipeline
-        run: cargo make ci
+        run: |
+          if ! command -v cargo-make &> /dev/null; then
+            cargo install cargo-make
+          fi
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres,sqlite
+
+      - name: Set up test environment
+        run: |
+          ${{ matrix.test-env }}
+          echo "${{ matrix.test-env }}" >> $GITHUB_ENV
+
+      - name: Run migrations (PostgreSQL)
+        if: matrix.feature == 'postgres' || matrix.feature == 'working-features'
+        run: cargo make migrate-postgres
+
+      - name: Run migrations (SQLite)
+        if: matrix.feature == 'sqlite' || matrix.feature == 'working-features'
+        run: cargo make migrate-sqlite
+
+      - name: Run tests
+        run: cargo make check-${{ matrix.feature }}
 
   coverage:
     name: Test Coverage
     runs-on: ubuntu-latest
+    needs: test-matrix
     services:
       postgres:
         image: postgres:15
@@ -63,23 +139,132 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+
     steps:
-      - uses: actions/checkout@v3
-      - run: rustup toolchain install stable --profile minimal --component clippy llvm-tools-preview --no-self-update
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - uses: Swatinem/rust-cache@v2
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        uses: moonrepo/setup-rust@v1
         with:
-          cache-all-crates: "true"
+          channel: stable
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Cache cargo-make
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-make
+          key: cargo-make-${{ runner.os }}
+
       - name: Install cargo-make
-        run: cargo install cargo-make
-      - name: Install sqlx-cli for PostgreSQL
-        run: cargo install sqlx-cli --no-default-features --features postgres
-      - name: Run PostgreSQL migrations
-        run: cargo sqlx migrate run --source src/storage/postgresql/migrations --database-url $DATABASE_URL
+        run: |
+          if ! command -v cargo-make &> /dev/null; then
+            cargo install cargo-make
+          fi
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres,sqlite
+
+      - name: Set up development environment
+        run: cargo make setup-dev
+
       - name: Generate test coverage
         run: cargo llvm-cov --features postgres,sqlite --no-default-features --verbose --lcov --output-path lcov.info
-      - name: Upload coverage
-        uses: VeryGoodOpenSource/very_good_coverage@v2
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
         with:
-          path: lcov.info
-          min_coverage: 50
+          file: lcov.info
+          fail_ci_if_error: true
+
+  docker:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: test-matrix
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.event_name == 'release')
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILDTIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+            REVISION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [test-matrix, coverage]
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        uses: moonrepo/setup-rust@v1
+        with:
+          channel: stable
+
+      - name: Cache cargo-make
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-make
+          key: cargo-make-${{ runner.os }}
+
+      - name: Install cargo-make
+        run: |
+          if ! command -v cargo-make &> /dev/null; then
+            cargo install cargo-make
+          fi
+
+      - name: Run release pipeline
+        run: cargo make ci-release
+
+      - name: Publish to crates.io
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
