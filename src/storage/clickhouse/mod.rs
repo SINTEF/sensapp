@@ -3,6 +3,7 @@ use crate::config;
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::{
     Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
+    unit::Unit,
 };
 use anyhow::{Context, Result};
 use async_broadcast::Sender;
@@ -26,6 +27,10 @@ pub struct ClickHouseStorage {
     #[allow(dead_code)]
     client: Client,
     database: Option<String>,
+    host: String,
+    port: u16,
+    user: String,
+    password: Option<String>,
 }
 
 impl std::fmt::Debug for ClickHouseStorage {
@@ -95,6 +100,10 @@ impl ClickHouseStorage {
         Ok(Self {
             client,
             database: database.map(|s| s.to_string()),
+            host: host.to_string(),
+            port,
+            user: user.to_string(),
+            password: password.map(|s| s.to_string()),
         })
     }
 
@@ -103,10 +112,12 @@ impl ClickHouseStorage {
         // First, create the database if it doesn't exist
         if let Some(database) = &self.database {
             // Create a client without database specification to create the database
-            let create_db_client = Client::default()
-                .with_url("http://localhost:8123")
-                .with_user("default")
-                .with_password("password");
+            let http_url = format!("http://{}:{}", self.host, self.port);
+            let mut create_db_client = Client::default().with_url(&http_url).with_user(&self.user);
+
+            if let Some(password) = &self.password {
+                create_db_client = create_db_client.with_password(password);
+            }
 
             let create_db_query = format!("CREATE DATABASE IF NOT EXISTS {}", database);
 
@@ -216,35 +227,64 @@ impl StorageInstance for ClickHouseStorage {
         &self,
         metric_filter: Option<&str>,
     ) -> Result<Vec<crate::datamodel::Sensor>> {
-        let query = r#"
-            SELECT
-                s.sensor_id,
-                s.uuid,
-                s.name,
-                s.type
-            FROM sensors s
-            WHERE (? IS NULL OR s.name = ?)
-            ORDER BY s.uuid ASC
-        "#;
+        let (query, use_filter) = match metric_filter {
+            Some(_) => (
+                r#"
+                    SELECT s.sensor_id, s.uuid, s.name, s.type,
+                           COALESCE(u.name, '') as unit_name,
+                           COALESCE(u.description, '') as unit_description
+                    FROM sensors s
+                    LEFT JOIN units u ON s.unit = u.id
+                    WHERE s.name = ? ORDER BY s.uuid ASC
+                "#,
+                true,
+            ),
+            None => (
+                r#"
+                    SELECT s.sensor_id, s.uuid, s.name, s.type,
+                           COALESCE(u.name, '') as unit_name,
+                           COALESCE(u.description, '') as unit_description
+                    FROM sensors s
+                    LEFT JOIN units u ON s.unit = u.id
+                    ORDER BY s.uuid ASC
+                "#,
+                false,
+            ),
+        };
 
-        let mut cursor = self
-            .client
-            .query(query)
-            .bind(metric_filter)
-            .bind(metric_filter)
-            .fetch::<(u64, String, String, String)>()
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct SensorRow {
+            sensor_id: u64,
+            #[serde(with = "clickhouse::serde::uuid")]
+            uuid: Uuid,
+            name: String,
+            r#type: String,
+            unit_name: String,
+            unit_description: String,
+        }
 
+        let mut cursor = if use_filter {
+            self.client
+                .query(query)
+                .bind(metric_filter.unwrap())
+                .fetch::<SensorRow>()
+                .map_err(|e| map_clickhouse_error(e, None, None))?
+        } else {
+            self.client
+                .query(query)
+                .fetch::<SensorRow>()
+                .map_err(|e| map_clickhouse_error(e, None, None))?
+        };
+
+        // Process sensors directly from cursor
         let mut sensors = Vec::new();
 
-        while let Some((sensor_id, uuid_str, name, sensor_type_str)) = cursor.next().await? {
-            let uuid = Uuid::from_str(&uuid_str).map_err(|e| {
-                StorageError::invalid_data_format(
-                    &format!("Invalid UUID '{}': {}", uuid_str, e),
-                    None,
-                    Some(&name),
-                )
-            })?;
+        while let Some(row) = cursor.next().await? {
+            let sensor_id = row.sensor_id;
+            let uuid = row.uuid;
+            let name = row.name;
+            let sensor_type_str = row.r#type;
+
             let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
                 StorageError::invalid_data_format(
                     &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
@@ -253,8 +293,19 @@ impl StorageInstance for ClickHouseStorage {
                 )
             })?;
 
-            // TODO: Get unit information in a separate query if needed
-            let unit = None;
+            // Create unit from JOIN result if unit name exists (not empty string)
+            let unit = if !row.unit_name.is_empty() {
+                Some(Unit {
+                    name: row.unit_name,
+                    description: if row.unit_description.is_empty() {
+                        None
+                    } else {
+                        Some(row.unit_description)
+                    },
+                })
+            } else {
+                None
+            };
 
             // Query labels for this sensor
             let labels_query =
@@ -349,32 +400,41 @@ impl StorageInstance for ClickHouseStorage {
             SELECT
                 s.uuid,
                 s.name,
-                s.type
+                s.type,
+                u.name AS unit_name,
+                u.description AS unit_description
             FROM sensors s
+            LEFT JOIN units u ON s.unit = u.id
             WHERE s.sensor_id = ?
             LIMIT 1
         "#;
+
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct SensorMetadataRow {
+            #[serde(with = "clickhouse::serde::uuid")]
+            uuid: Uuid,
+            name: String,
+            r#type: String,
+            unit_name: String, // Changed from Option<String> to String
+            unit_description: Option<String>,
+        }
 
         let mut sensor_cursor = self
             .client
             .query(sensor_query)
             .bind(sensor_id)
-            .fetch::<(String, String, String)>()
+            .fetch::<SensorMetadataRow>()
             .map_err(|e| map_clickhouse_error(e, Some(uuid), None))?;
 
-        let (uuid_str, name, sensor_type_str) = if let Some(row) = sensor_cursor.next().await? {
+        let row = if let Some(row) = sensor_cursor.next().await? {
             row
         } else {
             return Ok(None);
         };
 
-        let uuid = Uuid::from_str(&uuid_str).map_err(|e| {
-            StorageError::invalid_data_format(
-                &format!("Invalid UUID '{}': {}", uuid_str, e),
-                None,
-                Some(&name),
-            )
-        })?;
+        let uuid = row.uuid;
+        let name = row.name;
+        let sensor_type_str = row.r#type;
 
         let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
             StorageError::invalid_data_format(
@@ -384,8 +444,15 @@ impl StorageInstance for ClickHouseStorage {
             )
         })?;
 
-        // TODO: Get unit information in a separate query if needed
-        let unit = None;
+        // Create unit from query results
+        let unit = if !row.unit_name.is_empty() {
+            Some(Unit {
+                name: row.unit_name,
+                description: row.unit_description,
+            })
+        } else {
+            None
+        };
 
         // Get labels
         let labels_query = "SELECT name, COALESCE(description, '') FROM labels WHERE sensor_id = ?";

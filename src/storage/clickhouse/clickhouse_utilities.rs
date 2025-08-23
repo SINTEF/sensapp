@@ -57,7 +57,8 @@ pub async fn get_sensor_id_or_create_sensor(
     #[derive(Row, Serialize)]
     struct SensorRow {
         sensor_id: u64,
-        uuid: String,
+        #[serde(with = "clickhouse::serde::uuid")]
+        uuid: Uuid,
         name: String,
         r#type: String,
         unit: Option<u64>,
@@ -66,7 +67,7 @@ pub async fn get_sensor_id_or_create_sensor(
     let type_str = sensor_type.to_string();
     let sensor_row = SensorRow {
         sensor_id,
-        uuid: uuid.to_string(),
+        uuid: *uuid,
         name: name.to_string(),
         r#type: type_str,
         unit: unit_id,
