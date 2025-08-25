@@ -204,48 +204,6 @@ impl ArrowConverter {
         Ok(buffer)
     }
 
-    /// Convert multiple SensorData to Arrow format with multiple RecordBatches
-    ///
-    /// This is primarily intended for testing scenarios where you need to combine
-    /// data from multiple sensors into a single Arrow file. For production use
-    /// cases, consider using `to_arrow_file` for individual sensors.
-    #[cfg(any(test, feature = "test-utils"))]
-    pub fn sensor_data_list_to_arrow_file(sensor_data_list: &[SensorData]) -> Result<Vec<u8>> {
-        if sensor_data_list.is_empty() {
-            return Err(anyhow::anyhow!(
-                "Cannot create Arrow file from empty sensor data list"
-            ));
-        }
-
-        let batches: Result<Vec<RecordBatch>> =
-            sensor_data_list.iter().map(Self::to_record_batch).collect();
-        let batches = batches?;
-
-        Self::record_batches_to_arrow_file(&batches)
-    }
-
-    /// Convert multiple RecordBatches to Arrow file format
-    ///
-    /// This is a utility function primarily used by `sensor_data_list_to_arrow_file`
-    /// for combining multiple record batches into a single Arrow file.
-    #[cfg(any(test, feature = "test-utils"))]
-    fn record_batches_to_arrow_file(batches: &[RecordBatch]) -> Result<Vec<u8>> {
-        if batches.is_empty() {
-            return Err(anyhow::anyhow!(
-                "Cannot create Arrow file from empty batch list"
-            ));
-        }
-
-        let mut buffer = Vec::new();
-        {
-            let mut writer = FileWriter::try_new(&mut buffer, &batches[0].schema())?;
-            for batch in batches {
-                writer.write(batch)?;
-            }
-            writer.finish()?;
-        }
-        Ok(buffer)
-    }
 }
 
 // Implement conversion trait for SensAppDateTime to microseconds
@@ -368,13 +326,4 @@ mod tests {
         assert!(matches!(schema.field(1).data_type(), DataType::Struct(_)));
     }
 
-    #[test]
-    fn test_multiple_sensor_data() {
-        let sensor_data1 = test_data_helpers::create_test_sensor_data_integer();
-        let sensor_data2 = test_data_helpers::create_test_sensor_data_integer();
-        let sensor_list = vec![sensor_data1, sensor_data2];
-
-        let arrow_bytes = ArrowConverter::sensor_data_list_to_arrow_file(&sensor_list).unwrap();
-        assert!(!arrow_bytes.is_empty());
-    }
 }

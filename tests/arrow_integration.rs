@@ -11,6 +11,8 @@ use sensapp::exporters::ArrowConverter;
 use serial_test::serial;
 use smallvec::smallvec;
 use uuid::Uuid;
+use arrow::record_batch::RecordBatch;
+use arrow_ipc::writer::FileWriter;
 
 // Ensure configuration is loaded once for all tests in this module
 static INIT: std::sync::Once = std::sync::Once::new();
@@ -18,6 +20,46 @@ fn ensure_config() {
     INIT.call_once(|| {
         load_configuration_for_tests().expect("Failed to load configuration for tests");
     });
+}
+
+/// Convert multiple SensorData to Arrow format with multiple RecordBatches
+///
+/// This is primarily intended for testing scenarios where you need to combine
+/// data from multiple sensors into a single Arrow file.
+fn sensor_data_list_to_arrow_file(sensor_data_list: &[SensorData]) -> Result<Vec<u8>> {
+    if sensor_data_list.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Cannot create Arrow file from empty sensor data list"
+        ));
+    }
+
+    let batches: Result<Vec<RecordBatch>> =
+        sensor_data_list.iter().map(ArrowConverter::to_record_batch).collect();
+    let batches = batches?;
+
+    record_batches_to_arrow_file(&batches)
+}
+
+/// Convert multiple RecordBatches to Arrow file format
+///
+/// This is a utility function primarily used by `sensor_data_list_to_arrow_file`
+/// for combining multiple record batches into a single Arrow file.
+fn record_batches_to_arrow_file(batches: &[RecordBatch]) -> Result<Vec<u8>> {
+    if batches.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Cannot create Arrow file from empty batch list"
+        ));
+    }
+
+    let mut buffer = Vec::new();
+    {
+        let mut writer = FileWriter::try_new(&mut buffer, &batches[0].schema())?;
+        for batch in batches {
+            writer.write(batch)?;
+        }
+        writer.finish()?;
+    }
+    Ok(buffer)
 }
 
 /// Test Arrow data export functionality
@@ -580,7 +622,7 @@ mod converter_tests {
         let sensor_data2 = SensorData::new(sensor2, samples2);
 
         let sensor_list = vec![sensor_data1, sensor_data2];
-        let arrow_bytes = ArrowConverter::sensor_data_list_to_arrow_file(&sensor_list).unwrap();
+        let arrow_bytes = sensor_data_list_to_arrow_file(&sensor_list).unwrap();
 
         assert!(!arrow_bytes.is_empty());
         assert_eq!(&arrow_bytes[0..6], b"ARROW1");
