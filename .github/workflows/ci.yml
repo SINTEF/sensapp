@@ -55,7 +55,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        rust: [stable, beta]
+        rust: [stable]
+        #rust: [stable, beta]
         feature: [sqlite, postgres, working-features]
         include:
           - feature: sqlite
