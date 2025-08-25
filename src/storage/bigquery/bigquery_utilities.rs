@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use gcp_bigquery_client::{
     google::cloud::bigquery::storage::v1::AppendRowsResponse, storage::TableDescriptor,
 };
@@ -6,6 +6,7 @@ use tokio_stream::StreamExt;
 use tonic::Streaming;
 
 use super::BigQueryStorage;
+use tracing::{debug, error};
 
 pub async fn publish_rows(
     bqs: &BigQueryStorage,
@@ -14,11 +15,11 @@ pub async fn publish_rows(
     rows: Vec<impl prost::Message>,
 ) -> Result<()> {
     if rows.is_empty() {
-        println!("No {} rows to publish", table_name);
+        debug!("BigQuery: No {} rows to publish", table_name);
         return Ok(());
     }
 
-    println!("Publishing {} rows in {}", rows.len(), table_name);
+    debug!("BigQuery: Publishing {} rows to {}", rows.len(), table_name);
 
     let stream_name = bqs.new_stream_name(table_name.to_string());
     let trace_id = create_trace_id(table_name);
@@ -41,7 +42,7 @@ async fn check_streaming(mut streaming: Streaming<AppendRowsResponse>) -> Result
         let response = response?;
         if !response.row_errors.is_empty() {
             for error in response.row_errors {
-                eprintln!("BigQuery Row Error: {:?}", error);
+                error!("BigQuery Row Error: {:?}", error);
             }
             bail!("Failed to publish rows");
         }

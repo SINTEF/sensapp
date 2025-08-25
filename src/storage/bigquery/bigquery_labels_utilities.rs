@@ -1,6 +1,7 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
-use anyhow::{anyhow, Result};
+use crate::storage::StorageError;
+use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
@@ -9,10 +10,12 @@ use gcp_bigquery_client::model::{
 use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
 use tokio::sync::Mutex;
+use tracing::{debug, info};
 
 use crate::datamodel::SensAppVec;
 
 use super::{
+    BigQueryStorage,
     bigquery_prost_structs::{
         LabelDescriptionDictionary as ProstLabelDescriptionDictionary,
         LabelNameDictionary as ProstLabelNameDictionary,
@@ -21,7 +24,6 @@ use super::{
         LABELS_DESCRIPTION_DICTIONARY_DESCRIPTOR, LABELS_NAME_DICTIONARY_DESCRIPTOR,
     },
     bigquery_utilities::publish_rows,
-    BigQueryStorage,
 };
 
 static LABELS_NAME_CACHE: Lazy<Mutex<CLruCache<String, i64>>> =
@@ -52,8 +54,11 @@ pub async fn get_or_create_labels_name_ids(
         }
     }
 
-    println!("Found {} known label names", result.len());
-    println!("Found {} unknown label names", unknown_labels.len());
+    debug!("BigQuery: Found {} known label names", result.len());
+    debug!(
+        "BigQuery: Found {} unknown label names",
+        unknown_labels.len()
+    );
 
     if unknown_labels.is_empty() {
         return Ok(result);
@@ -82,7 +87,10 @@ pub async fn get_or_create_labels_name_ids(
         return Ok(result);
     }
 
-    println!("Found {} label names to create", labels_to_create.len());
+    info!(
+        "BigQuery: Creating {} new label names",
+        labels_to_create.len()
+    );
 
     let new_ids = create_labels_name(bqs, labels_to_create).await?;
     {
@@ -148,10 +156,12 @@ async fn get_existing_labels_name_ids(
     let mut results_map = HybridMap::with_capacity(result.row_count());
 
     while result.next_row() {
-        let id = result.get_i64(0)?.ok_or_else(|| anyhow!("id is null"))?;
-        let name = result
-            .get_string(1)?
-            .ok_or_else(|| anyhow!("name is null"))?;
+        let id = result.get_i64(0)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("label_name_id", None, None))
+        })?;
+        let name = result.get_string(1)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("label_name", None, None))
+        })?;
 
         results_map.insert(name, id);
     }
@@ -175,7 +185,7 @@ async fn create_labels_name(
         .map(|label| ProstLabelNameDictionary {
             id: *map
                 .get(&label)
-                .expect("Label not found in the map, this should not happen"),
+                .expect("Internal consistency error: Label missing from cached map"),
             name: label,
         })
         .collect::<Vec<_>>();
@@ -219,8 +229,11 @@ pub async fn get_or_create_labels_description_ids(
         }
     }
 
-    println!("Found {} known label descriptions", result.len());
-    println!("Found {} unknown label descriptions", unknown_labels.len());
+    debug!("BigQuery: Found {} known label descriptions", result.len());
+    debug!(
+        "BigQuery: Found {} unknown label descriptions",
+        unknown_labels.len()
+    );
 
     if unknown_labels.is_empty() {
         return Ok(result);
@@ -249,8 +262,8 @@ pub async fn get_or_create_labels_description_ids(
         return Ok(result);
     }
 
-    println!(
-        "Found {} label descriptions to create",
+    info!(
+        "BigQuery: Creating {} new label descriptions",
         labels_to_create.len()
     );
 
@@ -318,10 +331,12 @@ async fn get_existing_labels_description_ids(
     let mut results_map = HybridMap::with_capacity(result.row_count());
 
     while result.next_row() {
-        let id = result.get_i64(0)?.ok_or_else(|| anyhow!("id is null"))?;
-        let description = result
-            .get_string(1)?
-            .ok_or_else(|| anyhow!("description is null"))?;
+        let id = result.get_i64(0)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("label_name_id", None, None))
+        })?;
+        let description = result.get_string(1)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("label_description", None, None))
+        })?;
 
         results_map.insert(description, id);
     }
@@ -345,7 +360,7 @@ async fn create_labels_description(
         .map(|label| ProstLabelDescriptionDictionary {
             id: *map
                 .get(&label)
-                .expect("Label not found in the map, this should not happen"),
+                .expect("Internal consistency error: Label missing from cached map"),
             description: label,
         })
         .collect::<Vec<_>>();

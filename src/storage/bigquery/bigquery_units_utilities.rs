@@ -1,6 +1,7 @@
 use std::{collections::HashMap, num::NonZeroUsize};
 
-use anyhow::{anyhow, Result};
+use crate::storage::StorageError;
+use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
@@ -9,12 +10,13 @@ use gcp_bigquery_client::model::{
 use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
 use tokio::sync::Mutex;
+use tracing::{debug, info};
 
-use crate::datamodel::{unit::Unit, SensAppVec};
+use crate::datamodel::{SensAppVec, unit::Unit};
 
 use super::{
-    bigquery_prost_structs::Unit as ProstUnit, bigquery_table_descriptors::UNITS_DESCRIPTOR,
-    bigquery_utilities::publish_rows, BigQueryStorage,
+    BigQueryStorage, bigquery_prost_structs::Unit as ProstUnit,
+    bigquery_table_descriptors::UNITS_DESCRIPTOR, bigquery_utilities::publish_rows,
 };
 
 static UNITS_CACHE: Lazy<Mutex<CLruCache<String, i64>>> =
@@ -46,8 +48,8 @@ pub async fn get_or_create_units_ids(
         }
     }
 
-    println!("Found {} known units", result.len());
-    println!("Found {} unknown units", unknown_units.len());
+    debug!("BigQuery: Found {} known units", result.len());
+    debug!("BigQuery: Found {} unknown units", unknown_units.len());
 
     if unknown_units.is_empty() {
         return Ok(result);
@@ -76,7 +78,7 @@ pub async fn get_or_create_units_ids(
         return Ok(result);
     }
 
-    println!("Found {} units to create", units_to_create.len());
+    info!("BigQuery: Creating {} new units", units_to_create.len());
 
     let new_ids = create_units(bqs, units_to_create).await?;
     {
@@ -142,10 +144,12 @@ async fn get_existing_units_ids(
     let mut results_map = HybridMap::with_capacity(result.row_count());
 
     while result.next_row() {
-        let id = result.get_i64(0)?.ok_or_else(|| anyhow!("id is null"))?;
-        let name = result
-            .get_string(1)?
-            .ok_or_else(|| anyhow!("name is null"))?;
+        let id = result.get_i64(0)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("unit_id", None, None))
+        })?;
+        let name = result.get_string(1)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("unit_name", None, None))
+        })?;
 
         results_map.insert(name, id);
     }
@@ -169,7 +173,7 @@ async fn create_units(
         .map(|unit| ProstUnit {
             id: *map
                 .get(&unit.name)
-                .expect("Unit not found in the map, this should not happen"),
+                .expect("Internal consistency error: Unit missing from cached map"),
             name: unit.name,
             description: unit.description,
         })

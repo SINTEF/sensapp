@@ -22,6 +22,30 @@ SensApp should be stateless and scale from the edge to big data. The message que
 
 Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 
+## Development
+
+```bash
+# Build
+cargo build
+
+# Test
+cargo test
+cargo make test-all         # all storage backends
+
+# Lint (format + clippy)
+cargo make lint
+cargo make lint-all         # all storage backends
+
+# Full validation
+cargo make check-all        # working features (postgres + sqlite)
+cargo make check-all-storage # all storage backends
+
+# Setup (runs migrations)
+cargo make setup-dev
+```
+
+Override environment variables as needed: `DATABASE_URL`, `POSTGRES_USER`, etc.
+
 ## Built With Rust™️
 
 SensApp is developed using Rust, a language known for its performance, memory safety, and annoying borrow checker. SensApp used to be written in Scala, but the new author prefers Rust.

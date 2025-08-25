@@ -1,18 +1,17 @@
-use crate::datamodel::batch::{Batch, SingleSensorBatch};
+use crate::config;
 use crate::datamodel::TypedSamples;
-use anyhow::{bail, Context, Result};
+use crate::datamodel::batch::{Batch, SingleSensorBatch};
+use anyhow::{Context, Result, bail};
 use async_broadcast::Sender;
 use async_trait::async_trait;
 use duckdb::Connection;
 use duckdb_publishers::*;
 use duckdb_utilities::get_sensor_id_or_create_sensor;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
-use tokio::time::timeout;
 
-use super::storage::StorageInstance;
+use super::{StorageInstance, common::sync_with_timeout};
 
 mod duckdb_publishers;
 mod duckdb_utilities;
@@ -66,12 +65,10 @@ impl StorageInstance for DuckDBStorage {
     }
 
     async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
-        // SQLite doesn't need to do anything special for sync
-        // As we use transactions and the WAL mode.
-        if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
-            let _ = timeout(Duration::from_secs(15), sync_sender.broadcast(())).await?;
-        }
-        Ok(())
+        // DuckDB doesn't need to do anything special for sync
+        // As we use transactions
+        let config = config::get().context("Failed to get configuration")?;
+        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {
@@ -92,8 +89,54 @@ impl StorageInstance for DuckDBStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
+    async fn list_series(
+        &self,
+        _metric_filter: Option<&str>,
+    ) -> Result<Vec<crate::datamodel::Sensor>> {
         unimplemented!();
+    }
+
+    async fn query_sensor_data(
+        &self,
+        _sensor_uuid: &str,
+        _start_time: Option<crate::datamodel::SensAppDateTime>,
+        _end_time: Option<crate::datamodel::SensAppDateTime>,
+        _limit: Option<usize>,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        unimplemented!("DuckDB sensor data querying not yet implemented");
+    }
+
+    /// Clean up all test data from the database (DuckDB implementation)
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn cleanup_test_data(&self) -> Result<()> {
+        // DuckDB implementation - delete all data from tables
+        let connection = self.connection.lock().await;
+
+        // Delete all value tables
+        connection.execute("DELETE FROM blob_values", []).ok();
+        connection.execute("DELETE FROM json_values", []).ok();
+        connection.execute("DELETE FROM location_values", []).ok();
+        connection.execute("DELETE FROM boolean_values", []).ok();
+        connection.execute("DELETE FROM string_values", []).ok();
+        connection.execute("DELETE FROM float_values", []).ok();
+        connection.execute("DELETE FROM numeric_values", []).ok();
+        connection.execute("DELETE FROM integer_values", []).ok();
+
+        // Delete metadata tables
+        connection.execute("DELETE FROM labels", []).ok();
+        connection.execute("DELETE FROM sensors", []).ok();
+        connection
+            .execute("DELETE FROM strings_values_dictionary", [])
+            .ok();
+        connection
+            .execute("DELETE FROM labels_description_dictionary", [])
+            .ok();
+        connection
+            .execute("DELETE FROM labels_name_dictionary", [])
+            .ok();
+        connection.execute("DELETE FROM units", []).ok();
+
+        Ok(())
     }
 }
 

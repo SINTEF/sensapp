@@ -1,7 +1,7 @@
 use super::duckdb_utilities::get_string_value_id_or_create;
 use crate::datamodel::Sample;
 use anyhow::Result;
-use duckdb::{params, Transaction};
+use duckdb::{Transaction, params};
 use geo::Point;
 use rust_decimal::Decimal;
 use serde_json::Value;

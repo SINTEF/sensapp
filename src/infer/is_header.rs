@@ -1,4 +1,4 @@
-use super::parsing::{infer_type, InferedValue};
+use super::parsing::{InferedValue, infer_type};
 
 pub fn is_header(cells: &[String]) -> bool {
     if cells.is_empty() {

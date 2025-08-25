@@ -1,9 +1,13 @@
+use serde::{Deserialize, Serialize};
 use std::{
+    fmt,
     hash::Hash,
     io::{self, Write},
+    str::FromStr,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub enum SensorType {
     Integer = 1,
     Numeric = 20,
@@ -15,19 +19,20 @@ pub enum SensorType {
     Blob = 80,
 }
 
-// Implement to_string() for SensorType
-impl ToString for SensorType {
-    fn to_string(&self) -> String {
-        match self {
-            SensorType::Integer => "Integer".to_string(),
-            SensorType::Numeric => "Numeric".to_string(),
-            SensorType::Float => "Float".to_string(),
-            SensorType::String => "String".to_string(),
-            SensorType::Boolean => "Boolean".to_string(),
-            SensorType::Location => "Location".to_string(),
-            SensorType::Json => "JSON".to_string(),
-            SensorType::Blob => "Blob".to_string(),
-        }
+// Implement Display for SensorType (preferred over ToString)
+impl fmt::Display for SensorType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            SensorType::Integer => "Integer",
+            SensorType::Numeric => "Numeric",
+            SensorType::Float => "Float",
+            SensorType::String => "String",
+            SensorType::Boolean => "Boolean",
+            SensorType::Location => "Location",
+            SensorType::Json => "JSON",
+            SensorType::Blob => "Blob",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -39,6 +44,24 @@ impl SensorType {
     pub fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         let v = self.to_u8().to_le_bytes();
         writer.write_all(&v)
+    }
+}
+
+impl FromStr for SensorType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "integer" => Ok(SensorType::Integer),
+            "numeric" => Ok(SensorType::Numeric),
+            "float" => Ok(SensorType::Float),
+            "string" => Ok(SensorType::String),
+            "boolean" => Ok(SensorType::Boolean),
+            "location" => Ok(SensorType::Location),
+            "json" => Ok(SensorType::Json),
+            "blob" => Ok(SensorType::Blob),
+            _ => Err(format!("Unknown sensor type: {}", s)),
+        }
     }
 }
 

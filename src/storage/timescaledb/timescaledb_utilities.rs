@@ -1,8 +1,9 @@
-use crate::datamodel::unit::Unit;
 use crate::datamodel::Sensor;
+use crate::datamodel::unit::Unit;
 use anyhow::Result;
 use cached::proc_macro::cached;
 use sqlx::{Executor, Postgres, Row, Transaction};
+use std::time::Duration;
 use uuid::Uuid;
 
 /**
@@ -14,7 +15,7 @@ use uuid::Uuid;
 #[cached(
     time = 120,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ label_name.to_string() }"#
 )]
@@ -44,7 +45,7 @@ pub async fn get_label_name_id_or_create(
 #[cached(
     time = 120,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ label_description.to_string() }"#
 )]
@@ -75,7 +76,7 @@ pub async fn get_label_description_id_or_create(
 #[cached(
     time = 120,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ unit.name.clone() }"#
 )]
@@ -107,7 +108,7 @@ pub async fn get_unit_id_or_create(
 #[cached(
     time = 120,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "Uuid",
     convert = r#"{ sensor.uuid }"#
 )]
@@ -178,7 +179,7 @@ pub async fn get_sensor_id_or_create_sensor(
 #[cached(
     time = 120,
     result = true,
-    sync_writes = true,
+    sync_writes = "default",
     key = "String",
     convert = r#"{ string_value.to_string() }"#
 )]

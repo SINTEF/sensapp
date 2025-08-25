@@ -1,8 +1,12 @@
 use super::{app_error::AppError, state::HttpServerState};
+#[cfg(all(test, feature = "sqlite"))]
+use crate::config::load_configuration;
 use crate::datamodel::{
-    batch_builder::BatchBuilder, sensapp_datetime::SensAppDateTimeExt, sensapp_vec::SensAppLabels,
-    SensAppDateTime, Sensor, SensorType, TypedSamples,
+    SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
+    sensapp_datetime::SensAppDateTimeExt, sensapp_vec::SensAppLabels,
 };
+#[cfg(all(test, feature = "sqlite"))]
+use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::{
     debug_handler,
@@ -10,13 +14,14 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use flate2::read::GzDecoder;
-use influxdb_line_protocol::{parse_lines, FieldValue};
+use influxdb_line_protocol::{FieldValue, parse_lines};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::str::FromStr;
 use std::{io::Read, str::from_utf8};
 use std::{str, sync::Arc};
 use tokio_util::bytes::Bytes;
+use tracing::{debug, error, info};
 
 #[derive(Debug, Deserialize)]
 pub struct InfluxDBQueryParams {
@@ -33,18 +38,17 @@ fn bytes_to_string(headers: &HeaderMap, bytes: &Bytes) -> Result<String, AppErro
             Ok("gzip") => {
                 let mut d = GzDecoder::new(&bytes[..]);
                 let mut s = String::new();
-                d.read_to_string(&mut s)
-                    .map_err(|e| AppError::BadRequest(anyhow::anyhow!(e)))?;
+                d.read_to_string(&mut s).map_err(AppError::bad_request)?;
                 Ok(s)
             }
-            _ => Err(AppError::BadRequest(anyhow::anyhow!(
+            _ => Err(AppError::bad_request(anyhow::anyhow!(
                 "Unsupported content-encoding: {:?}",
                 value
             ))),
         },
         // No content-encoding header
         None => {
-            let str = from_utf8(bytes).map_err(|e| AppError::BadRequest(anyhow::anyhow!(e)))?;
+            let str = from_utf8(bytes).map_err(AppError::bad_request)?;
             Ok(str.to_string())
         }
     }
@@ -80,8 +84,12 @@ fn influxdb_field_to_sensapp(
         FieldValue::F64(value) => Ok((
             SensorType::Numeric,
             TypedSamples::one_numeric(
-                Decimal::from_f64_retain(value)
-                    .ok_or(anyhow::anyhow!("Failed to convert f64 to Decimal"))?,
+                Decimal::from_f64_retain(value).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Failed to convert f64 value {} to Decimal - precision may be too high",
+                        value
+                    )
+                })?,
                 datetime,
             ),
         )),
@@ -157,17 +165,14 @@ pub async fn publish_influxdb(
     }): Query<InfluxDBQueryParams>,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
-    // println!("InfluxDB publish");
-    // println!("bucket: {}", bucket);
-    // println!("org: {:?}", org);
-    // println!("org_id: {:?}", org_id);
-    // println!("precision: {:?}", precision);
-    // println!("bytes: {:?}", bytes);
-    // println!("headers: {:?}", headers);
+    debug!(
+        "InfluxDB publish: bucket={}, org={:?}, org_id={:?}, precision={:?}",
+        bucket, org, org_id, precision
+    );
 
     // Requires org or org_id
     if org.is_none() && org_id.is_none() {
-        return Err(AppError::BadRequest(anyhow::anyhow!(
+        return Err(AppError::bad_request(anyhow::anyhow!(
             "org or org_id must be specified"
         )));
     }
@@ -183,7 +188,7 @@ pub async fn publish_influxdb(
         Some(precision) => match precision.parse() {
             Ok(precision) => precision,
             Err(_) => {
-                return Err(AppError::BadRequest(anyhow::anyhow!(
+                return Err(AppError::bad_request(anyhow::anyhow!(
                     "Invalid precision: {}",
                     precision
                 )));
@@ -232,7 +237,7 @@ pub async fn publish_influxdb(
                     None => match SensAppDateTime::now() {
                         Ok(datetime) => datetime,
                         Err(error) => {
-                            return Err(AppError::InternalServerError(anyhow::anyhow!(error)));
+                            return Err(AppError::internal_server_error(error));
                         }
                     },
                 };
@@ -245,7 +250,7 @@ pub async fn publish_influxdb(
                         match influxdb_field_to_sensapp(field_value, datetime) {
                             Ok((sensor_type, value)) => (sensor_type, value),
                             Err(error) => {
-                                return Err(AppError::BadRequest(anyhow::anyhow!(error)));
+                                return Err(AppError::bad_request(error));
                             }
                         };
                     let name = compute_field_name(&url_encoded_field_name, &field_key);
@@ -254,26 +259,21 @@ pub async fn publish_influxdb(
                 }
             }
             Err(error) => {
-                return Err(AppError::BadRequest(anyhow::anyhow!(error)));
+                return Err(AppError::bad_request(error));
             }
         }
     }
 
-    // TODO: Remove this println once debugged
-    println!("INfluxDB: Sending to the event bus soon");
-
-    match batch_builder.send_what_is_left(state.event_bus).await {
-        Ok(Some(mut receiver)) => {
-            println!("INfluxDB: Waiting for the receiver");
-            receiver.wait().await?;
-            println!("INfluxDB: Receiver done");
+    match batch_builder.send_what_is_left(state.storage.clone()).await {
+        Ok(true) => {
+            info!("InfluxDB: Batch sent successfully");
         }
-        Ok(None) => {
-            println!("INfluxDB: No receiver");
+        Ok(false) => {
+            debug!("InfluxDB: No data to send");
         }
         Err(error) => {
-            println!("INfluxDB: Error: {:?}", error);
-            return Err(AppError::InternalServerError(anyhow::anyhow!(error)));
+            error!("InfluxDB: Error sending batch: {:?}", error);
+            return Err(AppError::internal_server_error(error));
         }
     }
 
@@ -282,13 +282,13 @@ pub async fn publish_influxdb(
 }
 
 #[cfg(test)]
+#[cfg(feature = "sqlite")]
 mod tests {
-    use crate::bus::{self, message};
     use crate::storage::sqlite::SqliteStorage;
 
     use super::*;
-    use flate2::write::GzEncoder;
     use flate2::Compression;
+    use flate2::write::GzEncoder;
     use influxdb_line_protocol::EscapedStr;
     use std::io::Write;
 
@@ -326,26 +326,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_influxdb() {
-        let event_bus = bus::event_bus::init_event_bus();
-        let mut wololo = event_bus.main_bus_receiver.activate_cloned();
-        tokio::spawn(async move {
-            while let Ok(message) = wololo.recv().await {
-                match message {
-                    message::Message::Publish(message::PublishMessage {
-                        batch: _,
-                        sync_receiver: _,
-                        sync_sender,
-                    }) => {
-                        println!("Received publish message");
-                        sync_sender.broadcast(()).await.unwrap();
-                    }
-                }
-            }
-        });
+        _ = load_configuration();
+
+        let storage = SqliteStorage::connect("sqlite::memory:").await.unwrap();
+        storage.create_or_migrate().await.unwrap();
         let state = State(HttpServerState {
             name: Arc::new("influxdb test".to_string()),
-            event_bus: event_bus.clone(),
-            storage: Arc::new(SqliteStorage::connect("sqlite::memory:").await.unwrap()),
+            storage: Arc::new(storage),
         });
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
@@ -528,7 +515,10 @@ mod tests {
         let result = influxdb_field_to_sensapp(FieldValue::F64(42.0), datetime).unwrap();
         assert_eq!(
             result,
-            (SensorType::Float, TypedSamples::one_float(42.0, datetime))
+            (
+                SensorType::Numeric,
+                TypedSamples::one_numeric(Decimal::from_f64_retain(42.0).unwrap(), datetime)
+            )
         );
 
         let result =

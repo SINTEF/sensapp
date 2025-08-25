@@ -23,3 +23,6 @@ coverage/
 pki
 
 test.db*
+
+# Claude
+.claude/settings.local.json

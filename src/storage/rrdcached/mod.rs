@@ -1,18 +1,21 @@
+use crate::storage::StorageError;
 use crate::{
+    config,
     datamodel::{Sensor, SensorType, TypedSamples},
-    storage::storage::StorageInstance,
+    storage::{StorageInstance, common::sync_with_timeout},
 };
-use anyhow::{anyhow, bail, Result};
-use axum::async_trait;
+use anyhow::{Context, Result, anyhow, bail};
+use async_trait::async_trait;
 use rrdcached_client::{
+    RRDCachedClient,
     batch_update::BatchUpdate,
     consolidation_function::ConsolidationFunction,
     create::{CreateArguments, CreateDataSource, CreateDataSourceType, CreateRoundRobinArchive},
     errors::RRDCachedClientError,
-    RRDCachedClient,
 };
-use std::{collections::HashSet, sync::Arc, time::Duration};
-use tokio::{sync::RwLock, time::timeout};
+use std::{collections::HashSet, sync::Arc};
+use tokio::sync::RwLock;
+use tracing::{debug, error};
 use url::Url;
 use uuid::Uuid;
 
@@ -132,8 +135,16 @@ impl RrdCachedStorage {
         match scheme {
             "rrdcached" | "rrdcached+tcp" => {
                 // extract host and port
-                let host = url.host_str().ok_or_else(|| anyhow!("No host in URL"))?;
-                let port = url.port().ok_or_else(|| anyhow!("No port in URL"))?;
+                let host = url.host_str().ok_or_else(|| {
+                    anyhow::Error::from(StorageError::configuration(
+                        "RRDCached connection URL missing host",
+                    ))
+                })?;
+                let port = url.port().ok_or_else(|| {
+                    anyhow::Error::from(StorageError::configuration(
+                        "RRDCached connection URL missing port",
+                    ))
+                })?;
 
                 let client = RRDCachedClient::connect_tcp(&format!("{}:{}", host, port)).await?;
                 Ok(Self {
@@ -286,12 +297,12 @@ impl StorageInstance for RrdCachedStorage {
             match client.batch(batch_updates).await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Failed to batch update: {:?}", e);
+                    error!("RRDCached: Failed to batch update: {:?}", e);
                     match e {
                         RRDCachedClientError::BatchUpdateErrorResponse(string, errors) => {
-                            println!("Batch update error response: {:?}", string);
+                            error!("RRDCached: Batch update error response: {:?}", string);
                             for error in errors {
-                                println!("Batch update error: {:?}", error);
+                                error!("RRDCached: Batch update error: {:?}", error);
                             }
                         }
                         _ => {}
@@ -312,9 +323,8 @@ impl StorageInstance for RrdCachedStorage {
             client.flush_all().await?;
         }
 
-        if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
-            let _ = timeout(Duration::from_secs(15), sync_sender.broadcast(())).await?;
-        }
+        let config = config::get().context("Failed to get configuration")?;
+        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await?;
 
         Ok(())
     }
@@ -323,7 +333,28 @@ impl StorageInstance for RrdCachedStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
+    async fn list_series(&self) -> Result<Vec<String>> {
         unimplemented!();
+    }
+
+    async fn query_sensor_data(
+        &self,
+        _sensor_uuid: &str,
+        _start_time: Option<crate::datamodel::SensAppDateTime>,
+        _end_time: Option<crate::datamodel::SensAppDateTime>,
+        _limit: Option<usize>,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        unimplemented!("RRDCached sensor data querying not yet implemented");
+    }
+
+    /// Clean up all test data from the database (RRDCached implementation)
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn cleanup_test_data(&self) -> Result<()> {
+        // RRDCached doesn't have a traditional database cleanup mechanism
+        // For tests, we would typically use separate RRD files or instances
+        // Clear the created sensors set as a minimal cleanup
+        let mut created_sensors = self.created_sensors.write().await;
+        created_sensors.clear();
+        Ok(())
     }
 }

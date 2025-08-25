@@ -1,31 +1,31 @@
+use nom::AsChar;
 use nom::{
-    character::{
-        complete::{char, satisfy},
-        is_hex_digit,
-    },
-    combinator::map,
-    combinator::map_res,
+    IResult, Parser,
+    character::complete::{char, satisfy},
+    combinator::{map, map_res},
     multi::count,
-    sequence::tuple,
-    IResult,
 };
 use uuid::Uuid;
 
+#[allow(dead_code)]
 #[inline]
 fn hex_digit_char(c: char) -> bool {
-    is_hex_digit(c as u8)
+    c.is_hex_digit()
 }
 
+#[allow(dead_code)]
 fn parse_hex_char(data: &str) -> IResult<&str, u8> {
     map_res(satisfy(hex_digit_char), |s: char| match s.to_digit(16) {
         Some(d) => Ok(d as u8),
         None => Err("Invalid hex digit"),
-    })(data)
+    })
+    .parse(data)
 }
 
+#[allow(dead_code)]
 pub fn parse_uuid(data: &str) -> IResult<&str, uuid::Uuid> {
     map(
-        tuple((
+        (
             count(parse_hex_char, 8),
             char('-'),
             count(parse_hex_char, 4),
@@ -35,7 +35,7 @@ pub fn parse_uuid(data: &str) -> IResult<&str, uuid::Uuid> {
             count(parse_hex_char, 4),
             char('-'),
             count(parse_hex_char, 12),
-        )),
+        ),
         |(a, _, b, _, c, _, d, _, e)| {
             let bytes = [
                 (a[0] << 4) | a[1],
@@ -57,9 +57,11 @@ pub fn parse_uuid(data: &str) -> IResult<&str, uuid::Uuid> {
             ];
             Uuid::from_bytes(bytes)
         },
-    )(data)
+    )
+    .parse(data)
 }
 
+#[allow(dead_code)]
 pub fn attempt_uuid_parsing(s: &str) -> Option<uuid::Uuid> {
     match parse_uuid(s) {
         Ok((_, uuid)) => Some(uuid),

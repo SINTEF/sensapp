@@ -1,18 +1,19 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use big_decimal_byte_string_encoder::encode_bigdecimal_to_bigquery_bytes;
 use bigdecimal::BigDecimal;
 use hybridmap::HybridMap;
 use std::sync::Arc;
+use tracing::{debug, info};
 use uuid::Uuid;
 
+use super::BigQueryStorage;
 use super::bigquery_prost_structs::{BlobValue, IntegerValue, JsonValue, LocationValue};
 use super::bigquery_table_descriptors::{
     BLOB_VALUES_DESCRIPTOR, INTEGER_VALUES_DESCRIPTOR, JSON_VALUES_DESCRIPTOR,
 };
 use super::bigquery_utilities::publish_rows;
-use super::BigQueryStorage;
 use crate::datamodel::SensAppVec;
-use crate::datamodel::{batch::Batch, SensorType, TypedSamples};
+use crate::datamodel::{SensorType, TypedSamples, batch::Batch};
 use crate::storage::bigquery::bigquery_prost_structs::{
     BooleanValue, FloatValue, NumericValue, StringValue,
 };
@@ -38,7 +39,10 @@ pub async fn publish_integer_values(
                             .get(&single_sensor_batch.sensor.uuid)
                             .ok_or(anyhow!("Sensor not found"))?;
                         let timestamp = value.datetime.to_isoformat();
-                        println!("timestamp: {}", timestamp);
+                        debug!(
+                            "BigQuery: Publishing integer value with timestamp: {}",
+                            timestamp
+                        );
                         rows.push(IntegerValue {
                             sensor_id: *sensor_id,
                             timestamp,
@@ -162,11 +166,11 @@ pub async fn publish_string_values(
     }
 
     if tmp_rows.is_empty() {
-        println!("No string values to publish");
+        debug!("BigQuery: No string values to publish");
         return Ok(());
     }
 
-    println!("Publishing {} string values", tmp_rows.len());
+    info!("BigQuery: Publishing {} string values", tmp_rows.len());
 
     let only_string_values = tmp_rows
         .iter()
@@ -180,7 +184,7 @@ pub async fn publish_string_values(
         .map(|row| {
             let string_id = ids_map
                 .get(&row.value_string)
-                .expect("String value not found in the map, this should not happen");
+                .expect("Internal consistency error: String value missing from cached map");
             StringValue {
                 sensor_id: row.sensor_id,
                 timestamp: row.timestamp,

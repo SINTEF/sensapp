@@ -23,12 +23,13 @@ impl SensAppDateTimeExt for SensAppDateTime {
     }
 }
 
-use hifitime::{Unit, UNIX_REF_EPOCH};
+use hifitime::{UNIX_REF_EPOCH, Unit};
 use sqlx::types::time::OffsetDateTime;
+#[allow(dead_code)]
 pub fn sensapp_datetime_to_offset_datetime(datetime: &SensAppDateTime) -> Result<OffsetDateTime> {
     let unix_timestamp = datetime.to_unix_seconds().floor() as i128;
 
-    let duration = datetime.to_duration();
+    let duration = datetime.to_et_duration();
     let (_sign, _days, _hours, _minutes, _seconds, miliseconds, microseconds, ns_left) =
         duration.decompose();
     let sum_after_seconds: i128 = (miliseconds as i128) * 1_000_000_i128
@@ -63,14 +64,10 @@ mod tests {
             offset_now.unix_timestamp(),
         );
 
-        assert_eq!(
-            hifitime_now.milliseconds(),
-            (offset_now.nanosecond() / 1_000_000) as u64
-        );
+        // Compare sub-second precision: extract nanoseconds within the current second
+        let hifitime_total_nanoseconds = hifitime_now.to_et_duration().total_nanoseconds();
+        let hifitime_subsec_nanoseconds = (hifitime_total_nanoseconds % 1_000_000_000) as u32;
 
-        assert_eq!(
-            hifitime_now.nanoseconds(),
-            (offset_now.nanosecond() % 1000) as u64
-        );
+        assert_eq!(hifitime_subsec_nanoseconds, offset_now.nanosecond());
     }
 }

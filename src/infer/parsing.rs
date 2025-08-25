@@ -1,6 +1,7 @@
 use std::{str::FromStr, sync::Arc};
 
 use nom::{
+    Err, IResult, Parser,
     branch::alt,
     bytes::complete::tag_no_case,
     character::complete::{i64, multispace0},
@@ -8,7 +9,6 @@ use nom::{
     number::complete::double,
     number::complete::recognize_float_or_exceptions,
     sequence::{delimited, terminated},
-    Err, IResult,
 };
 use rust_decimal::Decimal;
 
@@ -23,17 +23,26 @@ pub enum InferedValue {
     DateTime(hifitime::Epoch),
     //Location,
     //Blob(Vec<u8>),
-    // todo: booleans and dates and timestamps
+    // Future: Add support for boolean and additional date/timestamp formats
 }
 
 pub fn parse_integer(data: &str) -> IResult<&str, InferedValue> {
-    map(i64, InferedValue::Integer)(data)
+    map(i64, InferedValue::Integer).parse(data)
 }
 
 pub fn parse_float(data: &str) -> IResult<&str, InferedValue> {
     // We use the "double" parser from nom, that returns a f64.
     // The parser named "float" from nom returns a f32.
-    map(double, InferedValue::Float)(data)
+    // However, we reject special values like inf and NaN to treat them as strings
+    let (rest, value) = double(data)?;
+    if value.is_infinite() || value.is_nan() {
+        Err(Err::Error(nom::error::Error::new(
+            data,
+            nom::error::ErrorKind::Float,
+        )))
+    } else {
+        Ok((rest, InferedValue::Float(value)))
+    }
 }
 
 pub fn parse_numeric(data: &str) -> IResult<&str, InferedValue> {
@@ -59,7 +68,8 @@ pub fn parse_boolean(data: &str) -> IResult<&str, InferedValue> {
     map(
         alt((tag_no_case("true"), tag_no_case("false"))),
         |s: &str| InferedValue::Boolean(s.to_lowercase() == "true"),
-    )(data)
+    )
+    .parse(data)
 }
 
 fn is_likely_json(data: &str) -> bool {
@@ -82,7 +92,7 @@ pub fn parse_json(data: &str) -> IResult<&str, InferedValue> {
 
 fn convert_datetime_from_iso8601_to_hifitime(
     dt: iso8601::DateTime,
-) -> Result<hifitime::Epoch, hifitime::Errors> {
+) -> Result<hifitime::Epoch, hifitime::HifitimeError> {
     // convert the iso8601::DateTime to a std::time::Duration first
     let iso8601::DateTime { date, time } = dt;
     let (year, month, day) = match date {
@@ -166,7 +176,8 @@ pub fn infer_type(data: &str) -> IResult<&str, InferedValue> {
         terminated(parse_iso8601_datetime, eof),
         terminated(parse_json, eof),
         terminated(parse_string, eof),
-    ))(data)
+    ))
+    .parse(data)
 }
 
 pub fn infer_type_with_trim(data: &str) -> IResult<&str, InferedValue> {
@@ -181,7 +192,8 @@ pub fn infer_type_with_trim(data: &str) -> IResult<&str, InferedValue> {
         terminated(delimited(multispace0, parse_json, multispace0), eof),
         // We don't trim strings, as they can contain whitespace.
         terminated(parse_string, eof),
-    ))(data)
+    ))
+    .parse(data)
 }
 
 pub fn infer_type_with_numeric(data: &str) -> IResult<&str, InferedValue> {
@@ -191,7 +203,8 @@ pub fn infer_type_with_numeric(data: &str) -> IResult<&str, InferedValue> {
         terminated(parse_iso8601_datetime, eof),
         terminated(parse_json, eof),
         terminated(parse_string, eof),
-    ))(data)
+    ))
+    .parse(data)
 }
 
 pub fn infer_type_with_trim_and_numeric(data: &str) -> IResult<&str, InferedValue> {
@@ -205,7 +218,8 @@ pub fn infer_type_with_trim_and_numeric(data: &str) -> IResult<&str, InferedValu
         terminated(delimited(multispace0, parse_json, multispace0), eof),
         // We don't trim strings, as they can contain whitespace.
         terminated(parse_string, eof),
-    ))(data)
+    ))
+    .parse(data)
 }
 
 #[cfg(test)]

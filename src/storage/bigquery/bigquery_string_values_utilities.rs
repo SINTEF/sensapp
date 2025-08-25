@@ -1,6 +1,7 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
-use anyhow::{anyhow, Result};
+use crate::storage::StorageError;
+use anyhow::{Result, anyhow};
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
@@ -9,13 +10,14 @@ use gcp_bigquery_client::model::{
 use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
 use tokio::sync::Mutex;
+use tracing::{debug, info};
 
 use crate::datamodel::SensAppVec;
 
 use super::{
-    bigquery_prost_structs::StringValueDictionary,
+    BigQueryStorage, bigquery_prost_structs::StringValueDictionary,
     bigquery_table_descriptors::STRINGS_VALUES_DICTIONARY_DESCRIPTOR,
-    bigquery_utilities::publish_rows, BigQueryStorage,
+    bigquery_utilities::publish_rows,
 };
 
 static STRING_VALUES_CACHE: Lazy<Mutex<CLruCache<String, i64>>> =
@@ -43,9 +45,9 @@ pub async fn get_or_create_string_values_ids(
         }
     }
 
-    println!("Found {} known string values", result.len());
-    println!(
-        "Found {} unknown string values",
+    debug!("BigQuery: Found {} known string values", result.len());
+    debug!(
+        "BigQuery: Found {} unknown string values",
         unknown_string_values.len()
     );
 
@@ -76,7 +78,10 @@ pub async fn get_or_create_string_values_ids(
         return Ok(result);
     }
 
-    println!("Found {} string values to create", values_to_create.len());
+    info!(
+        "BigQuery: Creating {} new string values",
+        values_to_create.len()
+    );
 
     let new_ids = create_string_values(bqs, values_to_create).await?;
     {
@@ -142,10 +147,12 @@ async fn get_existing_string_values_ids(
     let mut results_map = HybridMap::with_capacity(result.row_count());
 
     while result.next_row() {
-        let id = result.get_i64(0)?.ok_or_else(|| anyhow!("id is null"))?;
-        let value = result
-            .get_string(1)?
-            .ok_or_else(|| anyhow!("value is null"))?;
+        let id = result.get_i64(0)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("string_value_id", None, None))
+        })?;
+        let value = result.get_string(1)?.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("string_value", None, None))
+        })?;
 
         results_map.insert(value, id);
     }
@@ -169,7 +176,7 @@ async fn create_string_values(
         .map(|string_value| StringValueDictionary {
             id: *map
                 .get(&string_value)
-                .expect("String value not found in the map, this should not happen"),
+                .expect("Internal consistency error: String value missing from cached map"),
             value: string_value,
         })
         .collect::<Vec<_>>();

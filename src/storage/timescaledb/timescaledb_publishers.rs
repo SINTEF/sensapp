@@ -1,7 +1,7 @@
 use super::timescaledb_utilities::get_string_value_id_or_create;
-use crate::datamodel::{sensapp_datetime::sensapp_datetime_to_offset_datetime, Sample};
+use crate::datamodel::{Sample, sensapp_datetime::sensapp_datetime_to_offset_datetime};
 use anyhow::Result;
-use sqlx::{prelude::*, Postgres, Transaction};
+use sqlx::{Postgres, Transaction, prelude::*};
 
 pub async fn publish_integer_values(
     transaction: &mut Transaction<'_, Postgres>,

@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use crate::{
     datamodel::{
-        batch_builder::BatchBuilder, sensapp_datetime::SensAppDateTimeExt,
-        sensapp_vec::SensAppLabels, unit::Unit, Sample, SensAppDateTime, Sensor, SensorType,
-        TypedSamples,
+        Sample, SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
+        sensapp_datetime::SensAppDateTimeExt, sensapp_vec::SensAppLabels, unit::Unit,
     },
     parsing::prometheus::remote_write_parser::parse_remote_write_request,
 };
@@ -17,6 +16,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use tokio_util::bytes::Bytes;
+use tracing::{debug, info};
 
 fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
     // Check that we have the right content encoding, that must be snappy
@@ -24,13 +24,13 @@ fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
         Some(content_encoding) => match content_encoding.to_str() {
             Ok("snappy") | Ok("SNAPPY") => {}
             _ => {
-                return Err(AppError::BadRequest(anyhow::anyhow!(
+                return Err(AppError::bad_request(anyhow::anyhow!(
                     "Unsupported content-encoding, must be snappy"
                 )));
             }
         },
         None => {
-            return Err(AppError::BadRequest(anyhow::anyhow!(
+            return Err(AppError::bad_request(anyhow::anyhow!(
                 "Missing content-encoding header"
             )));
         }
@@ -41,13 +41,13 @@ fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
         Some(content_type) => match content_type.to_str() {
             Ok("application/x-protobuf") | Ok("APPLICATION/X-PROTOBUF") => {}
             _ => {
-                return Err(AppError::BadRequest(anyhow::anyhow!(
+                return Err(AppError::bad_request(anyhow::anyhow!(
                     "Unsupported content-type, must be application/x-protobuf"
                 )));
             }
         },
         None => {
-            return Err(AppError::BadRequest(anyhow::anyhow!(
+            return Err(AppError::bad_request(anyhow::anyhow!(
                 "Missing content-type header"
             )));
         }
@@ -58,13 +58,13 @@ fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
         Some(version) => match version.to_str() {
             Ok("0.1.0") => {}
             _ => {
-                return Err(AppError::BadRequest(anyhow::anyhow!(
+                return Err(AppError::bad_request(anyhow::anyhow!(
                     "Unsupported x-prometheus-remote-write-version, must be 0.1.0"
                 )));
             }
         },
         None => {
-            return Err(AppError::BadRequest(anyhow::anyhow!(
+            return Err(AppError::bad_request(anyhow::anyhow!(
                 "Missing x-prometheus-remote-write-version header"
             )));
         }
@@ -83,7 +83,6 @@ fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
     path = "/api/v1/prometheus_remote_write",
     tag = "Prometheus",
     request_body(
-        content = Bytes,
         content_type = "application/x-protobuf",
         description = "Prometheus Remote Write endpoint. [Reference](https://prometheus.io/docs/concepts/remote_write_spec/)",
     ),
@@ -104,14 +103,7 @@ pub async fn publish_prometheus(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
-    // println!("InfluxDB publish");
-    // println!("bucket: {}", bucket);
-    // println!("org: {:?}", org);
-    // println!("org_id: {:?}", org_id);
-    // println!("precision: {:?}", precision);
-    // println!("bytes: {:?}", bytes);
-
-    println!("Received {} bytes", bytes.len());
+    debug!("Prometheus remote write: received {} bytes", bytes.len());
 
     // Verify headers
     verify_headers(&headers)?;
@@ -125,7 +117,7 @@ pub async fn publish_prometheus(
         return Ok(StatusCode::NO_CONTENT);
     }
 
-    println!("Received {} timeseries", write_request.timeseries.len());
+    debug!("Processing {} timeseries", write_request.timeseries.len());
 
     let mut batch_builder = BatchBuilder::new()?;
     for time_serie in write_request.timeseries {
@@ -147,7 +139,7 @@ pub async fn publish_prometheus(
         let name = match name {
             Some(name) => name,
             None => {
-                return Err(AppError::BadRequest(anyhow::anyhow!(
+                return Err(AppError::bad_request(anyhow::anyhow!(
                     "A time serie is missing its __name__ label"
                 )));
             }
@@ -169,16 +161,17 @@ pub async fn publish_prometheus(
         );
 
         batch_builder.add(Arc::new(sensor), samples).await?;
-        // batch_builder.send_if_batch_full(event_bus.clone()).await?;
     }
 
-    match batch_builder.send_what_is_left(state.event_bus).await {
-        Ok(Some(mut receiver)) => {
-            receiver.wait().await?;
+    match batch_builder.send_what_is_left(state.storage.clone()).await {
+        Ok(true) => {
+            info!("Prometheus: Batch sent successfully");
         }
-        Ok(None) => {}
+        Ok(false) => {
+            debug!("Prometheus: No data to send");
+        }
         Err(error) => {
-            return Err(AppError::InternalServerError(anyhow::anyhow!(error)));
+            return Err(AppError::internal_server_error(error));
         }
     }
 

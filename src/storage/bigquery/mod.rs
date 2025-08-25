@@ -1,5 +1,6 @@
-use crate::storage::storage::StorageInstance;
-use anyhow::{bail, Result};
+use crate::config;
+use crate::storage::{StorageInstance, common::sync_with_timeout};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use bigquery_publishers::{
     publish_blob_values, publish_boolean_values, publish_float_values, publish_integer_values,
@@ -14,8 +15,9 @@ use gcp_bigquery_client::{
 };
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
-use tokio::{sync::RwLock, time::timeout};
+use std::{future::Future, pin::Pin, sync::Arc};
+use tokio::sync::RwLock;
+use tracing::{debug, error, info};
 use url::Url;
 
 mod bigquery_labels_utilities;
@@ -84,11 +86,11 @@ impl BigQueryStorage {
     pub async fn connect(connection_string: &str) -> Result<Self> {
         let (gcp_sa_key, project_id, dataset_id) = parse_connection_string(connection_string)?;
 
-        println!(
+        info!(
             "Connecting to BigQuery with project_id: {}, dataset_id: {}",
             project_id, dataset_id
         );
-        println!("File: {}", gcp_sa_key);
+        debug!("Using service account key file: {}", gcp_sa_key);
         let client = Arc::new(RwLock::new(
             gcp_bigquery_client::Client::from_service_account_key_file(&gcp_sa_key).await?,
         ));
@@ -129,10 +131,10 @@ impl StorageInstance for BigQueryStorage {
             .await
         {
             Ok(_) => {
-                println!("Dataset already exists");
+                debug!("BigQuery dataset already exists");
             }
             Err(BQError::ResponseError { error }) if error.error.code == 404 => {
-                println!("Dataset does not exist, creating it");
+                info!("BigQuery dataset does not exist, creating it");
                 let dataset =
                     Dataset::new(&self.project_id, &self.dataset_id).location("europe-north1");
                 self.client.read().await.dataset().create(dataset).await?;
@@ -157,8 +159,10 @@ impl StorageInstance for BigQueryStorage {
             .query(&self.project_id, QueryRequest::new(parametrized_init_sql))
             .await?;
 
-        if rs.row_count() > 0 {
-            bail!("BigQuery should not return any rows on the schema creation query");
+        if let Some(total_rows) = rs.total_rows() {
+            if total_rows > 0 {
+                bail!("BigQuery should not return any rows on the schema creation query");
+            }
         }
 
         Ok(())
@@ -173,7 +177,7 @@ impl StorageInstance for BigQueryStorage {
             .iter()
             .map(|sensor_batch| sensor_batch.sensor.clone())
             .collect::<Vec<_>>();
-        println!("Publishing batch with {} sensors", sensors.len());
+        debug!("BigQuery: Publishing batch with {} sensors", sensors.len());
         let sensor_ids = Arc::new(get_sensor_ids_or_create_sensors(self, &sensors).await?);
 
         let futures: Vec<Pin<Box<dyn Future<Output = Result<(), _>> + Send>>> = vec![
@@ -211,21 +215,19 @@ impl StorageInstance for BigQueryStorage {
             Box::pin(publish_blob_values(self, batch.clone(), sensor_ids.clone())),
         ];
 
-        println!("Waiting for all publishers to finish");
+        debug!("BigQuery: Waiting for all publishers to finish");
         try_join_all(futures).await?;
-        println!("All publishers finished, syncing");
+        debug!("BigQuery: All publishers finished, syncing");
         self.sync(sync_sender).await?;
-        println!("Sync finished, yo yo yo");
+        debug!("BigQuery: Sync finished");
         Ok(())
     }
 
     async fn sync(&self, sync_sender: async_broadcast::Sender<()>) -> Result<()> {
-        // SQLite doesn't need to do anything special for sync
-        // As we use transactions and the WAL mode.
-        if sync_sender.receiver_count() > 0 && !sync_sender.is_closed() {
-            let _ = timeout(Duration::from_secs(15), sync_sender.broadcast(())).await?;
-        }
-        Ok(())
+        // BigQuery doesn't need to do anything special for sync
+        // as we use transactions and streaming inserts
+        let config = config::get().context("Failed to get configuration")?;
+        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {
@@ -233,7 +235,200 @@ impl StorageInstance for BigQueryStorage {
         Ok(())
     }
 
-    async fn list_sensors(&self) -> Result<Vec<String>> {
-        unimplemented!();
+    async fn list_series(
+        &self,
+        _metric_filter: Option<&str>,
+    ) -> Result<Vec<crate::datamodel::Sensor>> {
+        use crate::datamodel::{Sensor, SensorType, sensapp_vec::SensAppLabels, unit::Unit};
+        use gcp_bigquery_client::model::query_request::QueryRequest;
+        use smallvec::smallvec;
+        use std::str::FromStr;
+        use uuid::Uuid;
+
+        let query = format!(
+            r#"
+            SELECT s.sensor_id, s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
+            FROM `{}.{}.sensors` s
+            LEFT JOIN `{}.{}.units` u ON s.unit = u.id
+            ORDER BY s.uuid ASC
+            "#,
+            self.project_id, self.dataset_id, self.project_id, self.dataset_id
+        );
+
+        let rs = self
+            .client
+            .read()
+            .await
+            .job()
+            .query(&self.project_id, QueryRequest::new(query))
+            .await?;
+
+        let mut sensors = Vec::new();
+
+        for row in rs.rows.unwrap_or_default() {
+            let sensor_id: i64 = row.columns[0].value.as_ref().unwrap().parse().unwrap();
+            let sensor_uuid: Uuid = Uuid::from_str(row.columns[1].value.as_ref().unwrap()).unwrap();
+            let sensor_name = row.columns[2].value.as_ref().unwrap().to_string();
+            let sensor_type_str = row.columns[3].value.as_ref().unwrap();
+            let sensor_type =
+                SensorType::from_str(sensor_type_str).context("Failed to parse sensor type")?;
+            let unit = row.columns[4].value.as_ref().map(|name| {
+                Unit::new(
+                    name.to_string(),
+                    row.columns[5].value.as_ref().map(|d| d.to_string()),
+                )
+            });
+
+            // Query labels for this sensor
+            let labels_query = format!(
+                r#"
+                SELECT lnd.name as label_name, ldd.description as label_value
+                FROM `{}.{}.labels` l
+                JOIN `{}.{}.labels_name_dictionary` lnd ON l.name = lnd.id
+                JOIN `{}.{}.labels_description_dictionary` ldd ON l.description = ldd.id
+                WHERE l.sensor_id = {}
+                "#,
+                self.project_id,
+                self.dataset_id,
+                self.project_id,
+                self.dataset_id,
+                self.project_id,
+                self.dataset_id,
+                sensor_id
+            );
+
+            let labels_rs = self
+                .client
+                .read()
+                .await
+                .job()
+                .query(&self.project_id, QueryRequest::new(labels_query))
+                .await?;
+
+            let mut labels: SensAppLabels = smallvec![];
+            for label_row in labels_rs.rows.unwrap_or_default() {
+                let label_name = label_row.columns[0].value.as_ref().unwrap().to_string();
+                let label_value = label_row.columns[1].value.as_ref().unwrap().to_string();
+                labels.push((label_name, label_value));
+            }
+
+            let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
+
+            sensors.push(sensor);
+        }
+
+        Ok(sensors)
+    }
+
+    async fn query_sensor_data(
+        &self,
+        sensor_uuid: &str,
+        _start_time: Option<crate::datamodel::SensAppDateTime>,
+        _end_time: Option<crate::datamodel::SensAppDateTime>,
+        _limit: Option<usize>,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        use crate::datamodel::{
+            Sensor, SensorData, SensorType, sensapp_vec::SensAppLabels, unit::Unit,
+        };
+        use gcp_bigquery_client::model::query_request::QueryRequest;
+        use smallvec::smallvec;
+        use std::str::FromStr;
+
+        // Query sensor metadata by UUID
+        let sensor_query = format!(
+            r#"
+            SELECT s.sensor_id, s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
+            FROM `{}.{}.sensors` s
+            LEFT JOIN `{}.{}.units` u ON s.unit = u.id
+            WHERE s.uuid = '{}'
+            "#,
+            self.project_id, self.dataset_id, self.project_id, self.dataset_id, sensor_uuid
+        );
+
+        let sensor_rs = self
+            .client
+            .read()
+            .await
+            .job()
+            .query(&self.project_id, QueryRequest::new(sensor_query))
+            .await?;
+
+        let sensor_row = match sensor_rs.rows.and_then(|rows| rows.into_iter().next()) {
+            Some(row) => row,
+            None => return Ok(None),
+        };
+
+        let sensor_id: i64 = sensor_row.columns[0]
+            .value
+            .as_ref()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let sensor_uuid =
+            uuid::Uuid::from_str(sensor_row.columns[1].value.as_ref().unwrap()).unwrap();
+        let sensor_type = SensorType::from_str(sensor_row.columns[3].value.as_ref().unwrap())
+            .context("Failed to parse sensor type")?;
+        let unit = sensor_row.columns[4].value.as_ref().map(|name| {
+            Unit::new(
+                name.to_string(),
+                sensor_row.columns[5].value.as_ref().map(|d| d.to_string()),
+            )
+        });
+
+        // Query labels
+        let labels_query = format!(
+            r#"
+            SELECT lnd.name as label_name, ldd.description as label_value
+            FROM `{}.{}.labels` l
+            JOIN `{}.{}.labels_name_dictionary` lnd ON l.name = lnd.id
+            JOIN `{}.{}.labels_description_dictionary` ldd ON l.description = ldd.id
+            WHERE l.sensor_id = {}
+            "#,
+            self.project_id,
+            self.dataset_id,
+            self.project_id,
+            self.dataset_id,
+            self.project_id,
+            self.dataset_id,
+            sensor_id
+        );
+
+        let labels_rs = self
+            .client
+            .read()
+            .await
+            .job()
+            .query(&self.project_id, QueryRequest::new(labels_query))
+            .await?;
+
+        let mut labels: SensAppLabels = smallvec![];
+        for label_row in labels_rs.rows.unwrap_or_default() {
+            let label_name = label_row.columns[0].value.as_ref().unwrap().to_string();
+            let label_value = label_row.columns[1].value.as_ref().unwrap().to_string();
+            labels.push((label_name, label_value));
+        }
+
+        let sensor = Sensor::new(
+            sensor_uuid,
+            sensor_name.to_string(),
+            sensor_type,
+            unit,
+            Some(labels),
+        );
+
+        // For BigQuery, we'll return sensor metadata only for now
+        // Sample querying would require complex BigQuery-specific logic
+        let samples = crate::datamodel::TypedSamples::Integer(smallvec![]);
+
+        Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    /// Clean up all test data from the database (BigQuery implementation)
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn cleanup_test_data(&self) -> Result<()> {
+        // BigQuery doesn't support traditional TRUNCATE/DELETE operations well
+        // For now, this is a no-op since tests typically use separate datasets
+        // In a real implementation, you might recreate the dataset or use partitioned tables
+        Ok(())
     }
 }

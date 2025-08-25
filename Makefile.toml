@@ -1,0 +1,488 @@
+[config]
+default_to_workspace = false
+skip_core_tasks = true
+min_version = "0.37.0"
+
+[env]
+# Core cargo settings - only set if not already defined
+CARGO_TERM_COLOR = { value = "always", condition = { env_not_set = ["CARGO_TERM_COLOR"] } }
+RUST_BACKTRACE = { value = "1", condition = { env_not_set = ["RUST_BACKTRACE"] } }
+
+# PostgreSQL defaults (can be overridden)
+POSTGRES_USER = { value = "postgres", condition = { env_not_set = ["POSTGRES_USER"] } }
+POSTGRES_PASSWORD = { value = "postgres", condition = { env_not_set = ["POSTGRES_PASSWORD"] } }
+POSTGRES_DB = { value = "sensapp", condition = { env_not_set = ["POSTGRES_DB"] } }
+POSTGRES_HOST = { value = "localhost", condition = { env_not_set = ["POSTGRES_HOST"] } }
+POSTGRES_PORT = { value = "5432", condition = { env_not_set = ["POSTGRES_PORT"] } }
+DATABASE_URL = { value = "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}", condition = { env_not_set = ["DATABASE_URL"] } }
+
+# Test database URLs with conditional setting
+TEST_DATABASE_URL_POSTGRES = { value = "${DATABASE_URL}", condition = { env_not_set = ["TEST_DATABASE_URL_POSTGRES"] } }
+TEST_DATABASE_URL_SQLITE = { value = "sqlite://test.db", condition = { env_not_set = ["TEST_DATABASE_URL_SQLITE"] } }
+TEST_DATABASE_URL_CLICKHOUSE = { value = "clickhouse://default:password@localhost:8123/sensapp_test", condition = { env_not_set = ["TEST_DATABASE_URL_CLICKHOUSE"] } }
+
+# Environment profiles
+[env.ci]
+CI = "true"
+RUST_LOG = { value = "debug", condition = { env_not_set = ["RUST_LOG"] } }
+
+[env.development]
+RUST_LOG = { value = "info", condition = { env_not_set = ["RUST_LOG"] } }
+
+# Main tasks
+[tasks.default]
+description = "Build project with default features"
+command = "cargo"
+args = ["build"]
+
+[tasks.build]
+description = "Build project with default features"
+command = "cargo"
+args = ["build"]
+
+[tasks.test]
+description = "Test project with default features"
+command = "cargo"
+args = ["test"]
+
+[tasks.test-all]
+description = "Test all storage backend features"
+dependencies = ["test-sqlite", "test-postgres", "test-clickhouse", "test-timescaledb", "test-duckdb", "test-bigquery", "test-rrdcached"]
+
+[tasks.check-all]
+description = "Run all checks for working features (PostgreSQL and SQLite)"
+dependencies = ["check-sqlite", "check-postgres"]
+
+[tasks.check-all-storage]
+description = "Run all checks for all storage backend features"
+dependencies = ["check-sqlite", "check-postgres", "check-clickhouse", "check-timescaledb", "check-duckdb", "check-bigquery", "check-rrdcached"]
+
+# Task templates for code reuse
+[tasks.template-build]
+private = true
+command = "cargo"
+args = ["build", "--features", "${CARGO_MAKE_TASK_FEATURE}", "--no-default-features"]
+
+[tasks.template-test]
+private = true
+command = "cargo"
+args = ["test", "--features", "${CARGO_MAKE_TASK_FEATURE}", "--no-default-features"]
+
+[tasks.template-clippy]
+private = true
+command = "cargo"
+args = [
+  "clippy",
+  "--features",
+  "${CARGO_MAKE_TASK_FEATURE}",
+  "--no-default-features",
+  "--",
+  "-D",
+  "warnings",
+]
+
+[tasks.template-clippy-tests]
+private = true
+command = "cargo"
+args = [
+  "clippy",
+  "--tests",
+  "--features",
+  "${CARGO_MAKE_TASK_FEATURE}",
+  "--no-default-features",
+  "--",
+  "-D",
+  "warnings",
+]
+
+# SQLite checks
+[tasks.check-sqlite]
+description = "Run all SQLite checks"
+dependencies = [
+  "build-sqlite",
+  "test-sqlite",
+  "clippy-sqlite",
+  "clippy-test-sqlite",
+]
+
+[tasks.build-sqlite]
+extend = "template-build"
+private = false
+description = "Build with SQLite feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "sqlite" }
+
+[tasks.test-sqlite]
+extend = "template-test"
+private = false
+description = "Test with SQLite feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "sqlite", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_SQLITE}" }
+
+[tasks.clippy-sqlite]
+extend = "template-clippy"
+private = false
+description = "Clippy with SQLite feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "sqlite" }
+
+[tasks.clippy-test-sqlite]
+extend = "template-clippy-tests"
+private = false
+description = "Clippy tests with SQLite feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "sqlite" }
+
+# PostgreSQL checks
+[tasks.check-postgres]
+description = "Run all PostgreSQL checks"
+dependencies = [
+  "build-postgres",
+  "test-postgres",
+  "clippy-postgres",
+  "clippy-test-postgres",
+]
+
+[tasks.build-postgres]
+extend = "template-build"
+private = false
+description = "Build with PostgreSQL feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "postgres" }
+
+[tasks.test-postgres]
+extend = "template-test"
+private = false
+description = "Test with PostgreSQL feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "postgres", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_POSTGRES}" }
+
+[tasks.clippy-postgres]
+extend = "template-clippy"
+private = false
+description = "Clippy with PostgreSQL feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "postgres" }
+
+[tasks.clippy-test-postgres]
+extend = "template-clippy-tests"
+private = false
+description = "Clippy tests with PostgreSQL feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "postgres" }
+
+# ClickHouse checks
+[tasks.check-clickhouse]
+description = "Run all ClickHouse checks"
+dependencies = [
+  "build-clickhouse",
+  "test-clickhouse",
+  "clippy-clickhouse",
+  "clippy-test-clickhouse",
+]
+
+[tasks.build-clickhouse]
+extend = "template-build"
+private = false
+description = "Build with ClickHouse feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "clickhouse" }
+
+[tasks.test-clickhouse]
+extend = "template-test"
+private = false
+description = "Test with ClickHouse feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "clickhouse", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_CLICKHOUSE}" }
+
+[tasks.clippy-clickhouse]
+extend = "template-clippy"
+private = false
+description = "Clippy with ClickHouse feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "clickhouse" }
+
+[tasks.clippy-test-clickhouse]
+extend = "template-clippy-tests"
+private = false
+description = "Clippy tests with ClickHouse feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "clickhouse" }
+
+# TimescaleDB checks
+[tasks.check-timescaledb]
+description = "Run all TimescaleDB checks"
+dependencies = [
+  "build-timescaledb",
+  "test-timescaledb",
+  "clippy-timescaledb",
+  "clippy-test-timescaledb",
+]
+
+[tasks.build-timescaledb]
+extend = "template-build"
+private = false
+description = "Build with TimescaleDB feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb" }
+
+[tasks.test-timescaledb]
+extend = "template-test"
+private = false
+description = "Test with TimescaleDB feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_POSTGRES}" }
+
+[tasks.clippy-timescaledb]
+extend = "template-clippy"
+private = false
+description = "Clippy with TimescaleDB feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb" }
+
+[tasks.clippy-test-timescaledb]
+extend = "template-clippy-tests"
+private = false
+description = "Clippy tests with TimescaleDB feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb" }
+
+# DuckDB checks
+[tasks.check-duckdb]
+description = "Run all DuckDB checks"
+dependencies = [
+  "build-duckdb",
+  "test-duckdb",
+  "clippy-duckdb",
+  "clippy-test-duckdb",
+]
+
+[tasks.build-duckdb]
+extend = "template-build"
+private = false
+description = "Build with DuckDB feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "duckdb" }
+
+[tasks.test-duckdb]
+extend = "template-test"
+private = false
+description = "Test with DuckDB feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "duckdb" }
+
+[tasks.clippy-duckdb]
+extend = "template-clippy"
+private = false
+description = "Clippy with DuckDB feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "duckdb" }
+
+[tasks.clippy-test-duckdb]
+extend = "template-clippy-tests"
+private = false
+description = "Clippy tests with DuckDB feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "duckdb" }
+
+# BigQuery checks
+[tasks.check-bigquery]
+description = "Run all BigQuery checks"
+dependencies = [
+  "build-bigquery",
+  "test-bigquery",
+  "clippy-bigquery",
+  "clippy-test-bigquery",
+]
+
+[tasks.build-bigquery]
+extend = "template-build"
+private = false
+description = "Build with BigQuery feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "bigquery" }
+
+[tasks.test-bigquery]
+extend = "template-test"
+private = false
+description = "Test with BigQuery feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "bigquery" }
+
+[tasks.clippy-bigquery]
+extend = "template-clippy"
+private = false
+description = "Clippy with BigQuery feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "bigquery" }
+
+[tasks.clippy-test-bigquery]
+extend = "template-clippy-tests"
+private = false
+description = "Clippy tests with BigQuery feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "bigquery" }
+
+# RRDCached checks
+[tasks.check-rrdcached]
+description = "Run all RRDCached checks"
+dependencies = [
+  "build-rrdcached",
+  "test-rrdcached",
+  "clippy-rrdcached",
+  "clippy-test-rrdcached",
+]
+
+[tasks.build-rrdcached]
+extend = "template-build"
+private = false
+description = "Build with RRDCached feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached" }
+
+[tasks.test-rrdcached]
+extend = "template-test"
+private = false
+description = "Test with RRDCached feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached" }
+
+[tasks.clippy-rrdcached]
+extend = "template-clippy"
+private = false
+description = "Clippy with RRDCached feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached" }
+
+[tasks.clippy-test-rrdcached]
+extend = "template-clippy-tests"
+private = false
+description = "Clippy tests with RRDCached feature"
+env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached" }
+
+# Working features only (PostgreSQL + SQLite) to avoid compilation errors
+[tasks.check-working-features]
+description = "Run checks with both PostgreSQL and SQLite features"
+dependencies = [
+  "build-working",
+  "test-working",
+  "clippy-working",
+  "clippy-test-working",
+]
+
+[tasks.build-working]
+extend = "template-build"
+private = false
+description = "Build with working features (postgres + sqlite)"
+env = { "CARGO_MAKE_TASK_FEATURE" = "postgres,sqlite" }
+
+[tasks.test-working]
+extend = "template-test"
+private = false
+description = "Test with working features (defaults to PostgreSQL)"
+env = { "CARGO_MAKE_TASK_FEATURE" = "postgres,sqlite", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_POSTGRES}" }
+
+[tasks.clippy-working]
+extend = "template-clippy"
+private = false
+description = "Clippy with working features"
+env = { "CARGO_MAKE_TASK_FEATURE" = "postgres,sqlite" }
+
+[tasks.clippy-test-working]
+extend = "template-clippy-tests"
+private = false
+description = "Clippy tests with working features"
+env = { "CARGO_MAKE_TASK_FEATURE" = "postgres,sqlite" }
+
+# Quality and CI workflows
+[tasks.fmt-check]
+description = "Check code formatting"
+command = "cargo"
+args = ["fmt", "--", "--check"]
+
+[tasks.fmt]
+description = "Format code"
+command = "cargo"
+args = ["fmt"]
+
+[tasks.lint]
+description = "Run formatting check and clippy"
+dependencies = ["fmt-check", "clippy-working"]
+
+[tasks.lint-all]
+description = "Run formatting check and clippy on all features"
+dependencies = ["fmt-check", "clippy-all"]
+
+[tasks.security-audit]
+description = "Run security audit"
+command = "cargo"
+args = ["audit"]
+
+[tasks.clippy-all]
+description = "Run clippy on all storage backend features"
+dependencies = ["clippy-sqlite", "clippy-postgres", "clippy-clickhouse", "clippy-timescaledb", "clippy-duckdb", "clippy-bigquery", "clippy-rrdcached"]
+
+# CI workflows
+[tasks.ci-quick]
+description = "Quick CI pipeline for PR checks"
+dependencies = ["fmt-check", "check-working-features"]
+
+[tasks.ci]
+description = "Run full CI pipeline"
+dependencies = ["fmt-check", "check-all"]
+
+[tasks.ci-extended]
+description = "Run extended CI pipeline with combined features"
+dependencies = ["fmt-check", "check-all", "check-working-features"]
+
+[tasks.ci-release]
+description = "Release preparation pipeline"
+dependencies = ["ci-extended", "security-audit"]
+
+# Utility tasks
+[tasks.clean]
+description = "Clean all build artifacts and test databases"
+script = '''
+cargo clean
+rm -f test.db test.db-shm test.db-wal
+'''
+
+[tasks.setup-dev]
+description = "Set up development environment"
+dependencies = ["migrate-postgres", "migrate-sqlite"]
+
+# Migration tasks
+[tasks.migrate-sqlite]
+description = "Run SQLite migrations"
+env = { "DATABASE_URL" = "${TEST_DATABASE_URL_SQLITE}" }
+script = '''
+sqlx database create
+sqlx migrate run --source src/storage/sqlite/migrations
+'''
+
+[tasks.migrate-postgres]
+description = "Run PostgreSQL migrations"
+env = { "DATABASE_URL" = "${DATABASE_URL}" }
+script = '''
+sqlx migrate run --source src/storage/postgresql/migrations
+'''
+
+[tasks.migrate-clickhouse]
+description = "Run ClickHouse migrations"
+env = { "DATABASE_URL" = "${TEST_DATABASE_URL_CLICKHOUSE}" }
+script = '''
+sqlx migrate run --source src/storage/clickhouse/migrations
+'''
+
+# SQLx prepare tasks
+[tasks.prepare-sqlite]
+description = "Prepare SQLx for SQLite"
+env = { "DATABASE_URL" = "${TEST_DATABASE_URL_SQLITE}" }
+command = "cargo"
+args = [
+  "sqlx",
+  "prepare",
+  "--",
+  "--features",
+  "sqlite",
+  "--no-default-features",
+]
+
+[tasks.prepare-postgres]
+description = "Prepare SQLx for PostgreSQL"
+env = { "DATABASE_URL" = "${DATABASE_URL}" }
+command = "cargo"
+args = [
+  "sqlx",
+  "prepare",
+  "--",
+  "--features",
+  "postgres",
+  "--no-default-features",
+]
+
+[tasks.prepare-clickhouse]
+description = "Prepare SQLx for ClickHouse"
+env = { "DATABASE_URL" = "${TEST_DATABASE_URL_CLICKHOUSE}" }
+command = "cargo"
+args = [
+  "sqlx",
+  "prepare",
+  "--",
+  "--features",
+  "clickhouse",
+  "--no-default-features",
+]

@@ -5,9 +5,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use self::{mqtt::MqttConfig, opcua::OpcuaConfig};
+use self::mqtt::MqttConfig;
 pub mod mqtt;
-pub mod opcua;
 
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
@@ -26,6 +25,7 @@ pub struct SensAppConfig {
     pub http_server_timeout_seconds: u64,
 
     #[config(env = "SENSAPP_MAX_INFERENCES_ROWS", default = 128)]
+    #[allow(dead_code)]
     pub max_inference_rows: usize,
 
     #[config(env = "SENSAPP_BATCH_SIZE", default = 8192)]
@@ -34,20 +34,20 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_SENSOR_SALT", default = "sensapp")]
     pub sensor_salt: String,
 
-    #[config(env = "SENSAPP_SQLITE_CONNECTION_STRING")]
-    pub sqlite_connection_string: Option<String>,
-
-    #[config(env = "SENSAPP_POSTGRES_CONNECTION_STRING")]
-    pub postgres_connection_string: Option<String>,
-
-    #[config(env = "SENSAPP_TIMESCALEDB_CONNECTION_STRING")]
-    pub timescaledb_connection_string: Option<String>,
-
-    #[config(env = "SENSAPP_OPC_UA")]
-    pub opcua: Option<Vec<OpcuaConfig>>,
+    #[config(
+        env = "SENSAPP_STORAGE_CONNECTION_STRING",
+        default = "postgres://postgres:postgres@localhost:5432/sensapp"
+    )]
+    pub storage_connection_string: String,
 
     #[config(env = "SENSAPP_MQTT")]
     pub mqtt: Option<Vec<MqttConfig>>,
+
+    #[config(env = "SENSAPP_SENTRY_DSN")]
+    pub sentry_dsn: Option<String>,
+
+    #[config(env = "SENSAPP_STORAGE_SYNC_TIMEOUT_SECONDS", default = 15)]
+    pub storage_sync_timeout_seconds: u64,
 }
 
 impl SensAppConfig {
@@ -56,14 +56,6 @@ impl SensAppConfig {
             .env()
             .file("settings.toml")
             .load()?;
-
-        // Print the names of the opc_ua configurations
-        if let Some(opc_ua) = &c.opcua {
-            println!("OPC UA Configurations:");
-            for opc_ua in opc_ua {
-                println!("OPC UA Name: {}", opc_ua.application_name);
-            }
-        }
 
         Ok(c)
     }
@@ -100,6 +92,30 @@ pub fn load_configuration() -> Result<(), Error> {
     Ok(())
 }
 
+use std::sync::Mutex;
+
+// Used by integration tests - must be always available for test compilation
+#[allow(dead_code)] // Used by integration tests, not visible in cargo check
+static TEST_CONFIG_INIT: Mutex<()> = Mutex::new(());
+
+/// Test-only function to ensure configuration is loaded exactly once per test run
+/// Available for both unit tests and integration tests
+#[allow(dead_code)] // Used by integration tests, not visible in cargo check
+pub fn load_configuration_for_tests() -> Result<(), Error> {
+    let _guard = TEST_CONFIG_INIT.lock().unwrap();
+
+    // If config is already loaded, return success
+    if SENSAPP_CONFIG.get().is_some() {
+        return Ok(());
+    }
+
+    // Load default configuration for tests
+    let config = SensAppConfig::load()?;
+    SENSAPP_CONFIG.get_or_init(|| Arc::new(config));
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,10 +127,10 @@ mod tests {
         assert_eq!(config.port, 3000);
         assert_eq!(config.endpoint, IpAddr::from([127, 0, 0, 1]));
 
-        // set env PORT
-        std::env::set_var("SENSAPP_PORT", "8080");
-        let config = SensAppConfig::load().unwrap();
-        assert_eq!(config.port, 8080);
+        temp_env::with_var("SENSAPP_PORT", Some("8080"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.port, 8080);
+        });
     }
 
     #[test]
@@ -122,33 +138,40 @@ mod tests {
         let config = SensAppConfig::load().unwrap();
         assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
 
-        std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "12345");
-        let config = SensAppConfig::load().unwrap();
-        assert_eq!(config.parse_http_body_limit().unwrap(), 12345);
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("12345"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.parse_http_body_limit().unwrap(), 12345);
+        });
 
-        std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "10m");
-        let config = SensAppConfig::load().unwrap();
-        assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("10m"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+        });
 
-        std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "10mb");
-        let config = SensAppConfig::load().unwrap();
-        assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("10mb"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+        });
 
-        std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "10MiB");
-        let config = SensAppConfig::load().unwrap();
-        assert_eq!(config.parse_http_body_limit().unwrap(), 10485760);
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("10MiB"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.parse_http_body_limit().unwrap(), 10485760);
+        });
 
-        std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "1.5gb");
-        let config = SensAppConfig::load().unwrap();
-        assert_eq!(config.parse_http_body_limit().unwrap(), 1500000000);
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("1.5gb"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert_eq!(config.parse_http_body_limit().unwrap(), 1500000000);
+        });
 
-        std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "1tb");
-        let config = SensAppConfig::load().unwrap();
-        assert!(config.parse_http_body_limit().is_err());
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("1tb"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert!(config.parse_http_body_limit().is_err());
+        });
 
-        std::env::set_var("SENSAPP_HTTP_BODY_LIMIT", "-5mb");
-        let config = SensAppConfig::load().unwrap();
-        assert!(config.parse_http_body_limit().is_err());
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("-5mb"), || {
+            let config = SensAppConfig::load().unwrap();
+            assert!(config.parse_http_body_limit().is_err());
+        });
     }
 
     #[test]

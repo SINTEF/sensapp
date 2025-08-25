@@ -2,19 +2,23 @@ use super::columns::InferedColumn;
 use regex::Regex;
 use rust_decimal::Decimal;
 
+#[allow(dead_code)] // Will be used for geo location inference
 pub fn is_f64_likely_coordinates(value: f64) -> bool {
     (-180.0..=180.0).contains(&value)
 }
 
+#[allow(dead_code)] // Will be used for geo location inference
 pub fn is_decimal_likely_coordinates(value: Decimal) -> bool {
     value >= Decimal::new(-180, 0) && value <= Decimal::new(180, 0)
 }
 
+#[allow(dead_code)] // Will be used for geo column detection
 static LATITUDE_REGEX: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
     Regex::new(r"(?i)^(gps_?(loc_?|location_?|position_?|)|geo_?(loc_?|location_?|position_?|)|position_?|pos_?|coord_?|coordinates_?|)(lat|latitude)$")
         .expect("Failed to compile latitude regex")
 });
 
+#[allow(dead_code)] // Will be used for geo column detection
 static LONGITUDE_REGEX: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
     Regex::new(
         r"(?i)^(gps_?(loc_?|location_?|position_?|)|geo_?(loc_?|location_?|position_?|)|position_?|pos_?|coord_?|coordinates_?|)(lng|lon|long|longitude)$",
@@ -22,11 +26,13 @@ static LONGITUDE_REGEX: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::ne
     .expect("Failed to compile longitude regex")
 });
 
+#[allow(dead_code)] // Will be used for geo location inference
 pub enum GeoType {
     Latitude,
     Longitude,
 }
 
+#[allow(dead_code)] // Will be used for geo location inference
 pub fn lat_long_guesser(mode: GeoType, column_name: &str, column: &InferedColumn) -> isize {
     let regex = match mode {
         GeoType::Latitude => LATITUDE_REGEX.clone(),
@@ -43,16 +49,24 @@ pub fn lat_long_guesser(mode: GeoType, column_name: &str, column: &InferedColumn
 
     sum += match column {
         InferedColumn::Float(values) => {
-            if values.iter().all(|value| is_f64_likely_coordinates(*value)) {
+            let validator = match mode {
+                GeoType::Latitude => |v: f64| (-90.0..=90.0).contains(&v),
+                GeoType::Longitude => |v: f64| (-180.0..=180.0).contains(&v),
+            };
+            if values.iter().all(|value| validator(*value)) {
                 99
             } else {
                 -101
             }
         }
         InferedColumn::Numeric(values) => {
+            let (min_val, max_val) = match mode {
+                GeoType::Latitude => (Decimal::new(-90, 0), Decimal::new(90, 0)),
+                GeoType::Longitude => (Decimal::new(-180, 0), Decimal::new(180, 0)),
+            };
             if values
                 .iter()
-                .all(|value| is_decimal_likely_coordinates(*value))
+                .all(|value| *value >= min_val && *value <= max_val)
             {
                 98
             } else {
@@ -65,11 +79,13 @@ pub fn lat_long_guesser(mode: GeoType, column_name: &str, column: &InferedColumn
     sum
 }
 
+#[allow(dead_code)] // Will be used for geo column detection
 pub struct LatLonColumnNames {
     pub lat: String,
     pub lon: String,
 }
 
+#[allow(dead_code)] // Will be used for geo column detection
 pub fn likely_geo_columns(
     column_names: &[String],
     columns: &[InferedColumn],

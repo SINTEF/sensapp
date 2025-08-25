@@ -1,4 +1,5 @@
-use anyhow::{anyhow, Result};
+use crate::storage::StorageError;
+use anyhow::{Result, anyhow};
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
     query_parameter_value::QueryParameterValue, query_request::QueryRequest,
@@ -7,9 +8,11 @@ use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use super::{
+    BigQueryStorage,
     bigquery_labels_utilities::{
         get_or_create_labels_description_ids, get_or_create_labels_name_ids,
     },
@@ -17,10 +20,9 @@ use super::{
     bigquery_table_descriptors::LABELS_DESCRIPTOR,
     bigquery_units_utilities::get_or_create_units_ids,
     bigquery_utilities::publish_rows,
-    BigQueryStorage,
 };
 use crate::{
-    datamodel::{unit::Unit, SensAppVec, Sensor},
+    datamodel::{SensAppVec, Sensor, unit::Unit},
     storage::bigquery::bigquery_table_descriptors::SENSORS_DESCRIPTOR,
 };
 
@@ -51,8 +53,8 @@ pub async fn get_sensor_ids_or_create_sensors(
         }
     }
 
-    println!("Found {} known sensors", result.len());
-    println!("Found {} unknown sensors", unknown_sensors.len());
+    debug!("BigQuery: Found {} known sensors", result.len());
+    debug!("BigQuery: Found {} unknown sensors", unknown_sensors.len());
 
     if unknown_sensors.is_empty() {
         return Ok(result);
@@ -81,7 +83,7 @@ pub async fn get_sensor_ids_or_create_sensors(
         return Ok(result);
     }
 
-    println!("Found {} sensors to create", sensors_to_create.len());
+    info!("BigQuery: Creating {} new sensors", sensors_to_create.len());
 
     let new_ids = create_sensors(bqs, &sensors_to_create).await?;
     {
@@ -150,11 +152,15 @@ async fn get_existing_sensors_ids_from_uuids(
     while result.next_row() {
         let uuid = result
             .get_string(0)?
-            .ok_or_else(|| anyhow!("uuid is null"))?;
-        let sensor_id = result
-            .get_i64(1)?
-            .ok_or_else(|| anyhow!("sensor_id is null"))?;
-        println!("Found sensor: {} with id: {}", uuid, sensor_id);
+            .ok_or_else(|| anyhow::Error::from(StorageError::missing_field("uuid", None, None)))?;
+        let sensor_id = result.get_i64(1)?.ok_or_else(|| {
+            let parsed_uuid = Uuid::parse_str(&uuid).ok();
+            anyhow::Error::from(StorageError::missing_field("sensor_id", parsed_uuid, None))
+        })?;
+        debug!(
+            "BigQuery: Found existing sensor {} with id: {}",
+            uuid, sensor_id
+        );
         results_map.insert(Uuid::parse_str(&uuid)?, sensor_id);
     }
 
@@ -192,9 +198,13 @@ async fn create_sensors(
     let rows = sensors
         .iter()
         .map(|sensor| {
-            let sensor_id = map
-                .get(&sensor.uuid)
-                .expect("sensor_id not found, this should never happen so we panic");
+            let sensor_id = map.get(&sensor.uuid).ok_or_else(|| {
+                anyhow::Error::from(StorageError::missing_field(
+                    "sensor_id",
+                    Some(sensor.uuid),
+                    Some(&sensor.name),
+                ))
+            })?;
             let unit = sensor
                 .unit
                 .as_ref()
@@ -214,16 +224,28 @@ async fn create_sensors(
     // create the labels
     let mut labels_rows = Vec::new();
     for sensor in sensors {
-        let sensor_id = map
-            .get(&sensor.uuid)
-            .expect("sensor_id not found, this should never happen so we panic");
+        let sensor_id = map.get(&sensor.uuid).ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "sensor_id",
+                Some(sensor.uuid),
+                Some(&sensor.name),
+            ))
+        })?;
         for (name, description) in sensor.labels.iter() {
-            let name_id = labels_names_map
-                .get(name)
-                .expect("name_id not found, this should never happen so we panic");
-            let description_id = labels_descriptions_map
-                .get(description)
-                .expect("description_id not found, this should never happen so we panic");
+            let name_id = labels_names_map.get(name).ok_or_else(|| {
+                anyhow::Error::from(StorageError::missing_field(
+                    "label_name_id",
+                    Some(sensor.uuid),
+                    Some(&sensor.name),
+                ))
+            })?;
+            let description_id = labels_descriptions_map.get(description).ok_or_else(|| {
+                anyhow::Error::from(StorageError::missing_field(
+                    "label_description_id",
+                    Some(sensor.uuid),
+                    Some(&sensor.name),
+                ))
+            })?;
             labels_rows.push(ProstLabel {
                 sensor_id: *sensor_id,
                 name: *name_id,
