@@ -1,6 +1,8 @@
 mod common;
 
 use anyhow::Result;
+use arrow::record_batch::RecordBatch;
+use arrow_ipc::writer::FileWriter;
 use axum::http::StatusCode;
 use common::db::DbHelpers;
 use common::http::TestApp;
@@ -11,8 +13,6 @@ use sensapp::exporters::ArrowConverter;
 use serial_test::serial;
 use smallvec::smallvec;
 use uuid::Uuid;
-use arrow::record_batch::RecordBatch;
-use arrow_ipc::writer::FileWriter;
 
 // Ensure configuration is loaded once for all tests in this module
 static INIT: std::sync::Once = std::sync::Once::new();
@@ -33,8 +33,10 @@ fn sensor_data_list_to_arrow_file(sensor_data_list: &[SensorData]) -> Result<Vec
         ));
     }
 
-    let batches: Result<Vec<RecordBatch>> =
-        sensor_data_list.iter().map(ArrowConverter::to_record_batch).collect();
+    let batches: Result<Vec<RecordBatch>> = sensor_data_list
+        .iter()
+        .map(ArrowConverter::to_record_batch)
+        .collect();
     let batches = batches?;
 
     record_batches_to_arrow_file(&batches)

@@ -203,7 +203,6 @@ impl ArrowConverter {
         }
         Ok(buffer)
     }
-
 }
 
 // Implement conversion trait for SensAppDateTime to microseconds
@@ -325,5 +324,4 @@ mod tests {
         let schema = batch.schema();
         assert!(matches!(schema.field(1).data_type(), DataType::Struct(_)));
     }
-
 }
