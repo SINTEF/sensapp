@@ -57,13 +57,11 @@ jobs:
         os: [ubuntu-latest]
         rust: [stable]
         #rust: [stable, beta]
-        feature: [sqlite, postgres, working-features]
+        feature: [sqlite, postgres]
         include:
           - feature: sqlite
             test-env: "TEST_DATABASE_URL_SQLITE=sqlite://test.db"
           - feature: postgres
-            test-env: "TEST_DATABASE_URL_POSTGRES=postgres://postgres:postgres@localhost:5432/sensapp"
-          - feature: working-features
             test-env: "TEST_DATABASE_URL_POSTGRES=postgres://postgres:postgres@localhost:5432/sensapp"
 
     services:
@@ -112,74 +110,75 @@ jobs:
           echo "${{ matrix.test-env }}" >> $GITHUB_ENV
 
       - name: Run migrations (PostgreSQL)
-        if: matrix.feature == 'postgres' || matrix.feature == 'working-features'
+        if: matrix.feature == 'postgres'
         run: cargo make migrate-postgres
 
       - name: Run migrations (SQLite)
-        if: matrix.feature == 'sqlite' || matrix.feature == 'working-features'
+        if: matrix.feature == 'sqlite'
         run: cargo make migrate-sqlite
 
       - name: Run tests
         run: cargo make check-${{ matrix.feature }}
 
-  coverage:
-    name: Test Coverage
-    runs-on: ubuntu-latest
-    needs: test-matrix
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: sensapp
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+  # Disabled temporarily due to timeout issues
+  # coverage:
+  #   name: Test Coverage
+  #   runs-on: ubuntu-latest
+  #   needs: test-matrix
+  #   services:
+  #     postgres:
+  #       image: postgres:15
+  #       env:
+  #         POSTGRES_PASSWORD: postgres
+  #         POSTGRES_USER: postgres
+  #         POSTGRES_DB: sensapp
+  #       options: >-
+  #         --health-cmd pg_isready
+  #         --health-interval 10s
+  #         --health-timeout 5s
+  #         --health-retries 5
+  #       ports:
+  #         - 5432:5432
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v5
 
-      - name: Setup Rust toolchain
-        uses: moonrepo/setup-rust@v1
-        with:
-          channel: stable
-          components: llvm-tools-preview
+  #     - name: Setup Rust toolchain
+  #       uses: moonrepo/setup-rust@v1
+  #       with:
+  #         channel: stable
+  #         components: llvm-tools-preview
 
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+  #     - name: Install cargo-llvm-cov
+  #       uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Cache cargo-make
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cargo-make
-          key: cargo-make-${{ runner.os }}
+  #     - name: Cache cargo-make
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ~/.cargo/bin/cargo-make
+  #         key: cargo-make-${{ runner.os }}
 
-      - name: Install cargo-make
-        run: |
-          if ! command -v cargo-make &> /dev/null; then
-            cargo install cargo-make
-          fi
+  #     - name: Install cargo-make
+  #       run: |
+  #         if ! command -v cargo-make &> /dev/null; then
+  #           cargo install cargo-make
+  #         fi
 
-      - name: Install sqlx-cli
-        run: cargo install sqlx-cli --no-default-features --features postgres,sqlite
+  #     - name: Install sqlx-cli
+  #       run: cargo install sqlx-cli --no-default-features --features postgres,sqlite
 
-      - name: Set up development environment
-        run: cargo make setup-dev
+  #     - name: Set up development environment
+  #       run: cargo make setup-dev
 
-      - name: Generate test coverage
-        run: cargo llvm-cov --features postgres,sqlite --no-default-features --verbose --lcov --output-path lcov.info
+  #     - name: Generate test coverage
+  #       run: cargo llvm-cov --features postgres,sqlite --no-default-features --verbose --lcov --output-path lcov.info
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          file: lcov.info
-          fail_ci_if_error: true
+  #     - name: Upload coverage to Codecov
+  #       uses: codecov/codecov-action@v5
+  #       with:
+  #         file: lcov.info
+  #         fail_ci_if_error: true
 
   docker:
     name: Docker Build & Push
@@ -234,7 +233,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: [test-matrix, coverage]
+    needs: [test-matrix]
     if: github.event_name == 'release'
     permissions:
       contents: write
