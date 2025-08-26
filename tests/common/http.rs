@@ -5,6 +5,7 @@ use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
 use sensapp::ingestors::http::crud::{get_series_data, list_metrics, list_series};
+use sensapp::ingestors::http::prometheus_read::prometheus_remote_read;
 use sensapp::ingestors::http::server::publish_senml_data;
 use sensapp::ingestors::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
@@ -33,6 +34,10 @@ impl TestApp {
             .route("/metrics", get(list_metrics))
             .route("/series", get(list_series))
             .route("/series/{series_uuid}", get(get_series_data))
+            .route(
+                "/api/v1/prometheus_remote_read",
+                post(prometheus_remote_read),
+            )
             .with_state(state);
 
         Self { app }
@@ -115,6 +120,25 @@ impl TestApp {
             .uri(path)
             .header("content-type", "text/plain")
             .body(Body::from(influx_data.to_string()))?;
+
+        let response = self.app.clone().oneshot(request).await?;
+        Ok(TestResponse::new(response).await)
+    }
+
+    /// Send a Prometheus remote read request (compressed protobuf)
+    #[allow(dead_code)] // Test helper method
+    pub async fn post_prometheus_read(
+        &self,
+        path: &str,
+        compressed_data: &[u8],
+    ) -> Result<TestResponse> {
+        let request = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/x-protobuf")
+            .header("content-encoding", "snappy")
+            .header("x-prometheus-remote-read-version", "0.1.0")
+            .body(Body::from(compressed_data.to_vec()))?;
 
         let response = self.app.clone().oneshot(request).await?;
         Ok(TestResponse::new(response).await)
