@@ -12,6 +12,7 @@ pub enum DatabaseType {
     PostgreSQL,
     SQLite,
     ClickHouse,
+    RRDcached,
 }
 
 impl DatabaseType {
@@ -26,6 +27,9 @@ impl DatabaseType {
             DatabaseType::ClickHouse => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
                 "clickhouse://default:password@localhost:9000/sensapp_test".to_string()
             }),
+            DatabaseType::RRDcached => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+                "rrdcached://127.0.0.1:42217?preset=hoarder".to_string()
+            }),
         }
     }
 
@@ -35,6 +39,8 @@ impl DatabaseType {
             DatabaseType::SQLite
         } else if connection_string.starts_with("clickhouse://") {
             DatabaseType::ClickHouse
+        } else if connection_string.starts_with("rrdcached://") {
+            DatabaseType::RRDcached
         } else {
             // Default to PostgreSQL for postgres://, postgresql://, or any other prefix
             DatabaseType::PostgreSQL
@@ -75,6 +81,7 @@ impl TestDb {
             DatabaseType::PostgreSQL => "sensapp".to_string(),
             DatabaseType::SQLite => "test.db".to_string(),
             DatabaseType::ClickHouse => "sensapp_test".to_string(),
+            DatabaseType::RRDcached => "rrdcached".to_string(),
         };
 
         let connection_string = db_type.default_connection_string();

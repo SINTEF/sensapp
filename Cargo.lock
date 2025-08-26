@@ -4979,12 +4979,12 @@ dependencies = [
 
 [[package]]
 name = "rrdcached-client"
-version = "0.1.3"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8320934d3dc3e2f1d236912fe45a381cad9648d21f3975181393ffe8f2eac4b"
+checksum = "57dfd6f5a3094934b1f0813199b7571be5bde0bcc985005fe5a3c3d6a738d4cd"
 dependencies = [
- "nom 7.1.3",
- "thiserror 1.0.69",
+ "nom 8.0.0",
+ "thiserror 2.0.15",
  "tokio",
 ]
 
