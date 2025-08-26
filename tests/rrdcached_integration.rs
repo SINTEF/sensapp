@@ -6,7 +6,9 @@ mod rrdcached_tests {
     use anyhow::Result;
     use sensapp::config::load_configuration_for_tests;
     use sensapp::datamodel::{
-        batch::{Batch, SingleSensorBatch}, Sample, Sensor, SensorType, SensAppDateTime, TypedSamples, sensapp_vec::SensAppVec,
+        Sample, SensAppDateTime, Sensor, SensorType, TypedSamples,
+        batch::{Batch, SingleSensorBatch},
+        sensapp_vec::SensAppVec,
     };
     use serial_test::serial;
     use smallvec::SmallVec;
@@ -70,7 +72,8 @@ mod rrdcached_tests {
 
         // Create and publish batch
         let sensor_arc = Arc::new(sensor);
-        let single_sensor_batch = SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Float(samples.into()));
+        let single_sensor_batch =
+            SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Float(samples.into()));
         let mut sensors_vec = SensAppVec::new();
         sensors_vec.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors_vec));
@@ -90,7 +93,9 @@ mod rrdcached_tests {
         // Verify our sensor appears in the list (either by UUID match or by being present)
         let found = sensors.iter().any(|s| s.uuid == sensor_arc.uuid);
         if !found && sensors.is_empty() {
-            println!("Warning: No sensors found - this might be expected if RRDcached LIST command doesn't show recently created files");
+            println!(
+                "Warning: No sensors found - this might be expected if RRDcached LIST command doesn't show recently created files"
+            );
         }
 
         Ok(())
@@ -151,7 +156,8 @@ mod rrdcached_tests {
 
         // Build batch manually
         let sensor_arc = Arc::new(sensor);
-        let single_sensor_batch = SingleSensorBatch::new(sensor_arc, TypedSamples::Float(samples.into()));
+        let single_sensor_batch =
+            SingleSensorBatch::new(sensor_arc, TypedSamples::Float(samples.into()));
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
@@ -170,7 +176,10 @@ mod rrdcached_tests {
         assert!(!sensors.is_empty(), "Should have at least one sensor");
 
         let found_sensor = sensors.iter().find(|s| s.uuid == sensor_uuid);
-        assert!(found_sensor.is_some(), "Published sensor should be in the list");
+        assert!(
+            found_sensor.is_some(),
+            "Published sensor should be in the list"
+        );
 
         Ok(())
     }
@@ -201,7 +210,10 @@ mod rrdcached_tests {
         }];
 
         let int_sensor_arc = Arc::new(int_sensor);
-        let single_sensor_batch = SingleSensorBatch::new(int_sensor_arc.clone(), TypedSamples::Integer(int_samples.into()));
+        let single_sensor_batch = SingleSensorBatch::new(
+            int_sensor_arc.clone(),
+            TypedSamples::Integer(int_samples.into()),
+        );
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
@@ -224,7 +236,10 @@ mod rrdcached_tests {
         }];
 
         let bool_sensor_arc = Arc::new(bool_sensor);
-        let single_sensor_batch = SingleSensorBatch::new(bool_sensor_arc.clone(), TypedSamples::Boolean(bool_samples.into()));
+        let single_sensor_batch = SingleSensorBatch::new(
+            bool_sensor_arc.clone(),
+            TypedSamples::Boolean(bool_samples.into()),
+        );
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
@@ -282,7 +297,10 @@ mod rrdcached_tests {
         }];
 
         let string_sensor_arc = Arc::new(string_sensor);
-        let single_sensor_batch = SingleSensorBatch::new(string_sensor_arc.clone(), TypedSamples::String(string_samples.into()));
+        let single_sensor_batch = SingleSensorBatch::new(
+            string_sensor_arc.clone(),
+            TypedSamples::String(string_samples.into()),
+        );
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
@@ -295,7 +313,10 @@ mod rrdcached_tests {
         // (since unsupported types are filtered out in the create_sensors method)
         let sensors = storage.list_series(None).await?;
         let found_sensor = sensors.iter().find(|s| s.uuid == string_sensor_arc.uuid);
-        assert!(found_sensor.is_none(), "Unsupported sensor types should not be created");
+        assert!(
+            found_sensor.is_none(),
+            "Unsupported sensor types should not be created"
+        );
 
         Ok(())
     }
@@ -331,7 +352,8 @@ mod rrdcached_tests {
 
         // Publish the data
         let sensor_arc = Arc::new(sensor);
-        let single_sensor_batch = SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Float(samples.into()));
+        let single_sensor_batch =
+            SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Float(samples.into()));
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
@@ -345,8 +367,9 @@ mod rrdcached_tests {
         // When: We query the data back with the specific time range
         let start_time = Some(SensAppDateTime::from_unix_seconds(base_time - 10.0)); // Start before our data
         let end_time = Some(SensAppDateTime::from_unix_seconds(base_time + 10.0)); // End after our data
-        let sensor_data = storage.query_sensor_data(&sensor_uuid.to_string(), start_time, end_time, None).await?;
-
+        let sensor_data = storage
+            .query_sensor_data(&sensor_uuid.to_string(), start_time, end_time, None)
+            .await?;
 
         // Then: We should get back the data we stored
         assert!(sensor_data.is_some(), "Query should return data");
@@ -358,12 +381,18 @@ mod rrdcached_tests {
 
         // Verify samples (may not be exact due to RRD time alignment and consolidation)
         if let TypedSamples::Float(returned_samples) = sensor_data.samples {
-            assert!(!returned_samples.is_empty(), "Should have returned some samples");
-            
+            assert!(
+                !returned_samples.is_empty(),
+                "Should have returned some samples"
+            );
+
             // We may not get exact values due to RRD consolidation, but let's check we get reasonable data
             for sample in &returned_samples {
                 assert!(!sample.value.is_nan(), "Sample values should not be NaN");
-                println!("Retrieved sample: time={:?}, value={}", sample.datetime, sample.value);
+                println!(
+                    "Retrieved sample: time={:?}, value={}",
+                    sample.datetime, sample.value
+                );
             }
         } else {
             panic!("Expected Float samples, got: {:?}", sensor_data.samples);
@@ -400,7 +429,8 @@ mod rrdcached_tests {
 
         // Publish the data
         let sensor_arc = Arc::new(sensor);
-        let single_sensor_batch = SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Float(samples.into()));
+        let single_sensor_batch =
+            SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Float(samples.into()));
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
@@ -414,24 +444,30 @@ mod rrdcached_tests {
         // When: We query with a time range (first 5 minutes with buffer)
         let start_time = Some(SensAppDateTime::from_unix_seconds(base_time - 60.0)); // Start 1 minute before
         let end_time = Some(SensAppDateTime::from_unix_seconds(base_time + 360.0)); // End 6 minutes after start
-        
-        let sensor_data = storage.query_sensor_data(
-            &sensor_uuid.to_string(), 
-            start_time, 
-            end_time, 
-            None
-        ).await?;
+
+        let sensor_data = storage
+            .query_sensor_data(&sensor_uuid.to_string(), start_time, end_time, None)
+            .await?;
 
         // Then: We should get data within the time range
-        assert!(sensor_data.is_some(), "Query with time range should return data");
+        assert!(
+            sensor_data.is_some(),
+            "Query with time range should return data"
+        );
         let sensor_data = sensor_data.unwrap();
 
         if let TypedSamples::Float(returned_samples) = sensor_data.samples {
-            assert!(!returned_samples.is_empty(), "Should have returned samples in time range");
-            
+            assert!(
+                !returned_samples.is_empty(),
+                "Should have returned samples in time range"
+            );
+
             for sample in &returned_samples {
                 let sample_time = sample.datetime.to_unix_seconds();
-                println!("Sample in range: time={}, value={}", sample_time, sample.value);
+                println!(
+                    "Sample in range: time={}, value={}",
+                    sample_time, sample.value
+                );
                 // Note: RRD may return data slightly outside the range due to consolidation
             }
         } else {
@@ -451,10 +487,15 @@ mod rrdcached_tests {
 
         // When: We query a sensor that doesn't exist
         let non_existent_uuid = Uuid::new_v4();
-        let sensor_data = storage.query_sensor_data(&non_existent_uuid.to_string(), None, None, None).await?;
+        let sensor_data = storage
+            .query_sensor_data(&non_existent_uuid.to_string(), None, None, None)
+            .await?;
 
         // Then: We should get None
-        assert!(sensor_data.is_none(), "Query for non-existent sensor should return None");
+        assert!(
+            sensor_data.is_none(),
+            "Query for non-existent sensor should return None"
+        );
 
         Ok(())
     }
@@ -480,7 +521,10 @@ mod rrdcached_tests {
         // Create the sensor without publishing any data
         let sensor_arc = Arc::new(sensor);
         let empty_samples: Vec<Sample<f64>> = vec![];
-        let single_sensor_batch = SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Float(empty_samples.into()));
+        let single_sensor_batch = SingleSensorBatch::new(
+            sensor_arc.clone(),
+            TypedSamples::Float(empty_samples.into()),
+        );
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
@@ -489,10 +533,15 @@ mod rrdcached_tests {
         storage.publish(batch, sync_sender.clone()).await?;
 
         // When: We query the sensor
-        let sensor_data = storage.query_sensor_data(&sensor_uuid.to_string(), None, None, None).await?;
+        let sensor_data = storage
+            .query_sensor_data(&sensor_uuid.to_string(), None, None, None)
+            .await?;
 
         // Then: We should get None (no data available)
-        assert!(sensor_data.is_none(), "Query for sensor with no data should return None");
+        assert!(
+            sensor_data.is_none(),
+            "Query for sensor with no data should return None"
+        );
 
         Ok(())
     }
@@ -529,7 +578,10 @@ mod rrdcached_tests {
 
         // Publish the integer data
         let sensor_arc = Arc::new(sensor);
-        let single_sensor_batch = SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Integer(int_samples.into()));
+        let single_sensor_batch = SingleSensorBatch::new(
+            sensor_arc.clone(),
+            TypedSamples::Integer(int_samples.into()),
+        );
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
@@ -543,7 +595,9 @@ mod rrdcached_tests {
         // When: We query the data back with time range
         let start_time = Some(SensAppDateTime::from_unix_seconds(base_time - 10.0)); // Start before our data
         let end_time = Some(SensAppDateTime::from_unix_seconds(base_time + 10.0)); // End after our data
-        let sensor_data = storage.query_sensor_data(&sensor_uuid.to_string(), start_time, end_time, None).await?;
+        let sensor_data = storage
+            .query_sensor_data(&sensor_uuid.to_string(), start_time, end_time, None)
+            .await?;
 
         // Then: We should get back Float data (since RRD stores everything as f64)
         // Note: This shows a limitation - we lose the original type information
@@ -554,10 +608,16 @@ mod rrdcached_tests {
         assert_eq!(sensor_data.sensor.sensor_type, SensorType::Float);
 
         if let TypedSamples::Float(returned_samples) = sensor_data.samples {
-            assert!(!returned_samples.is_empty(), "Should have returned some samples");
-            
+            assert!(
+                !returned_samples.is_empty(),
+                "Should have returned some samples"
+            );
+
             for sample in &returned_samples {
-                println!("Retrieved integer-as-float sample: time={:?}, value={}", sample.datetime, sample.value);
+                println!(
+                    "Retrieved integer-as-float sample: time={:?}, value={}",
+                    sample.datetime, sample.value
+                );
                 // Values should be close to the original integers (42.0, 84.0)
                 assert!(!sample.value.is_nan(), "Sample values should not be NaN");
             }

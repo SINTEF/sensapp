@@ -13,8 +13,8 @@ use rrdcached_client::{
     create::{CreateArguments, CreateDataSource, CreateDataSourceType, CreateRoundRobinArchive},
     errors::RRDCachedClientError,
 };
-use std::{collections::HashSet, sync::Arc};
 use smallvec::SmallVec;
+use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::error;
 use url::Url;
@@ -122,10 +122,20 @@ pub struct RrdCachedStorage {
 // Trait to abstract over TCP and Unix socket clients
 #[async_trait::async_trait]
 trait RRDCachedClientTrait: Send + Sync + std::fmt::Debug {
-    async fn create(&mut self, args: rrdcached_client::create::CreateArguments) -> Result<(), rrdcached_client::errors::RRDCachedClientError>;
-    async fn batch(&mut self, batch_updates: Vec<BatchUpdate>) -> Result<(), rrdcached_client::errors::RRDCachedClientError>;
+    async fn create(
+        &mut self,
+        args: rrdcached_client::create::CreateArguments,
+    ) -> Result<(), rrdcached_client::errors::RRDCachedClientError>;
+    async fn batch(
+        &mut self,
+        batch_updates: Vec<BatchUpdate>,
+    ) -> Result<(), rrdcached_client::errors::RRDCachedClientError>;
     async fn flush_all(&mut self) -> Result<(), rrdcached_client::errors::RRDCachedClientError>;
-    async fn list(&mut self, recursive: bool, path: Option<&str>) -> Result<Vec<String>, rrdcached_client::errors::RRDCachedClientError>;
+    async fn list(
+        &mut self,
+        recursive: bool,
+        path: Option<&str>,
+    ) -> Result<Vec<String>, rrdcached_client::errors::RRDCachedClientError>;
     async fn fetch(
         &mut self,
         path: &str,
@@ -133,17 +143,26 @@ trait RRDCachedClientTrait: Send + Sync + std::fmt::Debug {
         start: Option<i64>,
         end: Option<i64>,
         columns: Option<Vec<String>>,
-    ) -> Result<rrdcached_client::fetch::FetchResponse, rrdcached_client::errors::RRDCachedClientError>;
+    ) -> Result<
+        rrdcached_client::fetch::FetchResponse,
+        rrdcached_client::errors::RRDCachedClientError,
+    >;
 }
 
 // Implement the trait for TCP client
 #[async_trait::async_trait]
 impl RRDCachedClientTrait for RRDCachedClient<tokio::net::TcpStream> {
-    async fn create(&mut self, args: rrdcached_client::create::CreateArguments) -> Result<(), rrdcached_client::errors::RRDCachedClientError> {
+    async fn create(
+        &mut self,
+        args: rrdcached_client::create::CreateArguments,
+    ) -> Result<(), rrdcached_client::errors::RRDCachedClientError> {
         RRDCachedClient::create(self, args).await
     }
 
-    async fn batch(&mut self, batch_updates: Vec<BatchUpdate>) -> Result<(), rrdcached_client::errors::RRDCachedClientError> {
+    async fn batch(
+        &mut self,
+        batch_updates: Vec<BatchUpdate>,
+    ) -> Result<(), rrdcached_client::errors::RRDCachedClientError> {
         RRDCachedClient::batch(self, batch_updates).await
     }
 
@@ -151,7 +170,11 @@ impl RRDCachedClientTrait for RRDCachedClient<tokio::net::TcpStream> {
         RRDCachedClient::flush_all(self).await
     }
 
-    async fn list(&mut self, recursive: bool, path: Option<&str>) -> Result<Vec<String>, rrdcached_client::errors::RRDCachedClientError> {
+    async fn list(
+        &mut self,
+        recursive: bool,
+        path: Option<&str>,
+    ) -> Result<Vec<String>, rrdcached_client::errors::RRDCachedClientError> {
         RRDCachedClient::list(self, recursive, path).await
     }
 
@@ -162,7 +185,10 @@ impl RRDCachedClientTrait for RRDCachedClient<tokio::net::TcpStream> {
         start: Option<i64>,
         end: Option<i64>,
         columns: Option<Vec<String>>,
-    ) -> Result<rrdcached_client::fetch::FetchResponse, rrdcached_client::errors::RRDCachedClientError> {
+    ) -> Result<
+        rrdcached_client::fetch::FetchResponse,
+        rrdcached_client::errors::RRDCachedClientError,
+    > {
         RRDCachedClient::fetch(self, path, consolidation_function, start, end, columns).await
     }
 }
@@ -170,11 +196,17 @@ impl RRDCachedClientTrait for RRDCachedClient<tokio::net::TcpStream> {
 // Implement the trait for Unix socket client
 #[async_trait::async_trait]
 impl RRDCachedClientTrait for RRDCachedClient<tokio::net::UnixStream> {
-    async fn create(&mut self, args: rrdcached_client::create::CreateArguments) -> Result<(), rrdcached_client::errors::RRDCachedClientError> {
+    async fn create(
+        &mut self,
+        args: rrdcached_client::create::CreateArguments,
+    ) -> Result<(), rrdcached_client::errors::RRDCachedClientError> {
         RRDCachedClient::create(self, args).await
     }
 
-    async fn batch(&mut self, batch_updates: Vec<BatchUpdate>) -> Result<(), rrdcached_client::errors::RRDCachedClientError> {
+    async fn batch(
+        &mut self,
+        batch_updates: Vec<BatchUpdate>,
+    ) -> Result<(), rrdcached_client::errors::RRDCachedClientError> {
         RRDCachedClient::batch(self, batch_updates).await
     }
 
@@ -182,7 +214,11 @@ impl RRDCachedClientTrait for RRDCachedClient<tokio::net::UnixStream> {
         RRDCachedClient::flush_all(self).await
     }
 
-    async fn list(&mut self, recursive: bool, path: Option<&str>) -> Result<Vec<String>, rrdcached_client::errors::RRDCachedClientError> {
+    async fn list(
+        &mut self,
+        recursive: bool,
+        path: Option<&str>,
+    ) -> Result<Vec<String>, rrdcached_client::errors::RRDCachedClientError> {
         RRDCachedClient::list(self, recursive, path).await
     }
 
@@ -193,7 +229,10 @@ impl RRDCachedClientTrait for RRDCachedClient<tokio::net::UnixStream> {
         start: Option<i64>,
         end: Option<i64>,
         columns: Option<Vec<String>>,
-    ) -> Result<rrdcached_client::fetch::FetchResponse, rrdcached_client::errors::RRDCachedClientError> {
+    ) -> Result<
+        rrdcached_client::fetch::FetchResponse,
+        rrdcached_client::errors::RRDCachedClientError,
+    > {
         RRDCachedClient::fetch(self, path, consolidation_function, start, end, columns).await
     }
 }
@@ -428,26 +467,26 @@ impl StorageInstance for RrdCachedStorage {
     ) -> Result<Vec<crate::datamodel::Sensor>> {
         // Use RRDcached's native LIST command to get available RRD files
         let mut client = self.client.write().await;
-        
+
         match client.list(true, None).await {
             Ok(rrd_files) => {
                 let mut sensors = Vec::new();
-                
+
                 for rrd_file in rrd_files {
                     // Trim whitespace from filename (RRDcached LIST returns names with trailing newlines)
                     let rrd_file = rrd_file.trim();
-                    
+
                     // Filter by metric name if provided
                     if let Some(filter) = metric_filter {
                         if !rrd_file.contains(filter) {
                             continue;
                         }
                     }
-                    
+
                     // Extract UUID from filename (assuming format: "<uuid>.rrd")
                     let filename = rrd_file.rsplit('/').next().unwrap_or(&rrd_file);
                     let uuid_str = filename.strip_suffix(".rrd").unwrap_or(filename);
-                    
+
                     if let Ok(uuid) = uuid_str.parse::<Uuid>() {
                         // Create a basic sensor object from RRD file info
                         // Note: RRDcached doesn't store full sensor metadata,
@@ -472,16 +511,16 @@ impl StorageInstance for RrdCachedStorage {
                         sensors.push(sensor);
                     }
                 }
-                
+
                 Ok(sensors)
             }
             Err(e) => {
                 error!("Failed to list RRD files: {:?}", e);
-                
+
                 // Fallback to tracking created sensors in this session
                 let created_sensors = self.created_sensors.read().await;
                 let mut sensors = Vec::new();
-                
+
                 for uuid in created_sensors.iter() {
                     let sensor = crate::datamodel::Sensor {
                         uuid: *uuid,
@@ -492,7 +531,7 @@ impl StorageInstance for RrdCachedStorage {
                     };
                     sensors.push(sensor);
                 }
-                
+
                 Ok(sensors)
             }
         }
@@ -511,14 +550,17 @@ impl StorageInstance for RrdCachedStorage {
         end_time: Option<crate::datamodel::SensAppDateTime>,
         _limit: Option<usize>, // RRD doesn't support limiting results directly
     ) -> Result<Option<crate::datamodel::SensorData>> {
-        use crate::datamodel::{SensorData, SensorType, Sample, sensapp_datetime::SensAppDateTimeExt};
+        use crate::datamodel::{
+            Sample, SensorData, SensorType, sensapp_datetime::SensAppDateTimeExt,
+        };
         use smallvec::SmallVec;
 
         // Check if sensor exists in our created_sensors set
         let created_sensors = self.created_sensors.read().await;
-        let sensor_uuid_obj = sensor_uuid.parse::<Uuid>()
+        let sensor_uuid_obj = sensor_uuid
+            .parse::<Uuid>()
             .map_err(|e| anyhow::anyhow!("Invalid sensor UUID: {}", e))?;
-        
+
         drop(created_sensors);
 
         // Convert time parameters to Unix timestamps
@@ -527,25 +569,31 @@ impl StorageInstance for RrdCachedStorage {
 
         // Fetch data from RRDcached - first flush to ensure data is written
         let mut client = self.client.write().await;
-        
+
         // Force flush to ensure all pending data is written to RRD files
         if let Err(e) = client.flush_all().await {
             tracing::warn!("Failed to flush before query: {:?}", e);
         }
         let rrd_path = sensor_uuid; // RRD file path is just the UUID
-        
-        let fetch_response = match client.fetch(
-            &rrd_path,
-            ConsolidationFunction::Average, // Use AVERAGE consolidation by default
-            start_timestamp,
-            end_timestamp,
-            None, // columns - use default
-        ).await {
+
+        let fetch_response = match client
+            .fetch(
+                &rrd_path,
+                ConsolidationFunction::Average, // Use AVERAGE consolidation by default
+                start_timestamp,
+                end_timestamp,
+                None, // columns - use default
+            )
+            .await
+        {
             Ok(response) => {
-                tracing::info!("Fetch successful for sensor {}: {} data points", 
-                              sensor_uuid, response.data.len());
+                tracing::info!(
+                    "Fetch successful for sensor {}: {} data points",
+                    sensor_uuid,
+                    response.data.len()
+                );
                 response
-            },
+            }
             Err(e) => {
                 // If fetch fails, it might be because no data exists yet
                 tracing::info!("Failed to fetch data for sensor {}: {:?}", sensor_uuid, e);
@@ -555,17 +603,22 @@ impl StorageInstance for RrdCachedStorage {
 
         // Convert RRD data to SensApp samples
         let mut samples = SmallVec::new();
-        
+
         tracing::info!("Processing {} RRD data points", fetch_response.data.len());
-        
+
         // RRD returns data as Vec<(timestamp, Vec<f64>)>
         // We use the first data source (index 0) since we create RRDs with one DS
         for (timestamp, values) in fetch_response.data {
-            tracing::debug!("RRD data point: timestamp={}, values={:?}", timestamp, values);
+            tracing::debug!(
+                "RRD data point: timestamp={}, values={:?}",
+                timestamp,
+                values
+            );
             if let Some(&value) = values.get(0) {
                 // Skip NaN values (RRD uses NaN for missing data)
                 if !value.is_nan() {
-                    let datetime = crate::datamodel::SensAppDateTime::from_unix_seconds_i64(timestamp as i64);
+                    let datetime =
+                        crate::datamodel::SensAppDateTime::from_unix_seconds_i64(timestamp as i64);
                     samples.push(Sample { datetime, value });
                     tracing::debug!("Added sample: time={:?}, value={}", datetime, value);
                 } else {
@@ -586,8 +639,8 @@ impl StorageInstance for RrdCachedStorage {
             uuid: sensor_uuid_obj,
             name: sensor_uuid.to_string(), // Use UUID as name since we don't have the original
             sensor_type: SensorType::Float, // Assume Float since RRD stores f64 values
-            unit: None, // We don't have unit information
-            labels: SmallVec::new(), // We don't have labels information
+            unit: None,                    // We don't have unit information
+            labels: SmallVec::new(),       // We don't have labels information
         };
 
         let typed_samples = TypedSamples::Float(samples);

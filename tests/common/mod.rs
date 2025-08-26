@@ -27,9 +27,8 @@ impl DatabaseType {
             DatabaseType::ClickHouse => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
                 "clickhouse://default:password@localhost:9000/sensapp_test".to_string()
             }),
-            DatabaseType::RRDcached => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-                "rrdcached://127.0.0.1:42217?preset=hoarder".to_string()
-            }),
+            DatabaseType::RRDcached => std::env::var("TEST_DATABASE_URL")
+                .unwrap_or_else(|_| "rrdcached://127.0.0.1:42217?preset=hoarder".to_string()),
         }
     }
 
