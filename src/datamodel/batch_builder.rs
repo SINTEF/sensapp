@@ -158,8 +158,7 @@ impl BatchBuilder {
         let batches_iter = self.build_batches().await;
 
         for batch in batches_iter {
-            let (sync_sender, _sync_receiver) = async_broadcast::broadcast(1);
-            storage.publish(Arc::new(batch), sync_sender).await?;
+            storage.publish(Arc::new(batch)).await?;
         }
 
         Ok(())
@@ -175,8 +174,7 @@ impl BatchBuilder {
         }
 
         let batch = self.build_batch().await;
-        let (sync_sender, _sync_receiver) = async_broadcast::broadcast(1);
-        storage.publish(Arc::new(batch), sync_sender).await?;
+        storage.publish(Arc::new(batch)).await?;
 
         Ok(())
     }
