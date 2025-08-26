@@ -45,9 +45,6 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_SENTRY_DSN")]
     pub sentry_dsn: Option<String>,
-
-    #[config(env = "SENSAPP_STORAGE_SYNC_TIMEOUT_SECONDS", default = 15)]
-    pub storage_sync_timeout_seconds: u64,
 }
 
 impl SensAppConfig {

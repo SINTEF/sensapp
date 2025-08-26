@@ -1,5 +1,4 @@
-use crate::config;
-use crate::storage::{StorageInstance, common::sync_with_timeout};
+use crate::storage::StorageInstance;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use bigquery_publishers::{
@@ -167,11 +166,7 @@ impl StorageInstance for BigQueryStorage {
 
         Ok(())
     }
-    async fn publish(
-        &self,
-        batch: Arc<crate::datamodel::batch::Batch>,
-        sync_sender: async_broadcast::Sender<()>,
-    ) -> Result<()> {
+    async fn publish(&self, batch: Arc<crate::datamodel::batch::Batch>) -> Result<()> {
         let sensors = batch
             .sensors
             .iter()
@@ -217,17 +212,7 @@ impl StorageInstance for BigQueryStorage {
 
         debug!("BigQuery: Waiting for all publishers to finish");
         try_join_all(futures).await?;
-        debug!("BigQuery: All publishers finished, syncing");
-        self.sync(sync_sender).await?;
-        debug!("BigQuery: Sync finished");
         Ok(())
-    }
-
-    async fn sync(&self, sync_sender: async_broadcast::Sender<()>) -> Result<()> {
-        // BigQuery doesn't need to do anything special for sync
-        // as we use transactions and streaming inserts
-        let config = config::get().context("Failed to get configuration")?;
-        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {

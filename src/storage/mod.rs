@@ -16,12 +16,7 @@ pub const DEFAULT_QUERY_LIMIT: usize = 10_000_000;
 #[async_trait]
 pub trait StorageInstance: Send + Sync + Debug {
     async fn create_or_migrate(&self) -> Result<()>;
-    async fn publish(
-        &self,
-        batch: std::sync::Arc<crate::datamodel::batch::Batch>,
-        sync_sender: async_broadcast::Sender<()>,
-    ) -> Result<()>;
-    async fn sync(&self, sync_sender: async_broadcast::Sender<()>) -> Result<()>;
+    async fn publish(&self, batch: std::sync::Arc<crate::datamodel::batch::Batch>) -> Result<()>;
 
     async fn vacuum(&self) -> Result<()>;
 

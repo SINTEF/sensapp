@@ -1,8 +1,6 @@
-use crate::config;
 use crate::datamodel::TypedSamples;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use anyhow::{Context, Result, bail};
-use async_broadcast::Sender;
 use async_trait::async_trait;
 use duckdb::Connection;
 use duckdb_publishers::*;
@@ -11,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 
-use super::{StorageInstance, common::sync_with_timeout};
+use super::StorageInstance;
 
 mod duckdb_publishers;
 mod duckdb_utilities;
@@ -47,7 +45,7 @@ impl StorageInstance for DuckDBStorage {
             .context("Failed to initialise database")?;
         Ok(())
     }
-    async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
+    async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         let connection = Arc::clone(&self.connection);
         let bbatch = batch.clone();
         spawn_blocking(move || -> Result<()> {
@@ -60,15 +58,7 @@ impl StorageInstance for DuckDBStorage {
             Ok(())
         })
         .await??;
-        self.sync(sync_sender).await?;
         Ok(())
-    }
-
-    async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
-        // DuckDB doesn't need to do anything special for sync
-        // As we use transactions
-        let config = config::get().context("Failed to get configuration")?;
-        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {

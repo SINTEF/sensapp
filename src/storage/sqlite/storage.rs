@@ -1,6 +1,5 @@
 use super::sqlite_publishers::*;
 use super::sqlite_utilities::get_sensor_id_or_create_sensor;
-use crate::config;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::unit::Unit;
@@ -9,11 +8,9 @@ use crate::datamodel::{
     sensapp_vec::SensAppLabels,
 };
 use crate::storage::{
-    DEFAULT_QUERY_LIMIT, StorageError, StorageInstance,
-    common::{datetime_to_micros, sync_with_timeout},
+    DEFAULT_QUERY_LIMIT, StorageError, StorageInstance, common::datetime_to_micros,
 };
 use anyhow::{Context, Result};
-use async_broadcast::Sender;
 use async_trait::async_trait;
 use geo::Point;
 use rust_decimal::Decimal;
@@ -66,22 +63,14 @@ impl StorageInstance for SqliteStorage {
 
         Ok(())
     }
-    async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
+    async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for single_sensor_batch in batch.sensors.as_ref() {
             self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
                 .await?;
         }
         transaction.commit().await?;
-        self.sync(sync_sender).await?;
         Ok(())
-    }
-
-    async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
-        // SQLite doesn't need to do anything special for sync
-        // As we use transactions and the WAL mode.
-        let config = config::get().context("Failed to get configuration")?;
-        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {

@@ -1,12 +1,10 @@
-use super::{DEFAULT_QUERY_LIMIT, StorageError, StorageInstance, common::sync_with_timeout};
-use crate::config;
+use super::{DEFAULT_QUERY_LIMIT, StorageError, StorageInstance};
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::{
     Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
     unit::Unit,
 };
 use anyhow::{Context, Result};
-use async_broadcast::Sender;
 use async_trait::async_trait;
 use base64::prelude::*;
 use clickhouse::Client;
@@ -177,7 +175,7 @@ impl StorageInstance for ClickHouseStorage {
         Ok(())
     }
 
-    async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
+    async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         let publisher = ClickHousePublisher::new(&self.client);
 
         for single_sensor_batch in batch.sensors.as_ref() {
@@ -186,15 +184,7 @@ impl StorageInstance for ClickHouseStorage {
                 .await?;
         }
 
-        self.sync(sync_sender).await?;
         Ok(())
-    }
-
-    async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
-        // ClickHouse doesn't need explicit sync like some other databases
-        // Just send the sync signal
-        let config = config::get().context("Failed to get configuration")?;
-        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {
