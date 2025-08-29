@@ -36,6 +36,12 @@ impl Batch {
         let results = futures::future::join_all(futures).await;
         results.into_iter().sum()
     }
+
+    #[cfg(feature = "test-utils")]
+    #[allow(dead_code)]
+    pub async fn is_empty(&self) -> bool {
+        self.len().await == 0
+    }
 }
 
 impl SingleSensorBatch {
@@ -95,6 +101,11 @@ impl SingleSensorBatch {
             TypedSamples::Blob(samples) => samples.len(),
             TypedSamples::Json(samples) => samples.len(),
         }
+    }
+
+    #[allow(dead_code)]
+    pub async fn is_empty(&self) -> bool {
+        self.len().await == 0
     }
 
     pub async fn take_samples(&mut self) -> TypedSamples {

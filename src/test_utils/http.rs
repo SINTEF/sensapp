@@ -1,14 +1,14 @@
+use crate::ingestors::http::crud::{get_series_data, list_metrics, list_series};
+use crate::ingestors::http::prometheus_read::prometheus_remote_read;
+use crate::ingestors::http::server::publish_senml_data;
+use crate::ingestors::http::state::HttpServerState;
+use crate::storage::StorageInstance;
 /// HTTP testing utilities
 use anyhow::Result;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
-use crate::ingestors::http::crud::{get_series_data, list_metrics, list_series};
-use crate::ingestors::http::prometheus_read::prometheus_remote_read;
-use crate::ingestors::http::server::publish_senml_data;
-use crate::ingestors::http::state::HttpServerState;
-use crate::storage::StorageInstance;
 use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot` and `ready`
 
@@ -19,7 +19,6 @@ pub struct TestApp {
 
 impl TestApp {
     /// Create a new test app with the provided storage
-
     pub async fn new(storage: Arc<dyn StorageInstance>) -> Self {
         let state = HttpServerState {
             name: Arc::new("SensApp Test".to_string()),
@@ -46,7 +45,7 @@ impl TestApp {
     pub async fn post_csv(&self, path: &str, csv_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
-            .uri(&format!("{}?mode=infer", path))
+            .uri(format!("{}?mode=infer", path))
             .header("content-type", "text/csv")
             .body(Body::from(csv_data.to_string()))?;
 
@@ -58,7 +57,7 @@ impl TestApp {
     pub async fn post_csv_strict(&self, path: &str, csv_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
-            .uri(&format!("{}?mode=strict", path))
+            .uri(format!("{}?mode=strict", path))
             .header("content-type", "text/csv")
             .body(Body::from(csv_data.to_string()))?;
 
@@ -70,7 +69,7 @@ impl TestApp {
     pub async fn post_csv_infer(&self, path: &str, csv_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
-            .uri(&format!("{}?mode=infer", path))
+            .uri(format!("{}?mode=infer", path))
             .header("content-type", "text/csv")
             .body(Body::from(csv_data.to_string()))?;
 
@@ -79,7 +78,6 @@ impl TestApp {
     }
 
     /// Send a POST request with JSON data
-
     pub async fn post_json(&self, path: &str, json_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -92,7 +90,6 @@ impl TestApp {
     }
 
     /// Send a POST request with binary data (e.g., Arrow files)
-
     pub async fn post_binary(
         &self,
         path: &str,
@@ -110,7 +107,6 @@ impl TestApp {
     }
 
     /// Send a GET request
-
     pub async fn get(&self, path: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("GET")
@@ -122,7 +118,6 @@ impl TestApp {
     }
 
     /// Send a POST request with SenML data
-
     pub async fn post_senml(&self, path: &str, senml_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -135,7 +130,6 @@ impl TestApp {
     }
 
     /// Send a POST request with InfluxDB line protocol data
-
     pub async fn post_influxdb(&self, path: &str, influx_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -148,7 +142,6 @@ impl TestApp {
     }
 
     /// Send a Prometheus remote read request (compressed protobuf)
-
     pub async fn post_prometheus_read(
         &self,
         path: &str,
@@ -214,7 +207,6 @@ impl TestResponse {
     }
 
     /// Parse response body as JSON
-
     pub fn json<T>(&self) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
@@ -244,13 +236,11 @@ impl TestResponse {
     }
 
     /// Get response headers
-
     pub fn headers(&self) -> &HeaderMap {
         &self.headers
     }
 
     /// Assert specific header value
-
     pub fn assert_header(&self, name: &str, expected: &str) -> &Self {
         let actual = self
             .headers
@@ -266,7 +256,6 @@ impl TestResponse {
     }
 
     /// Assert content-type header
-
     pub fn assert_content_type(&self, expected: &str) -> &Self {
         self.assert_header("content-type", expected)
     }

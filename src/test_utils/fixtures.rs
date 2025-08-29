@@ -1,8 +1,8 @@
-use hifitime::Epoch;
+use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::sensapp_vec::{SensAppLabels, SensAppVec};
 /// Test data fixtures for consistent testing
 use crate::datamodel::{Sample, Sensor, SensorType, TypedSamples, unit::Unit};
-use crate::datamodel::batch::{Batch, SingleSensorBatch};
+use hifitime::Epoch;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -34,7 +34,6 @@ pub fn temperature_sensor_csv() -> String {
 }
 
 /// Sample CSV data for multiple sensors
-
 pub fn multi_sensor_csv() -> String {
     let test_id = generate_test_id();
     format!(
@@ -51,7 +50,6 @@ pub fn multi_sensor_csv() -> String {
 
 /// Sample CSV data for multiple sensors with known sensor names
 /// Returns (csv_data, temperature_sensor_name, humidity_sensor_name)
-
 pub fn multi_sensor_csv_with_names() -> (String, String, String) {
     let test_id = generate_test_id();
     let temperature_name = format!("temperature_{}", test_id);
@@ -76,7 +74,6 @@ pub fn multi_sensor_csv_with_names() -> (String, String, String) {
 
 /// Sample CSV data for temperature sensor with known sensor name
 /// Returns (csv_data, sensor_name)
-
 pub fn temperature_sensor_csv_with_name() -> (String, String) {
     let test_id = generate_test_id();
     let sensor_name = format!("temperature_{}", test_id);
@@ -107,7 +104,6 @@ pub fn temperature_sensor_json() -> String {
 
 /// Sample JSON data for temperature sensor with known sensor name (SenML format)
 /// Returns (json_data, sensor_name)
-
 pub fn temperature_sensor_json_with_name() -> (String, String) {
     let test_id = generate_test_id();
     let sensor_name = format!("temperature_{}", test_id);
@@ -139,7 +135,6 @@ temperature,location=room1 value=21.5 1704067320000000000"#
 }
 
 /// Create a test sensor with specified parameters
-
 pub fn create_test_sensor(name: &str, sensor_type: SensorType) -> Arc<Sensor> {
     Arc::new(Sensor {
         uuid: Uuid::new_v4(),
@@ -166,7 +161,6 @@ pub fn create_test_float_samples(count: usize, start_value: f64) -> TypedSamples
 }
 
 /// Create test integer samples
-
 pub fn create_test_integer_samples(count: usize, start_value: i64) -> TypedSamples {
     let samples = (0..count)
         .map(|i| Sample {
@@ -178,7 +172,6 @@ pub fn create_test_integer_samples(count: usize, start_value: i64) -> TypedSampl
 }
 
 /// Create test boolean samples
-
 pub fn create_test_boolean_samples(count: usize) -> TypedSamples {
     let samples = (0..count)
         .map(|i| Sample {
@@ -190,7 +183,6 @@ pub fn create_test_boolean_samples(count: usize) -> TypedSamples {
 }
 
 /// Create test string samples
-
 pub fn create_test_string_samples(count: usize) -> TypedSamples {
     let samples = (0..count)
         .map(|i| Sample {
@@ -199,6 +191,12 @@ pub fn create_test_string_samples(count: usize) -> TypedSamples {
         })
         .collect();
     TypedSamples::String(samples)
+}
+
+/// Create a test Batch from sensors
+/// This replaces the production Batch::new() method for test purposes
+pub fn create_test_batch(sensors: SensAppVec<SingleSensorBatch>) -> Batch {
+    Batch { sensors }
 }
 
 #[cfg(test)]
@@ -226,10 +224,4 @@ mod tests {
             panic!("Expected float samples");
         }
     }
-}
-
-/// Create a test Batch from sensors
-/// This replaces the production Batch::new() method for test purposes
-pub fn create_test_batch(sensors: SensAppVec<SingleSensorBatch>) -> Batch {
-    Batch { sensors }
 }

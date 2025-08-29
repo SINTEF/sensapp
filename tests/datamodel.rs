@@ -1,11 +1,11 @@
 use anyhow::Result;
-use sensapp::test_utils::load_configuration_for_tests;
-use sensapp::test_utils::fixtures::create_test_batch;
 use sensapp::datamodel::batch::{Batch, SingleSensorBatch};
 use sensapp::datamodel::batch_builder::BatchBuilder;
 use sensapp::datamodel::sensapp_vec::{SensAppLabels, SensAppVec};
 use sensapp::datamodel::unit::Unit;
 use sensapp::datamodel::*;
+use sensapp::test_utils::fixtures::create_test_batch;
+use sensapp::test_utils::load_configuration_for_tests;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -370,9 +370,9 @@ mod batch_builder_tests {
 /// Test typed samples edge cases and conversions
 mod typed_samples_tests {
     use super::*;
-    use sensapp::test_utils::fixtures;
     use geo::Point;
     use rust_decimal::Decimal;
+    use sensapp::test_utils::fixtures;
     use std::str::FromStr;
 
     #[test]

@@ -1,7 +1,6 @@
 use crate::datamodel::SensAppDateTime;
 
 /// Convert SensAppDateTime to Unix microseconds for database storage
-
 pub fn datetime_to_micros(datetime: &SensAppDateTime) -> i64 {
     // Same pattern as used in parse_datetime_to_microseconds which works
     let unix_seconds = datetime.to_unix_seconds();

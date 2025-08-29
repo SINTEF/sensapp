@@ -1,6 +1,6 @@
-use anyhow::{Result, anyhow};
+use crate::config::{SENSAPP_CONFIG, SensAppConfig};
 use crate::storage::{StorageInstance, storage_factory::create_storage_from_connection_string};
-use crate::config::{SensAppConfig, SENSAPP_CONFIG};
+use anyhow::{Result, anyhow};
 use std::sync::{Arc, Mutex};
 
 pub mod db;

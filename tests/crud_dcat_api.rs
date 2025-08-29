@@ -1,8 +1,8 @@
 use anyhow::Result;
 use axum::http::StatusCode;
 use sensapp::test_utils::http::TestApp;
-use sensapp::test_utils::{TestDb, fixtures};
 use sensapp::test_utils::load_configuration_for_tests;
+use sensapp::test_utils::{TestDb, fixtures};
 use serde_json::Value;
 use serial_test::serial;
 

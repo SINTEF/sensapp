@@ -1,14 +1,14 @@
 #[cfg(feature = "rrdcached")]
 mod rrdcached_tests {
-    use sensapp::test_utils::{DatabaseType, TestDb};
     use anyhow::Result;
-    use sensapp::test_utils::load_configuration_for_tests;
-    use sensapp::test_utils::fixtures::create_test_batch;
     use sensapp::datamodel::{
         Sample, SensAppDateTime, Sensor, SensorType, TypedSamples,
         batch::{Batch, SingleSensorBatch},
         sensapp_vec::SensAppVec,
     };
+    use sensapp::test_utils::fixtures::create_test_batch;
+    use sensapp::test_utils::load_configuration_for_tests;
+    use sensapp::test_utils::{DatabaseType, TestDb};
     use serial_test::serial;
     use smallvec::SmallVec;
     use std::sync::Arc;

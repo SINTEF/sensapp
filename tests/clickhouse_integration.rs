@@ -1,8 +1,8 @@
 #[cfg(feature = "clickhouse")]
 mod clickhouse_tests {
-    use sensapp::test_utils::{DatabaseType, TestDb};
     use anyhow::Result;
     use sensapp::test_utils::load_configuration_for_tests;
+    use sensapp::test_utils::{DatabaseType, TestDb};
     use serial_test::serial;
 
     // Ensure configuration is loaded once for all tests in this module

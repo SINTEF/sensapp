@@ -1,5 +1,4 @@
 use anyhow::Result;
-use sensapp::test_utils::fixtures::create_test_batch;
 use sensapp::datamodel::batch::SingleSensorBatch;
 use sensapp::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use sensapp::datamodel::sensapp_vec::SensAppLabels;
@@ -7,6 +6,7 @@ use sensapp::datamodel::{Sample, SensAppDateTime, Sensor, SensorType, TypedSampl
 use sensapp::parsing::prometheus::remote_read_models::{LabelMatcher, label_matcher};
 use sensapp::storage::StorageInstance;
 use sensapp::storage::postgresql::prometheus_matcher::PrometheusMatcher;
+use sensapp::test_utils::fixtures::create_test_batch;
 use serial_test::serial;
 use smallvec::smallvec;
 use std::sync::Arc;
@@ -302,7 +302,7 @@ async fn test_prometheus_matcher_neq() -> Result<()> {
 
     // Should find sensors that don't have environment=production
     // This includes development servers and sensors without environment labels
-    assert!(matching_sensors.len() > 0);
+    assert!(!matching_sensors.is_empty());
 
     println!("Ending test_prometheus_matcher_neq...");
     Ok(())
@@ -395,7 +395,7 @@ async fn test_prometheus_matcher_not_regex() -> Result<()> {
     let matching_sensors = prometheus_matcher.find_matching_sensors(&matchers).await?;
 
     // Should find sensors that don't match ".*cpu.*" pattern
-    assert!(matching_sensors.len() > 0);
+    assert!(!matching_sensors.is_empty());
     println!("Ending test_prometheus_matcher_not_regex...");
 
     Ok(())
@@ -580,7 +580,7 @@ async fn test_prometheus_query_time_series_integration() -> Result<()> {
 
     let (sensor, samples) = &results[0];
     assert_eq!(sensor.name, "cpu_usage");
-    assert!(samples.len() > 0); // Should have time series data
+    assert!(!samples.is_empty()); // Should have time series data
 
     // Verify sensor has expected labels
     assert!(
@@ -844,17 +844,17 @@ impl UnitTestData {
         let mut labels = SensAppLabels::new();
         labels.push((
             "host".to_string(),
-            format!("unit_server1_{}", test_id.split('_').last().unwrap()),
+            format!("unit_server1_{}", test_id.split('_').next_back().unwrap()),
         ));
         labels.push(("job".to_string(), "node-exporter".to_string()));
 
         PrometheusTestData::add_sensor_with_samples(
             &mut batch_sensors,
-            &format!("unit_cpu_usage_{}", test_id.split('_').last().unwrap()),
+            &format!("unit_cpu_usage_{}", test_id.split('_').next_back().unwrap()),
             vec![
                 (
                     "host".to_string(),
-                    format!("unit_server1_{}", test_id.split('_').last().unwrap()),
+                    format!("unit_server1_{}", test_id.split('_').next_back().unwrap()),
                 ),
                 ("job".to_string(), "node-exporter".to_string()),
             ],
@@ -864,7 +864,10 @@ impl UnitTestData {
         // Add another test sensor without labels (unique name)
         PrometheusTestData::add_sensor_with_samples(
             &mut batch_sensors,
-            &format!("unit_memory_usage_{}", test_id.split('_').last().unwrap()),
+            &format!(
+                "unit_memory_usage_{}",
+                test_id.split('_').next_back().unwrap()
+            ),
             vec![],
             vec![(1000000, 1024.0)],
         )?;

@@ -2,8 +2,8 @@ use anyhow::Result;
 use axum::http::StatusCode;
 use sensapp::test_utils::db;
 use sensapp::test_utils::http::TestApp;
-use sensapp::test_utils::{TestDb, TestHelpers, fixtures};
 use sensapp::test_utils::load_configuration_for_tests;
+use sensapp::test_utils::{TestDb, TestHelpers, fixtures};
 use serial_test::serial;
 
 // Ensure configuration is loaded once for all tests in this module

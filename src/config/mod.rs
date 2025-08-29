@@ -88,7 +88,6 @@ pub fn load_configuration() -> Result<(), Error> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
