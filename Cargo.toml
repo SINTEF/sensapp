@@ -29,6 +29,8 @@ all-storage = [
 ]
 # Test utilities
 test-utils = []
+# MQTT support
+mqtt = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -7,13 +7,11 @@ use nom::{
 };
 use uuid::Uuid;
 
-#[allow(dead_code)]
 #[inline]
 fn hex_digit_char(c: char) -> bool {
     c.is_hex_digit()
 }
 
-#[allow(dead_code)]
 fn parse_hex_char(data: &str) -> IResult<&str, u8> {
     map_res(satisfy(hex_digit_char), |s: char| match s.to_digit(16) {
         Some(d) => Ok(d as u8),
@@ -22,7 +20,6 @@ fn parse_hex_char(data: &str) -> IResult<&str, u8> {
     .parse(data)
 }
 
-#[allow(dead_code)]
 pub fn parse_uuid(data: &str) -> IResult<&str, uuid::Uuid> {
     map(
         (
@@ -61,7 +58,6 @@ pub fn parse_uuid(data: &str) -> IResult<&str, uuid::Uuid> {
     .parse(data)
 }
 
-#[allow(dead_code)]
 pub fn attempt_uuid_parsing(s: &str) -> Option<uuid::Uuid> {
     match parse_uuid(s) {
         Ok((_, uuid)) => Some(uuid),

@@ -23,23 +23,24 @@ SensApp distinguises between:
 erDiagram
 
     SENSORS {
-        UUID id PK "UUID (v7 by default) of the sensor"
+        BigSerial sensor_id PK "Auto-incrementing primary key"
+        UUID uuid UK "UUID (v7 by default) of the sensor"
         String name "Name of the sensor"
-        TypeEnum type "The type of the sensor (integer, float, string, boolean, etc…)"
-        Serial unit FK "The unit of the sensor, for documentation purposes, if provided"
+        String type "The type of the sensor (integer, float, string, boolean, etc…)"
+        BigInt unit FK "The unit of the sensor, for documentation purposes, if provided"
     }
 
     UNITS {
-        Serial id PK
+        BigSerial id PK
         String name UK
         String description
     }
     SENSORS }o--|| UNITS : ""
 
     LABELS {
-        UUID sensor PK
-        BigSerial name PK
-        BigSerial description FK
+        BigInt sensor_id PK,FK
+        BigInt name PK,FK
+        BigInt description FK
     }
     SENSORS ||--o{ LABELS : ""
 
@@ -47,68 +48,69 @@ erDiagram
         BigSerial id PK
         String name UK
     }
-    LABELS }o--|| LABELS_NAME_DICTIONARY : "has one"
+    LABELS }o--|| LABELS_NAME_DICTIONARY : ""
+    
     LABELS_DESCRIPTION_DICTIONARY {
         BigSerial id PK
         String description UK
     }
     LABELS }o--|| LABELS_DESCRIPTION_DICTIONARY : ""
 
-
-    INTEGER_VALUES {
-        UUID sensor
-        DateTime datetime
-        Integer value
-    }
-
-    NUMERIC_VALUES {
-        UUID sensor
-        DateTime datetime
-        Numeric value
-    }
-
-    FLOAT_VALUES {
-        UUID sensor
-        DateTime datetime
-        Float value
-    }
-
-    STRING_VALUES {
-        UUID sensor
-        DateTime datetime
-        BigSerial value FK
-    }
     STRINGS_VALUES_DICTIONARY {
         BigSerial id PK
         String value UK
     }
+
+    INTEGER_VALUES {
+        BigInt sensor_id FK
+        BigInt timestamp_us
+        BigInt value
+    }
+
+    NUMERIC_VALUES {
+        BigInt sensor_id FK
+        BigInt timestamp_us
+        Numeric value
+    }
+
+    FLOAT_VALUES {
+        BigInt sensor_id FK
+        BigInt timestamp_us
+        DoublePrecision value
+    }
+
+    STRING_VALUES {
+        BigInt sensor_id FK
+        BigInt timestamp_us
+        BigInt value FK
+    }
     STRING_VALUES }o--|| STRINGS_VALUES_DICTIONARY : ""
 
     BOOLEAN_VALUES {
-        UUID sensor
-        DateTime datetime
+        BigInt sensor_id FK
+        BigInt timestamp_us
         Boolean value
     }
 
     %% Locations are common enough to be part of the core data model
     LOCATION_VALUES {
-        UUID sensor
-        DateTime datetime
-        Float latitude
-        Float longitude
+        BigInt sensor_id FK
+        BigInt timestamp_us
+        DoublePrecision latitude
+        DoublePrecision longitude
     }
 
     %% JSON values are not recommended, but they can be very convenient
     JSON_VALUES {
-        UUID sensor
-        DateTime datetime
-        JSON value
+        BigInt sensor_id FK
+        BigInt timestamp_us
+        JSONB value
     }
 
     BLOB_VALUES {
-        UUID sensor
-        DateTime datetime
-        Blob value
+        BigInt sensor_id FK
+        BigInt timestamp_us
+        BYTEA value
     }
 
     SENSORS ||--o{ STRING_VALUES : ""

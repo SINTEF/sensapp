@@ -7,7 +7,6 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub enum SensorType {
     Integer = 1,
     Numeric = 20,

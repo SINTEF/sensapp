@@ -1,6 +1,8 @@
+use crate::parsing::prometheus::remote_read_models::{QueryResult, ReadResponse};
 use crate::parsing::prometheus::remote_read_parser::{
-    create_empty_read_response, parse_remote_read_request, serialize_read_response,
+    parse_remote_read_request, serialize_read_response,
 };
+use crate::parsing::prometheus::remote_write_models::{Label, Sample, TimeSeries};
 
 use super::{app_error::AppError, state::HttpServerState};
 use axum::{
@@ -10,7 +12,7 @@ use axum::{
     response::Response,
 };
 use tokio_util::bytes::Bytes;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
     // Check that we have the right content encoding, that must be snappy
@@ -93,7 +95,7 @@ fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
 )]
 #[debug_handler]
 pub async fn prometheus_remote_read(
-    State(_state): State<HttpServerState>,
+    State(state): State<HttpServerState>,
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Result<Response<axum::body::Body>, AppError> {
@@ -139,14 +141,82 @@ pub async fn prometheus_remote_read(
         read_request.accepted_response_types
     );
 
-    // For now, create an empty response
-    warn!("Returning empty response - data fetching not yet implemented");
-    let empty_response = create_empty_read_response(&read_request).map_err(|e| {
-        AppError::internal_server_error(anyhow::anyhow!("Failed to create response: {}", e))
-    })?;
+    // Use the storage trait to query Prometheus time series data
+    let storage = &state.storage;
+
+    // Process each query
+    let mut query_results = Vec::new();
+
+    for query in &read_request.queries {
+        info!(
+            "Processing Prometheus query: time range {}ms - {}ms ({} matchers)",
+            query.start_timestamp_ms,
+            query.end_timestamp_ms,
+            query.matchers.len()
+        );
+
+        // Query time series data matching the matchers
+        let time_series_data = storage
+            .query_prometheus_time_series(
+                &query.matchers,
+                query.start_timestamp_ms,
+                query.end_timestamp_ms,
+            )
+            .await
+            .map_err(|e| {
+                AppError::internal_server_error(anyhow::anyhow!(
+                    "Failed to query time series data: {}",
+                    e
+                ))
+            })?;
+
+        info!("Found {} matching time series", time_series_data.len());
+
+        // Convert SensApp data to Prometheus TimeSeries format
+        let mut timeseries = Vec::new();
+
+        for (sensor, samples) in time_series_data {
+            // Convert sensor labels to Prometheus labels
+            let mut labels = vec![Label {
+                name: "__name__".to_string(),
+                value: sensor.name.clone(),
+            }];
+
+            // Add sensor labels if available
+            for (label_name, label_value) in sensor.labels.iter() {
+                // Skip __name__ since we already added it
+                if label_name != "__name__" {
+                    labels.push(Label {
+                        name: label_name.clone(),
+                        value: label_value.clone(),
+                    });
+                }
+            }
+
+            // Convert samples to Prometheus format
+            let prometheus_samples: Vec<Sample> = samples
+                .into_iter()
+                .map(|sample| Sample {
+                    timestamp: (sample.datetime.to_unix_seconds() * 1000.0) as i64,
+                    value: sample.value,
+                })
+                .collect();
+
+            timeseries.push(TimeSeries {
+                labels,
+                samples: prometheus_samples,
+            });
+        }
+
+        query_results.push(QueryResult { timeseries });
+    }
+
+    let response = ReadResponse {
+        results: query_results,
+    };
 
     // Serialize and compress the response
-    let response_bytes = serialize_read_response(&empty_response).map_err(|e| {
+    let response_bytes = serialize_read_response(&response).map_err(|e| {
         AppError::internal_server_error(anyhow::anyhow!("Failed to serialize response: {}", e))
     })?;
 

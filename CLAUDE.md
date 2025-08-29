@@ -82,3 +82,4 @@ SensApp is a **sensor data platform** built with Rust that scales from edge depl
 - code used for unit tests and integration tests should be marked with #[cfg(any(test, feature = "test-utils"))]
 - unit tests and integrations tests are very helpful and appreciated. Consider doing them even when not actively requested.
 - Backward compatibility is not a concern. The project is new.
+- I truly hate #[allow(dead_code)], so avoid it as much as possible. If the code is unused, delete it. If the code is used only conditionally, mark the conditions correctly. For example, in integration tests it should be marked with #[cfg(feature = "test-utils")]

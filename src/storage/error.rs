@@ -26,23 +26,19 @@ pub enum StorageError {
     },
 
     /// Sensor not found
-    #[error("Sensor not found: {sensor_id}")]
-    #[allow(dead_code)] // Part of error API, will be used for sensor operations
-    SensorNotFound { sensor_id: String },
+    #[error("Sensor not found: {sensor_uuid}")]
+    SensorNotFound { sensor_uuid: uuid::Uuid },
 
     /// Metric not found
     #[error("Metric not found: {metric_name}")]
-    #[allow(dead_code)] // Part of error API, will be used for metric operations
     MetricNotFound { metric_name: String },
 
     /// Configuration error
     #[error("Configuration error: {0}")]
-    #[allow(dead_code)] // Part of error API, will be used for storage config errors
     Configuration(String),
 
     /// Generic storage operation error with context
     #[error("Storage operation failed: {operation} - {details}")]
-    #[allow(dead_code)] // Part of error API, will be used for generic storage operations
     OperationFailed { operation: String, details: String },
 }
 

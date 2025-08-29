@@ -22,7 +22,6 @@ use clickhouse_utilities::{
 };
 
 pub struct ClickHouseStorage {
-    #[allow(dead_code)]
     client: Client,
     database: Option<String>,
     host: String,

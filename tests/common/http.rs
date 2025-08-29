@@ -13,14 +13,13 @@ use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot` and `ready`
 
 /// HTTP test client for making requests to our app
-#[allow(dead_code)] // Test helper struct
 pub struct TestApp {
     app: axum::Router,
 }
 
 impl TestApp {
     /// Create a new test app with the provided storage
-    #[allow(dead_code)] // Test helper method
+
     pub async fn new(storage: Arc<dyn StorageInstance>) -> Self {
         let state = HttpServerState {
             name: Arc::new("SensApp Test".to_string()),
@@ -44,7 +43,7 @@ impl TestApp {
     }
 
     /// Send a POST request with CSV data
-    #[allow(dead_code)] // Test helper method
+
     pub async fn post_csv(&self, path: &str, csv_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -57,7 +56,7 @@ impl TestApp {
     }
 
     /// Send a POST request with JSON data
-    #[allow(dead_code)] // Test helper method
+
     pub async fn post_json(&self, path: &str, json_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -70,7 +69,7 @@ impl TestApp {
     }
 
     /// Send a POST request with binary data (e.g., Arrow files)
-    #[allow(dead_code)] // Test helper method
+
     pub async fn post_binary(
         &self,
         path: &str,
@@ -88,7 +87,7 @@ impl TestApp {
     }
 
     /// Send a GET request
-    #[allow(dead_code)] // Test helper method
+
     pub async fn get(&self, path: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("GET")
@@ -100,7 +99,7 @@ impl TestApp {
     }
 
     /// Send a POST request with SenML data
-    #[allow(dead_code)] // Test helper method
+
     pub async fn post_senml(&self, path: &str, senml_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -113,7 +112,7 @@ impl TestApp {
     }
 
     /// Send a POST request with InfluxDB line protocol data
-    #[allow(dead_code)] // Test helper method
+
     pub async fn post_influxdb(&self, path: &str, influx_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
@@ -126,7 +125,7 @@ impl TestApp {
     }
 
     /// Send a Prometheus remote read request (compressed protobuf)
-    #[allow(dead_code)] // Test helper method
+
     pub async fn post_prometheus_read(
         &self,
         path: &str,
@@ -192,7 +191,7 @@ impl TestResponse {
     }
 
     /// Parse response body as JSON
-    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
+
     pub fn json<T>(&self) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
@@ -201,7 +200,6 @@ impl TestResponse {
     }
 
     /// Assert status code
-    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
     pub fn assert_status(&self, expected: StatusCode) -> &Self {
         assert_eq!(
             self.status, expected,
@@ -212,7 +210,6 @@ impl TestResponse {
     }
 
     /// Assert response body contains text
-    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
     pub fn assert_body_contains(&self, text: &str) -> &Self {
         assert!(
             self.body.contains(text),
@@ -224,13 +221,13 @@ impl TestResponse {
     }
 
     /// Get response headers
-    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
+
     pub fn headers(&self) -> &HeaderMap {
         &self.headers
     }
 
     /// Assert specific header value
-    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
+
     pub fn assert_header(&self, name: &str, expected: &str) -> &Self {
         let actual = self
             .headers
@@ -246,7 +243,7 @@ impl TestResponse {
     }
 
     /// Assert content-type header
-    #[allow(dead_code)] // Used across test files, not visible to individual test compilation
+
     pub fn assert_content_type(&self, expected: &str) -> &Self {
         self.assert_header("content-type", expected)
     }

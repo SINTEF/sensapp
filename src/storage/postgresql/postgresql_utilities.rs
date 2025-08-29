@@ -118,10 +118,14 @@ pub async fn get_sensor_id_or_create_sensor(
     )
     .bind(sqlx_uuid);
 
+    println!("Looking up sensor ID for UUID: {}", sensor.uuid);
+
     let sensor_id = transaction
         .fetch_optional(sensor_id_query)
         .await?
         .map(|row| row.get("sensor_id"));
+
+    println!("Sensor ID lookup result: {:?}\n", sensor_id);
 
     if let Some(Some(sensor_id)) = sensor_id {
         return Ok(sensor_id);
@@ -150,6 +154,8 @@ pub async fn get_sensor_id_or_create_sensor(
         .fetch_one(create_sensor_query)
         .await?
         .get("sensor_id");
+
+    println!("Created new sensor with ID: {}", sensor_id);
 
     // Add the labels
     for (key, value) in sensor.labels.iter() {
@@ -199,4 +205,19 @@ pub async fn get_string_value_id_or_create(
 
     let string_value_id = transaction.fetch_one(query).await?.get("id");
     Ok(string_value_id)
+}
+
+/***
+ * Clear all cached data related to PostgreSQL utilities.
+ */
+pub async fn clear_caches() {
+    use cached::Cached;
+    GET_LABEL_NAME_ID_OR_CREATE.lock().await.cache_clear();
+    GET_LABEL_DESCRIPTION_ID_OR_CREATE
+        .lock()
+        .await
+        .cache_clear();
+    GET_UNIT_ID_OR_CREATE.lock().await.cache_clear();
+    GET_SENSOR_ID_OR_CREATE_SENSOR.lock().await.cache_clear();
+    GET_STRING_VALUE_ID_OR_CREATE.lock().await.cache_clear();
 }

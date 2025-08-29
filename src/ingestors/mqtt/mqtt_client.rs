@@ -1,3 +1,4 @@
+#[cfg(feature = "mqtt")]
 use crate::{config::mqtt::MqttConfig, storage::StorageInstance};
 use anyhow::{Context, Result, bail};
 use rand::{Rng, distr::Alphanumeric, rng};

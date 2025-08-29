@@ -53,23 +53,19 @@ impl DatabaseType {
 pub struct TestDb {
     pub db_name: String,
     pub db_type: DatabaseType,
-    #[allow(dead_code)] // Used by some tests
     pub storage: Arc<dyn StorageInstance>,
-    #[allow(dead_code)] // Used by some tests
     pub connection_string: String,
 }
 
 impl TestDb {
     /// Create a new test database connection using the database type from environment
     /// or defaulting to PostgreSQL
-    #[allow(dead_code)] // Used by some tests
     pub async fn new() -> Result<Self> {
         let db_type = DatabaseType::from_env();
         Self::new_with_type(db_type).await
     }
 
     /// Create a new test database connection with a specific database type
-    #[allow(dead_code)] // Used by some tests
     pub async fn new_with_type(db_type: DatabaseType) -> Result<Self> {
         let db_name = match &db_type {
             DatabaseType::PostgreSQL => "sensapp".to_string(),
@@ -91,7 +87,6 @@ impl TestDb {
             .map_err(|e| anyhow!("Failed to run migrations for {}: {}", connection_string, e))?;
 
         // Clean up any existing test data to ensure test isolation
-        #[cfg(any(test, feature = "test-utils"))]
         storage.cleanup_test_data().await.map_err(|e| {
             anyhow!(
                 "Failed to cleanup test data for {}: {}",
@@ -110,7 +105,6 @@ impl TestDb {
 
     /// Create test databases for both PostgreSQL and SQLite
     /// Returns (postgresql_db, sqlite_db) tuple
-    #[allow(dead_code)] // Used by some tests
     pub async fn new_multi_database() -> Result<(TestDb, TestDb)> {
         let postgres_db = Self::new_with_type(DatabaseType::PostgreSQL).await?;
         let sqlite_db = Self::new_with_type(DatabaseType::SQLite).await?;
@@ -118,7 +112,6 @@ impl TestDb {
     }
 
     /// Clean up the test database
-    #[allow(dead_code)] // Used by some tests
     pub async fn cleanup(&self) -> Result<()> {
         // We'll implement database cleanup later
         // For now, just ensure we have proper separation
@@ -126,25 +119,13 @@ impl TestDb {
     }
 
     /// Get the storage instance for testing
-    #[allow(dead_code)] // Used by some tests
     pub fn storage(&self) -> Arc<dyn StorageInstance> {
         self.storage.clone()
     }
 }
 
-impl Drop for TestDb {
-    fn drop(&mut self) {
-        // Async cleanup would be better, but this ensures cleanup happens
-        println!(
-            "Test database {} ({:?}) cleaned up",
-            self.db_name, self.db_type
-        );
-    }
-}
-
 /// Helper trait for easier testing
 pub trait TestHelpers {
-    #[allow(dead_code)] // Test helper method
     fn expect_sensor_count(
         &self,
         expected: usize,

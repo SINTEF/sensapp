@@ -179,7 +179,7 @@ impl BatchBuilder {
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[cfg(feature = "test-utils")]
     pub async fn send_if_batch_full(
         &mut self,
         storage: Arc<dyn StorageInstance>,

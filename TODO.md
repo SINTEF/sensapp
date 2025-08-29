@@ -231,42 +231,55 @@ Major refactoring completed across multiple phases:
 ### Session 2-17: Major Implementation Work (🌊 waves 2-17)
 
 **Event Bus Removal & Architecture Simplification (✅ COMPLETED)**
+
 - Completely removed event bus from main.rs and all components
 - Updated all HTTP endpoints to use direct storage access
 - Refactored MQTT clients to use direct storage calls
 - Simplified main.rs initialization significantly
 
 **Comprehensive Read API (✅ COMPLETED)**
+
 - Implemented DCAT-compliant catalog endpoints: `/metrics` and `/series`
 - Added full series data endpoint: `/series/{uuid}` with format selection
 - Support for multiple export formats: SenML, CSV, JSONL, Apache Arrow
 - Time range queries with ISO 8601 datetime parsing and timezone handling
 
 **Testing Infrastructure (✅ MAJOR PROGRESS)**
+
 - 6+ comprehensive integration test files implemented
 - All export formats tested (SenML, CSV, JSONL, Arrow)
 - HTTP API endpoints fully tested
 - Data model and parser edge cases tested
 
 **Configuration & Settings (✅ COMPLETED)**
+
 - All storage backends configured via settings.toml
 - Runtime storage backend selection working
 - MQTT, Sentry, and network configuration implemented
 
 **Research-Ready Features (✅ COMPLETED)**
+
 - All storage backends maintained for comparison
 - DCAT catalog format for research compatibility
 - Multiple data format support for flexibility
 
-### Next Session Plan:
+### Next Session Plan
 
 **High Priority Remaining Items:**
+
 - [ ] ClickHouse storage backend implementation (Phase 2)
 - [ ] Performance benchmarks for storage backend comparison
 - [ ] Health check and metrics endpoints (/health, /metrics)
 - [ ] Connection pooling configuration
 
 **Medium Priority:**
+
 - [ ] Storage backend unit tests
 - [ ] Query performance metrics collection
 - [ ] Rate limiting and backpressure handling
+
+- Antoine's manual TODO:
+
+- query_sensor_data only supports floats, not good.
+- fix the automatic inference of CSV
+- continue implementing the prometheus remote read API.

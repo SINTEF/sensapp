@@ -1,5 +1,5 @@
 // Core storage traits and factory - always available
-use crate::datamodel::SensAppDateTime;
+use crate::datamodel::{Sample, SensAppDateTime, Sensor};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::fmt::Debug;
@@ -36,10 +36,18 @@ pub trait StorageInstance: Send + Sync + Debug {
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>>;
 
+    /// Query Prometheus time series data using label matchers
+    /// Returns a vector of (Sensor, samples) tuples for matching time series
+    async fn query_prometheus_time_series(
+        &self,
+        matchers: &[crate::parsing::prometheus::remote_read_models::LabelMatcher],
+        start_time_ms: i64,
+        end_time_ms: i64,
+    ) -> Result<Vec<(Sensor, Vec<Sample<f64>>)>>;
+
     /// Clean up all test data from the database
     /// This method is intended for testing purposes only
-    #[cfg(any(test, feature = "test-utils"))]
-    #[allow(dead_code)]
+    #[cfg(feature = "test-utils")]
     async fn cleanup_test_data(&self) -> Result<()>;
 }
 

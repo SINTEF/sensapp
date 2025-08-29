@@ -84,6 +84,7 @@ async fn async_main() -> Result<()> {
     }));
 
     // Start MQTT clients if configured
+    #[cfg(feature = "mqtt")]
     if let Some(mqtt_configs) = config.mqtt.as_ref() {
         println!("📡 Starting {} MQTT client(s)...", mqtt_configs.len());
         for (i, mqtt_config) in mqtt_configs.iter().enumerate() {
@@ -99,6 +100,9 @@ async fn async_main() -> Result<()> {
     } else {
         println!("ℹ️  No MQTT configuration found, skipping MQTT clients");
     }
+    
+    #[cfg(not(feature = "mqtt"))]
+    println!("📡 MQTT support disabled (compile with --features mqtt to enable)");
 
     let endpoint = config.endpoint;
     let port = config.port;

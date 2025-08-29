@@ -81,7 +81,13 @@ impl From<StorageError> for AppError {
 // Generic conversion for anyhow::Error specifically
 impl From<anyhow::Error> for AppError {
     fn from(err: anyhow::Error) -> Self {
-        Self::InternalServerError(err)
+        // If the error is actually a StorageError wrapped in anyhow, preserve it
+        // so IntoResponse can map specific storage variants (like SensorNotFound)
+        // to appropriate HTTP status codes (e.g., 404 Not Found).
+        match err.downcast::<StorageError>() {
+            Ok(storage_err) => Self::from(storage_err),
+            Err(err) => Self::InternalServerError(err),
+        }
     }
 }
 

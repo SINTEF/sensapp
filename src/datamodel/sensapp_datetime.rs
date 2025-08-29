@@ -1,4 +1,5 @@
 pub type SensAppDateTime = hifitime::Epoch;
+#[cfg(feature = "test-utils")]
 use anyhow::Result;
 
 pub trait SensAppDateTimeExt {
@@ -24,8 +25,9 @@ impl SensAppDateTimeExt for SensAppDateTime {
 }
 
 use hifitime::{UNIX_REF_EPOCH, Unit};
+#[cfg(feature = "test-utils")]
 use sqlx::types::time::OffsetDateTime;
-#[allow(dead_code)]
+#[cfg(feature = "test-utils")]
 pub fn sensapp_datetime_to_offset_datetime(datetime: &SensAppDateTime) -> Result<OffsetDateTime> {
     let unix_timestamp = datetime.to_unix_seconds().floor() as i128;
 

@@ -5,7 +5,9 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+#[cfg(feature = "mqtt")]
 use self::mqtt::MqttConfig;
+#[cfg(feature = "mqtt")]
 pub mod mqtt;
 
 #[derive(Debug, Config)]
@@ -24,10 +26,6 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS", default = 30)]
     pub http_server_timeout_seconds: u64,
 
-    #[config(env = "SENSAPP_MAX_INFERENCES_ROWS", default = 128)]
-    #[allow(dead_code)]
-    pub max_inference_rows: usize,
-
     #[config(env = "SENSAPP_BATCH_SIZE", default = 8192)]
     pub batch_size: usize,
 
@@ -40,6 +38,7 @@ pub struct SensAppConfig {
     )]
     pub storage_connection_string: String,
 
+    #[cfg(feature = "mqtt")]
     #[config(env = "SENSAPP_MQTT")]
     pub mqtt: Option<Vec<MqttConfig>>,
 
@@ -89,15 +88,15 @@ pub fn load_configuration() -> Result<(), Error> {
     Ok(())
 }
 
-use std::sync::Mutex;
-
 // Used by integration tests - must be always available for test compilation
-#[allow(dead_code)] // Used by integration tests, not visible in cargo check
+#[cfg(feature = "test-utils")]
+use std::sync::Mutex;
+#[cfg(feature = "test-utils")]
 static TEST_CONFIG_INIT: Mutex<()> = Mutex::new(());
 
 /// Test-only function to ensure configuration is loaded exactly once per test run
 /// Available for both unit tests and integration tests
-#[allow(dead_code)] // Used by integration tests, not visible in cargo check
+#[cfg(feature = "test-utils")]
 pub fn load_configuration_for_tests() -> Result<(), Error> {
     let _guard = TEST_CONFIG_INIT.lock().unwrap();
 

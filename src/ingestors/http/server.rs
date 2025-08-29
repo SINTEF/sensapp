@@ -5,7 +5,6 @@ use super::prometheus_read::prometheus_remote_read;
 use super::prometheus_write::publish_prometheus;
 use super::state::HttpServerState;
 use crate::config;
-use crate::importers::csv::publish_csv_async;
 use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
@@ -19,10 +18,11 @@ use crate::ingestors::http::prometheus_read::__path_prometheus_remote_read;
 use crate::ingestors::http::prometheus_write::__path_publish_prometheus;
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::http::header;
+use serde::Deserialize;
 use axum::routing::get;
 use axum::routing::post;
 use futures::TryStreamExt;
@@ -39,6 +39,22 @@ use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::{Level, debug};
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable as ScalarServable};
+
+#[derive(Deserialize)]
+struct PublishParams {
+    #[serde(default = "default_mode")]
+    mode: String,
+}
+
+fn default_mode() -> String {
+    "strict".to_string()
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ParseMode {
+    Strict,
+    Infer,
+}
 
 #[derive(OpenApi)]
 #[openapi(
@@ -82,18 +98,9 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .route("/", get(frontpage))
         //.route("/api-docs/openapi.json", get(openapi))
         .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
-        .route("/publish", post(publish_handler).layer(max_body_layer))
         .route(
             "/sensors/publish",
             post(publish_sensors_data).layer(max_body_layer),
-        )
-        .route(
-            "/sensors/{sensor_name_or_uuid}/publish_csv",
-            post(publish_csv),
-        )
-        .route(
-            "/sensors/{sensor_name_or_uuid}/publish_multipart",
-            post(publish_multipart).layer(max_body_layer),
         )
         // Metrics and Series CRUD
         .route("/metrics", get(list_metrics))
@@ -170,31 +177,10 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
 //     Json(ApiDoc::openapi())
 // }
 
-async fn publish_csv(
-    State(state): State<HttpServerState>,
-    //Path(sensor_name_or_uuid): Path<String>,
-    body: axum::body::Body,
-) -> Result<String, AppError> {
-    // let uuid = name_to_uuid(sensor_name_or_uuid.as_str())?;
-    // Convert the body in a stream
-    let stream = body.into_data_stream();
-    let stream = stream.map_err(io::Error::other);
-    let reader = stream.into_async_read();
-    //let reader = BufReader::new(stream.into_async_read());
-    // csv_async already uses a BufReader internally
-    let csv_reader = csv_async::AsyncReaderBuilder::new()
-        .has_headers(true)
-        .delimiter(b';')
-        .create_reader(reader);
-
-    //publish_csv_async(csv_reader, 100, state.storage.clone()).await?;
-    publish_csv_async(csv_reader, 8192, state.storage.clone()).await?;
-
-    Ok("ok".to_string())
-}
 
 async fn publish_sensors_data(
     State(state): State<HttpServerState>,
+    Query(params): Query<PublishParams>,
     headers: HeaderMap,
     body: axum::body::Body,
 ) -> Result<String, AppError> {
@@ -204,19 +190,28 @@ async fn publish_sensors_data(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("text/csv"); // Default to CSV
 
+    // Determine parse mode
+    let parse_mode = match params.mode.as_str() {
+        "strict" => ParseMode::Strict,
+        "infer" => ParseMode::Infer,
+        _ => return Err(AppError::bad_request(anyhow::anyhow!(
+            "Invalid mode parameter. Supported values: 'strict', 'infer'"
+        ))),
+    };
+
     match content_type {
         ct if ct.contains("application/json") => {
             publish_json_format(body, state.storage.clone()).await?;
         }
         ct if ct.contains("application/vnd.apache.arrow.file") => {
-            publish_arrow_format(body, state.storage.clone()).await?;
+            publish_arrow_format(body, parse_mode, state.storage.clone()).await?;
         }
         ct if ct.contains("text/csv") || ct.contains("application/csv") => {
-            publish_csv_format(body, state.storage.clone()).await?;
+            publish_csv_format(body, parse_mode, state.storage.clone()).await?;
         }
         _ => {
             // Default to CSV for unknown content types
-            publish_csv_format(body, state.storage.clone()).await?;
+            publish_csv_format(body, parse_mode, state.storage.clone()).await?;
         }
     }
 
@@ -241,6 +236,7 @@ async fn publish_json_format(
 /// Handle Arrow data ingestion
 async fn publish_arrow_format(
     body: axum::body::Body,
+    _mode: ParseMode,
     storage: Arc<dyn StorageInstance>,
 ) -> Result<(), AppError> {
     let stream = body.into_data_stream();
@@ -255,6 +251,7 @@ async fn publish_arrow_format(
 /// Handle CSV data ingestion
 async fn publish_csv_format(
     body: axum::body::Body,
+    mode: ParseMode,
     storage: Arc<dyn StorageInstance>,
 ) -> Result<(), AppError> {
     let stream = body.into_data_stream();
@@ -266,7 +263,7 @@ async fn publish_csv_format(
         .delimiter(b',') // Use comma for standard CSV
         .create_reader(reader);
 
-    publish_csv_async(csv_reader, 8192, storage)
+    crate::importers::csv::publish_csv_async_with_mode(csv_reader, 8192, mode, storage)
         .await
         .map_err(AppError::internal_server_error)
 }
@@ -310,26 +307,6 @@ pub async fn publish_senml_data(
     Ok(())
 }
 
-async fn publish_handler(bytes: Bytes) -> Result<Json<String>, (StatusCode, String)> {
-    let cursor = Cursor::new(bytes);
-    let df_result = CsvReadOptions::default()
-        .with_has_header(true)
-        .with_parse_options(CsvParseOptions::default().with_separator(b';'))
-        .into_reader_with_file_handle(cursor)
-        .finish();
-
-    // debug the schema
-    let schema = df_result.as_ref().unwrap().schema();
-    debug!("CSV schema: {:?}", schema);
-
-    match df_result {
-        Ok(df) => Ok(Json(format!("Number of rows: {}", df.height()))),
-        Err(_) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Error reading CSV".to_string(),
-        )),
-    }
-}
 
 #[utoipa::path(
     post,
@@ -345,10 +322,6 @@ async fn vacuum_database(State(state): State<HttpServerState>) -> Result<Json<St
     Ok(Json("Database vacuum completed successfully".to_string()))
 }
 
-async fn publish_multipart(/*mut multipart: Multipart*/)
- -> Result<Json<String>, (StatusCode, String)> {
-    Ok(Json("ok".to_string()))
-}
 
 #[cfg(test)]
 #[cfg(feature = "sqlite")]

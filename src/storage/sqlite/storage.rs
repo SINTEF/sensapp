@@ -543,7 +543,6 @@ impl SqliteStorage {
         Ok(())
     }
 
-    #[allow(dead_code)] // May be used for maintenance operations in the future
     async fn deduplicate(&self) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         transaction

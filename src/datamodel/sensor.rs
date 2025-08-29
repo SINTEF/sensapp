@@ -178,7 +178,6 @@ fn uuid_v8_blake3(name: &str, uuid_buffer: Vec<u8>) -> Result<Uuid, Error> {
 }
 
 impl Sensor {
-    #[allow(dead_code)]
     pub fn new(
         uuid: Uuid,
         name: String,

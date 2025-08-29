@@ -11,10 +11,12 @@ use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 use sqlx::{PgPool, postgres::PgConnectOptions};
 use std::{str::FromStr, sync::Arc};
+use tracing::debug;
 use uuid::Uuid;
 
 pub mod postgresql_publishers;
 pub mod postgresql_utilities;
+pub mod prometheus_matcher;
 
 use postgresql_publishers::*;
 use postgresql_utilities::get_sensor_id_or_create_sensor;
@@ -50,6 +52,10 @@ impl StorageInstance for PostgresStorage {
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for single_sensor_batch in batch.sensors.as_ref() {
+            println!(
+                "debug: publishing batch for sensor {:?}",
+                single_sensor_batch.sensor
+            );
             self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
                 .await?;
         }
@@ -62,6 +68,8 @@ impl StorageInstance for PostgresStorage {
             .execute(&self.pool)
             .await
             .context("Failed to vacuum database")?;
+
+        postgresql_utilities::clear_caches().await;
 
         Ok(())
     }
@@ -279,7 +287,12 @@ impl StorageInstance for PostgresStorage {
 
         let sensor_row = match sensor_row {
             Some(row) => row,
-            None => return Ok(None),
+            None => {
+                return Err(StorageError::SensorNotFound {
+                    sensor_uuid: parsed_uuid,
+                }
+                .into());
+            }
         };
 
         // Parse sensor metadata with improved error handling
@@ -396,86 +409,128 @@ impl StorageInstance for PostgresStorage {
     /// Clean up all test data from the database
     /// This removes all sensor data but keeps the schema intact
     /// Uses DELETE statements in dependency order to avoid foreign key conflicts
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(feature = "test-utils")]
     async fn cleanup_test_data(&self) -> Result<()> {
+        println!("Cleaning up test data from Postgres database...");
         // Use a transaction to ensure atomicity
         let mut tx = self.pool.begin().await?;
 
-        // Step 1: Delete all value tables (they reference sensors but nothing references them)
-        sqlx::query("DELETE FROM blob_values")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM json_values")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM location_values")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM boolean_values")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM string_values")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM float_values")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM numeric_values")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM integer_values")
-            .execute(&mut *tx)
-            .await?;
-
-        // Step 2: Delete labels (references sensors and dictionaries)
-        sqlx::query("DELETE FROM labels").execute(&mut *tx).await?;
-
-        // Step 3: Delete sensors (references units, but we'll preserve units for tests)
-        sqlx::query("DELETE FROM sensors").execute(&mut *tx).await?;
-
-        // Step 4: Delete dictionary tables (but preserve units for test data)
-        sqlx::query("DELETE FROM strings_values_dictionary")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM labels_description_dictionary")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM labels_name_dictionary")
-            .execute(&mut *tx)
-            .await?;
-
-        // Note: We preserve the units table to avoid foreign key violations in tests
-        // But we need to ensure common test units exist
-
-        // Insert common test units if they don't exist (using ON CONFLICT DO NOTHING for idempotency)
-        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT (name) DO NOTHING")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT (name) DO NOTHING")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('m', 'Meters') ON CONFLICT (name) DO NOTHING")
-            .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('kg', 'Kilograms') ON CONFLICT (name) DO NOTHING")
-            .execute(&mut *tx).await?;
-
-        // Reset sequences for clean test data
-        sqlx::query("ALTER SEQUENCE sensors_sensor_id_seq RESTART WITH 1")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("ALTER SEQUENCE strings_values_dictionary_id_seq RESTART WITH 1")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("ALTER SEQUENCE labels_description_dictionary_id_seq RESTART WITH 1")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("ALTER SEQUENCE labels_name_dictionary_id_seq RESTART WITH 1")
-            .execute(&mut *tx)
-            .await?;
+        for query in &[
+            // Step 1: Delete all value tables (they reference sensors but nothing references them)
+            "DELETE FROM blob_values",
+            "DELETE FROM json_values",
+            "DELETE FROM location_values",
+            "DELETE FROM boolean_values",
+            "DELETE FROM string_values",
+            "DELETE FROM float_values",
+            "DELETE FROM numeric_values",
+            "DELETE FROM integer_values",
+            // Step 2: Delete labels (references sensors and dictionaries)
+            "DELETE FROM labels",
+            // Step 3: Delete sensors (references units, but we'll preserve units for tests)
+            "DELETE FROM sensors",
+            // Step 4: Delete dictionaries that reference values/labels
+            "DELETE FROM strings_values_dictionary",
+            "DELETE FROM labels_name_dictionary",
+            "DELETE FROM labels_description_dictionary",
+            // Step 5: Reset sequences for clean test data
+            "ALTER SEQUENCE sensors_sensor_id_seq RESTART WITH 1",
+            "ALTER SEQUENCE strings_values_dictionary_id_seq RESTART WITH 1",
+            "ALTER SEQUENCE labels_name_dictionary_id_seq RESTART WITH 1",
+            "ALTER SEQUENCE labels_description_dictionary_id_seq RESTART WITH 1",
+        ] {
+            sqlx::query(query).execute(&mut *tx).await?;
+        }
 
         tx.commit()
             .await
             .context("Failed to commit test data cleanup transaction")?;
 
+        // Clear all PostgreSQL-related caches to ensure test isolation
+        println!("Clearing cached data...");
+        postgresql_utilities::clear_caches().await;
+
         Ok(())
+    }
+
+    /// Query time series data matching Prometheus label matchers within a time range.
+    /// Returns (sensor_metadata, time_series_values) for each matching sensor.
+    async fn query_prometheus_time_series(
+        &self,
+        matchers: &[crate::parsing::prometheus::remote_read_models::LabelMatcher],
+        start_time_ms: i64,
+        end_time_ms: i64,
+    ) -> Result<Vec<(Sensor, Vec<Sample<f64>>)>> {
+        use prometheus_matcher::PrometheusMatcher;
+
+        // Convert milliseconds to microseconds for our internal storage
+        let start_time_us = Some(start_time_ms * 1000);
+        let end_time_us = Some(end_time_ms * 1000);
+
+        // Find all sensors matching the label matchers
+        let matcher = PrometheusMatcher::new(self.pool.clone());
+        let sensor_ids = matcher
+            .find_matching_sensors(matchers)
+            .await
+            .context("Failed to find matching sensors")?;
+
+        debug!(
+            "Found {} matching sensors for Prometheus query",
+            sensor_ids.len()
+        );
+
+        let mut results = Vec::new();
+
+        for sensor_id in sensor_ids {
+            // Get sensor metadata and data by sensor_id directly
+            if let Some(sensor_data) = self
+                .query_sensor_data_by_id(
+                    sensor_id,
+                    start_time_us,
+                    end_time_us,
+                    None, // No limit for Prometheus queries
+                )
+                .await?
+            {
+                // Extract float samples (Prometheus only uses floats)
+                match sensor_data.samples {
+                    TypedSamples::Float(samples) => {
+                        let float_samples: Vec<Sample<f64>> = samples
+                            .into_iter()
+                            .map(|s| Sample {
+                                datetime: s.datetime,
+                                value: s.value,
+                            })
+                            .collect();
+                        results.push((sensor_data.sensor, float_samples));
+                    }
+                    TypedSamples::Integer(samples) => {
+                        // Convert integers to floats for Prometheus compatibility
+                        let float_samples: Vec<Sample<f64>> = samples
+                            .into_iter()
+                            .map(|s| Sample {
+                                datetime: s.datetime,
+                                value: s.value as f64,
+                            })
+                            .collect();
+                        results.push((sensor_data.sensor, float_samples));
+                    }
+                    _ => {
+                        // Skip non-numeric samples for Prometheus queries
+                        debug!(
+                            "Skipping non-numeric sensor {} for Prometheus query",
+                            sensor_data.sensor.uuid
+                        );
+                    }
+                }
+            }
+        }
+
+        debug!(
+            "Returning {} time series for Prometheus query",
+            results.len()
+        );
+        Ok(results)
     }
 }
 
@@ -487,6 +542,7 @@ impl PostgresStorage {
     ) -> Result<()> {
         let sensor_id =
             get_sensor_id_or_create_sensor(transaction, &single_sensor_batch.sensor).await?;
+        println!("debug : got sensor_id {}", sensor_id);
 
         let samples_guard = single_sensor_batch.samples.read().await;
         match &*samples_guard {
@@ -840,6 +896,96 @@ impl PostgresStorage {
         }
 
         Ok(TypedSamples::Blob(samples))
+    }
+
+    /// Internal method to query sensor data by sensor_id (instead of UUID string)
+    async fn query_sensor_data_by_id(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<Option<SensorData>> {
+        // Get sensor metadata
+        let sensor = self.get_sensor_by_id(sensor_id).await?;
+
+        // Query samples based on sensor type (Prometheus only uses floats)
+        let samples = self
+            .query_float_samples(sensor_id, start_time, end_time, limit)
+            .await?;
+
+        Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    /// Get sensor metadata by sensor_id
+    async fn get_sensor_by_id(&self, sensor_id: i64) -> Result<Sensor> {
+        #[derive(sqlx::FromRow)]
+        struct SensorRow {
+            uuid: Uuid,
+            name: String,
+            r#type: String,
+            unit_name: Option<String>,
+            unit_description: Option<String>,
+        }
+
+        let sensor_row: SensorRow = sqlx::query_as(
+            r#"
+            SELECT s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
+            FROM sensors s
+            LEFT JOIN units u ON s.unit = u.id
+            WHERE s.sensor_id = $1
+            "#,
+        )
+        .bind(sensor_id)
+        .fetch_one(&self.pool)
+        .await
+        .context("Failed to fetch sensor by ID")?;
+
+        let sensor_type = SensorType::from_str(&sensor_row.r#type)
+            .map_err(|e| anyhow::anyhow!("Invalid sensor type in database: {}", e))?;
+
+        let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
+            (Some(name), description) => Some(Unit::new(name, description)),
+            _ => None,
+        };
+
+        // Query labels for this sensor
+        let labels = self.get_sensor_labels(sensor_id).await?;
+
+        Ok(Sensor {
+            uuid: sensor_row.uuid,
+            name: sensor_row.name,
+            sensor_type,
+            unit,
+            labels: labels.unwrap_or_default(),
+        })
+    }
+
+    /// Get labels for a sensor by sensor_id
+    async fn get_sensor_labels(&self, sensor_id: i64) -> Result<Option<SensAppLabels>> {
+        let labels_rows: Vec<(String, String)> = sqlx::query_as(
+            r#"
+            SELECT lnd.name as label_name, ldd.description as label_value
+            FROM labels l
+            JOIN labels_name_dictionary lnd ON l.name = lnd.id
+            LEFT JOIN labels_description_dictionary ldd ON l.description = ldd.id
+            WHERE l.sensor_id = $1
+            "#,
+        )
+        .bind(sensor_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to fetch sensor labels")?;
+
+        if labels_rows.is_empty() {
+            Ok(None)
+        } else {
+            let mut labels = SensAppLabels::with_capacity(labels_rows.len());
+            for (name, value) in labels_rows {
+                labels.push((name, value));
+            }
+            Ok(Some(labels))
+        }
     }
 }
 
