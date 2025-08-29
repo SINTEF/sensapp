@@ -42,12 +42,35 @@ impl TestApp {
         Self { app }
     }
 
-    /// Send a POST request with CSV data
-
+    /// Send a POST request with CSV data (uses infer mode by default)
     pub async fn post_csv(&self, path: &str, csv_data: &str) -> Result<TestResponse> {
         let request = Request::builder()
             .method("POST")
-            .uri(path)
+            .uri(&format!("{}?mode=infer", path))
+            .header("content-type", "text/csv")
+            .body(Body::from(csv_data.to_string()))?;
+
+        let response = self.app.clone().oneshot(request).await?;
+        Ok(TestResponse::new(response).await)
+    }
+
+    /// Send a POST request with CSV data in strict mode
+    pub async fn post_csv_strict(&self, path: &str, csv_data: &str) -> Result<TestResponse> {
+        let request = Request::builder()
+            .method("POST")
+            .uri(&format!("{}?mode=strict", path))
+            .header("content-type", "text/csv")
+            .body(Body::from(csv_data.to_string()))?;
+
+        let response = self.app.clone().oneshot(request).await?;
+        Ok(TestResponse::new(response).await)
+    }
+
+    /// Send a POST request with CSV data in infer mode (explicit)
+    pub async fn post_csv_infer(&self, path: &str, csv_data: &str) -> Result<TestResponse> {
+        let request = Request::builder()
+            .method("POST")
+            .uri(&format!("{}?mode=infer", path))
             .header("content-type", "text/csv")
             .body(Body::from(csv_data.to_string()))?;
 
@@ -315,7 +338,8 @@ async fn test_publish_handler(
         Ok("Arrow data ingested successfully".to_string())
     } else {
         // Handle CSV data (default)
-        use sensapp::importers::csv::publish_csv_async;
+        use sensapp::importers::csv::publish_csv;
+        use sensapp::ingestors::http::server::ParseMode;
 
         let stream = body.into_data_stream();
         let stream = stream.map_err(io::Error::other);
@@ -326,7 +350,7 @@ async fn test_publish_handler(
             .delimiter(b',') // Use comma for tests, semicolon is the server default
             .create_reader(reader);
 
-        publish_csv_async(csv_reader, 1000, state.storage.clone())
+        publish_csv(csv_reader, 1000, ParseMode::Infer, state.storage.clone())
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

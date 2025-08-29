@@ -20,23 +20,19 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
-use axum::http::StatusCode;
 use axum::http::header;
-use serde::Deserialize;
 use axum::routing::get;
 use axum::routing::post;
 use futures::TryStreamExt;
-use polars::prelude::*;
+use serde::Deserialize;
 use std::io;
-use std::io::Cursor;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_util::bytes::Bytes;
 use tower::ServiceBuilder;
 use tower_http::trace;
 use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
-use tracing::{Level, debug};
+use tracing::Level;
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable as ScalarServable};
 
@@ -177,7 +173,6 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
 //     Json(ApiDoc::openapi())
 // }
 
-
 async fn publish_sensors_data(
     State(state): State<HttpServerState>,
     Query(params): Query<PublishParams>,
@@ -194,9 +189,11 @@ async fn publish_sensors_data(
     let parse_mode = match params.mode.as_str() {
         "strict" => ParseMode::Strict,
         "infer" => ParseMode::Infer,
-        _ => return Err(AppError::bad_request(anyhow::anyhow!(
-            "Invalid mode parameter. Supported values: 'strict', 'infer'"
-        ))),
+        _ => {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Invalid mode parameter. Supported values: 'strict', 'infer'"
+            )));
+        }
     };
 
     match content_type {
@@ -263,7 +260,7 @@ async fn publish_csv_format(
         .delimiter(b',') // Use comma for standard CSV
         .create_reader(reader);
 
-    crate::importers::csv::publish_csv_async_with_mode(csv_reader, 8192, mode, storage)
+    crate::importers::csv::publish_csv(csv_reader, 8192, mode, storage)
         .await
         .map_err(AppError::internal_server_error)
 }
@@ -307,7 +304,6 @@ pub async fn publish_senml_data(
     Ok(())
 }
 
-
 #[utoipa::path(
     post,
     path = "/api/v1/admin/vacuum",
@@ -321,7 +317,6 @@ async fn vacuum_database(State(state): State<HttpServerState>) -> Result<Json<St
     state.storage.vacuum().await?;
     Ok(Json("Database vacuum completed successfully".to_string()))
 }
-
 
 #[cfg(test)]
 #[cfg(feature = "sqlite")]

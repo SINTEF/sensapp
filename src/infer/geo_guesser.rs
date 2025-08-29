@@ -2,13 +2,7 @@ use super::columns::InferedColumn;
 use regex::Regex;
 use rust_decimal::Decimal;
 
-pub fn is_f64_likely_coordinates(value: f64) -> bool {
-    (-180.0..=180.0).contains(&value)
-}
-
-pub fn is_decimal_likely_coordinates(value: Decimal) -> bool {
-    value >= Decimal::new(-180, 0) && value <= Decimal::new(180, 0)
-}
+// Additional coordinate validation helpers available if needed
 
 static LATITUDE_REGEX: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
     Regex::new(r"(?i)^(gps_?(loc_?|location_?|position_?|)|geo_?(loc_?|location_?|position_?|)|position_?|pos_?|coord_?|coordinates_?|)(lat|latitude)$")
@@ -73,6 +67,7 @@ pub fn lat_long_guesser(mode: GeoType, column_name: &str, column: &InferedColumn
     sum
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct LatLonColumnNames {
     pub lat: String,
     pub lon: String,

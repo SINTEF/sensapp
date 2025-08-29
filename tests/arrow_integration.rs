@@ -413,6 +413,50 @@ mod roundtrip_tests {
 
     #[tokio::test]
     #[serial]
+    async fn test_arrow_roundtrip_integer_data_strict_mode() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        // Initial data ingestion via CSV in strict mode
+        let (csv_data, sensor_name) = fixtures::temperature_sensor_csv_with_name();
+        app.post_csv_strict("/sensors/publish", &csv_data).await?;
+
+        // Get original sensor
+        let original_sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("Original sensor should exist");
+
+        // Export as Arrow
+        let query_path = format!("/series/{}?format=arrow", original_sensor.uuid);
+        let export_response = app.get(&query_path).await?;
+        export_response.assert_status(StatusCode::OK);
+
+        let arrow_bytes = export_response.body_bytes();
+
+        // Clear database
+        test_db.cleanup().await?;
+
+        // Re-import the Arrow data
+        let import_response = app
+            .post_binary(
+                "/sensors/publish",
+                "application/vnd.apache.arrow.file",
+                arrow_bytes,
+            )
+            .await?;
+
+        assert_eq!(import_response.status(), 200);
+
+        // Verify data integrity
+        storage.expect_sensor_count(1).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn test_arrow_roundtrip_multiple_sensors() -> Result<()> {
         ensure_config();
         let test_db = TestDb::new().await?;

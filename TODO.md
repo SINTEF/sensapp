@@ -283,3 +283,6 @@ Major refactoring completed across multiple phases:
 - query_sensor_data only supports floats, not good.
 - fix the automatic inference of CSV
 - continue implementing the prometheus remote read API.
+- consider removing the whole inference thing.
+- adding support for prometheus like query syntax and sensor names in data imports / exports.
+- does strict mode have an unit support ? it should.

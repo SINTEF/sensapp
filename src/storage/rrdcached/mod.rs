@@ -135,13 +135,13 @@ impl RrdCachedStorage {
             "rrdcached" | "rrdcached+tcp" => {
                 // extract host and port
                 let host = url.host_str().ok_or_else(|| {
-                    anyhow::Error::from(StorageError::configuration(
-                        "RRDCached connection URL missing host",
+                    anyhow::Error::from(StorageError::Configuration(
+                        "RRDCached connection URL missing host".to_string(),
                     ))
                 })?;
                 let port = url.port().ok_or_else(|| {
-                    anyhow::Error::from(StorageError::configuration(
-                        "RRDCached connection URL missing port",
+                    anyhow::Error::from(StorageError::Configuration(
+                        "RRDCached connection URL missing port".to_string(),
                     ))
                 })?;
 

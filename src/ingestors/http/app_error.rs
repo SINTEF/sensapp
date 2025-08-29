@@ -34,7 +34,8 @@ impl IntoResponse for AppError {
             AppError::BadRequest(error) => (StatusCode::BAD_REQUEST, error.to_string()),
             AppError::NotFound(error) => (StatusCode::NOT_FOUND, error.to_string()),
             AppError::Storage(storage_error) => match &storage_error {
-                StorageError::SensorNotFound { .. } | StorageError::MetricNotFound { .. } => {
+                #[cfg(feature = "postgres")]
+                StorageError::SensorNotFound { .. } => {
                     (StatusCode::NOT_FOUND, storage_error.to_string())
                 }
                 #[cfg(any(
@@ -51,6 +52,7 @@ impl IntoResponse for AppError {
                     error!("Invalid data format: {}", storage_error);
                     (StatusCode::BAD_REQUEST, storage_error.to_string())
                 }
+                #[cfg(feature = "rrdcached")]
                 StorageError::Configuration(_) => {
                     error!("Storage configuration error: {}", storage_error);
                     (
@@ -58,7 +60,7 @@ impl IntoResponse for AppError {
                         "Storage configuration error".to_string(),
                     )
                 }
-                StorageError::Database(_) | StorageError::OperationFailed { .. } => {
+                StorageError::Database(_) => {
                     error!("Storage operation failed: {}", storage_error);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,

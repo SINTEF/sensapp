@@ -26,20 +26,14 @@ pub enum StorageError {
     },
 
     /// Sensor not found
+    #[cfg(feature = "postgres")]
     #[error("Sensor not found: {sensor_uuid}")]
     SensorNotFound { sensor_uuid: uuid::Uuid },
 
-    /// Metric not found
-    #[error("Metric not found: {metric_name}")]
-    MetricNotFound { metric_name: String },
-
     /// Configuration error
+    #[cfg(feature = "rrdcached")]
     #[error("Configuration error: {0}")]
     Configuration(String),
-
-    /// Generic storage operation error with context
-    #[error("Storage operation failed: {operation} - {details}")]
-    OperationFailed { operation: String, details: String },
 }
 
 impl StorageError {
