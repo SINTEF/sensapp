@@ -1,10 +1,9 @@
-mod common;
-
 #[cfg(feature = "rrdcached")]
 mod rrdcached_tests {
-    use crate::common::{DatabaseType, TestDb};
+    use sensapp::test_utils::{DatabaseType, TestDb};
     use anyhow::Result;
-    use sensapp::config::load_configuration_for_tests;
+    use sensapp::test_utils::load_configuration_for_tests;
+    use sensapp::test_utils::fixtures::create_test_batch;
     use sensapp::datamodel::{
         Sample, SensAppDateTime, Sensor, SensorType, TypedSamples,
         batch::{Batch, SingleSensorBatch},
@@ -76,7 +75,7 @@ mod rrdcached_tests {
             SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Float(samples.into()));
         let mut sensors_vec = SensAppVec::new();
         sensors_vec.push(single_sensor_batch);
-        let batch = Arc::new(Batch::new(sensors_vec));
+        let batch = Arc::new(create_test_batch(sensors_vec));
 
         let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
         storage.publish(batch, sync_sender.clone()).await?;
@@ -160,7 +159,7 @@ mod rrdcached_tests {
             SingleSensorBatch::new(sensor_arc, TypedSamples::Float(samples.into()));
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
-        let batch = Arc::new(Batch::new(sensors));
+        let batch = Arc::new(create_test_batch(sensors));
 
         // When: We publish the batch
         let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
@@ -216,7 +215,7 @@ mod rrdcached_tests {
         );
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
-        let batch = Arc::new(Batch::new(sensors));
+        let batch = Arc::new(create_test_batch(sensors));
 
         storage.publish(batch, sync_sender.clone()).await?;
         println!("Successfully published integer data to RRDcached");
@@ -242,7 +241,7 @@ mod rrdcached_tests {
         );
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
-        let batch = Arc::new(Batch::new(sensors));
+        let batch = Arc::new(create_test_batch(sensors));
 
         storage.publish(batch, sync_sender.clone()).await?;
         println!("Successfully published boolean data to RRDcached");
@@ -303,7 +302,7 @@ mod rrdcached_tests {
         );
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
-        let batch = Arc::new(Batch::new(sensors));
+        let batch = Arc::new(create_test_batch(sensors));
 
         // When: We try to publish unsupported data
         let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
@@ -356,7 +355,7 @@ mod rrdcached_tests {
             SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Float(samples.into()));
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
-        let batch = Arc::new(Batch::new(sensors));
+        let batch = Arc::new(create_test_batch(sensors));
 
         let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
         storage.publish(batch, sync_sender.clone()).await?;
@@ -433,7 +432,7 @@ mod rrdcached_tests {
             SingleSensorBatch::new(sensor_arc.clone(), TypedSamples::Float(samples.into()));
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
-        let batch = Arc::new(Batch::new(sensors));
+        let batch = Arc::new(create_test_batch(sensors));
 
         let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
         storage.publish(batch, sync_sender.clone()).await?;
@@ -527,7 +526,7 @@ mod rrdcached_tests {
         );
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
-        let batch = Arc::new(Batch::new(sensors));
+        let batch = Arc::new(create_test_batch(sensors));
 
         let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
         storage.publish(batch, sync_sender.clone()).await?;
@@ -584,7 +583,7 @@ mod rrdcached_tests {
         );
         let mut sensors = SensAppVec::new();
         sensors.push(single_sensor_batch);
-        let batch = Arc::new(Batch::new(sensors));
+        let batch = Arc::new(create_test_batch(sensors));
 
         let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
         storage.publish(batch, sync_sender.clone()).await?;

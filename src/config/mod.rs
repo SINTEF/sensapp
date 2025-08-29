@@ -65,7 +65,7 @@ impl SensAppConfig {
     }
 }
 
-static SENSAPP_CONFIG: OnceLock<Arc<SensAppConfig>> = OnceLock::new();
+pub(crate) static SENSAPP_CONFIG: OnceLock<Arc<SensAppConfig>> = OnceLock::new();
 
 pub fn get() -> Result<Arc<SensAppConfig>, Error> {
     SENSAPP_CONFIG.get().cloned().ok_or_else(|| {
@@ -88,29 +88,6 @@ pub fn load_configuration() -> Result<(), Error> {
     Ok(())
 }
 
-// Used by integration tests - must be always available for test compilation
-#[cfg(feature = "test-utils")]
-use std::sync::Mutex;
-#[cfg(feature = "test-utils")]
-static TEST_CONFIG_INIT: Mutex<()> = Mutex::new(());
-
-/// Test-only function to ensure configuration is loaded exactly once per test run
-/// Available for both unit tests and integration tests
-#[cfg(feature = "test-utils")]
-pub fn load_configuration_for_tests() -> Result<(), Error> {
-    let _guard = TEST_CONFIG_INIT.lock().unwrap();
-
-    // If config is already loaded, return success
-    if SENSAPP_CONFIG.get().is_some() {
-        return Ok(());
-    }
-
-    // Load default configuration for tests
-    let config = SensAppConfig::load()?;
-    SENSAPP_CONFIG.get_or_init(|| Arc::new(config));
-
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

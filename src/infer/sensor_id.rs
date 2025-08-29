@@ -9,7 +9,6 @@ pub enum SensorId {
     Name(String),
 }
 
-
 impl From<uuid::Uuid> for SensorId {
     fn from(uuid: uuid::Uuid) -> Self {
         SensorId::Uuid(uuid)
@@ -45,8 +44,6 @@ pub fn is_valid_uuid(input: &str) -> bool {
     attempt_uuid_parsing(input).is_some()
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -55,7 +52,7 @@ mod tests {
     fn test_detect_sensor_id_with_uuid() {
         let uuid_str = "550e8400-e29b-41d4-a716-446655440000";
         let sensor_id = detect_sensor_id(uuid_str);
-        
+
         // Test that it detected a UUID (this is the core functionality we actually use)
         match sensor_id {
             SensorId::Uuid(_) => (), // Good, it's a UUID
@@ -67,7 +64,7 @@ mod tests {
     fn test_detect_sensor_id_with_name() {
         let name = "temperature_sensor_01";
         let sensor_id = detect_sensor_id(name);
-        
+
         // Test that it detected a name (this is the core functionality we actually use)
         match sensor_id {
             SensorId::Name(detected_name) => assert_eq!(detected_name, name),

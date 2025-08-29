@@ -1,7 +1,6 @@
-mod common;
-
 use anyhow::Result;
-use sensapp::config::load_configuration_for_tests;
+use sensapp::test_utils::load_configuration_for_tests;
+use sensapp::test_utils::fixtures::create_test_batch;
 use sensapp::datamodel::batch::{Batch, SingleSensorBatch};
 use sensapp::datamodel::batch_builder::BatchBuilder;
 use sensapp::datamodel::sensapp_vec::{SensAppLabels, SensAppVec};
@@ -211,7 +210,7 @@ mod core_datamodel_tests {
 /// Test batch operations and batch builder
 mod batch_tests {
     use super::*;
-    use common::fixtures;
+    use sensapp::test_utils::fixtures;
 
     #[tokio::test]
     async fn test_single_sensor_batch_creation() {
@@ -304,7 +303,7 @@ mod batch_tests {
         sensors.push(batch1);
         sensors.push(batch2);
 
-        let batch = Batch::new(sensors);
+        let batch = create_test_batch(sensors);
         assert_eq!(batch.len().await, 8); // 5 + 3 samples total
     }
 
@@ -318,7 +317,7 @@ mod batch_tests {
 /// Test batch builder functionality
 mod batch_builder_tests {
     use super::*;
-    use common::fixtures;
+    use sensapp::test_utils::fixtures;
 
     #[tokio::test]
     async fn test_batch_builder_creation() -> Result<()> {
@@ -371,6 +370,7 @@ mod batch_builder_tests {
 /// Test typed samples edge cases and conversions
 mod typed_samples_tests {
     use super::*;
+    use sensapp::test_utils::fixtures;
     use geo::Point;
     use rust_decimal::Decimal;
     use std::str::FromStr;
@@ -463,6 +463,38 @@ mod typed_samples_tests {
             assert_eq!(samples[1].value["humidity"], 64);
         } else {
             panic!("Expected JSON samples");
+        }
+    }
+
+    #[test]
+    fn test_boolean_samples_using_fixture() {
+        // Test that the previously unused create_test_boolean_samples works
+        let boolean_samples = fixtures::create_test_boolean_samples(10);
+
+        if let TypedSamples::Boolean(samples) = boolean_samples {
+            assert_eq!(samples.len(), 10);
+            // Verify alternating pattern
+            for i in 0..10 {
+                assert_eq!(samples[i].value, i % 2 == 0);
+            }
+        } else {
+            panic!("Expected boolean samples from fixture");
+        }
+    }
+
+    #[test]
+    fn test_string_samples_using_fixture() {
+        // Test that the previously unused create_test_string_samples works
+        let string_samples = fixtures::create_test_string_samples(5);
+
+        if let TypedSamples::String(samples) = string_samples {
+            assert_eq!(samples.len(), 5);
+            // Verify string pattern
+            for i in 0..5 {
+                assert_eq!(samples[i].value, format!("sample_{}", i));
+            }
+        } else {
+            panic!("Expected string samples from fixture");
         }
     }
 

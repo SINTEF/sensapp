@@ -29,8 +29,6 @@ pub struct HeaderInfo {
 /// Complete analysis of CSV structure and content
 #[derive(Debug, Clone)]
 pub struct CsvAnalysis {
-    /// Header detection results
-    pub header_info: HeaderInfo,
     /// CSV structure type
     pub structure: CsvStructure,
     /// Column type inference results

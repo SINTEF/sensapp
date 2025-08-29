@@ -1,13 +1,11 @@
-mod common;
-
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use arrow_ipc::writer::FileWriter;
 use axum::http::StatusCode;
-use common::db::DbHelpers;
-use common::http::TestApp;
-use common::{TestDb, TestHelpers, fixtures};
-use sensapp::config::load_configuration_for_tests;
+use sensapp::test_utils::db;
+use sensapp::test_utils::http::TestApp;
+use sensapp::test_utils::{TestDb, TestHelpers, fixtures};
+use sensapp::test_utils::load_configuration_for_tests;
 use sensapp::datamodel::{Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples};
 use sensapp::exporters::ArrowConverter;
 use serial_test::serial;
@@ -81,7 +79,7 @@ mod export_tests {
         app.post_csv("/sensors/publish", &csv_data).await?;
 
         // Get the sensor UUID
-        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+        let sensor = db::get_sensor_by_name(&storage, &sensor_name)
             .await?
             .expect("Temperature sensor should exist");
 
@@ -115,7 +113,7 @@ mod export_tests {
         app.post_csv("/sensors/publish", &csv_data).await?;
 
         // Export temperature sensor as Arrow
-        let temp_sensor = DbHelpers::get_sensor_by_name(&storage, &temperature_name)
+        let temp_sensor = db::get_sensor_by_name(&storage, &temperature_name)
             .await?
             .expect("Temperature sensor should exist");
 
@@ -128,7 +126,7 @@ mod export_tests {
         assert_eq!(&body_bytes[0..6], b"ARROW1");
 
         // Export humidity sensor as Arrow
-        let humidity_sensor = DbHelpers::get_sensor_by_name(&storage, &humidity_name)
+        let humidity_sensor = db::get_sensor_by_name(&storage, &humidity_name)
             .await?
             .expect("Humidity sensor should exist");
 
@@ -156,7 +154,7 @@ mod export_tests {
         app.post_csv("/sensors/publish", &csv_data).await?;
 
         // Get the sensor UUID
-        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+        let sensor = db::get_sensor_by_name(&storage, &sensor_name)
             .await?
             .expect("Temperature sensor should exist");
 
@@ -380,7 +378,7 @@ mod roundtrip_tests {
         app.post_csv("/sensors/publish", &csv_data).await?;
 
         // Get original sensor
-        let original_sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+        let original_sensor = db::get_sensor_by_name(&storage, &sensor_name)
             .await?
             .expect("Original sensor should exist");
 
@@ -424,7 +422,7 @@ mod roundtrip_tests {
         app.post_csv_strict("/sensors/publish", &csv_data).await?;
 
         // Get original sensor
-        let original_sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+        let original_sensor = db::get_sensor_by_name(&storage, &sensor_name)
             .await?
             .expect("Original sensor should exist");
 
@@ -468,10 +466,10 @@ mod roundtrip_tests {
         app.post_csv("/sensors/publish", &csv_data).await?;
 
         // Export both sensors as Arrow
-        let temp_sensor = DbHelpers::get_sensor_by_name(&storage, &temp_name)
+        let temp_sensor = db::get_sensor_by_name(&storage, &temp_name)
             .await?
             .expect("Temperature sensor should exist");
-        let humidity_sensor = DbHelpers::get_sensor_by_name(&storage, &humidity_name)
+        let humidity_sensor = db::get_sensor_by_name(&storage, &humidity_name)
             .await?
             .expect("Humidity sensor should exist");
 

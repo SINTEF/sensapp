@@ -6,9 +6,8 @@ use sensapp::parsing::prometheus::remote_read_models::{
 };
 use snap::raw::Encoder;
 
-mod common;
-use common::TestDb;
-use common::http::TestApp;
+use sensapp::test_utils::TestDb;
+use sensapp::test_utils::http::TestApp;
 
 #[tokio::test]
 async fn test_prometheus_remote_read_empty_request() -> Result<()> {

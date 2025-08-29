@@ -1,11 +1,9 @@
-mod common;
-
 use anyhow::Result;
 use axum::http::StatusCode;
-use common::db::DbHelpers;
-use common::http::TestApp;
-use common::{TestDb, TestHelpers, fixtures};
-use sensapp::config::load_configuration_for_tests;
+use sensapp::test_utils::db;
+use sensapp::test_utils::http::TestApp;
+use sensapp::test_utils::{TestDb, TestHelpers, fixtures};
+use sensapp::test_utils::load_configuration_for_tests;
 use serial_test::serial;
 
 // Ensure configuration is loaded once for all tests in this module
@@ -41,7 +39,7 @@ mod query_tests {
 
         // And: Both sensors should be listed
         storage.expect_sensor_count(2).await?;
-        let sensor_names = DbHelpers::get_sensor_names(&storage).await?;
+        let sensor_names = db::get_sensor_names(&storage).await?;
         assert!(sensor_names.contains(&temperature_name));
         assert!(sensor_names.contains(&humidity_name));
 
@@ -62,7 +60,7 @@ mod query_tests {
         app.post_csv("/sensors/publish", &csv_data).await?;
 
         // Get the sensor UUID for querying
-        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+        let sensor = db::get_sensor_by_name(&storage, &sensor_name)
             .await?
             .expect("Temperature sensor should exist");
 
@@ -74,7 +72,7 @@ mod query_tests {
         response.assert_status(StatusCode::OK);
 
         // Verify the response contains expected sensor information
-        let sensor_data = DbHelpers::verify_sensor_data(&storage, &sensor_name, 5).await?;
+        let sensor_data = db::verify_sensor_data(&storage, &sensor_name, 5).await?;
         assert!(matches!(
             sensor_data.samples,
             sensapp::datamodel::TypedSamples::Float(_)
@@ -125,7 +123,7 @@ mod query_tests {
         response.assert_status(StatusCode::OK);
 
         // Verify we have metrics data for our sensors
-        let total_samples = DbHelpers::count_total_samples(&storage).await?;
+        let total_samples = db::count_total_samples(&storage).await?;
         assert_eq!(total_samples, 6); // 3 temperature + 3 humidity samples
 
         Ok(())
@@ -203,7 +201,7 @@ mod query_tests {
 
         // Verify the data is there
         storage.expect_sensor_count(1).await?;
-        DbHelpers::verify_sensor_data(&storage, "performance_test", 1000).await?;
+        db::verify_sensor_data(&storage, "performance_test", 1000).await?;
 
         Ok(())
     }
@@ -229,7 +227,7 @@ mod export_tests {
         app.post_csv("/sensors/publish", &csv_data).await?;
 
         // When: We export the data as CSV
-        let sensor_data = DbHelpers::verify_sensor_data(&storage, &sensor_name, 5).await?;
+        let sensor_data = db::verify_sensor_data(&storage, &sensor_name, 5).await?;
 
         let exported_csv = CsvConverter::to_csv(&sensor_data)?;
 
@@ -260,7 +258,7 @@ mod export_tests {
         app.post_csv("/sensors/publish", &csv_data).await?;
 
         // When: We export the data as JSONL
-        let sensor_data = DbHelpers::verify_sensor_data(&storage, &sensor_name, 5).await?;
+        let sensor_data = db::verify_sensor_data(&storage, &sensor_name, 5).await?;
 
         let exported_jsonl = JsonlConverter::to_jsonl(&sensor_data)?;
 
@@ -330,8 +328,8 @@ mod export_tests {
         app.post_csv("/sensors/publish", &csv_data).await?;
 
         // When: We export each sensor's data
-        let temp_data = DbHelpers::verify_sensor_data(&storage, &temperature_name, 3).await?;
-        let humidity_data = DbHelpers::verify_sensor_data(&storage, &humidity_name, 3).await?;
+        let temp_data = db::verify_sensor_data(&storage, &temperature_name, 3).await?;
+        let humidity_data = db::verify_sensor_data(&storage, &humidity_name, 3).await?;
 
         // Export both as CSV
         let temp_csv_str = CsvConverter::to_csv(&temp_data)?;
@@ -365,7 +363,7 @@ mod export_tests {
 
         // When: We ingest and then export the data
         app.post_csv("/sensors/publish", &original_csv).await?;
-        let sensor_data = DbHelpers::verify_sensor_data(&storage, &sensor_name, 5).await?;
+        let sensor_data = db::verify_sensor_data(&storage, &sensor_name, 5).await?;
 
         let exported_csv_str = CsvConverter::to_csv(&sensor_data)?;
 
@@ -423,7 +421,7 @@ mod export_tests {
         }
 
         app.post_csv("/sensors/publish", &large_csv).await?;
-        let sensor_data = DbHelpers::verify_sensor_data(&storage, &sensor_name, 1000).await?;
+        let sensor_data = db::verify_sensor_data(&storage, &sensor_name, 1000).await?;
 
         // When: We export the large dataset
         let start_time = std::time::Instant::now();
@@ -479,12 +477,12 @@ mod integration_tests {
         // 3. Verify data is correctly stored
         // Note: We now have 2 sensors because CSV and JSON use different names
         storage.expect_sensor_count(2).await?;
-        let total_samples = DbHelpers::count_total_samples(&storage).await?;
+        let total_samples = db::count_total_samples(&storage).await?;
         assert_eq!(total_samples, 8); // 5 from CSV + 3 from JSON
 
         // 4. Export data from the CSV sensor
         // First get the sensor by name to obtain its UUID
-        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name_csv)
+        let sensor = db::get_sensor_by_name(&storage, &sensor_name_csv)
             .await?
             .expect("CSV temperature sensor should exist");
 
@@ -551,7 +549,7 @@ mod time_query_tests {
         let storage = test_db.storage();
 
         // Create sensor data with specific timestamps
-        let _sensor = common::fixtures::create_test_sensor(
+        let _sensor = sensapp::test_utils::fixtures::create_test_sensor(
             "time_test",
             sensapp::datamodel::SensorType::Float,
         );
@@ -574,7 +572,7 @@ mod time_query_tests {
 
         // When: We query with time ranges
         // First try to get the sensor by name (if it exists)
-        let sensor = DbHelpers::get_sensor_by_name(&storage, "time_test").await?;
+        let sensor = db::get_sensor_by_name(&storage, "time_test").await?;
         let all_data = if let Some(sensor) = sensor {
             storage
                 .query_sensor_data(&sensor.uuid.to_string(), None, None, None)

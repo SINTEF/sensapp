@@ -100,7 +100,7 @@ async fn async_main() -> Result<()> {
     } else {
         println!("ℹ️  No MQTT configuration found, skipping MQTT clients");
     }
-    
+
     #[cfg(not(feature = "mqtt"))]
     println!("📡 MQTT support disabled (compile with --features mqtt to enable)");
 

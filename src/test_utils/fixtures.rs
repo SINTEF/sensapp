@@ -1,7 +1,8 @@
 use hifitime::Epoch;
-use sensapp::datamodel::sensapp_vec::SensAppLabels;
+use crate::datamodel::sensapp_vec::{SensAppLabels, SensAppVec};
 /// Test data fixtures for consistent testing
-use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples, unit::Unit};
+use crate::datamodel::{Sample, Sensor, SensorType, TypedSamples, unit::Unit};
+use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -225,4 +226,10 @@ mod tests {
             panic!("Expected float samples");
         }
     }
+}
+
+/// Create a test Batch from sensors
+/// This replaces the production Batch::new() method for test purposes
+pub fn create_test_batch(sensors: SensAppVec<SingleSensorBatch>) -> Batch {
+    Batch { sensors }
 }

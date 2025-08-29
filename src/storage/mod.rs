@@ -48,6 +48,7 @@ pub trait StorageInstance: Send + Sync + Debug {
     /// Clean up all test data from the database
     /// This method is intended for testing purposes only
     #[cfg(feature = "test-utils")]
+    #[allow(dead_code)] // False positive: Used by test_utils::TestDb through trait object
     async fn cleanup_test_data(&self) -> Result<()>;
 }
 

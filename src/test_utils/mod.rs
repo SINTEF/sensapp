@@ -1,10 +1,31 @@
 use anyhow::{Result, anyhow};
-use sensapp::storage::{StorageInstance, storage_factory::create_storage_from_connection_string};
-use std::sync::Arc;
+use crate::storage::{StorageInstance, storage_factory::create_storage_from_connection_string};
+use crate::config::{SensAppConfig, SENSAPP_CONFIG};
+use std::sync::{Arc, Mutex};
 
 pub mod db;
 pub mod fixtures;
 pub mod http;
+
+// Test configuration initialization
+static TEST_CONFIG_INIT: Mutex<()> = Mutex::new(());
+
+/// Test-only function to ensure configuration is loaded exactly once per test run
+/// Available for both unit tests and integration tests
+pub fn load_configuration_for_tests() -> Result<()> {
+    let _guard = TEST_CONFIG_INIT.lock().unwrap();
+
+    // If config is already loaded, return success
+    if SENSAPP_CONFIG.get().is_some() {
+        return Ok(());
+    }
+
+    // Load default configuration for tests
+    let config = SensAppConfig::load()?;
+    SENSAPP_CONFIG.get_or_init(|| Arc::new(config));
+
+    Ok(())
+}
 
 /// Supported database types for testing
 #[derive(Debug, Clone, PartialEq)]
@@ -56,10 +77,8 @@ impl DatabaseType {
 
 /// Test database manager that creates isolated test databases
 pub struct TestDb {
-    pub db_name: String,
-    pub db_type: DatabaseType,
     pub storage: Arc<dyn StorageInstance>,
-    pub connection_string: String,
+    connection_string: String,
 }
 
 impl TestDb {
@@ -72,13 +91,6 @@ impl TestDb {
 
     /// Create a new test database connection with a specific database type
     pub async fn new_with_type(db_type: DatabaseType) -> Result<Self> {
-        let db_name = match &db_type {
-            DatabaseType::PostgreSQL => "sensapp".to_string(),
-            DatabaseType::SQLite => "test.db".to_string(),
-            DatabaseType::ClickHouse => "sensapp_test".to_string(),
-            DatabaseType::RRDcached => "rrdcached".to_string(),
-        };
-
         let connection_string = db_type.default_connection_string();
 
         // Connect to the database
@@ -102,31 +114,24 @@ impl TestDb {
         })?;
 
         Ok(Self {
-            db_name,
-            db_type,
             storage,
             connection_string,
         })
     }
 
-    /// Create test databases for both PostgreSQL and SQLite
-    /// Returns (postgresql_db, sqlite_db) tuple
-    pub async fn new_multi_database() -> Result<(TestDb, TestDb)> {
-        let postgres_db = Self::new_with_type(DatabaseType::PostgreSQL).await?;
-        let sqlite_db = Self::new_with_type(DatabaseType::SQLite).await?;
-        Ok((postgres_db, sqlite_db))
+    /// Get the storage instance for testing
+    pub fn storage(&self) -> Arc<dyn StorageInstance> {
+        self.storage.clone()
+    }
+
+    /// Get the connection string for direct database access
+    pub fn connection_string(&self) -> &str {
+        &self.connection_string
     }
 
     /// Clean up the test database
     pub async fn cleanup(&self) -> Result<()> {
-        // We'll implement database cleanup later
-        // For now, just ensure we have proper separation
-        Ok(())
-    }
-
-    /// Get the storage instance for testing
-    pub fn storage(&self) -> Arc<dyn StorageInstance> {
-        self.storage.clone()
+        self.storage.cleanup_test_data().await
     }
 }
 

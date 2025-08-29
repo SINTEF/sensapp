@@ -8,3 +8,6 @@ pub mod infer;
 pub mod ingestors;
 pub mod parsing;
 pub mod storage;
+
+#[cfg(feature = "test-utils")]
+pub mod test_utils;

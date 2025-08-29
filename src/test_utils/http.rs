@@ -4,11 +4,11 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
-use sensapp::ingestors::http::crud::{get_series_data, list_metrics, list_series};
-use sensapp::ingestors::http::prometheus_read::prometheus_remote_read;
-use sensapp::ingestors::http::server::publish_senml_data;
-use sensapp::ingestors::http::state::HttpServerState;
-use sensapp::storage::StorageInstance;
+use crate::ingestors::http::crud::{get_series_data, list_metrics, list_series};
+use crate::ingestors::http::prometheus_read::prometheus_remote_read;
+use crate::ingestors::http::server::publish_senml_data;
+use crate::ingestors::http::state::HttpServerState;
+use crate::storage::StorageInstance;
 use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot` and `ready`
 
@@ -311,7 +311,7 @@ async fn test_publish_handler(
         Ok("ok".to_string())
     } else if content_type.contains("application/vnd.apache.arrow.file") {
         // Handle Arrow data
-        use sensapp::importers::arrow::publish_arrow_async;
+        use crate::importers::arrow::publish_arrow_async;
 
         let stream = body.into_data_stream();
         let stream = stream.map_err(io::Error::other);
@@ -338,8 +338,8 @@ async fn test_publish_handler(
         Ok("Arrow data ingested successfully".to_string())
     } else {
         // Handle CSV data (default)
-        use sensapp::importers::csv::publish_csv;
-        use sensapp::ingestors::http::server::ParseMode;
+        use crate::importers::csv::publish_csv;
+        use crate::ingestors::http::server::ParseMode;
 
         let stream = body.into_data_stream();
         let stream = stream.map_err(io::Error::other);

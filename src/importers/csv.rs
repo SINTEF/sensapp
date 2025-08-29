@@ -1,3 +1,4 @@
+use crate::ingestors::http::server::ParseMode;
 use crate::{
     datamodel::{
         Sample, SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
@@ -5,19 +6,18 @@ use crate::{
     },
     infer::{
         columns::{InferedColumn, infer_column},
-        csv_analysis::{CsvAnalysis, CsvStructure, HeaderInfo},
+        csv_analysis::{CsvAnalysis, CsvStructure},
         datagrid::StringDataGrid,
         geo_guesser::likely_geo_columns,
         parsing::InferedValue,
-        sensor_id::{detect_sensor_id, is_valid_uuid, SensorId},
+        sensor_id::{SensorId, detect_sensor_id, is_valid_uuid},
     },
     storage::StorageInstance,
 };
-use num_traits::ToPrimitive;
 use anyhow::{Result, anyhow};
-use crate::ingestors::http::server::ParseMode;
 use csv_async::AsyncReader;
 use futures::{StreamExt, io};
+use num_traits::ToPrimitive;
 use std::{collections::HashMap, sync::Arc};
 
 // Type alias to simplify complex HashMap type for clippy
@@ -65,7 +65,9 @@ pub async fn publish_csv<R: io::AsyncRead + Unpin + Send>(
 }
 
 /// Parse CSV data in strict mode with exact column name matching
-fn parse_csv_strict(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
+fn parse_csv_strict(
+    data_grid: StringDataGrid,
+) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
     let column_names = &data_grid.column_names;
 
     if data_grid.rows.is_empty() {
@@ -76,15 +78,15 @@ fn parse_csv_strict(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Se
     if column_names == &["datetime", "sensor_name", "value"] {
         return parse_long_format_with_names(data_grid);
     }
-    
+
     if column_names == &["datetime", "sensor_name", "value", "unit"] {
         return parse_long_format_with_names_and_units(data_grid);
     }
-    
+
     if column_names == &["datetime", "sensor_uuid", "value"] {
         return parse_long_format_with_uuids(data_grid);
     }
-    
+
     if column_names == &["datetime", "sensor_uuid", "value", "unit"] {
         return parse_long_format_with_uuids_and_units(data_grid);
     }
@@ -108,63 +110,80 @@ fn parse_csv_strict(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Se
 }
 
 /// Parse CSV data with intelligent inference
-fn parse_csv_with_inference(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
+fn parse_csv_with_inference(
+    data_grid: StringDataGrid,
+) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
     // Use the new CsvAnalysis for comprehensive inference
     // Note: Headers are already extracted by the CSV reader and set in data_grid.column_names
     // Create a custom analysis that uses the existing headers instead of trying to detect them
     let analysis = create_analysis_with_existing_headers(&data_grid)?;
-    
+
     // Debug output
     println!("DEBUG: CSV inference mode");
     println!("DEBUG: Column names: {:?}", data_grid.column_names);
     println!("DEBUG: Row count: {}", data_grid.rows.len());
-    println!("DEBUG: First few rows: {:?}", data_grid.rows.iter().take(3).collect::<Vec<_>>());
+    println!(
+        "DEBUG: First few rows: {:?}",
+        data_grid.rows.iter().take(3).collect::<Vec<_>>()
+    );
     println!("DEBUG: Detected structure: {:?}", analysis.structure);
     println!("DEBUG: DateTime column: {:?}", analysis.datetime_column);
     println!("DEBUG: Sensor ID column: {:?}", analysis.sensor_id_column);
     println!("DEBUG: Value column: {:?}", analysis.value_column);
-    
+
     // Use the original data_grid since headers are already properly set by CSV reader
     let processed_grid = data_grid;
 
     // Parse based on detected structure
     match analysis.structure {
         CsvStructure::Long => {
-            if let (Some(sensor_id_col), Some(value_col)) = (analysis.sensor_id_column, analysis.value_column) {
+            if let (Some(sensor_id_col), Some(value_col)) =
+                (analysis.sensor_id_column, analysis.value_column)
+            {
                 let datetime_col = analysis.datetime_column.unwrap_or(0);
-                parse_long_format_with_inference(processed_grid, datetime_col, sensor_id_col, value_col, analysis.unit_column, &analysis)
+                parse_long_format_with_inference(
+                    processed_grid,
+                    datetime_col,
+                    sensor_id_col,
+                    value_col,
+                    analysis.unit_column,
+                    &analysis,
+                )
             } else {
                 // Fallback to generic parsing
                 parse_csv_data_grid_with_analysis(processed_grid, &analysis)
             }
         }
-        CsvStructure::Wide => {
-            parse_wide_format_with_inference(processed_grid, &analysis)
-        }
-        CsvStructure::SingleSensor => {
-            parse_single_sensor_format(processed_grid, &analysis)
-        }
+        CsvStructure::Wide => parse_wide_format_with_inference(processed_grid, &analysis),
+        CsvStructure::SingleSensor => parse_single_sensor_format(processed_grid, &analysis),
     }
 }
 
-
 /// Parse long format CSV with sensor names: datetime,sensor_name,value
-fn parse_long_format_with_names(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
+fn parse_long_format_with_names(
+    data_grid: StringDataGrid,
+) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
     parse_long_format_generic(data_grid, 0, 1, 2, None, false)
 }
 
 /// Parse long format CSV with UUIDs: datetime,sensor_uuid,value
-fn parse_long_format_with_uuids(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
+fn parse_long_format_with_uuids(
+    data_grid: StringDataGrid,
+) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
     parse_long_format_generic(data_grid, 0, 1, 2, None, true)
 }
 
 /// Parse long format CSV with sensor names and units: datetime,sensor_name,value,unit
-fn parse_long_format_with_names_and_units(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
+fn parse_long_format_with_names_and_units(
+    data_grid: StringDataGrid,
+) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
     parse_long_format_generic(data_grid, 0, 1, 2, Some(3), false)
 }
 
 /// Parse long format CSV with UUIDs and units: datetime,sensor_uuid,value,unit
-fn parse_long_format_with_uuids_and_units(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
+fn parse_long_format_with_uuids_and_units(
+    data_grid: StringDataGrid,
+) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
     parse_long_format_generic(data_grid, 0, 1, 2, Some(3), true)
 }
 
@@ -205,17 +224,20 @@ fn parse_long_format_generic(
     // Process each row
     for (row_idx, row) in rows.iter().enumerate() {
         let datetime = parse_datetime_from_inferred(&inferred_columns[datetime_idx], row_idx)?;
-        
+
         let sensor_identifier = row[sensor_idx].clone();
         if sensor_identifier.trim().is_empty() {
-            return Err(anyhow!("Empty sensor identifier found in row {}", row_idx + 1));
+            return Err(anyhow!(
+                "Empty sensor identifier found in row {}",
+                row_idx + 1
+            ));
         }
 
         // Validate UUID if expected
         if is_uuid && !is_valid_uuid(&sensor_identifier) {
             return Err(anyhow!(
-                "Invalid UUID format in sensor_uuid column at row {}: '{}'", 
-                row_idx + 1, 
+                "Invalid UUID format in sensor_uuid column at row {}: '{}'",
+                row_idx + 1,
                 sensor_identifier
             ));
         }
@@ -230,15 +252,14 @@ fn parse_long_format_generic(
             .or_insert_with(|| {
                 let sensor_type = inferred_value_to_sensor_type(&value);
                 let unit = unit_name.map(|name| Unit::new(name, None));
-                let sensor = Arc::new(
-                    if is_uuid {
-                        // Parse UUID and use it
-                        let uuid = uuid::Uuid::parse_str(&sensor_identifier).unwrap();
-                        Sensor::new(uuid, sensor_identifier.clone(), sensor_type, unit, None)
-                    } else {
-                        Sensor::new_without_uuid(sensor_identifier.clone(), sensor_type, unit, None).unwrap()
-                    }
-                );
+                let sensor = Arc::new(if is_uuid {
+                    // Parse UUID and use it
+                    let uuid = uuid::Uuid::parse_str(&sensor_identifier).unwrap();
+                    Sensor::new(uuid, sensor_identifier.clone(), sensor_type, unit, None)
+                } else {
+                    Sensor::new_without_uuid(sensor_identifier.clone(), sensor_type, unit, None)
+                        .unwrap()
+                });
                 (sensor, Vec::new())
             })
             .1
@@ -264,7 +285,9 @@ fn parse_long_format_generic(
 }
 
 /// Parse wide format CSV: datetime,sensor1,sensor2,sensor3...
-fn parse_wide_format(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
+fn parse_wide_format(
+    data_grid: StringDataGrid,
+) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
     let column_names = &data_grid.column_names;
     let rows = &data_grid.rows;
 
@@ -310,9 +333,12 @@ fn parse_wide_format(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<S
         }
 
         let sensor_type = inferred_value_to_sensor_type(&samples[0].1);
-        let sensor = Arc::new(
-            Sensor::new_without_uuid(col_name.clone(), sensor_type, None, None)?
-        );
+        let sensor = Arc::new(Sensor::new_without_uuid(
+            col_name.clone(),
+            sensor_type,
+            None,
+            None,
+        )?);
 
         let typed_samples = convert_samples_to_typed_samples(samples, &sensor.sensor_type)?;
         result.insert(col_name.clone(), (sensor, typed_samples));
@@ -324,8 +350,6 @@ fn parse_wide_format(data_grid: StringDataGrid) -> Result<HashMap<String, (Arc<S
 
     Ok(result)
 }
-
-
 
 /// Parse long format CSV with inference analysis
 fn parse_long_format_with_inference(
@@ -346,22 +370,27 @@ fn parse_long_format_with_inference(
 
     // Process each row
     for (row_idx, row) in rows.iter().enumerate() {
-        let datetime = parse_datetime_from_inferred(&analysis.inferred_columns[datetime_idx], row_idx)?;
-        
+        let datetime =
+            parse_datetime_from_inferred(&analysis.inferred_columns[datetime_idx], row_idx)?;
+
         let sensor_identifier = row[sensor_idx].clone();
         if sensor_identifier.trim().is_empty() {
-            return Err(anyhow!("Empty sensor identifier found in row {}", row_idx + 1));
+            return Err(anyhow!(
+                "Empty sensor identifier found in row {}",
+                row_idx + 1
+            ));
         }
 
         // Use our new sensor ID detection
         let sensor_id = detect_sensor_id(&sensor_identifier);
-        
+
         // Create sensor key using the original identifier
         let sensor_key = sensor_identifier.clone();
-        
+
         // Parse value from inferred column type
-        let inferred_value = parse_value_from_analysis(&analysis.inferred_columns[value_idx], row_idx)?;
-        
+        let inferred_value =
+            parse_value_from_analysis(&analysis.inferred_columns[value_idx], row_idx)?;
+
         // Get or create sensor
         if !sensors_data.contains_key(&sensor_key) {
             // Create new sensor based on detected ID type
@@ -382,9 +411,13 @@ fn parse_long_format_with_inference(
             };
             sensors_data.insert(sensor_key.clone(), (sensor, Vec::new()));
         }
-        
+
         // Add sample to sensor
-        sensors_data.get_mut(&sensor_key).unwrap().1.push((datetime, inferred_value));
+        sensors_data
+            .get_mut(&sensor_key)
+            .unwrap()
+            .1
+            .push((datetime, inferred_value));
     }
 
     // Convert to final format
@@ -408,8 +441,9 @@ fn parse_wide_format_with_inference(
 
     // Process each row
     for (row_idx, row) in rows.iter().enumerate() {
-        let datetime = parse_datetime_from_inferred(&analysis.inferred_columns[datetime_col], row_idx)?;
-        
+        let datetime =
+            parse_datetime_from_inferred(&analysis.inferred_columns[datetime_col], row_idx)?;
+
         // Process each value column (skip datetime column)
         for (col_idx, column_name) in column_names.iter().enumerate() {
             if col_idx == datetime_col {
@@ -429,8 +463,9 @@ fn parse_wide_format_with_inference(
             }
 
             // Parse value from inferred column type
-            let inferred_value = parse_value_from_analysis(&analysis.inferred_columns[col_idx], row_idx)?;
-            
+            let inferred_value =
+                parse_value_from_analysis(&analysis.inferred_columns[col_idx], row_idx)?;
+
             // Get or create sensor for this column
             if !sensors_data.contains_key(column_name) {
                 let sensor = Arc::new(Sensor::new_without_uuid(
@@ -441,9 +476,13 @@ fn parse_wide_format_with_inference(
                 )?);
                 sensors_data.insert(column_name.clone(), (sensor, Vec::new()));
             }
-            
+
             // Add sample to sensor
-            sensors_data.get_mut(column_name).unwrap().1.push((datetime, inferred_value));
+            sensors_data
+                .get_mut(column_name)
+                .unwrap()
+                .1
+                .push((datetime, inferred_value));
         }
     }
 
@@ -469,16 +508,23 @@ fn parse_single_sensor_format(
 
     let datetime_col = analysis.datetime_column.unwrap_or(0);
     let value_col = if datetime_col == 0 { 1 } else { 0 };
-    
+
     let sensor_name = column_names[value_col].clone();
-    let sensor = Arc::new(Sensor::new_without_uuid(sensor_name.clone(), SensorType::Float, None, None)?);
-    
+    let sensor = Arc::new(Sensor::new_without_uuid(
+        sensor_name.clone(),
+        SensorType::Float,
+        None,
+        None,
+    )?);
+
     let mut samples = Vec::new();
-    
+
     // Process each row
     for (row_idx, _row) in rows.iter().enumerate() {
-        let datetime = parse_datetime_from_inferred(&analysis.inferred_columns[datetime_col], row_idx)?;
-        let inferred_value = parse_value_from_analysis(&analysis.inferred_columns[value_col], row_idx)?;
+        let datetime =
+            parse_datetime_from_inferred(&analysis.inferred_columns[datetime_col], row_idx)?;
+        let inferred_value =
+            parse_value_from_analysis(&analysis.inferred_columns[value_col], row_idx)?;
         samples.push((datetime, inferred_value));
     }
 
@@ -506,7 +552,9 @@ fn parse_csv_data_grid_with_analysis(
     let sensor_name_idx = analysis.sensor_id_column;
     let value_idx = analysis.value_column;
     // For unit, we need to detect it manually since analysis doesn't track it
-    let unit_idx = column_names.iter().position(|name| name.to_lowercase() == "unit");
+    let unit_idx = column_names
+        .iter()
+        .position(|name| name.to_lowercase() == "unit");
 
     let mut sensors_data: SensorDataMap = HashMap::new();
 
@@ -551,7 +599,8 @@ fn parse_csv_data_grid_with_analysis(
                     continue; // Skip datetime column
                 }
 
-                let value = parse_value_from_analysis(&analysis.inferred_columns[col_idx], row_idx)?;
+                let value =
+                    parse_value_from_analysis(&analysis.inferred_columns[col_idx], row_idx)?;
                 let sensor_name = col_name.clone();
 
                 sensors_data
@@ -588,12 +637,12 @@ fn convert_sensor_data_map_to_typed_samples(
     sensors_data: SensorDataMap,
 ) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
     let mut result = HashMap::new();
-    
+
     for (sensor_name, (sensor, samples)) in sensors_data {
         let typed_samples = convert_analysis_samples_to_typed_samples(samples)?;
         result.insert(sensor_name, (sensor, typed_samples));
     }
-    
+
     Ok(result)
 }
 
@@ -618,7 +667,10 @@ fn convert_analysis_samples_to_typed_samples(
         InferedValue::Integer(_) => {
             for (datetime, value) in samples {
                 if let InferedValue::Integer(val) = value {
-                    integer_samples.push(Sample { datetime, value: val });
+                    integer_samples.push(Sample {
+                        datetime,
+                        value: val,
+                    });
                 } else {
                     return Err(anyhow!("Mixed data types in samples - expected integer"));
                 }
@@ -629,14 +681,23 @@ fn convert_analysis_samples_to_typed_samples(
             for (datetime, value) in samples {
                 match value {
                     InferedValue::Float(val) => {
-                        float_samples.push(Sample { datetime, value: val });
+                        float_samples.push(Sample {
+                            datetime,
+                            value: val,
+                        });
                     }
                     InferedValue::Integer(val) => {
-                        float_samples.push(Sample { datetime, value: val as f64 });
+                        float_samples.push(Sample {
+                            datetime,
+                            value: val as f64,
+                        });
                     }
                     InferedValue::Numeric(val) => {
                         let float_val = val.to_f64().unwrap_or(0.0);
-                        float_samples.push(Sample { datetime, value: float_val });
+                        float_samples.push(Sample {
+                            datetime,
+                            value: float_val,
+                        });
                     }
                     _ => {
                         return Err(anyhow!("Mixed data types in samples - expected numeric"));
@@ -649,10 +710,16 @@ fn convert_analysis_samples_to_typed_samples(
             for (datetime, value) in samples {
                 match value {
                     InferedValue::String(val) => {
-                        string_samples.push(Sample { datetime, value: val });
+                        string_samples.push(Sample {
+                            datetime,
+                            value: val,
+                        });
                     }
                     InferedValue::DateTime(val) => {
-                        string_samples.push(Sample { datetime, value: val.to_rfc3339() });
+                        string_samples.push(Sample {
+                            datetime,
+                            value: val.to_rfc3339(),
+                        });
                     }
                     _ => {
                         return Err(anyhow!("Mixed data types in samples - expected string"));
@@ -664,7 +731,10 @@ fn convert_analysis_samples_to_typed_samples(
         InferedValue::Boolean(_) => {
             for (datetime, value) in samples {
                 if let InferedValue::Boolean(val) = value {
-                    boolean_samples.push(Sample { datetime, value: val });
+                    boolean_samples.push(Sample {
+                        datetime,
+                        value: val,
+                    });
                 } else {
                     return Err(anyhow!("Mixed data types in samples - expected boolean"));
                 }
@@ -674,7 +744,10 @@ fn convert_analysis_samples_to_typed_samples(
         InferedValue::Json(_) => {
             for (datetime, value) in samples {
                 if let InferedValue::Json(val) = value {
-                    json_samples.push(Sample { datetime, value: val.as_ref().clone() });
+                    json_samples.push(Sample {
+                        datetime,
+                        value: val.as_ref().clone(),
+                    });
                 } else {
                     return Err(anyhow!("Mixed data types in samples - expected JSON"));
                 }
@@ -691,54 +764,74 @@ fn parse_value_from_analysis(column: &InferedColumn, row_idx: usize) -> Result<I
             if row_idx < values.len() {
                 Ok(InferedValue::Integer(values[row_idx]))
             } else {
-                Err(anyhow!("Row index {} out of bounds for integer column", row_idx))
+                Err(anyhow!(
+                    "Row index {} out of bounds for integer column",
+                    row_idx
+                ))
             }
         }
         InferedColumn::Float(values) => {
             if row_idx < values.len() {
                 Ok(InferedValue::Float(values[row_idx]))
             } else {
-                Err(anyhow!("Row index {} out of bounds for float column", row_idx))
+                Err(anyhow!(
+                    "Row index {} out of bounds for float column",
+                    row_idx
+                ))
             }
         }
         InferedColumn::String(values) => {
             if row_idx < values.len() {
                 Ok(InferedValue::String(values[row_idx].clone()))
             } else {
-                Err(anyhow!("Row index {} out of bounds for string column", row_idx))
+                Err(anyhow!(
+                    "Row index {} out of bounds for string column",
+                    row_idx
+                ))
             }
         }
         InferedColumn::Boolean(values) => {
             if row_idx < values.len() {
                 Ok(InferedValue::Boolean(values[row_idx]))
             } else {
-                Err(anyhow!("Row index {} out of bounds for boolean column", row_idx))
+                Err(anyhow!(
+                    "Row index {} out of bounds for boolean column",
+                    row_idx
+                ))
             }
         }
         InferedColumn::DateTime(values) => {
             if row_idx < values.len() {
                 Ok(InferedValue::DateTime(values[row_idx]))
             } else {
-                Err(anyhow!("Row index {} out of bounds for datetime column", row_idx))
+                Err(anyhow!(
+                    "Row index {} out of bounds for datetime column",
+                    row_idx
+                ))
             }
         }
         InferedColumn::Numeric(values) => {
             if row_idx < values.len() {
                 Ok(InferedValue::Numeric(values[row_idx]))
             } else {
-                Err(anyhow!("Row index {} out of bounds for numeric column", row_idx))
+                Err(anyhow!(
+                    "Row index {} out of bounds for numeric column",
+                    row_idx
+                ))
             }
         }
         InferedColumn::Json(values) => {
             if row_idx < values.len() {
                 Ok(InferedValue::Json(values[row_idx].clone()))
             } else {
-                Err(anyhow!("Row index {} out of bounds for JSON column", row_idx))
+                Err(anyhow!(
+                    "Row index {} out of bounds for JSON column",
+                    row_idx
+                ))
             }
         }
     }
 }
-
 
 /// Create a CsvAnalysis using existing headers instead of trying to detect them
 /// This is needed because the CSV reader already extracted the headers
@@ -749,13 +842,6 @@ fn create_analysis_with_existing_headers(data_grid: &StringDataGrid) -> Result<C
 
     // Use the existing column names from the data_grid (already set by CSV reader)
     let column_names = data_grid.column_names.clone();
-    
-    // Create header info indicating we already have headers
-    let header_info = HeaderInfo {
-        has_headers: true,
-        headers: column_names.clone(),
-        confidence: 1.0, // We're certain since they came from CSV reader
-    };
 
     // Infer column types by building columns from data
     let mut columns = vec![Vec::new(); column_names.len()];
@@ -777,11 +863,14 @@ fn create_analysis_with_existing_headers(data_grid: &StringDataGrid) -> Result<C
 
     // Find datetime column using smart detection
     use crate::infer::datetime_guesser::likely_datetime_column;
-    let datetime_column = if let Some(best_column_name) = likely_datetime_column(&column_names, &inferred_columns) {
-        column_names.iter().position(|name| name == &best_column_name)
-    } else {
-        None
-    };
+    let datetime_column =
+        if let Some(best_column_name) = likely_datetime_column(&column_names, &inferred_columns) {
+            column_names
+                .iter()
+                .position(|name| name == &best_column_name)
+        } else {
+            None
+        };
 
     // Detect structure using the correct column names
     let structure = detect_csv_structure_simple(&column_names, &inferred_columns);
@@ -804,12 +893,11 @@ fn create_analysis_with_existing_headers(data_grid: &StringDataGrid) -> Result<C
                     None
                 }
             })
-        },
+        }
         _ => None,
     };
 
     Ok(CsvAnalysis {
-        header_info,
         structure,
         inferred_columns,
         geo_columns,
@@ -820,14 +908,13 @@ fn create_analysis_with_existing_headers(data_grid: &StringDataGrid) -> Result<C
     })
 }
 
-
 /// Detect the CSV structure type
 fn detect_csv_structure_simple(
     column_names: &[String],
     inferred_columns: &[InferedColumn],
 ) -> CsvStructure {
     let column_count = column_names.len();
-    
+
     // Single sensor: exactly 2 columns (timestamp, value)
     if column_count == 2 {
         return CsvStructure::SingleSensor;
@@ -842,7 +929,7 @@ fn detect_csv_structure_simple(
         name_lower == "name" ||
         // Check if column contains mixed sensor identifiers
         column_contains_sensor_identifiers_simple(inferred_columns.get(idx));
-        
+
         println!("DEBUG: Column '{}' -> sensor_id check: {}", name, matches);
         matches
     });
@@ -855,7 +942,10 @@ fn detect_csv_structure_simple(
         matches
     });
 
-    println!("DEBUG: has_sensor_id_column: {}, has_value_column: {}", has_sensor_id_column, has_value_column);
+    println!(
+        "DEBUG: has_sensor_id_column: {}, has_value_column: {}",
+        has_sensor_id_column, has_value_column
+    );
 
     // Long format: has sensor ID column and value column
     if has_sensor_id_column && has_value_column {
@@ -876,11 +966,13 @@ fn detect_long_format_columns_simple(
     // Find sensor ID column
     let sensor_id_column = column_names.iter().enumerate().find_map(|(idx, name)| {
         let name_lower = name.to_lowercase();
-        if (name_lower.contains("sensor") && (name_lower.contains("id") || name_lower.contains("name"))) ||
-           name_lower == "sensor" ||
-           name_lower == "id" ||
-           name_lower == "name" ||
-           column_contains_sensor_identifiers_simple(inferred_columns.get(idx)) {
+        if (name_lower.contains("sensor")
+            && (name_lower.contains("id") || name_lower.contains("name")))
+            || name_lower == "sensor"
+            || name_lower == "id"
+            || name_lower == "name"
+            || column_contains_sensor_identifiers_simple(inferred_columns.get(idx))
+        {
             Some(idx)
         } else {
             None
@@ -947,7 +1039,6 @@ fn parse_datetime_from_inferred(column: &InferedColumn, row_idx: usize) -> Resul
         )),
     }
 }
-
 
 fn inferred_value_to_sensor_type(value: &InferedValue) -> SensorType {
     match value {
@@ -1162,12 +1253,25 @@ mod strict_mode_tests {
     fn test_parse_strict_formats() {
         // Test long format with names
         let data_grid = StringDataGrid::new(
-            vec!["datetime".to_string(), "sensor_name".to_string(), "value".to_string()],
             vec![
-                vec!["2024-01-01T00:00:00Z".to_string(), "temp1".to_string(), "22.5".to_string()],
-                vec!["2024-01-01T01:00:00Z".to_string(), "temp2".to_string(), "23.1".to_string()],
+                "datetime".to_string(),
+                "sensor_name".to_string(),
+                "value".to_string(),
             ],
-        ).unwrap();
+            vec![
+                vec![
+                    "2024-01-01T00:00:00Z".to_string(),
+                    "temp1".to_string(),
+                    "22.5".to_string(),
+                ],
+                vec![
+                    "2024-01-01T01:00:00Z".to_string(),
+                    "temp2".to_string(),
+                    "23.1".to_string(),
+                ],
+            ],
+        )
+        .unwrap();
 
         let result = parse_csv_strict(data_grid);
         assert!(result.is_ok());
@@ -1180,12 +1284,25 @@ mod strict_mode_tests {
     #[test]
     fn test_parse_strict_wide_format() {
         let data_grid = StringDataGrid::new(
-            vec!["datetime".to_string(), "temperature".to_string(), "humidity".to_string()],
             vec![
-                vec!["2024-01-01T00:00:00Z".to_string(), "22.5".to_string(), "65.2".to_string()],
-                vec!["2024-01-01T01:00:00Z".to_string(), "23.1".to_string(), "64.8".to_string()],
+                "datetime".to_string(),
+                "temperature".to_string(),
+                "humidity".to_string(),
             ],
-        ).unwrap();
+            vec![
+                vec![
+                    "2024-01-01T00:00:00Z".to_string(),
+                    "22.5".to_string(),
+                    "65.2".to_string(),
+                ],
+                vec![
+                    "2024-01-01T01:00:00Z".to_string(),
+                    "23.1".to_string(),
+                    "64.8".to_string(),
+                ],
+            ],
+        )
+        .unwrap();
 
         let result = parse_csv_strict(data_grid);
         assert!(result.is_ok());
@@ -1205,11 +1322,18 @@ mod strict_mode_tests {
     #[test]
     fn test_strict_format_validation_errors() {
         let data_grid = StringDataGrid::new(
-            vec!["timestamp".to_string(), "device".to_string(), "reading".to_string()],
             vec![
-                vec!["2024-01-01T00:00:00Z".to_string(), "dev1".to_string(), "22.5".to_string()],
+                "timestamp".to_string(),
+                "device".to_string(),
+                "reading".to_string(),
             ],
-        ).unwrap();
+            vec![vec![
+                "2024-01-01T00:00:00Z".to_string(),
+                "dev1".to_string(),
+                "22.5".to_string(),
+            ]],
+        )
+        .unwrap();
 
         let result = parse_csv_strict(data_grid);
         assert!(result.is_err());
@@ -1266,15 +1390,28 @@ mod unit_tests {
     fn test_parse_strict_formats() {
         // Initialize configuration
         let _ = crate::config::load_configuration();
-        
+
         // Test long format with names
         let data_grid = StringDataGrid::new(
-            vec!["datetime".to_string(), "sensor_name".to_string(), "value".to_string()],
             vec![
-                vec!["2024-01-01T00:00:00Z".to_string(), "temp1".to_string(), "22.5".to_string()],
-                vec!["2024-01-01T01:00:00Z".to_string(), "temp2".to_string(), "23.1".to_string()],
+                "datetime".to_string(),
+                "sensor_name".to_string(),
+                "value".to_string(),
             ],
-        ).unwrap();
+            vec![
+                vec![
+                    "2024-01-01T00:00:00Z".to_string(),
+                    "temp1".to_string(),
+                    "22.5".to_string(),
+                ],
+                vec![
+                    "2024-01-01T01:00:00Z".to_string(),
+                    "temp2".to_string(),
+                    "23.1".to_string(),
+                ],
+            ],
+        )
+        .unwrap();
 
         let result = parse_csv_strict(data_grid);
         assert!(result.is_ok());

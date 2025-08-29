@@ -1,5 +1,6 @@
 use anyhow::Result;
-use sensapp::datamodel::batch::{Batch, SingleSensorBatch};
+use sensapp::test_utils::fixtures::create_test_batch;
+use sensapp::datamodel::batch::SingleSensorBatch;
 use sensapp::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use sensapp::datamodel::sensapp_vec::SensAppLabels;
 use sensapp::datamodel::{Sample, SensAppDateTime, Sensor, SensorType, TypedSamples};
@@ -10,8 +11,7 @@ use serial_test::serial;
 use smallvec::smallvec;
 use std::sync::Arc;
 
-mod common;
-use common::TestDb;
+use sensapp::test_utils::TestDb;
 
 /// Initialize configuration for tests
 fn init_config() {
@@ -156,7 +156,7 @@ impl PrometheusTestData {
         }
 
         // Create the batch and publish all test data to the database
-        let batch = Batch::new(batch_sensors);
+        let batch = create_test_batch(batch_sensors);
         storage.publish(Arc::new(batch)).await?;
 
         // wait 1 second to ensure data is committed
@@ -225,7 +225,7 @@ async fn test_prometheus_matcher_eq_sensor_name() -> Result<()> {
 
     // Get PostgreSQL storage for direct testing
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -256,7 +256,7 @@ async fn test_prometheus_matcher_eq_label() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -287,7 +287,7 @@ async fn test_prometheus_matcher_neq() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -319,7 +319,7 @@ async fn test_prometheus_matcher_regex() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -350,7 +350,7 @@ async fn test_prometheus_matcher_regex_sensor_name() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -381,7 +381,7 @@ async fn test_prometheus_matcher_not_regex() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -411,7 +411,7 @@ async fn test_prometheus_matcher_multiple_matchers_and_logic() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -440,7 +440,7 @@ async fn test_prometheus_matcher_no_matches() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -480,7 +480,7 @@ async fn test_debug_sensor_creation() -> Result<()> {
         SingleSensorBatch::new(Arc::new(sensor), TypedSamples::Float(samples));
     batch_sensors.push(single_sensor_batch);
 
-    let batch = Batch::new(batch_sensors);
+    let batch = create_test_batch(batch_sensors);
 
     println!("Publishing batch...");
     storage.publish(Arc::new(batch)).await?;
@@ -513,7 +513,7 @@ async fn test_prometheus_matcher_empty_matchers() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -538,7 +538,7 @@ async fn test_prometheus_matcher_contradictory_matchers() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -603,7 +603,7 @@ async fn test_prometheus_matcher_special_characters() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -632,7 +632,7 @@ async fn test_prometheus_matcher_invalid_regex_handling() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -663,7 +663,7 @@ async fn test_prometheus_matcher_sql_injection_protection() -> Result<()> {
     PrometheusTestData::create_test_sensors(&storage).await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -710,7 +710,7 @@ async fn test_unit_eq_matcher_sensor_name() -> Result<()> {
     UnitTestData::create_unit_test_sensors(&storage, "unit_test_1").await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -734,7 +734,7 @@ async fn test_unit_eq_matcher_label() -> Result<()> {
     UnitTestData::create_unit_test_sensors(&storage, "unit_test_2").await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -761,7 +761,7 @@ async fn test_unit_regex_matcher() -> Result<()> {
     UnitTestData::create_unit_test_sensors(&storage, "unit_test_3").await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -787,7 +787,7 @@ async fn test_unit_multiple_matchers_and_logic() -> Result<()> {
     UnitTestData::create_unit_test_sensors(&storage, "unit_test_4").await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -816,7 +816,7 @@ async fn test_unit_empty_matchers_returns_all() -> Result<()> {
     UnitTestData::create_unit_test_sensors(&storage, "unit_test_5").await?;
 
     // Create a separate pool connection for testing PrometheusMatcher
-    let pool = sqlx::PgPool::connect(&test_db.connection_string).await?;
+    let pool = sqlx::PgPool::connect(test_db.connection_string()).await?;
 
     let prometheus_matcher = PrometheusMatcher::new(pool);
 
@@ -869,7 +869,7 @@ impl UnitTestData {
             vec![(1000000, 1024.0)],
         )?;
 
-        let batch = Batch::new(batch_sensors);
+        let batch = create_test_batch(batch_sensors);
         storage.publish(Arc::new(batch)).await?;
         Ok(())
     }

@@ -61,11 +61,6 @@ impl TypedSamples {
         }
     }
 
-    #[cfg(feature = "test-utils")]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     pub fn clone_empty(&self) -> Self {
         match self {
             TypedSamples::Integer(_) => TypedSamples::Integer(smallvec![]),

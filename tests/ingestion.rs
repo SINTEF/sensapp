@@ -1,11 +1,9 @@
-mod common;
-
 use anyhow::Result;
 use axum::http::StatusCode;
-use common::db::DbHelpers;
-use common::http::TestApp;
-use common::{TestDb, fixtures};
-use sensapp::config::load_configuration_for_tests;
+use sensapp::test_utils::db;
+use sensapp::test_utils::http::TestApp;
+use sensapp::test_utils::{TestDb, fixtures};
+use sensapp::test_utils::load_configuration_for_tests;
 use serial_test::serial;
 
 // Ensure configuration is loaded once for all tests in this module
@@ -48,7 +46,7 @@ async fn test_csv_ingestion_temperature_sensor() -> Result<()> {
         return Err(anyhow::anyhow!("CSV has no data rows"));
     };
 
-    let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+    let sensor = db::get_sensor_by_name(&storage, &sensor_name)
         .await?
         .expect("Temperature sensor should exist");
 
@@ -59,7 +57,7 @@ async fn test_csv_ingestion_temperature_sensor() -> Result<()> {
     );
 
     // And: All samples should be stored
-    let sensor_data = DbHelpers::verify_sensor_data(&storage, &sensor_name, 5).await?;
+    let sensor_data = db::verify_sensor_data(&storage, &sensor_name, 5).await?;
 
     // Verify the first sample
     if let sensapp::datamodel::TypedSamples::Float(samples) = &sensor_data.samples {
@@ -103,7 +101,7 @@ async fn test_csv_ingestion_multiple_sensors() -> Result<()> {
 
     // Verify both expected sensors exist
     for sensor_name in &expected_sensors {
-        let sensor = DbHelpers::get_sensor_by_name(&storage, sensor_name)
+        let sensor = db::get_sensor_by_name(&storage, sensor_name)
             .await?
             .unwrap_or_else(|| panic!("Sensor {} should exist", sensor_name));
 
@@ -112,13 +110,13 @@ async fn test_csv_ingestion_multiple_sensors() -> Result<()> {
                 sensor.unit.as_ref().map(|u| &u.name),
                 Some(&"°C".to_string())
             );
-            DbHelpers::verify_sensor_data(&storage, sensor_name, 3).await?;
+            db::verify_sensor_data(&storage, sensor_name, 3).await?;
         } else if sensor_name.starts_with("humidity_") {
             assert_eq!(
                 sensor.unit.as_ref().map(|u| &u.name),
                 Some(&"%".to_string())
             );
-            DbHelpers::verify_sensor_data(&storage, sensor_name, 3).await?;
+            db::verify_sensor_data(&storage, sensor_name, 3).await?;
         }
     }
 
@@ -154,12 +152,12 @@ async fn test_json_ingestion() -> Result<()> {
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Could not parse sensor name from SenML JSON"))?;
 
-    let sensor = DbHelpers::get_sensor_by_name(&storage, sensor_name)
+    let sensor = db::get_sensor_by_name(&storage, sensor_name)
         .await?
         .expect("Temperature sensor should exist");
 
     assert!(sensor.name.starts_with("temperature_"));
-    DbHelpers::verify_sensor_data(&storage, sensor_name, 3).await?;
+    db::verify_sensor_data(&storage, sensor_name, 3).await?;
 
     Ok(())
 }
@@ -243,7 +241,7 @@ async fn test_large_csv_ingestion() -> Result<()> {
     response.assert_status(StatusCode::OK);
 
     // And: All samples should be stored for our bulk sensor
-    let sensor = DbHelpers::get_sensor_by_name(&storage, "temperature_bulk")
+    let sensor = db::get_sensor_by_name(&storage, "temperature_bulk")
         .await?
         .expect("Bulk temperature sensor should exist");
 
@@ -252,7 +250,7 @@ async fn test_large_csv_ingestion() -> Result<()> {
         sensor.unit.as_ref().map(|u| &u.name),
         Some(&"°C".to_string())
     );
-    DbHelpers::verify_sensor_data(&storage, "temperature_bulk", 1000).await?;
+    db::verify_sensor_data(&storage, "temperature_bulk", 1000).await?;
 
     Ok(())
 }

@@ -179,19 +179,6 @@ impl BatchBuilder {
         Ok(())
     }
 
-    #[cfg(feature = "test-utils")]
-    pub async fn send_if_batch_full(
-        &mut self,
-        storage: Arc<dyn StorageInstance>,
-    ) -> Result<bool, Error> {
-        let len = self.len().await;
-        if len < self.batch_size {
-            return Ok(false);
-        }
-        self.send(storage, len).await?;
-        Ok(true)
-    }
-
     pub async fn send_what_is_left(
         &mut self,
         storage: Arc<dyn StorageInstance>,

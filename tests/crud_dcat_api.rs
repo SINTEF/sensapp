@@ -1,10 +1,8 @@
-mod common;
-
 use anyhow::Result;
 use axum::http::StatusCode;
-use common::http::TestApp;
-use common::{TestDb, fixtures};
-use sensapp::config::load_configuration_for_tests;
+use sensapp::test_utils::http::TestApp;
+use sensapp::test_utils::{TestDb, fixtures};
+use sensapp::test_utils::load_configuration_for_tests;
 use serde_json::Value;
 use serial_test::serial;
 

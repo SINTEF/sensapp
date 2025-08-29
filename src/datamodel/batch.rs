@@ -24,16 +24,6 @@ impl Default for Batch {
 
 impl Batch {
     #[cfg(feature = "test-utils")]
-    pub fn new(sensors: SensAppVec<SingleSensorBatch>) -> Self {
-        Self { sensors }
-    }
-
-    #[cfg(feature = "test-utils")]
-    pub async fn is_empty(&self) -> bool {
-        self.len().await == 0
-    }
-
-    #[cfg(feature = "test-utils")]
     pub async fn len(&self) -> usize {
         let sensors_len = self.sensors.len();
         if sensors_len == 0 {
@@ -91,11 +81,6 @@ impl SingleSensorBatch {
             }
         }
         Ok(())
-    }
-
-    #[cfg(feature = "test-utils")]
-    pub async fn is_empty(&self) -> bool {
-        self.len().await == 0
     }
 
     pub async fn len(&self) -> usize {
