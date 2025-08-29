@@ -111,7 +111,7 @@ big-decimal-byte-string-encoder = { version = "0.1", optional = true }
 clru = "0.6"
 utoipa = { version = "5.4", features = ["axum_extras"] }
 utoipa-scalar = { version = "0.3", features = ["axum"] }
-rrdcached-client = { version = "0.1", optional = true }
+rrdcached-client = { version = "0.1.5", optional = true }
 clickhouse = { version = "0.13", features = ["lz4", "uuid", "time"], optional = true }
 rustls = "0.23"
 
