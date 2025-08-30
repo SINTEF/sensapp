@@ -1,14 +1,11 @@
-use crate::ingestors::http::crud::{get_series_data, list_metrics, list_series};
-use crate::ingestors::http::prometheus_read::prometheus_remote_read;
-use crate::ingestors::http::server::publish_senml_data;
+use crate::ingestors::http::server::build_app_routes;
 use crate::ingestors::http::state::HttpServerState;
 use crate::storage::StorageInstance;
 /// HTTP testing utilities
 use anyhow::Result;
-use axum::Router;
 use axum::body::Body;
+use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderMap, Request, StatusCode};
-use axum::routing::{get, post};
 use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot` and `ready`
 
@@ -25,18 +22,10 @@ impl TestApp {
             storage,
         };
 
-        // Create a minimal router for testing (without middleware that might interfere)
-        // We'll define simple test handlers that delegate to the import functions
-        let app = Router::new()
-            .route("/sensors/publish", post(test_publish_handler))
-            .route("/metrics", get(list_metrics))
-            .route("/series", get(list_series))
-            .route("/series/{series_uuid}", get(get_series_data))
-            .route(
-                "/api/v1/prometheus_remote_read",
-                post(prometheus_remote_read),
-            )
-            .with_state(state);
+        // Use the shared route builder from the main server
+        // This ensures tests use the exact same routes as production
+        let max_body_layer = DefaultBodyLimit::max(10 * 1024 * 1024); // 10MB for tests
+        let app = build_app_routes(state, max_body_layer);
 
         Self { app }
     }
@@ -158,6 +147,24 @@ impl TestApp {
         let response = self.app.clone().oneshot(request).await?;
         Ok(TestResponse::new(response).await)
     }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub async fn post_prometheus_write(
+        &self,
+        path: &str,
+        compressed_data: &[u8],
+    ) -> Result<TestResponse> {
+        let request = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/x-protobuf")
+            .header("content-encoding", "snappy")
+            .header("x-prometheus-remote-write-version", "0.1.0")
+            .body(Body::from(compressed_data.to_vec()))?;
+
+        let response = self.app.clone().oneshot(request).await?;
+        Ok(TestResponse::new(response).await)
+    }
 }
 
 /// Test response wrapper for easier assertions
@@ -261,91 +268,8 @@ impl TestResponse {
     }
 }
 
-/// Unified publish handler for testing - handles CSV, JSON, and Arrow based on content type
-async fn test_publish_handler(
-    axum::extract::State(state): axum::extract::State<HttpServerState>,
-    headers: axum::http::HeaderMap,
-    body: Body,
-) -> Result<String, (StatusCode, String)> {
-    use futures::TryStreamExt;
-    use std::io;
-
-    let content_type = headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("text/csv");
-
-    if content_type.contains("application/json") {
-        // Handle JSON data
-        let body_bytes = axum::body::to_bytes(body, usize::MAX).await.map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("Failed to read body: {}", e),
-            )
-        })?;
-
-        let json_str = String::from_utf8(body_bytes.to_vec())
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid UTF-8: {}", e)))?;
-
-        // Use the real JSON ingestion logic
-        publish_senml_data(&json_str, state.storage.clone())
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("JSON ingestion failed: {:?}", e),
-                )
-            })?;
-
-        Ok("ok".to_string())
-    } else if content_type.contains("application/vnd.apache.arrow.file") {
-        // Handle Arrow data
-        use crate::importers::arrow::publish_arrow_async;
-
-        let stream = body.into_data_stream();
-        let stream = stream.map_err(io::Error::other);
-        let reader = stream.into_async_read();
-
-        publish_arrow_async(reader, state.storage.clone())
-            .await
-            .map_err(|e| {
-                // Arrow parsing errors should be bad requests, not internal server errors
-                if e.to_string().contains("Failed to create Arrow file reader")
-                    || e.to_string()
-                        .contains("Arrow file contains no data batches")
-                    || e.to_string().contains("Failed to read Arrow batch")
-                {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        format!("Invalid Arrow format: {}", e),
-                    )
-                } else {
-                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-                }
-            })?;
-
-        Ok("Arrow data ingested successfully".to_string())
-    } else {
-        // Handle CSV data (default)
-        use crate::importers::csv::publish_csv;
-        use crate::ingestors::http::server::ParseMode;
-
-        let stream = body.into_data_stream();
-        let stream = stream.map_err(io::Error::other);
-        let reader = stream.into_async_read();
-
-        let csv_reader = csv_async::AsyncReaderBuilder::new()
-            .has_headers(true)
-            .delimiter(b',') // Use comma for tests, semicolon is the server default
-            .create_reader(reader);
-
-        publish_csv(csv_reader, 1000, ParseMode::Infer, state.storage.clone())
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        Ok("CSV data ingested successfully".to_string())
-    }
-}
+// Removed the test_publish_handler function entirely as it's no longer needed
+// The real server endpoints will be used directly through the shared router
 
 #[cfg(test)]
 mod tests {

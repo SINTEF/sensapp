@@ -1,5 +1,7 @@
 use super::common::decompress_snappy;
-use super::remote_read_models::{ReadRequest, ReadResponse};
+use super::remote_read_models::ReadRequest;
+#[cfg(any(test, feature = "test-utils"))]
+use super::remote_read_models::ReadResponse;
 use anyhow::Result;
 use prost::Message;
 use std::io::Cursor;
@@ -47,6 +49,7 @@ pub fn parse_remote_read_request(input: &[u8]) -> Result<ReadRequest> {
     Ok(request)
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 pub fn serialize_read_response(response: &ReadResponse) -> Result<Vec<u8>> {
     let encoded = response.encode_to_vec();
     debug!("Encoded ReadResponse to {} bytes", encoded.len());

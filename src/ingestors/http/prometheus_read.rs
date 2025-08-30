@@ -1,8 +1,8 @@
-use crate::parsing::prometheus::remote_read_models::{QueryResult, ReadResponse};
-use crate::parsing::prometheus::remote_read_parser::{
-    parse_remote_read_request, serialize_read_response,
-};
-use crate::parsing::prometheus::remote_write_models::{Label, Sample, TimeSeries};
+use crate::parsing::prometheus::chunk_encoder::ChunkEncoder;
+use crate::parsing::prometheus::remote_read_models::read_request;
+use crate::parsing::prometheus::remote_read_parser::parse_remote_read_request;
+use crate::parsing::prometheus::remote_write_models::{Label, Sample};
+use crate::parsing::prometheus::stream_writer::StreamWriter;
 
 use super::{app_error::AppError, state::HttpServerState};
 use axum::{
@@ -141,15 +141,27 @@ pub async fn prometheus_remote_read(
         read_request.accepted_response_types
     );
 
+    // Check if client supports chunked responses (we only support STREAMED_XOR_CHUNKS)
+    let supports_chunks = read_request
+        .accepted_response_types
+        .contains(&(read_request::ResponseType::StreamedXorChunks as i32));
+    
+    if !supports_chunks {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "Client does not support STREAMED_XOR_CHUNKS response type. Only chunked responses are supported."
+        )));
+    }
+
     // Use the storage trait to query Prometheus time series data
     let storage = &state.storage;
 
-    // Process each query
-    let mut query_results = Vec::new();
+    // Process each query and create chunked responses
+    let mut chunked_responses = Vec::new();
 
-    for query in &read_request.queries {
+    for (query_index, query) in read_request.queries.iter().enumerate() {
         info!(
-            "Processing Prometheus query: time range {}ms - {}ms ({} matchers)",
+            "Processing Prometheus query {}: time range {}ms - {}ms ({} matchers)",
+            query_index,
             query.start_timestamp_ms,
             query.end_timestamp_ms,
             query.matchers.len()
@@ -172,10 +184,16 @@ pub async fn prometheus_remote_read(
 
         info!("Found {} matching time series", time_series_data.len());
 
-        // Convert SensApp data to Prometheus TimeSeries format
-        let mut timeseries = Vec::new();
+        // Convert each time series to chunked format
+        let mut chunked_series = Vec::new();
 
         for (sensor, samples) in time_series_data {
+            debug!(
+                "Processing sensor '{}' with {} samples, labels: {:?}",
+                sensor.name,
+                samples.len(),
+                sensor.labels
+            );
             // Convert sensor labels to Prometheus labels
             let mut labels = vec![Label {
                 name: "__name__".to_string(),
@@ -193,7 +211,7 @@ pub async fn prometheus_remote_read(
                 }
             }
 
-            // Convert samples to Prometheus format
+            // Convert actual samples to Prometheus format
             let prometheus_samples: Vec<Sample> = samples
                 .into_iter()
                 .map(|sample| Sample {
@@ -202,22 +220,39 @@ pub async fn prometheus_remote_read(
                 })
                 .collect();
 
-            timeseries.push(TimeSeries {
-                labels,
-                samples: prometheus_samples,
-            });
+            // Skip encoding if no samples (empty time series)
+            if prometheus_samples.is_empty() {
+                debug!("Skipping sensor '{}' - no samples", sensor.name);
+                continue;
+            }
+
+            debug!(
+                "Encoding sensor '{}' with {} labels and {} samples",
+                sensor.name,
+                labels.len(),
+                prometheus_samples.len()
+            );
+
+            // Encode the series with XOR chunks
+            let encoded_series = ChunkEncoder::encode_series(labels, prometheus_samples)
+                .map_err(|e| {
+                    AppError::internal_server_error(anyhow::anyhow!(
+                        "Failed to encode series: {}",
+                        e
+                    ))
+                })?;
+
+            chunked_series.push(encoded_series);
         }
 
-        query_results.push(QueryResult { timeseries });
+        // Create a ChunkedReadResponse for this query
+        let response = ChunkEncoder::create_response(query_index as i64, chunked_series);
+        chunked_responses.push(response);
     }
 
-    let response = ReadResponse {
-        results: query_results,
-    };
-
-    // Serialize and compress the response
-    let response_bytes = serialize_read_response(&response).map_err(|e| {
-        AppError::internal_server_error(anyhow::anyhow!("Failed to serialize response: {}", e))
+    // Create the streaming response body
+    let response_bytes = StreamWriter::create_stream_body(&chunked_responses).map_err(|e| {
+        AppError::internal_server_error(anyhow::anyhow!("Failed to create stream body: {}", e))
     })?;
 
     info!(
@@ -225,11 +260,11 @@ pub async fn prometheus_remote_read(
         response_bytes.len()
     );
 
-    // Build HTTP response with appropriate headers
+    // Build HTTP response with appropriate headers for chunked response
+    // Note: No content-encoding for chunked responses (no snappy compression)
     let response = Response::builder()
         .status(StatusCode::OK)
-        .header("content-type", "application/x-protobuf")
-        .header("content-encoding", "snappy")
+        .header("content-type", "application/x-streamed-protobuf; proto=prometheus.ChunkedReadResponse")
         .body(axum::body::Body::from(response_bytes))
         .map_err(|e| {
             AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))

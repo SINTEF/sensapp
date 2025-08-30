@@ -106,10 +106,16 @@ pub async fn publish_prometheus(
     debug!("Prometheus remote write: received {} bytes", bytes.len());
 
     // Verify headers
-    verify_headers(&headers)?;
+    verify_headers(&headers).map_err(|e| {
+        debug!("Header verification failed: {:?}", e);
+        e
+    })?;
 
     // Parse the content
-    let write_request = parse_remote_write_request(&bytes)?;
+    let write_request = parse_remote_write_request(&bytes).map_err(|e| {
+        debug!("Failed to parse write request: {:?}", e);
+        e
+    })?;
 
     // Regularly, prometheus sends metadata on the undocumented reserved field,
     // so we stop immediately when it happens.
@@ -119,7 +125,10 @@ pub async fn publish_prometheus(
 
     debug!("Processing {} timeseries", write_request.timeseries.len());
 
-    let mut batch_builder = BatchBuilder::new()?;
+    let mut batch_builder = BatchBuilder::new().map_err(|e| {
+        debug!("Failed to create batch builder: {:?}", e);
+        AppError::internal_server_error(e)
+    })?;
     for time_serie in write_request.timeseries {
         let mut labels = SensAppLabels::with_capacity(time_serie.labels.len());
         let mut name: Option<String> = None;
@@ -146,7 +155,11 @@ pub async fn publish_prometheus(
         };
 
         // Prometheus has a very simple model, it's always a float.
-        let sensor = Sensor::new_without_uuid(name, SensorType::Float, unit, Some(labels))?;
+        let sensor = Sensor::new_without_uuid(name, SensorType::Float, unit, Some(labels))
+            .map_err(|e| {
+                debug!("Failed to create sensor: {:?}", e);
+                AppError::internal_server_error(e)
+            })?;
 
         // We can now add the samples
         let samples = TypedSamples::Float(
@@ -160,7 +173,10 @@ pub async fn publish_prometheus(
                 .collect(),
         );
 
-        batch_builder.add(Arc::new(sensor), samples).await?;
+        batch_builder.add(Arc::new(sensor), samples).await.map_err(|e| {
+            debug!("Failed to add samples to batch: {:?}", e);
+            AppError::internal_server_error(e)
+        })?;
     }
 
     match batch_builder.send_what_is_left(state.storage.clone()).await {

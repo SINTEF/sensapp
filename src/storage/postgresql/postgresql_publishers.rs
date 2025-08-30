@@ -51,8 +51,20 @@ pub async fn publish_float_values(
     sensor_id: i64,
     values: &[Sample<f64>],
 ) -> Result<()> {
+    use tracing::debug;
+    
+    debug!(
+        "Publishing {} float values for sensor_id {}",
+        values.len(),
+        sensor_id
+    );
+    
     for value in values {
         let timestamp_us = datetime_to_micros(&value.datetime);
+        debug!(
+            "  Storing float sample: timestamp_us={}, value={}",
+            timestamp_us, value.value
+        );
         let query = sqlx::query(
             r#"
             INSERT INTO float_values (sensor_id, timestamp_us, value)

@@ -64,33 +64,9 @@ pub enum ParseMode {
 )]
 struct ApiDoc;
 
-pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
-    let config = config::get()?;
-    let max_body_layer = DefaultBodyLimit::max(config.parse_http_body_limit()?);
-    let timeout_seconds = config.http_server_timeout_seconds;
-
-    // Initialize tracing
-    // Note: tracing subscriber is initialized in main.rs
-
-    // List of headers that shouldn't be logged
-    let sensitive_headers: Arc<[_]> = vec![header::AUTHORIZATION, header::COOKIE].into();
-
-    // Middleware creation
-    let middleware = ServiceBuilder::new()
-        //.layer(NewSentryLayer::<Request>::new_from_top())
-        .sensitive_request_headers(sensitive_headers.clone())
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
-                .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
-        )
-        .sensitive_response_headers(sensitive_headers)
-        .layer(TimeoutLayer::new(Duration::from_secs(timeout_seconds)))
-        .compression()
-        .into_inner();
-
-    // Create our application with a single route
-    let app = Router::new()
+/// Build the application router without middleware (useful for testing)
+pub fn build_app_routes(state: HttpServerState, max_body_layer: DefaultBodyLimit) -> Router {
+    Router::new()
         .route("/", get(frontpage))
         //.route("/api-docs/openapi.json", get(openapi))
         .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
@@ -119,8 +95,36 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         )
         // Admin API
         .route("/api/v1/admin/vacuum", post(vacuum_database))
-        .layer(middleware)
-        .with_state(state);
+        .with_state(state)
+}
+
+pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
+    let config = config::get()?;
+    let max_body_layer = DefaultBodyLimit::max(config.parse_http_body_limit()?);
+    let timeout_seconds = config.http_server_timeout_seconds;
+
+    // Initialize tracing
+    // Note: tracing subscriber is initialized in main.rs
+
+    // List of headers that shouldn't be logged
+    let sensitive_headers: Arc<[_]> = vec![header::AUTHORIZATION, header::COOKIE].into();
+
+    // Middleware creation
+    let middleware = ServiceBuilder::new()
+        //.layer(NewSentryLayer::<Request>::new_from_top())
+        .sensitive_request_headers(sensitive_headers.clone())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
+                .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
+        )
+        .sensitive_response_headers(sensitive_headers)
+        .layer(TimeoutLayer::new(Duration::from_secs(timeout_seconds)))
+        .compression()
+        .into_inner();
+
+    // Create our application using the shared route builder
+    let app = build_app_routes(state, max_body_layer).layer(middleware);
 
     // Bind to the address with improved error handling
     let listener = match tokio::net::TcpListener::bind(address).await {
@@ -242,7 +246,14 @@ async fn publish_arrow_format(
 
     crate::importers::arrow::publish_arrow_async(reader, storage)
         .await
-        .map_err(AppError::internal_server_error)
+        .map_err(|e| {
+            // Check if this is a client error (invalid format) or server error
+            if e.is_client_error() {
+                AppError::bad_request(anyhow::anyhow!(e))
+            } else {
+                AppError::internal_server_error(anyhow::anyhow!(e))
+            }
+        })
 }
 
 /// Handle CSV data ingestion

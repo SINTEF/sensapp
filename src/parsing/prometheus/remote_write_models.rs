@@ -25,7 +25,7 @@ pub struct TimeSeries {
     pub samples: Vec<Sample>,
 }
 
-#[derive(prost::Message)]
+#[derive(prost::Message, Clone)]
 pub struct Label {
     #[prost(string, tag = "1")]
     pub name: String,
@@ -33,7 +33,7 @@ pub struct Label {
     pub value: String,
 }
 
-#[derive(prost::Message)]
+#[derive(prost::Message, Clone)]
 pub struct Sample {
     #[prost(double, tag = "1")]
     pub value: f64,

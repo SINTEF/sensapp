@@ -475,13 +475,16 @@ impl StorageInstance for PostgresStorage {
             .context("Failed to find matching sensors")?;
 
         debug!(
-            "Found {} matching sensors for Prometheus query",
-            sensor_ids.len()
+            "Found {} matching sensors for Prometheus query: {:?}",
+            sensor_ids.len(),
+            sensor_ids
         );
 
         let mut results = Vec::new();
 
         for sensor_id in sensor_ids {
+            debug!("Querying data for sensor_id: {}", sensor_id);
+            
             // Get sensor metadata and data by sensor_id directly
             if let Some(sensor_data) = self
                 .query_sensor_data_by_id(
@@ -492,6 +495,11 @@ impl StorageInstance for PostgresStorage {
                 )
                 .await?
             {
+                debug!(
+                    "Retrieved sensor '{}' with type {:?}",
+                    sensor_data.sensor.name,
+                    sensor_data.sensor.sensor_type
+                );
                 // Extract float samples (Prometheus only uses floats)
                 match sensor_data.samples {
                     TypedSamples::Float(samples) => {
@@ -668,6 +676,11 @@ impl PostgresStorage {
             value: f64,
         }
 
+        debug!(
+            "Querying float samples for sensor_id {} between {:?} and {:?}",
+            sensor_id, start_time, end_time
+        );
+
         let rows: Vec<FloatValueRow> = sqlx::query_as(
             r#"
             SELECT timestamp_us, value FROM float_values
@@ -684,6 +697,8 @@ impl PostgresStorage {
         .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
         .fetch_all(&self.pool)
         .await?;
+
+        debug!("Found {} float samples", rows.len());
 
         let mut samples = smallvec![];
         for row in rows {
@@ -952,13 +967,13 @@ impl PostgresStorage {
         // Query labels for this sensor
         let labels = self.get_sensor_labels(sensor_id).await?;
 
-        Ok(Sensor {
-            uuid: sensor_row.uuid,
-            name: sensor_row.name,
+        Ok(Sensor::new(
+            sensor_row.uuid,
+            sensor_row.name,
             sensor_type,
             unit,
-            labels: labels.unwrap_or_default(),
-        })
+            labels,
+        ))
     }
 
     /// Get labels for a sensor by sensor_id
@@ -977,12 +992,19 @@ impl PostgresStorage {
         .await
         .context("Failed to fetch sensor labels")?;
 
+        debug!(
+            "Retrieved {} labels for sensor_id {}",
+            labels_rows.len(),
+            sensor_id
+        );
+
         if labels_rows.is_empty() {
             Ok(None)
         } else {
             let mut labels = SensAppLabels::with_capacity(labels_rows.len());
-            for (name, value) in labels_rows {
-                labels.push((name, value));
+            for (name, value) in labels_rows.iter() {
+                debug!("  Label: {}={}", name, value);
+                labels.push((name.clone(), value.clone()));
             }
             Ok(Some(labels))
         }

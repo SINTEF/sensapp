@@ -30,7 +30,8 @@ SensApp is a **sensor data platform** built with Rust that scales from edge depl
 
 - **HTTP REST API** with Axum web framework
 - **MQTT client** for IoT device integration
-- **Multi-format support**: JSON, CSV, SenML, InfluxDB line protocol, Prometheus remote write
+- **Multi-format support**: JSON, CSV, SenML, InfluxDB line protocol, Prometheus remote write and Remote Read
+- **Compatibility gateways**: InfluxDB and Prometheus.
 
 #### Storage Abstraction (`src/storage/`)
 
@@ -78,8 +79,11 @@ SensApp is a **sensor data platform** built with Rust that scales from edge depl
 - DATABASE_URL="postgres://postgres:postgres@localhost:5432/sensapp" cargo sqlx prepare
 - do focus on postgresql, AND NOT OTHER STORAGE BACKENDS FOR NOW.
 - You are an excellent and experienced software engineer.
-- When you filter the tests, you may get a success code even when all the tests where filtered out, confusing you as the test you wanted to run passed. But a line such as "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 78 filtered out; finished in 0.00s" means that you failed your filter, not that the test passed.
 - code used for unit tests and integration tests should be marked with #[cfg(any(test, feature = "test-utils"))]
-- unit tests and integrations tests are very helpful and appreciated. Consider doing them even when not actively requested.
-- Backward compatibility is not a concern. The project is new.
 - I truly hate #[allow(dead_code)], so avoid it as much as possible. If the code is unused, delete it. If the code is used only conditionally, mark the conditions correctly. For example, in integration tests it should be marked with #[cfg(feature = "test-utils")]
+- unit tests and integrations tests are very helpful and appreciated. Consider doing them even when not actively requested.
+- Rust best practices should be followed.
+- KISS: Keep It Simple Stupid. Avoid over-engineering.
+- Good Enough is the target, not perfection.
+- Professionalism and pragmatism are expected. This is a professional project, not a hobby project.
+- Backward compatibility is not a concern. The project is not deployed in production yet.

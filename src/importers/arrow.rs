@@ -4,7 +4,7 @@ use crate::{
     },
     storage::StorageInstance,
 };
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use arrow::array::{
     Array, ArrayRef, BinaryArray, BooleanArray, Decimal128Array, Float64Array, Int64Array,
     StringArray, StructArray, TimestampMicrosecondArray,
@@ -17,6 +17,30 @@ use geo::Point;
 use rust_decimal::Decimal;
 use smallvec::SmallVec;
 use std::{collections::HashMap, io::Cursor, sync::Arc};
+use thiserror::Error;
+
+/// Arrow import error types
+#[derive(Error, Debug)]
+pub enum ArrowError {
+    #[error("Invalid Arrow format: {0}")]
+    InvalidFormat(String),
+    
+    #[error("Arrow parsing error: {0}")]
+    ParseError(String),
+    
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    
+    #[error("Storage error: {0}")]
+    StorageError(#[from] anyhow::Error),
+}
+
+impl ArrowError {
+    /// Check if this is a client error (bad request)
+    pub fn is_client_error(&self) -> bool {
+        matches!(self, ArrowError::InvalidFormat(_) | ArrowError::ParseError(_))
+    }
+}
 
 /// Type alias for complex sensor data map
 type SensorDataMap = HashMap<String, (Arc<Sensor>, Vec<(SensAppDateTime, TypedSamples)>)>;
@@ -26,60 +50,60 @@ use uuid::Uuid;
 pub async fn publish_arrow_async<R: AsyncRead + Unpin + Send>(
     mut arrow_reader: R,
     storage: Arc<dyn StorageInstance>,
-) -> Result<()> {
+) -> Result<(), ArrowError> {
     // Read all data into a buffer first
     let mut buffer = Vec::new();
-    arrow_reader.read_to_end(&mut buffer).await?;
+    arrow_reader.read_to_end(&mut buffer).await.map_err(ArrowError::IoError)?;
 
     // Parse the Arrow data
     let record_batches = parse_arrow_file(&buffer)?;
 
     // Convert Arrow data to SensApp format and publish
-    let mut batch_builder = BatchBuilder::new()?;
+    let mut batch_builder = BatchBuilder::new().map_err(ArrowError::StorageError)?;
 
     for record_batch in record_batches {
         let sensor_data_map = convert_record_batch_to_sensors(&record_batch)?;
 
         for (_sensor_key, (sensor, sample_entries)) in sensor_data_map {
             for (_datetime, typed_samples) in sample_entries {
-                batch_builder.add(sensor.clone(), typed_samples).await?;
+                batch_builder.add(sensor.clone(), typed_samples).await.map_err(ArrowError::StorageError)?;
             }
         }
     }
 
-    batch_builder.send_what_is_left(storage).await?;
+    batch_builder.send_what_is_left(storage).await.map_err(ArrowError::StorageError)?;
     Ok(())
 }
 
 /// Parse Arrow IPC file format from bytes
-fn parse_arrow_file(buffer: &[u8]) -> Result<Vec<RecordBatch>> {
+fn parse_arrow_file(buffer: &[u8]) -> Result<Vec<RecordBatch>, ArrowError> {
     let cursor = Cursor::new(buffer);
     let reader = FileReader::try_new(cursor, None)
-        .map_err(|e| anyhow!("Failed to create Arrow file reader: {}", e))?;
+        .map_err(|e| ArrowError::InvalidFormat(format!("Not a valid Arrow file: {}", e)))?;
 
     let mut batches = Vec::new();
     for batch_result in reader {
-        let batch =
-            batch_result.map_err(|e| anyhow!("Failed to read Arrow batch from file: {}", e))?;
+        let batch = batch_result
+            .map_err(|e| ArrowError::ParseError(format!("Failed to read batch: {}", e)))?;
         batches.push(batch);
     }
 
     if batches.is_empty() {
-        return Err(anyhow!("Arrow file contains no data batches"));
+        return Err(ArrowError::InvalidFormat("Arrow file contains no data batches".to_string()));
     }
 
     Ok(batches)
 }
 
 /// Convert Arrow RecordBatch to SensApp sensors and samples
-fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap> {
+fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap, ArrowError> {
     let schema = batch.schema();
 
     // Find required columns
     let timestamp_idx = find_column_index(&schema, "timestamp")
-        .ok_or_else(|| anyhow!("Arrow data must contain 'timestamp' column"))?;
+        .ok_or_else(|| ArrowError::InvalidFormat("Arrow data must contain 'timestamp' column".to_string()))?;
     let value_idx = find_column_index(&schema, "value")
-        .ok_or_else(|| anyhow!("Arrow data must contain 'value' column"))?;
+        .ok_or_else(|| ArrowError::InvalidFormat("Arrow data must contain 'value' column".to_string()))?;
 
     // Optional metadata columns
     let sensor_id_idx = find_column_index(&schema, "sensor_id");
@@ -94,20 +118,20 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
         DataType::Timestamp(TimeUnit::Microsecond, _) => timestamp_array
             .as_any()
             .downcast_ref::<TimestampMicrosecondArray>()
-            .ok_or_else(|| anyhow!("Failed to downcast timestamp array"))?,
+            .ok_or_else(|| ArrowError::ParseError("Failed to downcast timestamp array".to_string()))?,
         _ => {
-            return Err(anyhow!(
-                "Timestamp column must be Timestamp(Microsecond, _) type"
+            return Err(ArrowError::InvalidFormat(
+                "Timestamp column must be Timestamp(Microsecond, _) type".to_string()
             ));
         }
     };
 
     // Convert timestamps
-    let timestamps: Result<Vec<SensAppDateTime>> = (0..timestamp_data.len())
+    let timestamps: Result<Vec<SensAppDateTime>, ArrowError> = (0..timestamp_data.len())
         .map(|i| {
             let ts_micros = timestamp_data.value(i);
             microseconds_to_sensapp_datetime(ts_micros)
-                .ok_or_else(|| anyhow!("Invalid timestamp value: {}", ts_micros))
+                .ok_or_else(|| ArrowError::ParseError(format!("Invalid timestamp value: {}", ts_micros)))
         })
         .collect();
     let timestamps = timestamps?;
@@ -143,13 +167,13 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
 fn convert_arrow_array_to_typed_samples(
     array: &ArrayRef,
     timestamps: &[SensAppDateTime],
-) -> Result<(SensorType, TypedSamples)> {
+) -> Result<(SensorType, TypedSamples), ArrowError> {
     match array.data_type() {
         DataType::Int64 => {
             let int_array = array
                 .as_any()
                 .downcast_ref::<Int64Array>()
-                .ok_or_else(|| anyhow!("Failed to downcast Int64 array"))?;
+                .ok_or_else(|| ArrowError::ParseError("Failed to downcast Int64 array".to_string()))?;
 
             let samples: SmallVec<[Sample<i64>; 4]> = (0..int_array.len())
                 .map(|i| Sample {
@@ -165,7 +189,7 @@ fn convert_arrow_array_to_typed_samples(
             let float_array = array
                 .as_any()
                 .downcast_ref::<Float64Array>()
-                .ok_or_else(|| anyhow!("Failed to downcast Float64 array"))?;
+                .ok_or_else(|| ArrowError::ParseError("Failed to downcast Float64 array".to_string()))?;
 
             let samples: SmallVec<[Sample<f64>; 4]> = (0..float_array.len())
                 .map(|i| Sample {
@@ -181,7 +205,7 @@ fn convert_arrow_array_to_typed_samples(
             let decimal_array = array
                 .as_any()
                 .downcast_ref::<Decimal128Array>()
-                .ok_or_else(|| anyhow!("Failed to downcast Decimal128 array"))?;
+                .ok_or_else(|| ArrowError::ParseError("Failed to downcast Decimal128 array".to_string()))?;
 
             let samples: Result<SmallVec<[Sample<Decimal>; 4]>> = (0..decimal_array.len())
                 .map(|i| {
@@ -202,7 +226,7 @@ fn convert_arrow_array_to_typed_samples(
             let string_array = array
                 .as_any()
                 .downcast_ref::<StringArray>()
-                .ok_or_else(|| anyhow!("Failed to downcast String array"))?;
+                .ok_or_else(|| ArrowError::ParseError("Failed to downcast String array".to_string()))?;
 
             let samples: SmallVec<[Sample<String>; 4]> = (0..string_array.len())
                 .map(|i| Sample {
@@ -218,7 +242,7 @@ fn convert_arrow_array_to_typed_samples(
             let bool_array = array
                 .as_any()
                 .downcast_ref::<BooleanArray>()
-                .ok_or_else(|| anyhow!("Failed to downcast Boolean array"))?;
+                .ok_or_else(|| ArrowError::ParseError("Failed to downcast Boolean array".to_string()))?;
 
             let samples: SmallVec<[Sample<bool>; 4]> = (0..bool_array.len())
                 .map(|i| Sample {
@@ -239,19 +263,19 @@ fn convert_arrow_array_to_typed_samples(
                 let struct_array = array
                     .as_any()
                     .downcast_ref::<StructArray>()
-                    .ok_or_else(|| anyhow!("Failed to downcast Struct array"))?;
+                    .ok_or_else(|| ArrowError::ParseError("Failed to downcast Struct array".to_string()))?;
 
                 let lat_array = struct_array
                     .column(0)
                     .as_any()
                     .downcast_ref::<Float64Array>()
-                    .ok_or_else(|| anyhow!("Latitude must be Float64"))?;
+                    .ok_or_else(|| ArrowError::InvalidFormat("Latitude must be Float64".to_string()))?;
 
                 let lon_array = struct_array
                     .column(1)
                     .as_any()
                     .downcast_ref::<Float64Array>()
-                    .ok_or_else(|| anyhow!("Longitude must be Float64"))?;
+                    .ok_or_else(|| ArrowError::InvalidFormat("Longitude must be Float64".to_string()))?;
 
                 let samples: SmallVec<[Sample<Point>; 4]> = (0..struct_array.len())
                     .map(|i| {
@@ -266,7 +290,7 @@ fn convert_arrow_array_to_typed_samples(
 
                 Ok((SensorType::Location, TypedSamples::Location(samples)))
             } else {
-                Err(anyhow!("Unsupported struct format for location data"))
+                Err(ArrowError::InvalidFormat("Unsupported struct format for location data".to_string()))
             }
         }
 
@@ -274,7 +298,7 @@ fn convert_arrow_array_to_typed_samples(
             let binary_array = array
                 .as_any()
                 .downcast_ref::<BinaryArray>()
-                .ok_or_else(|| anyhow!("Failed to downcast Binary array"))?;
+                .ok_or_else(|| ArrowError::ParseError("Failed to downcast Binary array".to_string()))?;
 
             let samples: SmallVec<[Sample<Vec<u8>>; 4]> = (0..binary_array.len())
                 .map(|i| Sample {
@@ -286,10 +310,10 @@ fn convert_arrow_array_to_typed_samples(
             Ok((SensorType::Blob, TypedSamples::Blob(samples)))
         }
 
-        _ => Err(anyhow!(
+        _ => Err(ArrowError::InvalidFormat(format!(
             "Unsupported Arrow data type: {:?}",
             array.data_type()
-        )),
+        ))),
     }
 }
 
@@ -301,18 +325,18 @@ fn find_column_index(schema: &arrow::datatypes::Schema, column_name: &str) -> Op
         .position(|field| field.name() == column_name)
 }
 
-fn extract_sensor_id(batch: &RecordBatch, sensor_id_idx: Option<usize>) -> Result<Uuid> {
+fn extract_sensor_id(batch: &RecordBatch, sensor_id_idx: Option<usize>) -> Result<Uuid, ArrowError> {
     if let Some(idx) = sensor_id_idx {
         let array = batch
             .column(idx)
             .as_any()
             .downcast_ref::<StringArray>()
-            .ok_or_else(|| anyhow!("sensor_id column must be string type"))?;
+            .ok_or_else(|| ArrowError::InvalidFormat("sensor_id column must be string type".to_string()))?;
 
         if array.len() > 0 {
             let uuid_str = array.value(0);
             return Uuid::parse_str(uuid_str)
-                .map_err(|e| anyhow!("Invalid UUID in sensor_id: {}", e));
+                .map_err(|e| ArrowError::ParseError(format!("Invalid UUID in sensor_id: {}", e)));
         }
     }
 
