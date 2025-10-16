@@ -76,7 +76,7 @@ SensApp is a **sensor data platform** built with Rust that scales from edge depl
 - postgresql database name is sensapp
 - DATABASE_URL="postgres://postgres:postgres@localhost:5432/sensapp" sqlx migrate run --source src/storage/postgresql/migrations
 - DATABASE_URL="postgres://postgres:postgres@localhost:5432/sensapp" cargo sqlx prepare
-- do focus on postgresql, AND NOT OTHER STORAGE BACKENDS FOR NOW.
+- do focus on postgresql, AND NOT OTHER STORAGE BACKENDS FOR NOW. DO NOT TEST WITH SQLITE. THANKS!
 - You are an excellent and experienced software engineer.
 - When you filter the tests, you may get a success code even when all the tests where filtered out, confusing you as the test you wanted to run passed. But a line such as "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 78 filtered out; finished in 0.00s" means that you failed your filter, not that the test passed.
 - code used for unit tests and integration tests should be marked with #[cfg(any(test, feature = "test-utils"))]

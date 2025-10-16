@@ -45,6 +45,9 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_SENTRY_DSN")]
     pub sentry_dsn: Option<String>,
+
+    #[config(env = "SENSAPP_INFLUXDB_WITH_NUMERIC", default = false)]
+    pub influxdb_with_numeric: bool,
 }
 
 impl SensAppConfig {

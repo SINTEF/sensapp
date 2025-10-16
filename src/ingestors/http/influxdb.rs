@@ -1,12 +1,8 @@
 use super::{app_error::AppError, state::HttpServerState};
-#[cfg(all(test, feature = "sqlite"))]
-use crate::config::load_configuration;
 use crate::datamodel::{
     SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
     sensapp_datetime::SensAppDateTimeExt, sensapp_vec::SensAppLabels,
 };
-#[cfg(all(test, feature = "sqlite"))]
-use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::{
     debug_handler,
@@ -67,6 +63,7 @@ fn compute_field_name(url_encoded_measurement_name: &str, field_key: &str) -> St
 fn influxdb_field_to_sensapp(
     field_value: FieldValue,
     datetime: SensAppDateTime,
+    with_numeric: bool,
 ) -> Result<(SensorType, TypedSamples)> {
     match field_value {
         FieldValue::I64(value) => Ok((
@@ -80,19 +77,24 @@ fn influxdb_field_to_sensapp(
             )),
             Err(_) => anyhow::bail!("U64 value is too big to be converted to i64"),
         },
-        //FieldValue::F64(value) => Ok((SensorType::Float, TypedSamples::one_float(value, datetime))),
-        FieldValue::F64(value) => Ok((
-            SensorType::Numeric,
-            TypedSamples::one_numeric(
-                Decimal::from_f64_retain(value).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Failed to convert f64 value {} to Decimal - precision may be too high",
-                        value
-                    )
-                })?,
-                datetime,
-            ),
-        )),
+        FieldValue::F64(value) => {
+            if with_numeric {
+                Ok((
+                    SensorType::Numeric,
+                    TypedSamples::one_numeric(
+                        Decimal::from_f64_retain(value).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "Failed to convert f64 value {} to Decimal - precision may be too high",
+                                value
+                            )
+                        })?,
+                        datetime,
+                    ),
+                ))
+            } else {
+                Ok((SensorType::Float, TypedSamples::one_float(value, datetime)))
+            }
+        }
         FieldValue::String(value) => Ok((
             SensorType::String,
             TypedSamples::one_string(value.into(), datetime),
@@ -247,7 +249,7 @@ pub async fn publish_influxdb(
                 for (field_key, field_value) in line.field_set {
                     let unit = None;
                     let (sensor_type, value) =
-                        match influxdb_field_to_sensapp(field_value, datetime) {
+                        match influxdb_field_to_sensapp(field_value, datetime, state.influxdb_with_numeric) {
                             Ok((sensor_type, value)) => (sensor_type, value),
                             Err(error) => {
                                 return Err(AppError::bad_request(error));
@@ -282,11 +284,10 @@ pub async fn publish_influxdb(
 }
 
 #[cfg(test)]
-#[cfg(feature = "sqlite")]
 mod tests {
-    use crate::storage::sqlite::SqliteStorage;
-
     use super::*;
+    use crate::config::load_configuration_for_tests;
+    use crate::storage::storage_factory::create_storage_from_connection_string;
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use influxdb_line_protocol::EscapedStr;
@@ -326,13 +327,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_influxdb() {
-        _ = load_configuration();
+        _ = load_configuration_for_tests();
 
-        let storage = SqliteStorage::connect("sqlite::memory:").await.unwrap();
+        let connection_string = std::env::var("TEST_DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/sensapp".to_string());
+        let storage = create_storage_from_connection_string(&connection_string)
+            .await
+            .unwrap();
         storage.create_or_migrate().await.unwrap();
+        storage.cleanup_test_data().await.unwrap();
+
         let state = State(HttpServerState {
             name: Arc::new("influxdb test".to_string()),
-            storage: Arc::new(storage),
+            storage,
+            influxdb_with_numeric: false,
         });
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
@@ -500,19 +508,32 @@ mod tests {
     #[test]
     fn test_influxdb_field_to_sensapp() {
         let datetime = SensAppDateTime::from_unix_seconds(0.0);
-        let result = influxdb_field_to_sensapp(FieldValue::I64(42), datetime).unwrap();
+
+        // Test integer types
+        let result = influxdb_field_to_sensapp(FieldValue::I64(42), datetime, true).unwrap();
         assert_eq!(
             result,
             (SensorType::Integer, TypedSamples::one_integer(42, datetime))
         );
 
-        let result = influxdb_field_to_sensapp(FieldValue::U64(42), datetime).unwrap();
+        let result = influxdb_field_to_sensapp(FieldValue::U64(42), datetime, true).unwrap();
         assert_eq!(
             result,
             (SensorType::Integer, TypedSamples::one_integer(42, datetime))
         );
 
-        let result = influxdb_field_to_sensapp(FieldValue::F64(42.0), datetime).unwrap();
+        // Test F64 with with_numeric=false (default Float)
+        let result = influxdb_field_to_sensapp(FieldValue::F64(42.0), datetime, false).unwrap();
+        assert_eq!(
+            result,
+            (
+                SensorType::Float,
+                TypedSamples::one_float(42.0, datetime)
+            )
+        );
+
+        // Test F64 with with_numeric=true (Numeric/Decimal mode)
+        let result = influxdb_field_to_sensapp(FieldValue::F64(42.0), datetime, true).unwrap();
         assert_eq!(
             result,
             (
@@ -521,8 +542,9 @@ mod tests {
             )
         );
 
+        // Test string type
         let result =
-            influxdb_field_to_sensapp(FieldValue::String(EscapedStr::from("test")), datetime)
+            influxdb_field_to_sensapp(FieldValue::String(EscapedStr::from("test")), datetime, true)
                 .unwrap();
         assert_eq!(
             result,
@@ -532,7 +554,8 @@ mod tests {
             )
         );
 
-        let result = influxdb_field_to_sensapp(FieldValue::Boolean(true), datetime).unwrap();
+        // Test boolean type
+        let result = influxdb_field_to_sensapp(FieldValue::Boolean(true), datetime, true).unwrap();
         assert_eq!(
             result,
             (
@@ -545,7 +568,7 @@ mod tests {
     #[test]
     fn test_convert_too_high_u64_to_i64() {
         let datetime = SensAppDateTime::from_unix_seconds(0.0);
-        let result = influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime);
+        let result = influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime, true);
         assert!(result.is_err());
     }
 

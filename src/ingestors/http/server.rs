@@ -357,6 +357,7 @@ mod tests {
         let state = HttpServerState {
             name: Arc::new("hello world".to_string()),
             storage: Arc::new(SqliteStorage::connect("sqlite::memory:").await.unwrap()),
+            influxdb_with_numeric: false,
         };
         let app = Router::new().route("/", get(frontpage)).with_state(state);
         let request = Request::builder().uri("/").body(Body::empty()).unwrap();

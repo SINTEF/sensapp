@@ -109,6 +109,7 @@ async fn async_main() -> Result<()> {
         HttpServerState {
             name: Arc::new("SensApp".to_string()),
             storage,
+            influxdb_with_numeric: config.influxdb_with_numeric,
         },
         address,
     )

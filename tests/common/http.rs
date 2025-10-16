@@ -24,6 +24,7 @@ impl TestApp {
         let state = HttpServerState {
             name: Arc::new("SensApp Test".to_string()),
             storage,
+            influxdb_with_numeric: false,
         };
 
         // Create a minimal router for testing (without middleware that might interfere)
