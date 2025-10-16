@@ -293,6 +293,11 @@ mod tests {
     use influxdb_line_protocol::EscapedStr;
     use std::io::Write;
 
+    /// Helper to get test database URL - uses the centralized constant from test_utils
+    fn get_test_database_url() -> String {
+        sensapp::test_utils::get_test_database_url()
+    }
+
     #[test]
     fn test_bytes_to_string() {
         let headers = HeaderMap::new();
@@ -329,8 +334,7 @@ mod tests {
     async fn test_publish_influxdb() {
         _ = load_configuration_for_tests();
 
-        let connection_string = std::env::var("TEST_DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/sensapp".to_string());
+        let connection_string = get_test_database_url();
         let storage = create_storage_from_connection_string(&connection_string)
             .await
             .unwrap();
