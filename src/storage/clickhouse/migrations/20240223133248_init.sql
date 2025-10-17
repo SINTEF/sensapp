@@ -33,83 +33,83 @@ SETTINGS index_granularity = 8192;
 -- Create the 'integer_values' table
 CREATE TABLE IF NOT EXISTS integer_values (
     sensor_id UInt64,
-    timestamp_us Int64,
-    value Int64
+    timestamp_us Int64 CODEC(DoubleDelta, LZ4),
+    value Int64 CODEC(DoubleDelta, ZSTD(1))
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity_bytes = 10485760;
 
 -- Create the 'numeric_values' table
 CREATE TABLE IF NOT EXISTS numeric_values (
     sensor_id UInt64,
-    timestamp_us Int64,
-    value Decimal128(38)
+    timestamp_us Int64 CODEC(DoubleDelta, LZ4),
+    value Decimal128(38) CODEC(ZSTD(1))
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity_bytes = 10485760;
 
 -- Create the 'float_values' table
 CREATE TABLE IF NOT EXISTS float_values (
     sensor_id UInt64,
-    timestamp_us Int64,
-    value Float64
+    timestamp_us Int64 CODEC(DoubleDelta, LZ4),
+    value Float64 CODEC(DoubleDelta, ZSTD(1))
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity_bytes = 10485760;
 
 -- Create the 'string_values' table
 CREATE TABLE IF NOT EXISTS string_values (
     sensor_id UInt64,
-    timestamp_us Int64,
-    value LowCardinality(String)  -- Automatic string deduplication
+    timestamp_us Int64 CODEC(DoubleDelta, LZ4),
+    value LowCardinality(String) CODEC(ZSTD(3))  -- Automatic string deduplication
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity_bytes = 10485760;
 
 -- Create the 'boolean_values' table
 CREATE TABLE IF NOT EXISTS boolean_values (
     sensor_id UInt64,
-    timestamp_us Int64,
-    value Bool
+    timestamp_us Int64 CODEC(DoubleDelta, LZ4),
+    value Bool CODEC(ZSTD(1))
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity_bytes = 10485760;
 
 -- Create the 'location_values' table
 CREATE TABLE IF NOT EXISTS location_values (
     sensor_id UInt64,
-    timestamp_us Int64,
-    latitude Float64,
-    longitude Float64
+    timestamp_us Int64 CODEC(DoubleDelta, LZ4),
+    latitude Float64 CODEC(DoubleDelta, ZSTD(1)),
+    longitude Float64 CODEC(DoubleDelta, ZSTD(1))
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity_bytes = 10485760;
 
 -- Create the 'json_values' table
 CREATE TABLE IF NOT EXISTS json_values (
     sensor_id UInt64,
-    timestamp_us Int64,
-    value String  -- JSON stored as string, can use JSONExtract functions
+    timestamp_us Int64 CODEC(DoubleDelta, LZ4),
+    value JSON  -- Native JSON type (ClickHouse 24.8+) for better performance and compression
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity_bytes = 10485760;
 
 -- Create the 'blob_values' table
 CREATE TABLE IF NOT EXISTS blob_values (
     sensor_id UInt64,
-    timestamp_us Int64,
-    value String  -- Binary data stored as string (base64 encoded)
+    timestamp_us Int64 CODEC(DoubleDelta, LZ4),
+    value String CODEC(ZSTD(3))  -- Binary data stored as string (base64 encoded)
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity_bytes = 10485760;
 
 -- Create indexes for units table
 CREATE INDEX IF NOT EXISTS idx_units_name ON units (name) TYPE bloom_filter GRANULARITY 1;

@@ -5,6 +5,7 @@ use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
 use sensapp::ingestors::http::crud::{get_series_data, list_metrics, list_series};
+use sensapp::ingestors::http::health::{liveness, readiness};
 use sensapp::ingestors::http::server::publish_senml_data;
 use sensapp::ingestors::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
@@ -24,6 +25,7 @@ impl TestApp {
         let state = HttpServerState {
             name: Arc::new("SensApp Test".to_string()),
             storage,
+            influxdb_with_numeric: false,
         };
 
         // Create a minimal router for testing (without middleware that might interfere)
@@ -33,6 +35,8 @@ impl TestApp {
             .route("/metrics", get(list_metrics))
             .route("/series", get(list_series))
             .route("/series/{series_uuid}", get(get_series_data))
+            .route("/health/live", get(liveness))
+            .route("/health/ready", get(readiness))
             .with_state(state);
 
         Self { app }
@@ -305,7 +309,7 @@ async fn test_publish_handler(
             .delimiter(b',') // Use comma for tests, semicolon is the server default
             .create_reader(reader);
 
-        publish_csv_async(csv_reader, 1000, state.storage.clone())
+        publish_csv_async(csv_reader, state.storage.clone())
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

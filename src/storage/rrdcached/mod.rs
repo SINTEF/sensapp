@@ -1,8 +1,7 @@
 use crate::storage::StorageError;
 use crate::{
-    config,
     datamodel::{Sensor, SensorType, TypedSamples},
-    storage::{StorageInstance, common::sync_with_timeout},
+    storage::StorageInstance,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -193,11 +192,7 @@ impl StorageInstance for RrdCachedStorage {
     async fn create_or_migrate(&self) -> Result<()> {
         Ok(())
     }
-    async fn publish(
-        &self,
-        batch: std::sync::Arc<crate::datamodel::batch::Batch>,
-        sync_sender: async_broadcast::Sender<()>,
-    ) -> Result<()> {
+    async fn publish(&self, batch: std::sync::Arc<crate::datamodel::batch::Batch>) -> Result<()> {
         if batch.sensors.is_empty() {
             return Ok(());
         }
@@ -311,20 +306,11 @@ impl StorageInstance for RrdCachedStorage {
             }
         }
 
-        self.sync(sync_sender).await?;
-
-        Ok(())
-    }
-
-    async fn sync(&self, sync_sender: async_broadcast::Sender<()>) -> Result<()> {
-        // Flush !
+        // Flush the RRD cached client
         {
             let mut client = self.client.write().await;
             client.flush_all().await?;
         }
-
-        let config = config::get().context("Failed to get configuration")?;
-        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await?;
 
         Ok(())
     }
@@ -345,6 +331,18 @@ impl StorageInstance for RrdCachedStorage {
         _limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
         unimplemented!("RRDCached sensor data querying not yet implemented");
+    }
+
+    /// Health check for RRDCached storage
+    /// Verifies the connection to RRDCached by checking if client can respond
+    async fn health_check(&self) -> Result<()> {
+        // For RRDCached, we can try to flush which should return quickly if connected
+        let mut client = self.client.write().await;
+        client
+            .flush_all()
+            .await
+            .context("RRDCached health check failed")?;
+        Ok(())
     }
 
     /// Clean up all test data from the database (RRDCached implementation)

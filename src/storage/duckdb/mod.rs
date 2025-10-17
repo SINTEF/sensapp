@@ -1,8 +1,6 @@
-use crate::config;
 use crate::datamodel::TypedSamples;
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use anyhow::{Context, Result, bail};
-use async_broadcast::Sender;
 use async_trait::async_trait;
 use duckdb::Connection;
 use duckdb_publishers::*;
@@ -11,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 
-use super::{StorageInstance, common::sync_with_timeout};
+use super::StorageInstance;
 
 mod duckdb_publishers;
 mod duckdb_utilities;
@@ -47,7 +45,7 @@ impl StorageInstance for DuckDBStorage {
             .context("Failed to initialise database")?;
         Ok(())
     }
-    async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
+    async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         let connection = Arc::clone(&self.connection);
         let bbatch = batch.clone();
         spawn_blocking(move || -> Result<()> {
@@ -60,15 +58,7 @@ impl StorageInstance for DuckDBStorage {
             Ok(())
         })
         .await??;
-        self.sync(sync_sender).await?;
         Ok(())
-    }
-
-    async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
-        // DuckDB doesn't need to do anything special for sync
-        // As we use transactions
-        let config = config::get().context("Failed to get configuration")?;
-        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {
@@ -106,6 +96,16 @@ impl StorageInstance for DuckDBStorage {
         unimplemented!("DuckDB sensor data querying not yet implemented");
     }
 
+    /// Health check for DuckDB storage
+    /// Executes a simple SELECT 1 query to verify database connectivity
+    async fn health_check(&self) -> Result<()> {
+        let connection = self.connection.lock().await;
+        connection
+            .execute("SELECT 1", [])
+            .context("DuckDB health check failed")?;
+        Ok(())
+    }
+
     /// Clean up all test data from the database (DuckDB implementation)
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {
@@ -135,6 +135,15 @@ impl StorageInstance for DuckDBStorage {
             .execute("DELETE FROM labels_name_dictionary", [])
             .ok();
         connection.execute("DELETE FROM units", []).ok();
+
+        // Step 2: Clear all cached function caches
+        // The cached macro generates cache variables named after the function in uppercase
+        use cached::Cached;
+        duckdb_utilities::GET_LABEL_NAME_ID_OR_CREATE.cache_clear();
+        duckdb_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE.cache_clear();
+        duckdb_utilities::GET_UNIT_ID_OR_CREATE.cache_clear();
+        duckdb_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR.cache_clear();
+        duckdb_utilities::GET_STRING_VALUE_ID_OR_CREATE.cache_clear();
 
         Ok(())
     }

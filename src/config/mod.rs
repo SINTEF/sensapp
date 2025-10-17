@@ -5,9 +5,6 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use self::mqtt::MqttConfig;
-pub mod mqtt;
-
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
     #[config(env = "SENSAPP_INSTANCE_ID", default = 0)]
@@ -40,21 +37,22 @@ pub struct SensAppConfig {
     )]
     pub storage_connection_string: String,
 
-    #[config(env = "SENSAPP_MQTT")]
-    pub mqtt: Option<Vec<MqttConfig>>,
-
     #[config(env = "SENSAPP_SENTRY_DSN")]
     pub sentry_dsn: Option<String>,
 
-    #[config(env = "SENSAPP_STORAGE_SYNC_TIMEOUT_SECONDS", default = 15)]
-    pub storage_sync_timeout_seconds: u64,
+    #[config(env = "SENSAPP_INFLUXDB_WITH_NUMERIC", default = false)]
+    pub influxdb_with_numeric: bool,
 }
 
 impl SensAppConfig {
     pub fn load() -> Result<SensAppConfig, Error> {
+        // Get settings file path from environment variable or use default
+        let settings_file = std::env::var("SENSAPP_SETTINGS_FILE")
+            .unwrap_or_else(|_| "settings.toml".to_string());
+
         let c = SensAppConfig::builder()
             .env()
-            .file("settings.toml")
+            .file(settings_file)
             .load()?;
 
         Ok(c)
@@ -182,5 +180,22 @@ mod tests {
 
         let config = get().unwrap();
         assert_eq!(config.port, 3000);
+    }
+
+    #[test]
+    fn test_custom_settings_file() {
+        // Test that SENSAPP_SETTINGS_FILE environment variable works
+        temp_env::with_var("SENSAPP_SETTINGS_FILE", Some("settings.toml"), || {
+            let config = SensAppConfig::load();
+            assert!(config.is_ok(), "Should load settings.toml when specified");
+        });
+
+        // Test with non-existent file
+        temp_env::with_var("SENSAPP_SETTINGS_FILE", Some("non-existent.toml"), || {
+            let config = SensAppConfig::load();
+            // This will still work because confique allows missing files
+            // and will use environment variables and defaults
+            assert!(config.is_ok(), "Should handle missing file gracefully");
+        });
     }
 }

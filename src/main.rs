@@ -83,23 +83,6 @@ async fn async_main() -> Result<()> {
         std::process::exit(1);
     }));
 
-    // Start MQTT clients if configured
-    if let Some(mqtt_configs) = config.mqtt.as_ref() {
-        println!("📡 Starting {} MQTT client(s)...", mqtt_configs.len());
-        for (i, mqtt_config) in mqtt_configs.iter().enumerate() {
-            let cloned_config = mqtt_config.clone();
-            let cloned_storage = storage.clone();
-            tokio::spawn(async move {
-                if let Err(e) = ingestors::mqtt::mqtt_client(cloned_config, cloned_storage).await {
-                    event!(Level::ERROR, "MQTT client {} failed: {}", i + 1, e);
-                }
-            });
-            println!("✅ MQTT client {} started", i + 1);
-        }
-    } else {
-        println!("ℹ️  No MQTT configuration found, skipping MQTT clients");
-    }
-
     let endpoint = config.endpoint;
     let port = config.port;
     let address = SocketAddr::from((endpoint, port));
@@ -109,6 +92,7 @@ async fn async_main() -> Result<()> {
         HttpServerState {
             name: Arc::new("SensApp".to_string()),
             storage,
+            influxdb_with_numeric: config.influxdb_with_numeric,
         },
         address,
     )

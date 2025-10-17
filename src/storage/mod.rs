@@ -16,12 +16,7 @@ pub const DEFAULT_QUERY_LIMIT: usize = 10_000_000;
 #[async_trait]
 pub trait StorageInstance: Send + Sync + Debug {
     async fn create_or_migrate(&self) -> Result<()>;
-    async fn publish(
-        &self,
-        batch: std::sync::Arc<crate::datamodel::batch::Batch>,
-        sync_sender: async_broadcast::Sender<()>,
-    ) -> Result<()>;
-    async fn sync(&self, sync_sender: async_broadcast::Sender<()>) -> Result<()>;
+    async fn publish(&self, batch: std::sync::Arc<crate::datamodel::batch::Batch>) -> Result<()>;
 
     async fn vacuum(&self) -> Result<()>;
 
@@ -40,6 +35,11 @@ pub trait StorageInstance: Send + Sync + Debug {
         end_time: Option<SensAppDateTime>,
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>>;
+
+    /// Health check for the storage backend
+    /// Returns Ok(()) if the storage is healthy and can accept connections
+    /// Returns Err if the storage is unhealthy
+    async fn health_check(&self) -> Result<()>;
 
     /// Clean up all test data from the database
     /// This method is intended for testing purposes only

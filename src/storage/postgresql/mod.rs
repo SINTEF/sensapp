@@ -1,15 +1,10 @@
-use super::{
-    DEFAULT_QUERY_LIMIT, StorageError, StorageInstance,
-    common::{datetime_to_micros, sync_with_timeout},
-};
-use crate::config;
+use super::{DEFAULT_QUERY_LIMIT, StorageError, StorageInstance, common::datetime_to_micros};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
     Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
 };
 use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
 use anyhow::{Context, Result};
-use async_broadcast::Sender;
 use async_trait::async_trait;
 use geo::Point;
 use serde_json::Value as JsonValue;
@@ -52,22 +47,14 @@ impl StorageInstance for PostgresStorage {
 
         Ok(())
     }
-    async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
+    async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for single_sensor_batch in batch.sensors.as_ref() {
             self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
                 .await?;
         }
         transaction.commit().await?;
-        self.sync(sync_sender).await?;
         Ok(())
-    }
-
-    async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
-        // PostgreSQL doesn't need to do anything special for sync
-        // as we use transaction
-        let config = config::get().context("Failed to get configuration")?;
-        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {
@@ -406,6 +393,16 @@ impl StorageInstance for PostgresStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    /// Health check for PostgreSQL storage
+    /// Executes a simple SELECT 1 query to verify database connectivity
+    async fn health_check(&self) -> Result<()> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .context("PostgreSQL health check failed")?;
+        Ok(())
+    }
+
     /// Clean up all test data from the database
     /// This removes all sensor data but keeps the schema intact
     /// Uses DELETE statements in dependency order to avoid foreign key conflicts
@@ -487,6 +484,15 @@ impl StorageInstance for PostgresStorage {
         tx.commit()
             .await
             .context("Failed to commit test data cleanup transaction")?;
+
+        // Step 5: Clear all cached function caches
+        // The cached macro generates cache variables named after the function in uppercase
+        use cached::Cached;
+        postgresql_utilities::GET_LABEL_NAME_ID_OR_CREATE.lock().await.cache_clear();
+        postgresql_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE.lock().await.cache_clear();
+        postgresql_utilities::GET_UNIT_ID_OR_CREATE.lock().await.cache_clear();
+        postgresql_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR.lock().await.cache_clear();
+        postgresql_utilities::GET_STRING_VALUE_ID_OR_CREATE.lock().await.cache_clear();
 
         Ok(())
     }

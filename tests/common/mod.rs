@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use sensapp::storage::{StorageInstance, storage_factory::create_storage_from_connection_string};
+use sensapp::test_utils::get_test_database_url;
 use std::sync::Arc;
 
 pub mod db;
@@ -18,9 +19,7 @@ impl DatabaseType {
     /// Get the appropriate connection string for the database type
     pub fn default_connection_string(&self) -> String {
         match self {
-            DatabaseType::PostgreSQL => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-                "postgres://postgres:postgres@localhost:5432/sensapp".to_string()
-            }),
+            DatabaseType::PostgreSQL => get_test_database_url(),
             DatabaseType::SQLite => std::env::var("TEST_DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite://test.db".to_string()),
             DatabaseType::ClickHouse => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
@@ -43,8 +42,7 @@ impl DatabaseType {
 
     /// Get the database type from environment variables or use default
     pub fn from_env() -> Self {
-        let connection_string = std::env::var("TEST_DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/sensapp".to_string());
+        let connection_string = get_test_database_url();
         Self::from_connection_string(&connection_string)
     }
 }

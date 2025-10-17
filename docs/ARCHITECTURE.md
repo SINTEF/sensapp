@@ -69,21 +69,17 @@ SensApp uses the Rust Tokio runtime for asynchronous programming.
 
 ## Internal Architecture
 
-SensApp uses an event-based architecture internally, with a message bus to communicate between components. The messages are lightweight, only internal, and do not rely on a network.
+SensApp is designed to be stateless and horizontally scalable. It uses direct storage calls rather than internal message buses to minimize complexity and maximize performance.
 
 ## Incoming data streams
 
-SensApp should eventually support the following incoming data streams:
+SensApp focuses on HTTP-based data ingestion:
 
- - Stream-based protocols:
-   - MQTT
-   - AMQP
-   - Kafka
-   - Nats
- - HTTP REST Push
- - HTTP Rest Pull
+ - HTTP REST Push (primary ingestion method)
  - InfluxDB Write API
  - Prometheus Remote Write API
+
+For message queue protocols (MQTT, AMQP, Kafka, Nats), we recommend using dedicated integration tools like Telegraf, Vector, or Fluent Bit to bridge these protocols to SensApp's HTTP API. This architectural decision keeps SensApp stateless and horizontally scalable, as the complexity of maintaining message queue client connections and subscriptions is better handled by specialized tools.
 
 ## Supported incoming data formats
 
@@ -144,4 +140,4 @@ The storage backend and the message queue should be resilient.
 
 ## Internal Software Architecture
 
-Internally, SensApp uses a message bus and queues to communicate between components. This is inspired by the NodeJS, Apache NiFi, and the reactive manifesto.
+Internally, SensApp uses direct storage calls for simplicity and performance. Components communicate through shared storage interfaces with async/await patterns.

@@ -18,8 +18,13 @@ use axum::{
 use tokio_util::bytes::Bytes;
 use tracing::{debug, info};
 
+/// Validates required Prometheus Remote Write API headers.
+///
+/// Prometheus sends data with specific headers:
+/// - `content-encoding`: must be "snappy" (compression format)
+/// - `content-type`: must be "application/x-protobuf" (protobuf format)
+/// - `x-prometheus-remote-write-version`: must be "0.1.0" (API version)
 fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
-    // Check that we have the right content encoding, that must be snappy
     match headers.get("content-encoding") {
         Some(content_encoding) => match content_encoding.to_str() {
             Ok("snappy") | Ok("SNAPPY") => {}
@@ -124,6 +129,8 @@ pub async fn publish_prometheus(
         let mut labels = SensAppLabels::with_capacity(time_serie.labels.len());
         let mut name: Option<String> = None;
         let mut unit: Option<Unit> = None;
+        // Extract special labels: __name__ (metric name) and "unit" (custom SensApp field)
+        // All labels including these are stored as-is in SensApp for full metadata preservation
         for label in time_serie.labels {
             match label.name.as_str() {
                 "__name__" => {

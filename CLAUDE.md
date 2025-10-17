@@ -22,15 +22,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview
 
-SensApp is a **sensor data platform** built with Rust that scales from edge deployments (SQLite) to big data clusters (ClickHouse). It uses an **event-driven architecture** with an internal message bus for component communication.
+SensApp is a **sensor data platform** built with Rust that scales from edge deployments (SQLite) to big data clusters (ClickHouse). It uses **direct storage calls** for simplicity and horizontal scalability.
 
 ### Core Components
 
 #### Data Ingestion (`src/ingestors/`)
 
 - **HTTP REST API** with Axum web framework
-- **MQTT client** for IoT device integration
 - **Multi-format support**: JSON, CSV, SenML, InfluxDB line protocol, Prometheus remote write
+- For message queue protocols (MQTT, Kafka, etc.), use external tools like Telegraf or Vector to bridge to HTTP
 
 #### Storage Abstraction (`src/storage/`)
 
@@ -60,13 +60,12 @@ SensApp is a **sensor data platform** built with Rust that scales from edge depl
 
 - Primary config file: `settings.toml`
 - Database connections configured via connection strings
-- MQTT configurations support multiple endpoints
 - Sentry integration for error tracking and monitoring
 
 ### Key Design Patterns
 
 - **Async-first** using Tokio runtime throughout
-- **Event-driven** architecture with message passing
+- **Stateless architecture** with direct storage calls for horizontal scalability
 - **Storage-agnostic** design with trait-based abstractions
 - **Type safety** for sensor data with compile-time guarantees
 - **Scalable deployment** patterns from single-node to distributed clusters, but the complexity is handled by the storage layer (the databases).
@@ -76,7 +75,7 @@ SensApp is a **sensor data platform** built with Rust that scales from edge depl
 - postgresql database name is sensapp
 - DATABASE_URL="postgres://postgres:postgres@localhost:5432/sensapp" sqlx migrate run --source src/storage/postgresql/migrations
 - DATABASE_URL="postgres://postgres:postgres@localhost:5432/sensapp" cargo sqlx prepare
-- do focus on postgresql, AND NOT OTHER STORAGE BACKENDS FOR NOW.
+- do focus on postgresql, AND NOT OTHER STORAGE BACKENDS FOR NOW. DO NOT TEST WITH SQLITE. THANKS!
 - You are an excellent and experienced software engineer.
 - When you filter the tests, you may get a success code even when all the tests where filtered out, confusing you as the test you wanted to run passed. But a line such as "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 78 filtered out; finished in 0.00s" means that you failed your filter, not that the test passed.
 - code used for unit tests and integration tests should be marked with #[cfg(any(test, feature = "test-utils"))]
