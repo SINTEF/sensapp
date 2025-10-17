@@ -1,7 +1,8 @@
 use super::app_error::AppError;
 use super::crud::{get_series_data, list_metrics, list_series};
 use super::influxdb::publish_influxdb;
-use super::prometheus::publish_prometheus;
+use super::prometheus_read::prometheus_remote_read;
+use super::prometheus_write::publish_prometheus;
 use super::state::HttpServerState;
 use crate::config;
 use crate::importers::csv::publish_csv_async;
@@ -14,7 +15,8 @@ use crate::ingestors::http::crud::{
     __path_get_series_data, __path_list_metrics, __path_list_series,
 };
 use crate::ingestors::http::influxdb::__path_publish_influxdb;
-use crate::ingestors::http::prometheus::__path_publish_prometheus;
+use crate::ingestors::http::prometheus_read::__path_prometheus_remote_read;
+use crate::ingestors::http::prometheus_write::__path_publish_prometheus;
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
@@ -43,10 +45,10 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
     tags(
         (name = "SensApp", description = "SensApp API"),
         (name = "InfluxDB", description = "InfluxDB Write API"),
-        (name = "Prometheus", description = "Prometheus Remote Write API"),
+        (name = "Prometheus", description = "Prometheus Remote Write and Read API"),
         (name = "Admin", description = "Administrative operations"),
     ),
-    paths(frontpage, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, vacuum_database),
+    paths(frontpage, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, prometheus_remote_read, vacuum_database),
 )]
 struct ApiDoc;
 
@@ -106,6 +108,11 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .route(
             "/api/v1/prometheus_remote_write",
             post(publish_prometheus).layer(max_body_layer),
+        )
+        // Prometheus Remote Read API
+        .route(
+            "/api/v1/prometheus_remote_read",
+            post(prometheus_remote_read).layer(max_body_layer),
         )
         // Admin API
         .route("/api/v1/admin/vacuum", post(vacuum_database))
