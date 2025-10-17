@@ -11,13 +11,13 @@
 // Check the prometheus_remote_write.proto file and https://prometheus.io/docs/concepts/remote_write_spec/
 // for more information.
 
-#[derive(prost::Message)]
+#[derive(prost::Message, Clone)]
 pub struct WriteRequest {
     #[prost(message, repeated, tag = "1")]
     pub timeseries: Vec<TimeSeries>,
 }
 
-#[derive(prost::Message)]
+#[derive(prost::Message, Clone)]
 pub struct TimeSeries {
     #[prost(message, repeated, tag = "1")]
     pub labels: Vec<Label>,
@@ -25,7 +25,7 @@ pub struct TimeSeries {
     pub samples: Vec<Sample>,
 }
 
-#[derive(prost::Message)]
+#[derive(prost::Message, Clone)]
 pub struct Label {
     #[prost(string, tag = "1")]
     pub name: String,
@@ -33,7 +33,7 @@ pub struct Label {
     pub value: String,
 }
 
-#[derive(prost::Message)]
+#[derive(prost::Message, Clone)]
 pub struct Sample {
     #[prost(double, tag = "1")]
     pub value: f64,
