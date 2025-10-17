@@ -136,6 +136,15 @@ impl StorageInstance for DuckDBStorage {
             .ok();
         connection.execute("DELETE FROM units", []).ok();
 
+        // Step 2: Clear all cached function caches
+        // The cached macro generates cache variables named after the function in uppercase
+        use cached::Cached;
+        duckdb_utilities::GET_LABEL_NAME_ID_OR_CREATE.cache_clear();
+        duckdb_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE.cache_clear();
+        duckdb_utilities::GET_UNIT_ID_OR_CREATE.cache_clear();
+        duckdb_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR.cache_clear();
+        duckdb_utilities::GET_STRING_VALUE_ID_OR_CREATE.cache_clear();
+
         Ok(())
     }
 }

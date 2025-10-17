@@ -485,6 +485,15 @@ impl StorageInstance for PostgresStorage {
             .await
             .context("Failed to commit test data cleanup transaction")?;
 
+        // Step 5: Clear all cached function caches
+        // The cached macro generates cache variables named after the function in uppercase
+        use cached::Cached;
+        postgresql_utilities::GET_LABEL_NAME_ID_OR_CREATE.lock().await.cache_clear();
+        postgresql_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE.lock().await.cache_clear();
+        postgresql_utilities::GET_UNIT_ID_OR_CREATE.lock().await.cache_clear();
+        postgresql_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR.lock().await.cache_clear();
+        postgresql_utilities::GET_STRING_VALUE_ID_OR_CREATE.lock().await.cache_clear();
+
         Ok(())
     }
 }
