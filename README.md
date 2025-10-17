@@ -7,7 +7,7 @@ It enables the handling of small time series data of the edge efficiently to lar
 ## Features
 
 - **Flexible Time Series DataBase Storage**: Supports various time-series databases such as SQLite, PostgreSQL (with optional TimeScaleDB plugin), DuckDB, ClickHouse, BigQuery, and RRDCached, with the potential to extend support to other databases in the future.
-- **Multiple Data Ingestion Protocols**: Easy data ingestion via HTTP REST API and MQTT.
+- **HTTP REST API**: Easy data ingestion via HTTP REST API with support for multiple data formats.
 - **Compatibility with Existing Pipelines**: Offers Prometheus Remote Write and InfluxDB line format support for seamless integration into existing sensor data pipelines.
 - **Data formats**: Supports various data formats like JSON, CSV, SenML, and Apache Arrow IPC.
 

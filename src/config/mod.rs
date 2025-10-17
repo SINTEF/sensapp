@@ -5,9 +5,6 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use self::mqtt::MqttConfig;
-pub mod mqtt;
-
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
     #[config(env = "SENSAPP_INSTANCE_ID", default = 0)]
@@ -39,9 +36,6 @@ pub struct SensAppConfig {
         default = "postgres://postgres:postgres@localhost:5432/sensapp"
     )]
     pub storage_connection_string: String,
-
-    #[config(env = "SENSAPP_MQTT")]
-    pub mqtt: Option<Vec<MqttConfig>>,
 
     #[config(env = "SENSAPP_SENTRY_DSN")]
     pub sentry_dsn: Option<String>,

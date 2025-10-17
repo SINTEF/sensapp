@@ -96,6 +96,16 @@ impl StorageInstance for DuckDBStorage {
         unimplemented!("DuckDB sensor data querying not yet implemented");
     }
 
+    /// Health check for DuckDB storage
+    /// Executes a simple SELECT 1 query to verify database connectivity
+    async fn health_check(&self) -> Result<()> {
+        let connection = self.connection.lock().await;
+        connection
+            .execute("SELECT 1", [])
+            .context("DuckDB health check failed")?;
+        Ok(())
+    }
+
     /// Clean up all test data from the database (DuckDB implementation)
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {

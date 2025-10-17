@@ -8,11 +8,10 @@ use crate::importers::csv::publish_csv_async;
 use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
-//use axum::extract::Multipart;
-//use axum::extract::Path;
 use crate::ingestors::http::crud::{
     __path_get_series_data, __path_list_metrics, __path_list_series,
 };
+use crate::ingestors::http::health::{__path_liveness, __path_readiness, liveness, readiness};
 use crate::ingestors::http::influxdb::__path_publish_influxdb;
 use crate::ingestors::http::prometheus::__path_publish_prometheus;
 use axum::Json;
@@ -45,8 +44,9 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
         (name = "InfluxDB", description = "InfluxDB Write API"),
         (name = "Prometheus", description = "Prometheus Remote Write API"),
         (name = "Admin", description = "Administrative operations"),
+        (name = "Health", description = "Health check endpoints"),
     ),
-    paths(frontpage, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, vacuum_database),
+    paths(frontpage, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, vacuum_database, liveness, readiness),
 )]
 struct ApiDoc;
 
@@ -63,7 +63,6 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
 
     // Middleware creation
     let middleware = ServiceBuilder::new()
-        //.layer(NewSentryLayer::<Request>::new_from_top())
         .sensitive_request_headers(sensitive_headers.clone())
         .layer(
             TraceLayer::new_for_http()
@@ -78,8 +77,10 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
     // Create our application with a single route
     let app = Router::new()
         .route("/", get(frontpage))
-        //.route("/api-docs/openapi.json", get(openapi))
         .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
+        // Health check endpoints
+        .route("/health/live", get(liveness))
+        .route("/health/ready", get(readiness))
         .route("/publish", post(publish_handler).layer(max_body_layer))
         .route(
             "/sensors/publish",
@@ -88,10 +89,6 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .route(
             "/sensors/{sensor_name_or_uuid}/publish_csv",
             post(publish_csv),
-        )
-        .route(
-            "/sensors/{sensor_name_or_uuid}/publish_multipart",
-            post(publish_multipart).layer(max_body_layer),
         )
         // Metrics and Series CRUD
         .route("/metrics", get(list_metrics))
@@ -152,35 +149,19 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
     Ok(Json(name))
 }
 
-// #[utoipa::path(
-//     get,
-//     path = "/api-docs/openapi.json",
-//     responses(
-//         (status = 200, description = "OpenAPI JSON", body = ApiDoc)
-//     )
-// )]
-// async fn openapi() -> Json<utoipa::openapi::OpenApi> {
-//     Json(ApiDoc::openapi())
-// }
-
 async fn publish_csv(
     State(state): State<HttpServerState>,
-    //Path(sensor_name_or_uuid): Path<String>,
     body: axum::body::Body,
 ) -> Result<String, AppError> {
-    // let uuid = name_to_uuid(sensor_name_or_uuid.as_str())?;
-    // Convert the body in a stream
     let stream = body.into_data_stream();
     let stream = stream.map_err(io::Error::other);
     let reader = stream.into_async_read();
-    //let reader = BufReader::new(stream.into_async_read());
-    // csv_async already uses a BufReader internally
+
     let csv_reader = csv_async::AsyncReaderBuilder::new()
         .has_headers(true)
         .delimiter(b';')
         .create_reader(reader);
 
-    //publish_csv_async(csv_reader, 100, state.storage.clone()).await?;
     publish_csv_async(csv_reader, 8192, state.storage.clone()).await?;
 
     Ok("ok".to_string())
@@ -338,25 +319,36 @@ async fn vacuum_database(State(state): State<HttpServerState>) -> Result<Json<St
     Ok(Json("Database vacuum completed successfully".to_string()))
 }
 
-async fn publish_multipart(/*mut multipart: Multipart*/)
- -> Result<Json<String>, (StatusCode, String)> {
-    Ok(Json("ok".to_string()))
-}
-
 #[cfg(test)]
-#[cfg(feature = "sqlite")]
 mod tests {
     use axum::{body::Body, http::Request};
     use tower::ServiceExt;
 
     use super::*;
-    use crate::storage::sqlite::SqliteStorage;
+
+    /// Helper to get test database URL - uses the centralized constant from test_utils
+    fn get_test_database_url() -> String {
+        sensapp::test_utils::get_test_database_url()
+    }
 
     #[tokio::test]
-    async fn test_handler() {
+    async fn test_frontpage_handler() {
+        use crate::storage::storage_factory::create_storage_from_connection_string;
+
+        let connection_string = get_test_database_url();
+        let storage = create_storage_from_connection_string(&connection_string)
+            .await
+            .expect("Failed to create storage");
+
+        // Ensure database is up to date
+        storage
+            .create_or_migrate()
+            .await
+            .expect("Failed to run migrations");
+
         let state = HttpServerState {
             name: Arc::new("hello world".to_string()),
-            storage: Arc::new(SqliteStorage::connect("sqlite::memory:").await.unwrap()),
+            storage,
             influxdb_with_numeric: false,
         };
         let app = Router::new().route("/", get(frontpage)).with_state(state);

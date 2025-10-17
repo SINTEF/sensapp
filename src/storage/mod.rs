@@ -36,6 +36,11 @@ pub trait StorageInstance: Send + Sync + Debug {
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>>;
 
+    /// Health check for the storage backend
+    /// Returns Ok(()) if the storage is healthy and can accept connections
+    /// Returns Err if the storage is unhealthy
+    async fn health_check(&self) -> Result<()>;
+
     /// Clean up all test data from the database
     /// This method is intended for testing purposes only
     #[cfg(any(test, feature = "test-utils"))]

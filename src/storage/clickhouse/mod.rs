@@ -483,6 +483,17 @@ impl StorageInstance for ClickHouseStorage {
         Ok(Some(sensor_data))
     }
 
+    /// Health check for ClickHouse storage
+    /// Executes a simple SELECT 1 query to verify database connectivity
+    async fn health_check(&self) -> Result<()> {
+        self.client
+            .query("SELECT 1")
+            .execute()
+            .await
+            .context("ClickHouse health check failed")?;
+        Ok(())
+    }
+
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {
         clickhouse_utilities::test_utils::cleanup_test_data(&self.client).await

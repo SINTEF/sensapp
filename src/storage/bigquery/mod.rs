@@ -408,6 +408,20 @@ impl StorageInstance for BigQueryStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    /// Health check for BigQuery storage
+    /// Executes a simple SELECT 1 query to verify BigQuery connectivity
+    async fn health_check(&self) -> Result<()> {
+        let query = "SELECT 1".to_string();
+        self.client
+            .read()
+            .await
+            .job()
+            .query(&self.project_id, QueryRequest::new(query))
+            .await
+            .context("BigQuery health check failed")?;
+        Ok(())
+    }
+
     /// Clean up all test data from the database (BigQuery implementation)
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {

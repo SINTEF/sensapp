@@ -22,15 +22,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview
 
-SensApp is a **sensor data platform** built with Rust that scales from edge deployments (SQLite) to big data clusters (ClickHouse). It uses an **event-driven architecture** with an internal message bus for component communication.
+SensApp is a **sensor data platform** built with Rust that scales from edge deployments (SQLite) to big data clusters (ClickHouse). It uses **direct storage calls** for simplicity and horizontal scalability.
 
 ### Core Components
 
 #### Data Ingestion (`src/ingestors/`)
 
 - **HTTP REST API** with Axum web framework
-- **MQTT client** for IoT device integration
 - **Multi-format support**: JSON, CSV, SenML, InfluxDB line protocol, Prometheus remote write
+- For message queue protocols (MQTT, Kafka, etc.), use external tools like Telegraf or Vector to bridge to HTTP
 
 #### Storage Abstraction (`src/storage/`)
 
@@ -60,13 +60,12 @@ SensApp is a **sensor data platform** built with Rust that scales from edge depl
 
 - Primary config file: `settings.toml`
 - Database connections configured via connection strings
-- MQTT configurations support multiple endpoints
 - Sentry integration for error tracking and monitoring
 
 ### Key Design Patterns
 
 - **Async-first** using Tokio runtime throughout
-- **Event-driven** architecture with message passing
+- **Stateless architecture** with direct storage calls for horizontal scalability
 - **Storage-agnostic** design with trait-based abstractions
 - **Type safety** for sensor data with compile-time guarantees
 - **Scalable deployment** patterns from single-node to distributed clusters, but the complexity is handled by the storage layer (the databases).

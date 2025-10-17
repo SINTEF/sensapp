@@ -6,13 +6,9 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 
 ### 🔄 Architecture Simplification
 
-- [ ] Add connection pooling for storage backends
 - [x] Create proper storage factory with runtime selection via `settings.toml`
 - [x] Simplify `main.rs` initialization
 - [x] Keep ALL storage backends for research comparison
-
-### ✅ Phase 1 Completed
-
 - [x] **Event Bus Removal**: Completely removed event bus from `main.rs` and all components
 - [x] **Direct Storage Calls**: All components now use direct storage access instead of event bus
 - [x] **Storage Factory**: Implemented runtime storage backend selection via connection strings
@@ -23,17 +19,24 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 
 ### 🗄️ ClickHouse Implementation
 
-- [ ] Create `src/storage/clickhouse/` module
-- [ ] Implement ClickHouse storage trait
-- [ ] Add ClickHouse migrations
-- [ ] Include ClickHouse in storage factory
-- [ ] Document ClickHouse-specific optimizations (LowCardinality, etc.)
-- [ ] Add ClickHouse connection string parsing
-- [ ] Test ClickHouse backend with sample data
+- [x] Create `src/storage/clickhouse/` module
+- [x] Implement ClickHouse storage trait
+- [x] Add ClickHouse migrations
+- [x] Include ClickHouse in storage factory
+- [x] Document ClickHouse-specific optimizations (LowCardinality, etc.)
+- [x] Add ClickHouse connection string parsing
+- [x] Test ClickHouse backend with sample data
 
-### ✅ Completed
+### ✅ Phase 2 Completed
 
-- [ ] None yet
+- [x] **ClickHouse Module**: Full implementation in `src/storage/clickhouse/` with 3 main files
+- [x] **Storage Trait**: Complete `StorageInstance` trait implementation with all methods
+- [x] **Database Schema**: 11 tables with monthly partitioning, bloom filters, and materialized views
+- [x] **Connection Parsing**: `clickhouse://user:password@host:port/database` format supported
+- [x] **Data Types**: All 8 sensor types (Integer, Numeric, Float, String, Boolean, Location, JSON, Blob)
+- [x] **Factory Integration**: Storage factory correctly routes ClickHouse URLs
+- [x] **Integration Tests**: Full test suite in `tests/clickhouse_integration.rs`
+- [x] **Minor Gaps**: Example config in `settings.toml` would be nice to add
 
 ## Phase 3: Add Comprehensive Read API (Week 2)
 
@@ -49,9 +52,6 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 - [x] Implement data export in multiple formats (SenML, CSV, JSONL, Arrow)
 - [ ] Add query performance metrics collection
 - [ ] Add offset parameter for full pagination support
-
-### ✅ Phase 3 Completed
-
 - [x] **DCAT Catalog Format**: Both metrics and series endpoints use W3C DCAT standard
 - [x] **Multiple Export Formats**: SenML, CSV, JSON Lines, Apache Arrow all implemented
 - [x] **Time Range Queries**: Full support for ISO 8601 datetime parsing with timezone handling
@@ -84,7 +84,6 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 - [x] Integration tests for Apache Arrow export (`tests/arrow_integration.rs`)
 - [x] Integration tests for datamodel edge cases (`tests/datamodel.rs`)
 - [x] Integration tests for parser edge cases (`tests/parser_edge_cases.rs`)
-- [ ] Integration tests for MQTT ingestion
 - [ ] Integration tests for InfluxDB compatibility endpoints
 - [ ] Integration tests for Prometheus compatibility endpoints
 - [ ] Cross-storage backend data consistency tests
@@ -135,8 +134,10 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 
 ### 🏥 Health Monitoring
 
-- [ ] Health check endpoint (`/health`)
-- [ ] Storage backend connectivity checks
+- [x] Health check endpoint (`/health/live` for liveness, `/health/ready` for readiness)
+- [x] Storage backend connectivity checks (all 7 backends: PostgreSQL, SQLite, TimescaleDB, ClickHouse, BigQuery, DuckDB, RRDCached)
+- [x] Unit tests for health check handlers and response serialization
+- [x] Integration tests for health endpoints with database verification
 - [ ] Database migration status checks
 - [ ] Resource usage health indicators
 
@@ -146,7 +147,6 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 - [x] **Settings Configuration**: All major settings moved to settings.toml
 - [x] **Multi-Backend Support**: PostgreSQL, SQLite, DuckDB, BigQuery, TimescaleDB, RRDCached
 - [x] **Network Configuration**: HTTP server endpoint and port configuration
-- [x] **MQTT Configuration**: Optional MQTT client configuration support
 - [x] **Sentry Integration**: Optional error tracking configuration
 
 ## Phase 6: Streamline Ingestion (Week 3)
@@ -154,9 +154,9 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 ### 🔧 Ingestion Simplification
 
 - [x] Keep HTTP ingestion (all format support)
-- [x] Keep MQTT for ingestion only
 - [x] Remove OPC UA to separate crate/service
 - [x] Remove AMQP planning/references
+- [x] Remove MQTT client (use Telegraf/Vector bridge instead)
 - [x] Optimize batch processing without event bus
 - [ ] Add ingestion rate limiting
 - [ ] Add backpressure handling
@@ -165,7 +165,7 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 
 - [x] **Event Bus Removal**: Event bus completely removed from all components
 - [x] **Direct Storage Access**: All ingestion now uses direct storage calls
-- [x] **MQTT Simplification**: MQTT clients now have direct storage access
+- [x] **MQTT Client Removed**: Keeps SensApp stateless; use Telegraf/Vector for MQTT bridging
 - [x] **Batch Processing**: Simplified batch processing without event bus overhead
 
 ## Phase 7: Research Tools & Documentation (Week 4)
@@ -201,8 +201,8 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 - ✅ Focus on measurement and observability
 - ✅ Make storage selection runtime configurable
 - ✅ Prioritize research flexibility over production optimization
-- ✅ Keep ingestion simple (HTTP + MQTT only)
-- ✅ Remove unnecessary complexity (event bus, OPC UA)
+- ✅ Keep ingestion simple (HTTP only)
+- ✅ Remove unnecessary complexity (event bus, OPC UA, MQTT client)
 
 ## Session Notes
 
@@ -220,7 +220,7 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 
 - Event bus creates single-threaded bottleneck in `main.rs:178-210`
 - All storage calls are serialized through single consumer task
-- Event bus is used in 11 files: CSV importers, MQTT/OPC UA clients, HTTP endpoints, batch builder
+- Event bus is used in 11 files: CSV importers, OPC UA clients, HTTP endpoints, batch builder
 - Current pattern: `event_bus.publish(batch)` → single consumer → `storage.publish(batch)`
 - New pattern: Direct `storage.publish(batch)` calls for parallel processing
 
@@ -231,42 +231,50 @@ Major refactoring completed across multiple phases:
 ### Session 2-17: Major Implementation Work (🌊 waves 2-17)
 
 **Event Bus Removal & Architecture Simplification (✅ COMPLETED)**
+
 - Completely removed event bus from main.rs and all components
 - Updated all HTTP endpoints to use direct storage access
-- Refactored MQTT clients to use direct storage calls
+- Removed MQTT client to keep SensApp stateless
 - Simplified main.rs initialization significantly
 
 **Comprehensive Read API (✅ COMPLETED)**
+
 - Implemented DCAT-compliant catalog endpoints: `/metrics` and `/series`
 - Added full series data endpoint: `/series/{uuid}` with format selection
 - Support for multiple export formats: SenML, CSV, JSONL, Apache Arrow
 - Time range queries with ISO 8601 datetime parsing and timezone handling
 
 **Testing Infrastructure (✅ MAJOR PROGRESS)**
+
 - 6+ comprehensive integration test files implemented
 - All export formats tested (SenML, CSV, JSONL, Arrow)
 - HTTP API endpoints fully tested
 - Data model and parser edge cases tested
 
 **Configuration & Settings (✅ COMPLETED)**
+
 - All storage backends configured via settings.toml
 - Runtime storage backend selection working
-- MQTT, Sentry, and network configuration implemented
+- Sentry and network configuration implemented
 
 **Research-Ready Features (✅ COMPLETED)**
+
 - All storage backends maintained for comparison
 - DCAT catalog format for research compatibility
 - Multiple data format support for flexibility
 
-### Next Session Plan:
+### Next Session Plan
 
 **High Priority Remaining Items:**
-- [ ] ClickHouse storage backend implementation (Phase 2)
+
+- [x] ClickHouse storage backend implementation (Phase 2)
+- [x] Health check endpoints (/health/live, /health/ready)
 - [ ] Performance benchmarks for storage backend comparison
-- [ ] Health check and metrics endpoints (/health, /metrics)
+- [ ] Metrics endpoints (/metrics for Prometheus)
 - [ ] Connection pooling configuration
 
 **Medium Priority:**
+
 - [ ] Storage backend unit tests
 - [ ] Query performance metrics collection
 - [ ] Rate limiting and backpressure handling

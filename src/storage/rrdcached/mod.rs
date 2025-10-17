@@ -333,6 +333,18 @@ impl StorageInstance for RrdCachedStorage {
         unimplemented!("RRDCached sensor data querying not yet implemented");
     }
 
+    /// Health check for RRDCached storage
+    /// Verifies the connection to RRDCached by checking if client can respond
+    async fn health_check(&self) -> Result<()> {
+        // For RRDCached, we can try to flush which should return quickly if connected
+        let mut client = self.client.write().await;
+        client
+            .flush_all()
+            .await
+            .context("RRDCached health check failed")?;
+        Ok(())
+    }
+
     /// Clean up all test data from the database (RRDCached implementation)
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {

@@ -433,6 +433,16 @@ impl StorageInstance for TimeScaleDBStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    /// Health check for TimescaleDB storage
+    /// Executes a simple SELECT 1 query to verify database connectivity
+    async fn health_check(&self) -> Result<()> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .context("TimescaleDB health check failed")?;
+        Ok(())
+    }
+
     /// Clean up all test data from the database (TimescaleDB implementation)
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {

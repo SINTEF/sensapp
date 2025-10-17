@@ -393,6 +393,16 @@ impl StorageInstance for PostgresStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    /// Health check for PostgreSQL storage
+    /// Executes a simple SELECT 1 query to verify database connectivity
+    async fn health_check(&self) -> Result<()> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .context("PostgreSQL health check failed")?;
+        Ok(())
+    }
+
     /// Clean up all test data from the database
     /// This removes all sensor data but keeps the schema intact
     /// Uses DELETE statements in dependency order to avoid foreign key conflicts
