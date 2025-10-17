@@ -19,9 +19,7 @@ storage_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp
 # Storage sync timeout in seconds (default: 15)
 # storage_sync_timeout_seconds = 30
 
-# MQTT Configuration (optional)
-# Uncomment and configure to enable MQTT ingestion:
-# [[mqtt]]
-# url = "mqtt://localhost:1883"
-# client_id = "sensapp-001"
-# topics = ["sensors/+/temperature", "sensors/+/humidity"]
+# InfluxDB Configuration
+# Use Numeric/Decimal (high precision) for InfluxDB numeric values instead of Float (default: false)
+# Numeric (Decimal) is precise but slower; Float (f64) is faster but has limited precision
+# influxdb_with_numeric = false

@@ -3,14 +3,12 @@ pub mod timescaledb_utilities;
 
 use self::timescaledb_publishers::*;
 use self::timescaledb_utilities::get_sensor_id_or_create_sensor;
-use super::{DEFAULT_QUERY_LIMIT, StorageError, StorageInstance, common::sync_with_timeout};
-use crate::config;
+use super::{DEFAULT_QUERY_LIMIT, StorageError, StorageInstance};
 use crate::datamodel::{
     SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
 };
 use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
 use anyhow::{Context, Result};
-use async_broadcast::Sender;
 use async_trait::async_trait;
 use smallvec::smallvec;
 use sqlx::{PgPool, postgres::PgConnectOptions};
@@ -52,22 +50,14 @@ impl StorageInstance for TimeScaleDBStorage {
 
         Ok(())
     }
-    async fn publish(&self, batch: Arc<Batch>, sync_sender: Sender<()>) -> Result<()> {
+    async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for single_sensor_batch in batch.sensors.as_ref() {
             self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
                 .await?;
         }
         transaction.commit().await?;
-        self.sync(sync_sender).await?;
         Ok(())
-    }
-
-    async fn sync(&self, sync_sender: Sender<()>) -> Result<()> {
-        // timescaledb doesn't need to do anything special for sync
-        // as we use transaction
-        let config = config::get().context("Failed to get configuration")?;
-        sync_with_timeout(&sync_sender, config.storage_sync_timeout_seconds).await
     }
 
     async fn vacuum(&self) -> Result<()> {
@@ -441,6 +431,16 @@ impl StorageInstance for TimeScaleDBStorage {
         };
 
         Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    /// Health check for TimescaleDB storage
+    /// Executes a simple SELECT 1 query to verify database connectivity
+    async fn health_check(&self) -> Result<()> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .context("TimescaleDB health check failed")?;
+        Ok(())
     }
 
     /// Clean up all test data from the database (TimescaleDB implementation)

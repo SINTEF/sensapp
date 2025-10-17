@@ -1,12 +1,8 @@
 use super::{app_error::AppError, state::HttpServerState};
-#[cfg(all(test, feature = "sqlite"))]
-use crate::config::load_configuration;
 use crate::datamodel::{
     SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
     sensapp_datetime::SensAppDateTimeExt, sensapp_vec::SensAppLabels,
 };
-#[cfg(all(test, feature = "sqlite"))]
-use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::{
     debug_handler,
@@ -67,32 +63,56 @@ fn compute_field_name(url_encoded_measurement_name: &str, field_key: &str) -> St
 fn influxdb_field_to_sensapp(
     field_value: FieldValue,
     datetime: SensAppDateTime,
+    with_numeric: bool,
 ) -> Result<(SensorType, TypedSamples)> {
     match field_value {
-        FieldValue::I64(value) => Ok((
-            SensorType::Integer,
-            TypedSamples::one_integer(value, datetime),
-        )),
-        FieldValue::U64(value) => match i64::try_from(value) {
-            Ok(value) => Ok((
-                SensorType::Integer,
-                TypedSamples::one_integer(value, datetime),
-            )),
-            Err(_) => anyhow::bail!("U64 value is too big to be converted to i64"),
-        },
-        //FieldValue::F64(value) => Ok((SensorType::Float, TypedSamples::one_float(value, datetime))),
-        FieldValue::F64(value) => Ok((
-            SensorType::Numeric,
-            TypedSamples::one_numeric(
-                Decimal::from_f64_retain(value).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Failed to convert f64 value {} to Decimal - precision may be too high",
-                        value
-                    )
-                })?,
-                datetime,
-            ),
-        )),
+        FieldValue::I64(value) => {
+            if with_numeric {
+                Ok((
+                    SensorType::Numeric,
+                    TypedSamples::one_numeric(Decimal::from(value), datetime),
+                ))
+            } else {
+                Ok((
+                    SensorType::Integer,
+                    TypedSamples::one_integer(value, datetime),
+                ))
+            }
+        }
+        FieldValue::U64(value) => {
+            if with_numeric {
+                Ok((
+                    SensorType::Numeric,
+                    TypedSamples::one_numeric(Decimal::from(value), datetime),
+                ))
+            } else {
+                match i64::try_from(value) {
+                    Ok(value) => Ok((
+                        SensorType::Integer,
+                        TypedSamples::one_integer(value, datetime),
+                    )),
+                    Err(_) => anyhow::bail!("U64 value is too big to be converted to i64"),
+                }
+            }
+        }
+        FieldValue::F64(value) => {
+            if with_numeric {
+                Ok((
+                    SensorType::Numeric,
+                    TypedSamples::one_numeric(
+                        Decimal::from_f64_retain(value).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "Failed to convert f64 value {} to Decimal - precision may be too high",
+                                value
+                            )
+                        })?,
+                        datetime,
+                    ),
+                ))
+            } else {
+                Ok((SensorType::Float, TypedSamples::one_float(value, datetime)))
+            }
+        }
         FieldValue::String(value) => Ok((
             SensorType::String,
             TypedSamples::one_string(value.into(), datetime),
@@ -247,7 +267,7 @@ pub async fn publish_influxdb(
                 for (field_key, field_value) in line.field_set {
                     let unit = None;
                     let (sensor_type, value) =
-                        match influxdb_field_to_sensapp(field_value, datetime) {
+                        match influxdb_field_to_sensapp(field_value, datetime, state.influxdb_with_numeric) {
                             Ok((sensor_type, value)) => (sensor_type, value),
                             Err(error) => {
                                 return Err(AppError::bad_request(error));
@@ -282,15 +302,19 @@ pub async fn publish_influxdb(
 }
 
 #[cfg(test)]
-#[cfg(feature = "sqlite")]
 mod tests {
-    use crate::storage::sqlite::SqliteStorage;
-
     use super::*;
+    use crate::config::load_configuration_for_tests;
+    use crate::storage::storage_factory::create_storage_from_connection_string;
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use influxdb_line_protocol::EscapedStr;
     use std::io::Write;
+
+    /// Helper to get test database URL - uses the centralized constant from test_utils
+    fn get_test_database_url() -> String {
+        sensapp::test_utils::get_test_database_url()
+    }
 
     #[test]
     fn test_bytes_to_string() {
@@ -326,13 +350,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_influxdb() {
-        _ = load_configuration();
+        _ = load_configuration_for_tests();
 
-        let storage = SqliteStorage::connect("sqlite::memory:").await.unwrap();
+        let connection_string = get_test_database_url();
+        let storage = create_storage_from_connection_string(&connection_string)
+            .await
+            .unwrap();
         storage.create_or_migrate().await.unwrap();
+        storage.cleanup_test_data().await.unwrap();
+
         let state = State(HttpServerState {
             name: Arc::new("influxdb test".to_string()),
-            storage: Arc::new(storage),
+            storage,
+            influxdb_with_numeric: false,
         });
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
@@ -495,24 +525,59 @@ mod tests {
         let result = publish_influxdb(state.clone(), headers, query, bytes).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(AppError::BadRequest(_))));
+
+        // Cleanup test data
+        state.0.storage.cleanup_test_data().await.unwrap();
     }
 
     #[test]
     fn test_influxdb_field_to_sensapp() {
         let datetime = SensAppDateTime::from_unix_seconds(0.0);
-        let result = influxdb_field_to_sensapp(FieldValue::I64(42), datetime).unwrap();
+
+        // Test integer types with with_numeric=false (default Integer)
+        let result = influxdb_field_to_sensapp(FieldValue::I64(42), datetime, false).unwrap();
         assert_eq!(
             result,
             (SensorType::Integer, TypedSamples::one_integer(42, datetime))
         );
 
-        let result = influxdb_field_to_sensapp(FieldValue::U64(42), datetime).unwrap();
+        let result = influxdb_field_to_sensapp(FieldValue::U64(42), datetime, false).unwrap();
         assert_eq!(
             result,
             (SensorType::Integer, TypedSamples::one_integer(42, datetime))
         );
 
-        let result = influxdb_field_to_sensapp(FieldValue::F64(42.0), datetime).unwrap();
+        // Test integer types with with_numeric=true (Numeric/Decimal mode)
+        let result = influxdb_field_to_sensapp(FieldValue::I64(42), datetime, true).unwrap();
+        assert_eq!(
+            result,
+            (
+                SensorType::Numeric,
+                TypedSamples::one_numeric(Decimal::from(42), datetime)
+            )
+        );
+
+        let result = influxdb_field_to_sensapp(FieldValue::U64(42), datetime, true).unwrap();
+        assert_eq!(
+            result,
+            (
+                SensorType::Numeric,
+                TypedSamples::one_numeric(Decimal::from(42), datetime)
+            )
+        );
+
+        // Test F64 with with_numeric=false (default Float)
+        let result = influxdb_field_to_sensapp(FieldValue::F64(42.0), datetime, false).unwrap();
+        assert_eq!(
+            result,
+            (
+                SensorType::Float,
+                TypedSamples::one_float(42.0, datetime)
+            )
+        );
+
+        // Test F64 with with_numeric=true (Numeric/Decimal mode)
+        let result = influxdb_field_to_sensapp(FieldValue::F64(42.0), datetime, true).unwrap();
         assert_eq!(
             result,
             (
@@ -521,8 +586,9 @@ mod tests {
             )
         );
 
+        // Test string type
         let result =
-            influxdb_field_to_sensapp(FieldValue::String(EscapedStr::from("test")), datetime)
+            influxdb_field_to_sensapp(FieldValue::String(EscapedStr::from("test")), datetime, true)
                 .unwrap();
         assert_eq!(
             result,
@@ -532,7 +598,8 @@ mod tests {
             )
         );
 
-        let result = influxdb_field_to_sensapp(FieldValue::Boolean(true), datetime).unwrap();
+        // Test boolean type
+        let result = influxdb_field_to_sensapp(FieldValue::Boolean(true), datetime, true).unwrap();
         assert_eq!(
             result,
             (
@@ -545,8 +612,70 @@ mod tests {
     #[test]
     fn test_convert_too_high_u64_to_i64() {
         let datetime = SensAppDateTime::from_unix_seconds(0.0);
-        let result = influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime);
+
+        // With with_numeric=false, too high u64 values should fail (can't convert to i64)
+        let result = influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime, false);
         assert!(result.is_err());
+
+        // With with_numeric=true, high u64 values should succeed (converted to Decimal)
+        let result = influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime, true);
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            (
+                SensorType::Numeric,
+                TypedSamples::one_numeric(Decimal::from(i64::MAX as u64 + 1), datetime)
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_influxdb_with_numeric_enabled() {
+        _ = load_configuration_for_tests();
+
+        let connection_string = get_test_database_url();
+        let storage = create_storage_from_connection_string(&connection_string)
+            .await
+            .unwrap();
+        storage.create_or_migrate().await.unwrap();
+        storage.cleanup_test_data().await.unwrap();
+
+        // Test with influxdb_with_numeric enabled
+        let state = State(HttpServerState {
+            name: Arc::new("influxdb numeric test".to_string()),
+            storage: storage.clone(),
+            influxdb_with_numeric: true,
+        });
+
+        // Test with integer value
+        let headers = HeaderMap::new();
+        let query = Query(InfluxDBQueryParams {
+            bucket: "test_numeric".to_string(),
+            org: Some("test_numeric".to_string()),
+            org_id: None,
+            precision: None,
+        });
+        let bytes = Bytes::from("memory,host=B usage_int=42i,usage_float=3.14 1590488773254420000");
+        let result = publish_influxdb(state.clone(), headers, query, bytes)
+            .await
+            .unwrap();
+        assert_eq!(result, StatusCode::NO_CONTENT);
+
+        // Test with high u64 value that exceeds i64::MAX - should succeed with numeric enabled
+        let headers = HeaderMap::new();
+        let query = Query(InfluxDBQueryParams {
+            bucket: "test_numeric".to_string(),
+            org: Some("test_numeric".to_string()),
+            org_id: None,
+            precision: None,
+        });
+        let bytes = Bytes::from("memory usage_big=9223372036854775808u 1590488773254420000");
+        let result = publish_influxdb(state.clone(), headers, query, bytes)
+            .await
+            .unwrap();
+        assert_eq!(result, StatusCode::NO_CONTENT);
+
+        storage.cleanup_test_data().await.unwrap();
     }
 
     #[test]

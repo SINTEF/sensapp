@@ -5,4 +5,5 @@ use std::sync::Arc;
 pub struct HttpServerState {
     pub name: Arc<String>,
     pub storage: Arc<dyn StorageInstance>,
+    pub influxdb_with_numeric: bool,
 }
