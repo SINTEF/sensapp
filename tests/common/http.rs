@@ -309,7 +309,7 @@ async fn test_publish_handler(
             .delimiter(b',') // Use comma for tests, semicolon is the server default
             .create_reader(reader);
 
-        publish_csv_async(csv_reader, 1000, state.storage.clone())
+        publish_csv_async(csv_reader, state.storage.clone())
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
