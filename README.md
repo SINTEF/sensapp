@@ -15,9 +15,9 @@ It enables the handling of small time series data of the edge efficiently to lar
 
 SensApp should be stateless and scale from the edge to big data. The message queue software and the database software solve the complex problems. SensApp is a simple adapter between.
 
-* SensApp supports simple deployments without requiring a message queue and only an embedded SQLite database.
-* SensApp supports medium deployments with a single message broker and a PostgreSQL database.
-* For larger deployments, SensApp advises a distributed message queue, an automatic load balancer for the SensApp instances, and a ClickHouse cluster.
+- SensApp supports simple deployments without requiring a message queue and only an embedded SQLite database.
+- SensApp supports medium deployments with a single message broker and a PostgreSQL database.
+- For larger deployments, SensApp advises a distributed message queue, an automatic load balancer for the SensApp instances, and a ClickHouse cluster.
 
 Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 
@@ -47,17 +47,7 @@ Override environment variables as needed: `DATABASE_URL`, `POSTGRES_USER`, etc.
 
 ## Built With Rust™️
 
-SensApp is developed using Rust, a language known for its performance, memory safety, and annoying borrow checker. SensApp used to be written in Scala, but the new author prefers Rust.
-
-Not only the language, it's also the extensive high quality open-source ecosystem that makes Rust a great choice for SensApp:
-
-* [Tokio](https://tokio.rs/) asynchronous runtime
-* [Serde](https://serde.rs/) serialization framework
-* [Axum](https://github.com/tokio-rs/axum) web framework
-* [SQLx](https://github.com/launchbadge/sqlx) database driver
-* [Polars](https://pola.rs) data frame library
-* [nom](https://github.com/rust-bakery/nom) parser combinator library
-* *and many more…*
+SensApp is developed using Rust, a language known for its performance, memory safety, and annoying borrow checker. SensApp used to be written in Scala, but the new author prefers Rust. But most of the heavy lifting is done by the dependencies, that are listed in the [Cargo.toml](Cargo.toml) file.
 
 ## Contributing
 
