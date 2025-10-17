@@ -4,7 +4,7 @@ use crate::storage::clickhouse::clickhouse_utilities::{
 };
 use anyhow::Result;
 use base64::prelude::*;
-use clickhouse::Client;
+use clickhouse::{Client, inserter::Inserter};
 use serde::Serialize;
 
 // Row structures for ClickHouse inserts
@@ -72,18 +72,39 @@ struct LabelRow {
     description: Option<String>,
 }
 
-/// Publisher for single sensor batch to ClickHouse
+/// Publisher for single sensor batch to ClickHouse with stateful inserters
 pub struct ClickHousePublisher<'a> {
     client: &'a Client,
+    // Lazily initialized inserters for each value type
+    integer_inserter: Option<Inserter<IntegerValueRow>>,
+    numeric_inserter: Option<Inserter<NumericValueRow>>,
+    float_inserter: Option<Inserter<FloatValueRow>>,
+    string_inserter: Option<Inserter<StringValueRow>>,
+    boolean_inserter: Option<Inserter<BooleanValueRow>>,
+    location_inserter: Option<Inserter<LocationValueRow>>,
+    json_inserter: Option<Inserter<JsonValueRow>>,
+    blob_inserter: Option<Inserter<BlobValueRow>>,
+    label_inserter: Option<Inserter<LabelRow>>,
 }
 
 impl<'a> ClickHousePublisher<'a> {
     pub fn new(client: &'a Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            integer_inserter: None,
+            numeric_inserter: None,
+            float_inserter: None,
+            string_inserter: None,
+            boolean_inserter: None,
+            location_inserter: None,
+            json_inserter: None,
+            blob_inserter: None,
+            label_inserter: None,
+        }
     }
 
     /// Publish a single sensor batch to ClickHouse
-    pub async fn publish_single_sensor_batch(&self, batch: &SingleSensorBatch) -> Result<()> {
+    pub async fn publish_single_sensor_batch(&mut self, batch: &SingleSensorBatch) -> Result<()> {
         // Get or create sensor_id
         let sensor_id = get_sensor_id_or_create_sensor(
             self.client,
@@ -112,15 +133,21 @@ impl<'a> ClickHousePublisher<'a> {
     }
 
     /// Publish labels for a sensor
-    async fn publish_labels(&self, sensor_id: u64, labels: &[(String, String)]) -> Result<()> {
+    async fn publish_labels(&mut self, sensor_id: u64, labels: &[(String, String)]) -> Result<()> {
         if labels.is_empty() {
             return Ok(());
         }
 
-        let mut insert = self
-            .client
-            .insert("labels")
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        // Get or create the label inserter
+        if self.label_inserter.is_none() {
+            self.label_inserter = Some(
+                self.client
+                    .inserter("labels")
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+            );
+        }
+
+        let inserter = self.label_inserter.as_mut().unwrap();
 
         for (name, description) in labels {
             let row = LabelRow {
@@ -128,22 +155,16 @@ impl<'a> ClickHousePublisher<'a> {
                 name: name.clone(),
                 description: Some(description.clone()),
             };
-            insert
+            inserter
                 .write(&row)
-                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
-
-        insert
-            .end()
-            .await
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         Ok(())
     }
 
     /// Publish samples by their types
-    async fn publish_samples(&self, sensor_id: u64, samples: &TypedSamples) -> Result<()> {
+    async fn publish_samples(&mut self, sensor_id: u64, samples: &TypedSamples) -> Result<()> {
         match samples {
             TypedSamples::Integer(values) => {
                 self.publish_integer_values(sensor_id, values).await?;
@@ -175,15 +196,21 @@ impl<'a> ClickHousePublisher<'a> {
     }
 
     /// Publish integer values
-    async fn publish_integer_values(&self, sensor_id: u64, samples: &[Sample<i64>]) -> Result<()> {
+    async fn publish_integer_values(&mut self, sensor_id: u64, samples: &[Sample<i64>]) -> Result<()> {
         if samples.is_empty() {
             return Ok(());
         }
 
-        let mut insert = self
-            .client
-            .insert("integer_values")
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        // Get or create the integer inserter
+        if self.integer_inserter.is_none() {
+            self.integer_inserter = Some(
+                self.client
+                    .inserter("integer_values")
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+            );
+        }
+
+        let inserter = self.integer_inserter.as_mut().unwrap();
 
         for sample in samples {
             let row = IntegerValueRow {
@@ -191,23 +218,17 @@ impl<'a> ClickHousePublisher<'a> {
                 timestamp_us: datetime_to_micros(&sample.datetime),
                 value: sample.value,
             };
-            insert
+            inserter
                 .write(&row)
-                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
-
-        insert
-            .end()
-            .await
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         Ok(())
     }
 
     /// Publish numeric values
     async fn publish_numeric_values(
-        &self,
+        &mut self,
         sensor_id: u64,
         samples: &[Sample<rust_decimal::Decimal>],
     ) -> Result<()> {
@@ -215,10 +236,16 @@ impl<'a> ClickHousePublisher<'a> {
             return Ok(());
         }
 
-        let mut insert = self
-            .client
-            .insert("numeric_values")
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        // Get or create the numeric inserter
+        if self.numeric_inserter.is_none() {
+            self.numeric_inserter = Some(
+                self.client
+                    .inserter("numeric_values")
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+            );
+        }
+
+        let inserter = self.numeric_inserter.as_mut().unwrap();
 
         for sample in samples {
             let row = NumericValueRow {
@@ -226,30 +253,30 @@ impl<'a> ClickHousePublisher<'a> {
                 timestamp_us: datetime_to_micros(&sample.datetime),
                 value: sample.value,
             };
-            insert
+            inserter
                 .write(&row)
-                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
-
-        insert
-            .end()
-            .await
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         Ok(())
     }
 
     /// Publish float values
-    async fn publish_float_values(&self, sensor_id: u64, samples: &[Sample<f64>]) -> Result<()> {
+    async fn publish_float_values(&mut self, sensor_id: u64, samples: &[Sample<f64>]) -> Result<()> {
         if samples.is_empty() {
             return Ok(());
         }
 
-        let mut insert = self
-            .client
-            .insert("float_values")
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        // Get or create the float inserter
+        if self.float_inserter.is_none() {
+            self.float_inserter = Some(
+                self.client
+                    .inserter("float_values")
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+            );
+        }
+
+        let inserter = self.float_inserter.as_mut().unwrap();
 
         for sample in samples {
             let row = FloatValueRow {
@@ -257,23 +284,17 @@ impl<'a> ClickHousePublisher<'a> {
                 timestamp_us: datetime_to_micros(&sample.datetime),
                 value: sample.value,
             };
-            insert
+            inserter
                 .write(&row)
-                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
-
-        insert
-            .end()
-            .await
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         Ok(())
     }
 
     /// Publish string values
     async fn publish_string_values(
-        &self,
+        &mut self,
         sensor_id: u64,
         samples: &[Sample<String>],
     ) -> Result<()> {
@@ -281,10 +302,16 @@ impl<'a> ClickHousePublisher<'a> {
             return Ok(());
         }
 
-        let mut insert = self
-            .client
-            .insert("string_values")
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        // Get or create the string inserter
+        if self.string_inserter.is_none() {
+            self.string_inserter = Some(
+                self.client
+                    .inserter("string_values")
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+            );
+        }
+
+        let inserter = self.string_inserter.as_mut().unwrap();
 
         for sample in samples {
             let row = StringValueRow {
@@ -292,30 +319,30 @@ impl<'a> ClickHousePublisher<'a> {
                 timestamp_us: datetime_to_micros(&sample.datetime),
                 value: sample.value.clone(),
             };
-            insert
+            inserter
                 .write(&row)
-                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
-
-        insert
-            .end()
-            .await
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         Ok(())
     }
 
     /// Publish boolean values
-    async fn publish_boolean_values(&self, sensor_id: u64, samples: &[Sample<bool>]) -> Result<()> {
+    async fn publish_boolean_values(&mut self, sensor_id: u64, samples: &[Sample<bool>]) -> Result<()> {
         if samples.is_empty() {
             return Ok(());
         }
 
-        let mut insert = self
-            .client
-            .insert("boolean_values")
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        // Get or create the boolean inserter
+        if self.boolean_inserter.is_none() {
+            self.boolean_inserter = Some(
+                self.client
+                    .inserter("boolean_values")
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+            );
+        }
+
+        let inserter = self.boolean_inserter.as_mut().unwrap();
 
         for sample in samples {
             let row = BooleanValueRow {
@@ -323,23 +350,17 @@ impl<'a> ClickHousePublisher<'a> {
                 timestamp_us: datetime_to_micros(&sample.datetime),
                 value: sample.value,
             };
-            insert
+            inserter
                 .write(&row)
-                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
-
-        insert
-            .end()
-            .await
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         Ok(())
     }
 
     /// Publish location values
     async fn publish_location_values(
-        &self,
+        &mut self,
         sensor_id: u64,
         samples: &[Sample<geo::Point>],
     ) -> Result<()> {
@@ -347,10 +368,16 @@ impl<'a> ClickHousePublisher<'a> {
             return Ok(());
         }
 
-        let mut insert = self
-            .client
-            .insert("location_values")
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        // Get or create the location inserter
+        if self.location_inserter.is_none() {
+            self.location_inserter = Some(
+                self.client
+                    .inserter("location_values")
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+            );
+        }
+
+        let inserter = self.location_inserter.as_mut().unwrap();
 
         for sample in samples {
             let row = LocationValueRow {
@@ -359,23 +386,17 @@ impl<'a> ClickHousePublisher<'a> {
                 latitude: sample.value.y(),
                 longitude: sample.value.x(),
             };
-            insert
+            inserter
                 .write(&row)
-                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
-
-        insert
-            .end()
-            .await
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         Ok(())
     }
 
     /// Publish JSON values
     async fn publish_json_values(
-        &self,
+        &mut self,
         sensor_id: u64,
         samples: &[Sample<serde_json::Value>],
     ) -> Result<()> {
@@ -383,10 +404,16 @@ impl<'a> ClickHousePublisher<'a> {
             return Ok(());
         }
 
-        let mut insert = self
-            .client
-            .insert("json_values")
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        // Get or create the json inserter
+        if self.json_inserter.is_none() {
+            self.json_inserter = Some(
+                self.client
+                    .inserter("json_values")
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+            );
+        }
+
+        let inserter = self.json_inserter.as_mut().unwrap();
 
         for sample in samples {
             let row = JsonValueRow {
@@ -394,30 +421,30 @@ impl<'a> ClickHousePublisher<'a> {
                 timestamp_us: datetime_to_micros(&sample.datetime),
                 value: sample.value.to_string(),
             };
-            insert
+            inserter
                 .write(&row)
-                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
-
-        insert
-            .end()
-            .await
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         Ok(())
     }
 
     /// Publish blob values (base64 encoded)
-    async fn publish_blob_values(&self, sensor_id: u64, samples: &[Sample<Vec<u8>>]) -> Result<()> {
+    async fn publish_blob_values(&mut self, sensor_id: u64, samples: &[Sample<Vec<u8>>]) -> Result<()> {
         if samples.is_empty() {
             return Ok(());
         }
 
-        let mut insert = self
-            .client
-            .insert("blob_values")
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        // Get or create the blob inserter
+        if self.blob_inserter.is_none() {
+            self.blob_inserter = Some(
+                self.client
+                    .inserter("blob_values")
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+            );
+        }
+
+        let inserter = self.blob_inserter.as_mut().unwrap();
 
         for sample in samples {
             let row = BlobValueRow {
@@ -425,16 +452,77 @@ impl<'a> ClickHousePublisher<'a> {
                 timestamp_us: datetime_to_micros(&sample.datetime),
                 value: base64::prelude::BASE64_STANDARD.encode(&sample.value),
             };
-            insert
+            inserter
                 .write(&row)
-                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
 
-        insert
-            .end()
-            .await
-            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        Ok(())
+    }
+
+    /// Commit all pending inserts to ClickHouse in parallel
+    pub async fn commit_all(mut self) -> Result<()> {
+        // Collect all initialized inserters and commit them in parallel
+        let mut tasks = Vec::new();
+
+        if let Some(inserter) = self.integer_inserter.take() {
+            tasks.push(tokio::spawn(async move {
+                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+            }));
+        }
+
+        if let Some(inserter) = self.numeric_inserter.take() {
+            tasks.push(tokio::spawn(async move {
+                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+            }));
+        }
+
+        if let Some(inserter) = self.float_inserter.take() {
+            tasks.push(tokio::spawn(async move {
+                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+            }));
+        }
+
+        if let Some(inserter) = self.string_inserter.take() {
+            tasks.push(tokio::spawn(async move {
+                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+            }));
+        }
+
+        if let Some(inserter) = self.boolean_inserter.take() {
+            tasks.push(tokio::spawn(async move {
+                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+            }));
+        }
+
+        if let Some(inserter) = self.location_inserter.take() {
+            tasks.push(tokio::spawn(async move {
+                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+            }));
+        }
+
+        if let Some(inserter) = self.json_inserter.take() {
+            tasks.push(tokio::spawn(async move {
+                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+            }));
+        }
+
+        if let Some(inserter) = self.blob_inserter.take() {
+            tasks.push(tokio::spawn(async move {
+                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+            }));
+        }
+
+        if let Some(inserter) = self.label_inserter.take() {
+            tasks.push(tokio::spawn(async move {
+                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+            }));
+        }
+
+        // Wait for all tasks to complete and collect results
+        for task in tasks {
+            task.await??;
+        }
 
         Ok(())
     }

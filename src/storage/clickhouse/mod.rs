@@ -176,13 +176,16 @@ impl StorageInstance for ClickHouseStorage {
     }
 
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
-        let publisher = ClickHousePublisher::new(&self.client);
+        let mut publisher = ClickHousePublisher::new(&self.client);
 
         for single_sensor_batch in batch.sensors.as_ref() {
             publisher
                 .publish_single_sensor_batch(single_sensor_batch)
                 .await?;
         }
+
+        // Commit all inserters in parallel
+        publisher.commit_all().await?;
 
         Ok(())
     }

@@ -275,6 +275,10 @@ pub async fn publish_senml_data(
     Ok(())
 }
 
+/// Database Vacuuming
+///
+/// Cleans up and optimizes the database by removing unused data and reclaiming space.
+/// (only if supported by the underlying storage engine).
 #[utoipa::path(
     post,
     path = "/api/v1/admin/vacuum",
@@ -295,6 +299,7 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
+    use serial_test::serial;
     use tower::ServiceExt;
 
     use super::*;
@@ -305,6 +310,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_frontpage_handler() {
         use crate::storage::storage_factory::create_storage_from_connection_string;
 

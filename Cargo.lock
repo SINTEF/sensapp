@@ -1357,6 +1357,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "lz4_flex",
+ "quanta",
  "replace_with",
  "sealed",
  "serde",
@@ -4510,6 +4511,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c0f333311d2d8fda65bcf76af35054e9f38e253332a0289746156a59656988b"
 dependencies = [
  "pulldown-cmark",
+]
+
+[[package]]
+name = "quanta"
+version = "0.12.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3ab5a9d756f0d97bdc89019bd2e4ea098cf9cde50ee7564dde6b81ccc8f06c7"
+dependencies = [
+ "crossbeam-utils",
+ "libc",
+ "once_cell",
+ "raw-cpuid",
+ "wasi 0.11.1+wasi-snapshot-preview1",
+ "web-sys",
+ "winapi",
 ]
 
 [[package]]

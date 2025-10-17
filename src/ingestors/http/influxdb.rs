@@ -266,13 +266,16 @@ pub async fn publish_influxdb(
 
                 for (field_key, field_value) in line.field_set {
                     let unit = None;
-                    let (sensor_type, value) =
-                        match influxdb_field_to_sensapp(field_value, datetime, state.influxdb_with_numeric) {
-                            Ok((sensor_type, value)) => (sensor_type, value),
-                            Err(error) => {
-                                return Err(AppError::bad_request(error));
-                            }
-                        };
+                    let (sensor_type, value) = match influxdb_field_to_sensapp(
+                        field_value,
+                        datetime,
+                        state.influxdb_with_numeric,
+                    ) {
+                        Ok((sensor_type, value)) => (sensor_type, value),
+                        Err(error) => {
+                            return Err(AppError::bad_request(error));
+                        }
+                    };
                     let name = compute_field_name(&url_encoded_field_name, &field_key);
                     let sensor = Sensor::new_without_uuid(name, sensor_type, unit, tags.clone())?;
                     batch_builder.add(Arc::new(sensor), value).await?;
@@ -309,6 +312,7 @@ mod tests {
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use influxdb_line_protocol::EscapedStr;
+    use serial_test::serial;
     use std::io::Write;
 
     /// Helper to get test database URL - uses the centralized constant from test_utils
@@ -317,6 +321,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_bytes_to_string() {
         let headers = HeaderMap::new();
         let bytes = Bytes::from("test");
@@ -349,6 +354,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_publish_influxdb() {
         _ = load_configuration_for_tests();
 
@@ -531,6 +537,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_influxdb_field_to_sensapp() {
         let datetime = SensAppDateTime::from_unix_seconds(0.0);
 
@@ -570,10 +577,7 @@ mod tests {
         let result = influxdb_field_to_sensapp(FieldValue::F64(42.0), datetime, false).unwrap();
         assert_eq!(
             result,
-            (
-                SensorType::Float,
-                TypedSamples::one_float(42.0, datetime)
-            )
+            (SensorType::Float, TypedSamples::one_float(42.0, datetime))
         );
 
         // Test F64 with with_numeric=true (Numeric/Decimal mode)
@@ -610,15 +614,18 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_convert_too_high_u64_to_i64() {
         let datetime = SensAppDateTime::from_unix_seconds(0.0);
 
         // With with_numeric=false, too high u64 values should fail (can't convert to i64)
-        let result = influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime, false);
+        let result =
+            influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime, false);
         assert!(result.is_err());
 
         // With with_numeric=true, high u64 values should succeed (converted to Decimal)
-        let result = influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime, true);
+        let result =
+            influxdb_field_to_sensapp(FieldValue::U64(i64::MAX as u64 + 1), datetime, true);
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
@@ -630,6 +637,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_publish_influxdb_with_numeric_enabled() {
         _ = load_configuration_for_tests();
 
@@ -675,10 +683,11 @@ mod tests {
             .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
 
-        storage.cleanup_test_data().await.unwrap();
+        //storage.cleanup_test_data().await.unwrap();
     }
 
     #[test]
+    #[serial]
     fn test_precision_enum() {
         let result = Precision::from_str("ns").unwrap();
         assert_eq!(result, Precision::Nanoseconds);
