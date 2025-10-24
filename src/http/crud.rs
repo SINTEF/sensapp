@@ -1,7 +1,7 @@
 use crate::datamodel::SensAppDateTime;
 use crate::exporters::{ArrowConverter, CsvConverter, JsonlConverter, SenMLConverter};
-use crate::ingestors::http::app_error::AppError;
-use crate::ingestors::http::state::HttpServerState;
+use crate::http::app_error::AppError;
+use crate::http::state::HttpServerState;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;

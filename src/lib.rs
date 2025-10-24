@@ -3,9 +3,9 @@
 pub mod config;
 pub mod datamodel;
 pub mod exporters;
+pub mod http;
 pub mod importers;
 pub mod infer;
-pub mod ingestors;
 pub mod parsing;
 pub mod storage;
 

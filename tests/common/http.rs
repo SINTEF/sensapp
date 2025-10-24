@@ -4,10 +4,10 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
-use sensapp::ingestors::http::crud::{get_series_data, list_metrics, list_series};
-use sensapp::ingestors::http::health::{liveness, readiness};
-use sensapp::ingestors::http::server::publish_senml_data;
-use sensapp::ingestors::http::state::HttpServerState;
+use sensapp::http::crud::{get_series_data, list_metrics, list_series};
+use sensapp::http::health::{liveness, readiness};
+use sensapp::http::server::publish_senml_data;
+use sensapp::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
 use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot` and `ready`
