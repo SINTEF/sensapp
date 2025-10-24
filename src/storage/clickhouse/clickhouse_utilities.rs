@@ -74,7 +74,8 @@ pub async fn get_sensor_id_or_create_sensor(
     };
 
     let mut insert = client
-        .insert("sensors")
+        .insert::<SensorRow>("sensors")
+        .await
         .map_err(|e| StorageError::invalid_data_format(&e.to_string(), Some(*uuid), Some(name)))?;
 
     insert
@@ -127,7 +128,8 @@ async fn get_or_create_unit(client: &clickhouse::Client, unit: &Unit) -> Result<
 
     // Unit doesn't exist, create it
     let mut insert = client
-        .insert("units")
+        .insert::<UnitRow>("units")
+        .await
         .map_err(|e| StorageError::invalid_data_format(&e.to_string(), None, None))?;
 
     insert
