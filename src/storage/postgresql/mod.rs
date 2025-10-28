@@ -10,6 +10,7 @@ use geo::Point;
 use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 use sqlx::{PgPool, postgres::PgConnectOptions};
+use std::collections::HashMap;
 use std::{str::FromStr, sync::Arc};
 use uuid::Uuid;
 
@@ -78,15 +79,16 @@ impl StorageInstance for PostgresStorage {
             r#type: Option<String>,
             unit_name: Option<String>,
             unit_description: Option<String>,
+            labels: Option<sqlx::types::Json<HashMap<String, String>>>,
         }
 
         // Query sensors with their metadata using the catalog view, optionally filtered by metric name
         let sensor_rows: Vec<SensorRow> = sqlx::query_as(
             r#"
-            SELECT sensor_id, uuid, name, type, unit_name, unit_description
+            SELECT sensor_id, uuid, name, type, unit_name, unit_description, labels
             FROM sensor_catalog_view
             WHERE ($1::TEXT IS NULL OR name = $1)
-            ORDER BY uuid ASC
+            ORDER BY sensor_id ASC
             "#,
         )
         .bind(metric_filter)
@@ -96,7 +98,9 @@ impl StorageInstance for PostgresStorage {
         let mut sensors = Vec::new();
 
         for sensor_row in sensor_rows {
-            // Parse sensor metadata with improved error handling
+            /*let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
+                anyhow::Error::from(StorageError::missing_field("sensor_id", None, None))
+            })?;*/
             let sensor_uuid = sensor_row
                 .uuid
                 .ok_or_else(|| {
@@ -129,46 +133,18 @@ impl StorageInstance for PostgresStorage {
                 _ => None,
             };
 
-            // Query labels for this sensor with proper error context
-            let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
-                anyhow::Error::from(StorageError::missing_field(
-                    "sensor_id",
-                    Some(sensor_uuid),
-                    Some(&sensor_name),
-                ))
-            })?;
+            let labels: Option<SensAppLabels> = if let Some(labels_json) = sensor_row.labels {
+                let mut labels: SensAppLabels = smallvec![];
+                for (label_name, label_value) in labels_json.0 {
+                    labels.push((label_name, label_value));
+                }
 
-            #[derive(sqlx::FromRow)]
-            struct LabelRow {
-                label_name: String,
-                label_value: String,
-            }
+                Some(labels)
+            } else {
+                None
+            };
 
-            let labels_rows: Vec<LabelRow> = sqlx::query_as(
-                r#"
-                SELECT lnd.name as label_name, ldd.description as label_value
-                FROM labels l
-                JOIN labels_name_dictionary lnd ON l.name = lnd.id
-                JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                WHERE l.sensor_id = $1
-                "#,
-            )
-            .bind(sensor_id)
-            .fetch_all(&self.pool)
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to query labels for sensor UUID={} name='{}'",
-                    sensor_uuid, sensor_name
-                )
-            })?;
-
-            let mut labels: SensAppLabels = smallvec![];
-            for label_row in labels_rows {
-                labels.push((label_row.label_name, label_row.label_value));
-            }
-
-            let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
+            let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, labels);
 
             sensors.push(sensor);
         }
@@ -488,11 +464,26 @@ impl StorageInstance for PostgresStorage {
         // Step 5: Clear all cached function caches
         // The cached macro generates cache variables named after the function in uppercase
         use cached::Cached;
-        postgresql_utilities::GET_LABEL_NAME_ID_OR_CREATE.lock().await.cache_clear();
-        postgresql_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE.lock().await.cache_clear();
-        postgresql_utilities::GET_UNIT_ID_OR_CREATE.lock().await.cache_clear();
-        postgresql_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR.lock().await.cache_clear();
-        postgresql_utilities::GET_STRING_VALUE_ID_OR_CREATE.lock().await.cache_clear();
+        postgresql_utilities::GET_LABEL_NAME_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        postgresql_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        postgresql_utilities::GET_UNIT_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        postgresql_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
+            .lock()
+            .await
+            .cache_clear();
+        postgresql_utilities::GET_STRING_VALUE_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
 
         Ok(())
     }

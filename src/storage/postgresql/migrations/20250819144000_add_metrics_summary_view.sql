@@ -11,4 +11,5 @@ FROM sensors s
 LEFT JOIN units u ON s.unit = u.id
 LEFT JOIN labels l ON s.sensor_id = l.sensor_id
 LEFT JOIN labels_name_dictionary lnd ON l.name = lnd.id
-GROUP BY s.name, s.type;
+GROUP BY s.name, s.type
+ORDER BY s.name;
