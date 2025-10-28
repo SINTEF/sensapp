@@ -10,7 +10,7 @@ use sensapp::http::server::publish_senml_data;
 use sensapp::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
 use std::sync::Arc;
-use tower::ServiceExt; // for `oneshot` and `ready`
+use tower::ServiceExt;
 
 /// HTTP test client for making requests to our app
 #[allow(dead_code)] // Test helper struct

@@ -2,6 +2,7 @@ use super::app_error::AppError;
 use super::crud::{get_series_data, list_metrics, list_series};
 use super::influxdb::publish_influxdb;
 use super::prometheus::publish_prometheus;
+use super::prometheus_read::prometheus_remote_read;
 use super::state::HttpServerState;
 use crate::config;
 use crate::importers::csv::publish_csv_async;
@@ -11,6 +12,7 @@ use crate::http::crud::{
 use crate::http::health::{__path_liveness, __path_readiness, liveness, readiness};
 use crate::http::influxdb::__path_publish_influxdb;
 use crate::http::prometheus::__path_publish_prometheus;
+use crate::http::prometheus_read::__path_prometheus_remote_read;
 use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::Json;
@@ -42,7 +44,7 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
         (name = "Admin", description = "Administrative operations"),
         (name = "Health", description = "Health check endpoints"),
     ),
-    paths(frontpage, publish_sensors_data, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, vacuum_database, liveness, readiness),
+    paths(frontpage, publish_sensors_data, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, prometheus_remote_read, vacuum_database, liveness, readiness),
 )]
 struct ApiDoc;
 
@@ -89,6 +91,11 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .route(
             "/api/v1/prometheus_remote_write",
             post(publish_prometheus).layer(max_body_layer),
+        )
+        // Prometheus Remote Read API
+        .route(
+            "/api/v1/prometheus_remote_read",
+            post(prometheus_remote_read).layer(max_body_layer),
         )
         // Admin API
         .route("/api/v1/admin/vacuum", post(vacuum_database))

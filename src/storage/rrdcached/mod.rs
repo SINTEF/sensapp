@@ -319,7 +319,12 @@ impl StorageInstance for RrdCachedStorage {
         Ok(())
     }
 
-    async fn list_series(&self) -> Result<Vec<String>> {
+    async fn list_series(
+        &self,
+        _metric_filter: Option<&str>,
+        _limit: Option<usize>,
+        _bookmark: Option<&str>,
+    ) -> Result<crate::storage::ListSeriesResult> {
         unimplemented!();
     }
 

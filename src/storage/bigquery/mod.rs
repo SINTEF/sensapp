@@ -223,7 +223,12 @@ impl StorageInstance for BigQueryStorage {
     async fn list_series(
         &self,
         _metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>> {
+        _limit: Option<usize>,
+        _bookmark: Option<&str>,
+    ) -> Result<crate::storage::ListSeriesResult> {
+        // TODO: Implement pagination for BigQuery backend
+        // TODO: Implement metric_filter support for BigQuery backend
+        // For now, ignore limit, bookmark, and metric_filter parameters and return all results
         use crate::datamodel::{Sensor, SensorType, sensapp_vec::SensAppLabels, unit::Unit};
         use gcp_bigquery_client::model::query_request::QueryRequest;
         use smallvec::smallvec;
@@ -302,7 +307,10 @@ impl StorageInstance for BigQueryStorage {
             sensors.push(sensor);
         }
 
-        Ok(sensors)
+        Ok(crate::storage::ListSeriesResult {
+            series: sensors,
+            bookmark: None,
+        })
     }
 
     async fn query_sensor_data(

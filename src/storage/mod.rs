@@ -13,6 +13,22 @@ pub mod common;
 /// Set to 10 million records - appropriate for timeseries data
 pub const DEFAULT_QUERY_LIMIT: usize = 10_000_000;
 
+/// Default limit for list_series when no limit is specified
+pub const DEFAULT_LIST_SERIES_LIMIT: usize = 256;
+
+/// Maximum limit for list_series to prevent excessive memory usage
+pub const MAX_LIST_SERIES_LIMIT: usize = 16384;
+
+/// Result type for list_series with pagination support
+#[derive(Debug)]
+pub struct ListSeriesResult {
+    /// The series matching the query
+    pub series: Vec<crate::datamodel::Sensor>,
+    /// Bookmark for the next page (sensor_id as string)
+    /// None if this is the last page
+    pub bookmark: Option<String>,
+}
+
 #[async_trait]
 pub trait StorageInstance: Send + Sync + Debug {
     async fn create_or_migrate(&self) -> Result<()>;
@@ -23,7 +39,9 @@ pub trait StorageInstance: Send + Sync + Debug {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>>;
+        limit: Option<usize>,
+        bookmark: Option<&str>,
+    ) -> Result<ListSeriesResult>;
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>>;
 

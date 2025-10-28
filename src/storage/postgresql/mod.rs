@@ -70,7 +70,9 @@ impl StorageInstance for PostgresStorage {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>> {
+        limit: Option<usize>,
+        bookmark: Option<&str>,
+    ) -> Result<crate::storage::ListSeriesResult> {
         #[derive(sqlx::FromRow)]
         struct SensorRow {
             sensor_id: Option<i64>,
@@ -82,25 +84,49 @@ impl StorageInstance for PostgresStorage {
             labels: Option<sqlx::types::Json<HashMap<String, String>>>,
         }
 
+        // Parse bookmark as sensor_id
+        let bookmark_id: Option<i64> = if let Some(bookmark_str) = bookmark {
+            Some(bookmark_str.parse::<i64>().map_err(|e| {
+                anyhow::Error::from(StorageError::invalid_data_format(
+                    &format!("Invalid bookmark format: {}", e),
+                    None,
+                    None,
+                ))
+            })?)
+        } else {
+            None
+        };
+
+        // Validate and apply limit
+        let effective_limit = limit
+            .unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT)
+            .min(crate::storage::MAX_LIST_SERIES_LIMIT);
+
         // Query sensors with their metadata using the catalog view, optionally filtered by metric name
+        // Use bookmark for cursor-based pagination (sensor_id > bookmark)
         let sensor_rows: Vec<SensorRow> = sqlx::query_as(
             r#"
             SELECT sensor_id, uuid, name, type, unit_name, unit_description, labels
             FROM sensor_catalog_view
             WHERE ($1::TEXT IS NULL OR name = $1)
+              AND ($2::BIGINT IS NULL OR sensor_id > $2)
             ORDER BY sensor_id ASC
+            LIMIT $3
             "#,
         )
         .bind(metric_filter)
+        .bind(bookmark_id)
+        .bind(effective_limit as i64)
         .fetch_all(&self.pool)
         .await?;
 
         let mut sensors = Vec::new();
+        let mut last_sensor_id: Option<i64> = None;
 
         for sensor_row in sensor_rows {
-            /*let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
-                anyhow::Error::from(StorageError::missing_field("sensor_id", None, None))
-            })?;*/
+            // Keep track of the last sensor_id for bookmark
+            last_sensor_id = sensor_row.sensor_id;
+
             let sensor_uuid = sensor_row
                 .uuid
                 .ok_or_else(|| {
@@ -149,7 +175,18 @@ impl StorageInstance for PostgresStorage {
             sensors.push(sensor);
         }
 
-        Ok(sensors)
+        // Determine if there's a next page based on whether we got the full limit
+        // If we got exactly the limit, there might be more pages, so return the last sensor_id as bookmark
+        let next_bookmark = if sensors.len() == effective_limit {
+            last_sensor_id.map(|id| id.to_string())
+        } else {
+            None
+        };
+
+        Ok(crate::storage::ListSeriesResult {
+            series: sensors,
+            bookmark: next_bookmark,
+        })
     }
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {
