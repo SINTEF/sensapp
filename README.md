@@ -44,6 +44,8 @@ Most of the complexity lies in the [database schema design](docs/DATAMODEL.md). 
 - For **medium** deployments, SensApp can be deployed with a single message broker and a PostgreSQL database.
 - For **larger** deployments, many SensApp instances can be deployed behind a load balancer, connected to a ClickHouse database cluster.
 
+SensApp storage is based on the findings of the paper [TSM-Bench: Benchmarking Time Series Database Systems for Monitoring Applications](https://dl.acm.org/doi/abs/10.14778/3611479.3611532). ClickHouse also released [an experimental time-series engine](https://clickhouse.com/docs/engines/table-engines/special/time_series) that is somewhat similar to SensApp's storage schema.
+
 Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 
 ## Development
@@ -73,6 +75,8 @@ Override environment variables as needed: `DATABASE_URL`, `POSTGRES_USER`, etc.
 ## Built With Rust™️
 
 SensApp is developed using Rust, a language known for its performance, memory safety, and annoying borrow checker. SensApp used to be written in Scala, but the new author prefers Rust.
+
+Another reason is from the results from the paper [Energy efficiency across programming languages: how do energy, time, and memory relate?](https://dl.acm.org/doi/10.1145/3136014.3136031), which shows Rust as one of the most energy-efficient programming languages while having memory safety.
 
 Not only the language, it's also the extensive high quality open-source ecosystem that makes Rust a great choice for SensApp.
 
