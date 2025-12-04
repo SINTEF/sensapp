@@ -486,6 +486,17 @@ impl StorageInstance for ClickHouseStorage {
         Ok(Some(sensor_data))
     }
 
+    async fn query_sensors_by_labels(
+        &self,
+        _matchers: &[super::LabelMatcher],
+        _start_time: Option<SensAppDateTime>,
+        _end_time: Option<SensAppDateTime>,
+        _limit: Option<usize>,
+    ) -> Result<Vec<SensorData>> {
+        // TODO: Implement label-based query for ClickHouse
+        anyhow::bail!("query_sensors_by_labels not yet implemented for ClickHouse")
+    }
+
     /// Health check for ClickHouse storage
     /// Executes a simple SELECT 1 query to verify database connectivity
     async fn health_check(&self) -> Result<()> {

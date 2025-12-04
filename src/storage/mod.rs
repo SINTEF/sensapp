@@ -8,6 +8,9 @@ pub mod error;
 pub use error::StorageError;
 
 pub mod common;
+pub mod query;
+
+pub use query::{LabelMatcher, MatcherType};
 
 /// Default limit for timeseries queries when no limit is specified
 /// Set to 10 million records - appropriate for timeseries data
@@ -35,6 +38,30 @@ pub trait StorageInstance: Send + Sync + Debug {
         end_time: Option<SensAppDateTime>,
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>>;
+
+    /// Query sensors and their data by label matchers.
+    ///
+    /// This method finds all sensors matching the given label matchers and returns
+    /// their data within the specified time range. Multiple matchers are combined
+    /// with AND logic.
+    ///
+    /// # Arguments
+    ///
+    /// * `matchers` - Label matchers to filter sensors. Use `__name__` to filter by metric name.
+    /// * `start_time` - Optional start of time range (inclusive)
+    /// * `end_time` - Optional end of time range (inclusive)
+    /// * `limit` - Optional maximum number of samples per sensor
+    ///
+    /// # Returns
+    ///
+    /// A vector of `SensorData` for all matching sensors.
+    async fn query_sensors_by_labels(
+        &self,
+        matchers: &[LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        limit: Option<usize>,
+    ) -> Result<Vec<crate::datamodel::SensorData>>;
 
     /// Health check for the storage backend
     /// Returns Ok(()) if the storage is healthy and can accept connections

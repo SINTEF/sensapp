@@ -423,6 +423,17 @@ impl StorageInstance for SqliteStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    async fn query_sensors_by_labels(
+        &self,
+        _matchers: &[crate::storage::LabelMatcher],
+        _start_time: Option<SensAppDateTime>,
+        _end_time: Option<SensAppDateTime>,
+        _limit: Option<usize>,
+    ) -> Result<Vec<SensorData>> {
+        // TODO: Implement label-based query for SQLite
+        anyhow::bail!("query_sensors_by_labels not yet implemented for SQLite")
+    }
+
     /// Health check for SQLite storage
     /// Executes a simple SELECT 1 query to verify database connectivity
     async fn health_check(&self) -> Result<()> {
@@ -512,11 +523,26 @@ impl StorageInstance for SqliteStorage {
         // Step 5: Clear all cached function caches
         // The cached macro generates cache variables named after the function in uppercase
         use cached::Cached;
-        super::sqlite_utilities::GET_LABEL_NAME_ID_OR_CREATE.lock().await.cache_clear();
-        super::sqlite_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE.lock().await.cache_clear();
-        super::sqlite_utilities::GET_UNIT_ID_OR_CREATE.lock().await.cache_clear();
-        super::sqlite_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR.lock().await.cache_clear();
-        super::sqlite_utilities::GET_STRING_VALUE_ID_OR_CREATE.lock().await.cache_clear();
+        super::sqlite_utilities::GET_LABEL_NAME_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        super::sqlite_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        super::sqlite_utilities::GET_UNIT_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        super::sqlite_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
+            .lock()
+            .await
+            .cache_clear();
+        super::sqlite_utilities::GET_STRING_VALUE_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
 
         Ok(())
     }

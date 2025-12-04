@@ -408,6 +408,17 @@ impl StorageInstance for BigQueryStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    async fn query_sensors_by_labels(
+        &self,
+        _matchers: &[super::LabelMatcher],
+        _start_time: Option<SensAppDateTime>,
+        _end_time: Option<SensAppDateTime>,
+        _limit: Option<usize>,
+    ) -> Result<Vec<SensorData>> {
+        // TODO: Implement label-based query for BigQuery
+        anyhow::bail!("query_sensors_by_labels not yet implemented for BigQuery")
+    }
+
     /// Health check for BigQuery storage
     /// Executes a simple SELECT 1 query to verify BigQuery connectivity
     async fn health_check(&self) -> Result<()> {

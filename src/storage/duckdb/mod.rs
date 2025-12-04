@@ -96,6 +96,17 @@ impl StorageInstance for DuckDBStorage {
         unimplemented!("DuckDB sensor data querying not yet implemented");
     }
 
+    async fn query_sensors_by_labels(
+        &self,
+        _matchers: &[super::LabelMatcher],
+        _start_time: Option<crate::datamodel::SensAppDateTime>,
+        _end_time: Option<crate::datamodel::SensAppDateTime>,
+        _limit: Option<usize>,
+    ) -> Result<Vec<crate::datamodel::SensorData>> {
+        // TODO: Implement label-based query for DuckDB
+        anyhow::bail!("query_sensors_by_labels not yet implemented for DuckDB")
+    }
+
     /// Health check for DuckDB storage
     /// Executes a simple SELECT 1 query to verify database connectivity
     async fn health_check(&self) -> Result<()> {

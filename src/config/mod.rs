@@ -47,13 +47,10 @@ pub struct SensAppConfig {
 impl SensAppConfig {
     pub fn load() -> Result<SensAppConfig, Error> {
         // Get settings file path from environment variable or use default
-        let settings_file = std::env::var("SENSAPP_SETTINGS_FILE")
-            .unwrap_or_else(|_| "settings.toml".to_string());
+        let settings_file =
+            std::env::var("SENSAPP_SETTINGS_FILE").unwrap_or_else(|_| "settings.toml".to_string());
 
-        let c = SensAppConfig::builder()
-            .env()
-            .file(settings_file)
-            .load()?;
+        let c = SensAppConfig::builder().env().file(settings_file).load()?;
 
         Ok(c)
     }

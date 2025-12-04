@@ -143,7 +143,7 @@ impl<'a> ClickHousePublisher<'a> {
             self.label_inserter = Some(
                 self.client
                     .inserter("labels")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                    .map_err(|e| map_clickhouse_error(e, None, None))?,
             );
         }
 
@@ -196,7 +196,11 @@ impl<'a> ClickHousePublisher<'a> {
     }
 
     /// Publish integer values
-    async fn publish_integer_values(&mut self, sensor_id: u64, samples: &[Sample<i64>]) -> Result<()> {
+    async fn publish_integer_values(
+        &mut self,
+        sensor_id: u64,
+        samples: &[Sample<i64>],
+    ) -> Result<()> {
         if samples.is_empty() {
             return Ok(());
         }
@@ -206,7 +210,7 @@ impl<'a> ClickHousePublisher<'a> {
             self.integer_inserter = Some(
                 self.client
                     .inserter("integer_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                    .map_err(|e| map_clickhouse_error(e, None, None))?,
             );
         }
 
@@ -241,7 +245,7 @@ impl<'a> ClickHousePublisher<'a> {
             self.numeric_inserter = Some(
                 self.client
                     .inserter("numeric_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                    .map_err(|e| map_clickhouse_error(e, None, None))?,
             );
         }
 
@@ -262,7 +266,11 @@ impl<'a> ClickHousePublisher<'a> {
     }
 
     /// Publish float values
-    async fn publish_float_values(&mut self, sensor_id: u64, samples: &[Sample<f64>]) -> Result<()> {
+    async fn publish_float_values(
+        &mut self,
+        sensor_id: u64,
+        samples: &[Sample<f64>],
+    ) -> Result<()> {
         if samples.is_empty() {
             return Ok(());
         }
@@ -272,7 +280,7 @@ impl<'a> ClickHousePublisher<'a> {
             self.float_inserter = Some(
                 self.client
                     .inserter("float_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                    .map_err(|e| map_clickhouse_error(e, None, None))?,
             );
         }
 
@@ -307,7 +315,7 @@ impl<'a> ClickHousePublisher<'a> {
             self.string_inserter = Some(
                 self.client
                     .inserter("string_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                    .map_err(|e| map_clickhouse_error(e, None, None))?,
             );
         }
 
@@ -328,7 +336,11 @@ impl<'a> ClickHousePublisher<'a> {
     }
 
     /// Publish boolean values
-    async fn publish_boolean_values(&mut self, sensor_id: u64, samples: &[Sample<bool>]) -> Result<()> {
+    async fn publish_boolean_values(
+        &mut self,
+        sensor_id: u64,
+        samples: &[Sample<bool>],
+    ) -> Result<()> {
         if samples.is_empty() {
             return Ok(());
         }
@@ -338,7 +350,7 @@ impl<'a> ClickHousePublisher<'a> {
             self.boolean_inserter = Some(
                 self.client
                     .inserter("boolean_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                    .map_err(|e| map_clickhouse_error(e, None, None))?,
             );
         }
 
@@ -373,7 +385,7 @@ impl<'a> ClickHousePublisher<'a> {
             self.location_inserter = Some(
                 self.client
                     .inserter("location_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                    .map_err(|e| map_clickhouse_error(e, None, None))?,
             );
         }
 
@@ -409,7 +421,7 @@ impl<'a> ClickHousePublisher<'a> {
             self.json_inserter = Some(
                 self.client
                     .inserter("json_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                    .map_err(|e| map_clickhouse_error(e, None, None))?,
             );
         }
 
@@ -430,7 +442,11 @@ impl<'a> ClickHousePublisher<'a> {
     }
 
     /// Publish blob values (base64 encoded)
-    async fn publish_blob_values(&mut self, sensor_id: u64, samples: &[Sample<Vec<u8>>]) -> Result<()> {
+    async fn publish_blob_values(
+        &mut self,
+        sensor_id: u64,
+        samples: &[Sample<Vec<u8>>],
+    ) -> Result<()> {
         if samples.is_empty() {
             return Ok(());
         }
@@ -440,7 +456,7 @@ impl<'a> ClickHousePublisher<'a> {
             self.blob_inserter = Some(
                 self.client
                     .inserter("blob_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                    .map_err(|e| map_clickhouse_error(e, None, None))?,
             );
         }
 
@@ -467,55 +483,82 @@ impl<'a> ClickHousePublisher<'a> {
 
         if let Some(inserter) = self.integer_inserter.take() {
             tasks.push(tokio::spawn(async move {
-                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+                inserter
+                    .end()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))
             }));
         }
 
         if let Some(inserter) = self.numeric_inserter.take() {
             tasks.push(tokio::spawn(async move {
-                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+                inserter
+                    .end()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))
             }));
         }
 
         if let Some(inserter) = self.float_inserter.take() {
             tasks.push(tokio::spawn(async move {
-                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+                inserter
+                    .end()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))
             }));
         }
 
         if let Some(inserter) = self.string_inserter.take() {
             tasks.push(tokio::spawn(async move {
-                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+                inserter
+                    .end()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))
             }));
         }
 
         if let Some(inserter) = self.boolean_inserter.take() {
             tasks.push(tokio::spawn(async move {
-                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+                inserter
+                    .end()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))
             }));
         }
 
         if let Some(inserter) = self.location_inserter.take() {
             tasks.push(tokio::spawn(async move {
-                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+                inserter
+                    .end()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))
             }));
         }
 
         if let Some(inserter) = self.json_inserter.take() {
             tasks.push(tokio::spawn(async move {
-                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+                inserter
+                    .end()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))
             }));
         }
 
         if let Some(inserter) = self.blob_inserter.take() {
             tasks.push(tokio::spawn(async move {
-                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+                inserter
+                    .end()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))
             }));
         }
 
         if let Some(inserter) = self.label_inserter.take() {
             tasks.push(tokio::spawn(async move {
-                inserter.end().await.map_err(|e| map_clickhouse_error(e, None, None))
+                inserter
+                    .end()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))
             }));
         }
 
