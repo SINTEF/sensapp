@@ -27,6 +27,159 @@ impl ArrowConverter {
         Self::record_batch_to_arrow_file(&batch)
     }
 
+    /// Convert multiple SensorData to Arrow IPC file format (bytes)
+    /// Uses a "long" format similar to CSV (timestamp, sensor_name, value, type)
+    /// which can accommodate multiple sensors in a single file.
+    pub fn to_arrow_file_multi(sensor_data_list: &[SensorData]) -> Result<Vec<u8>> {
+        if sensor_data_list.is_empty() {
+            // Return empty Arrow file with a minimal schema
+            let schema = Arc::new(Schema::new(vec![
+                Field::new(
+                    "timestamp",
+                    DataType::Timestamp(TimeUnit::Microsecond, None),
+                    false,
+                ),
+                Field::new("sensor_name", DataType::Utf8, false),
+                Field::new("value", DataType::Utf8, false),
+                Field::new("type", DataType::Utf8, false),
+            ]));
+            let batch = RecordBatch::new_empty(schema);
+            return Self::record_batch_to_arrow_file(&batch);
+        }
+
+        // Calculate total sample count
+        let total_samples: usize = sensor_data_list.iter().map(|sd| sd.samples.len()).sum();
+
+        // Create builders for the long format
+        let mut timestamp_builder = TimestampMicrosecondBuilder::with_capacity(total_samples);
+        let mut sensor_name_builder =
+            StringBuilder::with_capacity(total_samples, total_samples * 32);
+        let mut value_builder = StringBuilder::with_capacity(total_samples, total_samples * 16);
+        let mut type_builder = StringBuilder::with_capacity(total_samples, total_samples * 8);
+
+        // Process each sensor's data
+        for sensor_data in sensor_data_list {
+            Self::append_samples_to_builders(
+                sensor_data,
+                &mut timestamp_builder,
+                &mut sensor_name_builder,
+                &mut value_builder,
+                &mut type_builder,
+            )?;
+        }
+
+        // Create schema for long format
+        let schema = Arc::new(Schema::new(vec![
+            Field::new(
+                "timestamp",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                false,
+            ),
+            Field::new("sensor_name", DataType::Utf8, false),
+            Field::new("value", DataType::Utf8, false),
+            Field::new("type", DataType::Utf8, false),
+        ]));
+
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(timestamp_builder.finish()),
+            Arc::new(sensor_name_builder.finish()),
+            Arc::new(value_builder.finish()),
+            Arc::new(type_builder.finish()),
+        ];
+
+        let batch = RecordBatch::try_new(schema, columns)
+            .map_err(|e| anyhow::anyhow!("Failed to create Arrow RecordBatch: {}", e))?;
+
+        Self::record_batch_to_arrow_file(&batch)
+    }
+
+    /// Internal helper to append samples from a sensor to the builders
+    fn append_samples_to_builders(
+        sensor_data: &SensorData,
+        timestamp_builder: &mut TimestampMicrosecondBuilder,
+        sensor_name_builder: &mut StringBuilder,
+        value_builder: &mut StringBuilder,
+        type_builder: &mut StringBuilder,
+    ) -> Result<()> {
+        let sensor_name = &sensor_data.sensor.name;
+
+        match &sensor_data.samples {
+            TypedSamples::Integer(samples) => {
+                for sample in samples.iter() {
+                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_name_builder.append_value(sensor_name);
+                    value_builder.append_value(sample.value.to_string());
+                    type_builder.append_value("integer");
+                }
+            }
+            TypedSamples::Numeric(samples) => {
+                for sample in samples.iter() {
+                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_name_builder.append_value(sensor_name);
+                    value_builder.append_value(sample.value.to_string());
+                    type_builder.append_value("numeric");
+                }
+            }
+            TypedSamples::Float(samples) => {
+                for sample in samples.iter() {
+                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_name_builder.append_value(sensor_name);
+                    value_builder.append_value(sample.value.to_string());
+                    type_builder.append_value("float");
+                }
+            }
+            TypedSamples::String(samples) => {
+                for sample in samples.iter() {
+                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_name_builder.append_value(sensor_name);
+                    value_builder.append_value(&sample.value);
+                    type_builder.append_value("string");
+                }
+            }
+            TypedSamples::Boolean(samples) => {
+                for sample in samples.iter() {
+                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_name_builder.append_value(sensor_name);
+                    value_builder.append_value(sample.value.to_string());
+                    type_builder.append_value("boolean");
+                }
+            }
+            TypedSamples::Location(samples) => {
+                for sample in samples.iter() {
+                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_name_builder.append_value(sensor_name);
+                    value_builder.append_value(format!(
+                        "{},{}",
+                        sample.value.y(),
+                        sample.value.x()
+                    ));
+                    type_builder.append_value("location");
+                }
+            }
+            TypedSamples::Json(samples) => {
+                for sample in samples.iter() {
+                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_name_builder.append_value(sensor_name);
+                    value_builder.append_value(sample.value.to_string());
+                    type_builder.append_value("json");
+                }
+            }
+            TypedSamples::Blob(samples) => {
+                for sample in samples.iter() {
+                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_name_builder.append_value(sensor_name);
+                    value_builder.append_value(base64::Engine::encode(
+                        &base64::engine::general_purpose::STANDARD,
+                        &sample.value,
+                    ));
+                    type_builder.append_value("blob");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Internal method to convert SensorData to Arrow schema and columns
     fn convert_sensor_data_to_arrow(
         sensor_data: &SensorData,

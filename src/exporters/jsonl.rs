@@ -15,7 +15,24 @@ impl JsonlConverter {
     /// Convert SensorData to JSON Lines format (one JSON object per line)
     pub fn to_jsonl(sensor_data: &SensorData) -> Result<String> {
         let mut jsonl_output = String::new();
+        Self::append_sensor_to_jsonl(&mut jsonl_output, sensor_data)?;
+        Ok(jsonl_output)
+    }
 
+    /// Convert multiple SensorData to JSON Lines format (one JSON object per line)
+    /// Simply iterates through all sensors and appends their lines to the output.
+    pub fn to_jsonl_multi(sensor_data_list: &[SensorData]) -> Result<String> {
+        let mut jsonl_output = String::new();
+
+        for sensor_data in sensor_data_list {
+            Self::append_sensor_to_jsonl(&mut jsonl_output, sensor_data)?;
+        }
+
+        Ok(jsonl_output)
+    }
+
+    /// Internal helper to append a single sensor's data to JSONL output
+    fn append_sensor_to_jsonl(jsonl_output: &mut String, sensor_data: &SensorData) -> Result<()> {
         match &sensor_data.samples {
             TypedSamples::Integer(samples) => {
                 for sample in samples.iter() {
@@ -125,7 +142,7 @@ impl JsonlConverter {
             }
         }
 
-        Ok(jsonl_output)
+        Ok(())
     }
 }
 
@@ -199,5 +216,78 @@ mod tests {
         assert_eq!(parsed.get("latitude").unwrap(), 48.8566);
         assert_eq!(parsed.get("longitude").unwrap(), 2.3522);
         assert_eq!(parsed.get("type").unwrap(), "location");
+    }
+
+    #[test]
+    fn test_multi_sensor_to_jsonl() {
+        // Create first sensor with integer samples
+        let sensor1 = Sensor::new(
+            Uuid::new_v4(),
+            "temperature".to_string(),
+            SensorType::Integer,
+            None,
+            None,
+        );
+        let samples1 = TypedSamples::Integer(smallvec![
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1609459200.0),
+                value: 23,
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1609459260.0),
+                value: 24,
+            }
+        ]);
+        let sensor_data1 = SensorData::new(sensor1, samples1);
+
+        // Create second sensor with float samples
+        let sensor2 = Sensor::new(
+            Uuid::new_v4(),
+            "humidity".to_string(),
+            SensorType::Float,
+            None,
+            None,
+        );
+        let samples2 = TypedSamples::Float(smallvec![
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1609459200.0),
+                value: 45.5,
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1609459260.0),
+                value: 46.2,
+            }
+        ]);
+        let sensor_data2 = SensorData::new(sensor2, samples2);
+
+        // Test multi-sensor conversion
+        let sensor_data_list = vec![sensor_data1, sensor_data2];
+        let jsonl_output = JsonlConverter::to_jsonl_multi(&sensor_data_list).unwrap();
+
+        // Should have 4 lines (2 sensors * 2 samples each)
+        let lines: Vec<&str> = jsonl_output.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines.len(), 4);
+
+        // Each line should be valid JSON
+        for line in &lines {
+            let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert!(parsed.get("timestamp").is_some());
+            assert!(parsed.get("sensor_name").is_some());
+        }
+
+        // Check that both sensors are represented
+        let has_temperature = lines.iter().any(|l| l.contains("temperature"));
+        let has_humidity = lines.iter().any(|l| l.contains("humidity"));
+        assert!(has_temperature, "Should have temperature sensor records");
+        assert!(has_humidity, "Should have humidity sensor records");
+    }
+
+    #[test]
+    fn test_multi_sensor_jsonl_empty_list() {
+        let sensor_data_list: Vec<SensorData> = vec![];
+        let jsonl_output = JsonlConverter::to_jsonl_multi(&sensor_data_list).unwrap();
+
+        // Should be empty
+        assert!(jsonl_output.is_empty());
     }
 }

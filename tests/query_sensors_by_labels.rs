@@ -37,7 +37,13 @@ fn create_sensor_with_labels(
     labels: Vec<(String, String)>,
 ) -> Sensor {
     let labels: SensAppLabels = labels.into_iter().collect();
-    Sensor::new(Uuid::new_v4(), name.to_string(), sensor_type, None, Some(labels))
+    Sensor::new(
+        Uuid::new_v4(),
+        name.to_string(),
+        sensor_type,
+        None,
+        Some(labels),
+    )
 }
 
 /// Helper to create float samples
@@ -84,14 +90,20 @@ async fn test_query_by_exact_name() -> Result<()> {
     let sensor1 = create_sensor_with_labels("cpu_usage", SensorType::Float, vec![]);
     let sensor2 = create_sensor_with_labels("memory_usage", SensorType::Float, vec![]);
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query by exact name
     let matchers = vec![LabelMatcher::eq("__name__", "cpu_usage")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 1, "Should find exactly one sensor");
     assert_eq!(results[0].sensor.name, "cpu_usage");
@@ -112,15 +124,21 @@ async fn test_query_by_name_not_equal() -> Result<()> {
     let sensor2 = create_sensor_with_labels("memory_usage", SensorType::Float, vec![]);
     let sensor3 = create_sensor_with_labels("disk_usage", SensorType::Float, vec![]);
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-        (sensor3, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+            (sensor3, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query by name != cpu_usage
     let matchers = vec![LabelMatcher::neq("__name__", "cpu_usage")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 2, "Should find two sensors");
     let names: Vec<&str> = results.iter().map(|r| r.sensor.name.as_str()).collect();
@@ -144,15 +162,21 @@ async fn test_query_by_name_regex() -> Result<()> {
     let sensor2 = create_sensor_with_labels("cpu_temperature", SensorType::Float, vec![]);
     let sensor3 = create_sensor_with_labels("memory_usage", SensorType::Float, vec![]);
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-        (sensor3, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+            (sensor3, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query by name matching regex "cpu.*"
     let matchers = vec![LabelMatcher::regex("__name__", "cpu.*")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 2, "Should find two cpu sensors");
     let names: Vec<&str> = results.iter().map(|r| r.sensor.name.as_str()).collect();
@@ -175,15 +199,21 @@ async fn test_query_by_name_regex_not_match() -> Result<()> {
     let sensor2 = create_sensor_with_labels("cpu_temperature", SensorType::Float, vec![]);
     let sensor3 = create_sensor_with_labels("memory_usage", SensorType::Float, vec![]);
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-        (sensor3, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+            (sensor3, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query by name NOT matching regex "cpu.*"
     let matchers = vec![LabelMatcher::not_regex("__name__", "cpu.*")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 1, "Should find one non-cpu sensor");
     assert_eq!(results[0].sensor.name, "memory_usage");
@@ -220,15 +250,21 @@ async fn test_query_by_label_exact() -> Result<()> {
         vec![("environment".to_string(), "production".to_string())],
     );
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-        (sensor3, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+            (sensor3, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query by label environment=production
     let matchers = vec![LabelMatcher::eq("environment", "production")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 2, "Should find two production sensors");
     for result in &results {
@@ -266,15 +302,21 @@ async fn test_query_by_label_not_equal() -> Result<()> {
         vec![("environment".to_string(), "test".to_string())],
     );
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-        (sensor3, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+            (sensor3, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query by label environment != production
     let matchers = vec![LabelMatcher::neq("environment", "production")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 2, "Should find two non-production sensors");
     let names: Vec<&str> = results.iter().map(|r| r.sensor.name.as_str()).collect();
@@ -309,15 +351,21 @@ async fn test_query_by_label_regex() -> Result<()> {
         vec![("region".to_string(), "us-east-1".to_string())],
     );
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-        (sensor3, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+            (sensor3, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query by label region matching regex "eu-.*"
     let matchers = vec![LabelMatcher::regex("region", "eu-.*")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 2, "Should find two EU servers");
     let names: Vec<&str> = results.iter().map(|r| r.sensor.name.as_str()).collect();
@@ -347,14 +395,20 @@ async fn test_query_by_label_regex_not_match() -> Result<()> {
         vec![("region".to_string(), "us-east-1".to_string())],
     );
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query by label region NOT matching regex "eu-.*"
     let matchers = vec![LabelMatcher::not_regex("region", "eu-.*")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 1, "Should find one non-EU server");
     assert_eq!(results[0].sensor.name, "server_us");
@@ -391,18 +445,24 @@ async fn test_query_combined_name_and_label() -> Result<()> {
         vec![("environment".to_string(), "production".to_string())],
     );
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-        (sensor3, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+            (sensor3, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query by name=cpu_usage AND environment=production
     let matchers = vec![
         LabelMatcher::eq("__name__", "cpu_usage"),
         LabelMatcher::eq("environment", "production"),
     ];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 1, "Should find exactly one sensor");
     assert_eq!(results[0].sensor.name, "cpu_usage");
@@ -444,18 +504,24 @@ async fn test_query_multiple_labels() -> Result<()> {
         ],
     );
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-        (sensor3, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+            (sensor3, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query by environment=production AND service=api
     let matchers = vec![
         LabelMatcher::eq("environment", "production"),
         LabelMatcher::eq("service", "api"),
     ];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 1, "Should find exactly one sensor");
     assert_eq!(results[0].sensor.name, "app_metrics");
@@ -481,9 +547,14 @@ async fn test_query_empty_matchers() -> Result<()> {
 
     // Query with empty matchers
     let matchers: Vec<LabelMatcher> = vec![];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
-    assert!(results.is_empty(), "Empty matchers should return empty result");
+    assert!(
+        results.is_empty(),
+        "Empty matchers should return empty result"
+    );
 
     Ok(())
 }
@@ -506,9 +577,14 @@ async fn test_query_no_matches() -> Result<()> {
 
     // Query for non-existent sensor name
     let matchers = vec![LabelMatcher::eq("__name__", "nonexistent_sensor")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
-    assert!(results.is_empty(), "Should return empty for non-matching query");
+    assert!(
+        results.is_empty(),
+        "Should return empty for non-matching query"
+    );
 
     Ok(())
 }
@@ -527,9 +603,14 @@ async fn test_query_sensor_without_labels() -> Result<()> {
 
     // Query by label - should not match sensor without that label
     let matchers = vec![LabelMatcher::eq("environment", "production")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
-    assert!(results.is_empty(), "Sensor without labels should not match label query");
+    assert!(
+        results.is_empty(),
+        "Sensor without labels should not match label query"
+    );
 
     Ok(())
 }
@@ -552,12 +633,9 @@ async fn test_query_with_time_range() -> Result<()> {
     let end_time = hifitime::Epoch::from_unix_seconds((1704067200 + 6 * 60) as f64); // 6 minutes in
 
     let matchers = vec![LabelMatcher::eq("__name__", "time_test_sensor")];
-    let results = storage.query_sensors_by_labels(
-        &matchers,
-        Some(start_time),
-        Some(end_time),
-        None,
-    ).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), None)
+        .await?;
 
     assert_eq!(results.len(), 1, "Should find one sensor");
 
@@ -585,7 +663,9 @@ async fn test_query_with_limit() -> Result<()> {
     publish_test_sensors(&storage, vec![(sensor, samples)]).await?;
 
     let matchers = vec![LabelMatcher::eq("__name__", "limit_test_sensor")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, Some(10)).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, Some(10))
+        .await?;
 
     assert_eq!(results.len(), 1, "Should find one sensor");
 
@@ -625,11 +705,15 @@ async fn test_query_integer_sensor() -> Result<()> {
         .collect();
 
     let mut batch_builder = BatchBuilder::new()?;
-    batch_builder.add(Arc::new(sensor), TypedSamples::Integer(samples)).await?;
+    batch_builder
+        .add(Arc::new(sensor), TypedSamples::Integer(samples))
+        .await?;
     batch_builder.send_what_is_left(storage.clone()).await?;
 
     let matchers = vec![LabelMatcher::eq("endpoint", "/api/users")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].sensor.name, "request_count");
@@ -661,11 +745,15 @@ async fn test_query_string_sensor() -> Result<()> {
         .collect();
 
     let mut batch_builder = BatchBuilder::new()?;
-    batch_builder.add(Arc::new(sensor), TypedSamples::String(samples)).await?;
+    batch_builder
+        .add(Arc::new(sensor), TypedSamples::String(samples))
+        .await?;
     batch_builder.send_what_is_left(storage.clone()).await?;
 
     let matchers = vec![LabelMatcher::eq("severity", "info")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].sensor.name, "status_log");
@@ -697,11 +785,15 @@ async fn test_query_boolean_sensor() -> Result<()> {
         .collect();
 
     let mut batch_builder = BatchBuilder::new()?;
-    batch_builder.add(Arc::new(sensor), TypedSamples::Boolean(samples)).await?;
+    batch_builder
+        .add(Arc::new(sensor), TypedSamples::Boolean(samples))
+        .await?;
     batch_builder.send_what_is_left(storage.clone()).await?;
 
     let matchers = vec![LabelMatcher::eq("service", "database")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].sensor.name, "service_healthy");
@@ -727,17 +819,27 @@ async fn test_query_regex_special_chars() -> Result<()> {
     let sensor2 = create_sensor_with_labels("http_request_duration", SensorType::Float, vec![]);
     let sensor3 = create_sensor_with_labels("grpc_requests", SensorType::Float, vec![]);
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-        (sensor3, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+            (sensor3, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // Query using regex with word boundary-like pattern
     let matchers = vec![LabelMatcher::regex("__name__", "http_request.*")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
-    assert_eq!(results.len(), 2, "Should match http_requests_total and http_request_duration");
+    assert_eq!(
+        results.len(),
+        2,
+        "Should match http_requests_total and http_request_duration"
+    );
 
     Ok(())
 }
@@ -753,14 +855,20 @@ async fn test_query_regex_case_sensitive() -> Result<()> {
     let sensor1 = create_sensor_with_labels("CPU_Usage", SensorType::Float, vec![]);
     let sensor2 = create_sensor_with_labels("cpu_usage", SensorType::Float, vec![]);
 
-    publish_test_sensors(&storage, vec![
-        (sensor1, create_float_samples(3)),
-        (sensor2, create_float_samples(3)),
-    ]).await?;
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor1, create_float_samples(3)),
+            (sensor2, create_float_samples(3)),
+        ],
+    )
+    .await?;
 
     // PostgreSQL ~ is case-sensitive by default
     let matchers = vec![LabelMatcher::regex("__name__", "cpu.*")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
 
     assert_eq!(results.len(), 1, "Should only match lowercase cpu_usage");
     assert_eq!(results[0].sensor.name, "cpu_usage");
@@ -787,7 +895,10 @@ async fn test_query_performance_many_sensors() -> Result<()> {
             &format!("perf_sensor_{}", i),
             SensorType::Float,
             vec![
-                ("environment".to_string(), if i % 2 == 0 { "production" } else { "staging" }.to_string()),
+                (
+                    "environment".to_string(),
+                    if i % 2 == 0 { "production" } else { "staging" }.to_string(),
+                ),
                 ("index".to_string(), i.to_string()),
             ],
         );
@@ -799,11 +910,16 @@ async fn test_query_performance_many_sensors() -> Result<()> {
     // Time the query
     let start = std::time::Instant::now();
     let matchers = vec![LabelMatcher::eq("environment", "production")];
-    let results = storage.query_sensors_by_labels(&matchers, None, None, None).await?;
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, None)
+        .await?;
     let duration = start.elapsed();
 
     assert_eq!(results.len(), 25, "Should find 25 production sensors");
-    assert!(duration.as_secs() < 5, "Query should complete in under 5 seconds");
+    assert!(
+        duration.as_secs() < 5,
+        "Query should complete in under 5 seconds"
+    );
 
     Ok(())
 }

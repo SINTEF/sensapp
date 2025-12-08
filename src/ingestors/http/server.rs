@@ -3,6 +3,7 @@ use super::crud::{get_series_data, list_metrics, list_series};
 use super::influxdb::publish_influxdb;
 use super::prometheus_read::prometheus_remote_read;
 use super::prometheus_write::publish_prometheus;
+use super::simple_promql::simple_promql_query;
 use super::state::HttpServerState;
 use crate::config;
 use crate::importers::csv::publish_csv_async;
@@ -13,6 +14,7 @@ use crate::ingestors::http::health::{__path_liveness, __path_readiness, liveness
 use crate::ingestors::http::influxdb::__path_publish_influxdb;
 use crate::ingestors::http::prometheus_read::__path_prometheus_remote_read;
 use crate::ingestors::http::prometheus_write::__path_publish_prometheus;
+use crate::ingestors::http::simple_promql::__path_simple_promql_query;
 use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::Json;
@@ -44,7 +46,7 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
         (name = "Admin", description = "Administrative operations"),
         (name = "Health", description = "Health check endpoints"),
     ),
-    paths(frontpage, publish_sensors_data, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, prometheus_remote_read, vacuum_database, liveness, readiness),
+    paths(frontpage, publish_sensors_data, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, prometheus_remote_read, simple_promql_query, vacuum_database, liveness, readiness),
 )]
 struct ApiDoc;
 
@@ -97,6 +99,8 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             "/api/v1/prometheus_remote_read",
             post(prometheus_remote_read).layer(max_body_layer),
         )
+        // Simple PromQL Query API
+        .route("/api/v1/query", get(simple_promql_query))
         // Admin API
         .route("/api/v1/admin/vacuum", post(vacuum_database))
         // Health check endpoints

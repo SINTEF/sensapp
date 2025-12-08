@@ -18,6 +18,7 @@ impl PostgresStorage {
     ///
     /// This fetches samples for all provided sensors in optimized batch queries,
     /// one query per sensor type, instead of N queries for N sensors.
+    /// Queries for different sensor types are executed concurrently.
     pub(super) async fn batch_query_samples(
         &self,
         sensors: &[(i64, Sensor)],
@@ -51,99 +52,133 @@ impl PostgresStorage {
             }
         }
 
-        // Batch query for each type
-        if !integer_sensors.is_empty() {
-            self.batch_query_integer_samples(
-                &integer_sensors,
-                start_time,
-                end_time,
-                limit_val,
-                &mut results,
-            )
-            .await?;
-        }
-        if !numeric_sensors.is_empty() {
-            self.batch_query_numeric_samples(
-                &numeric_sensors,
-                start_time,
-                end_time,
-                limit_val,
-                &mut results,
-            )
-            .await?;
-        }
-        if !float_sensors.is_empty() {
-            self.batch_query_float_samples(
-                &float_sensors,
-                start_time,
-                end_time,
-                limit_val,
-                &mut results,
-            )
-            .await?;
-        }
-        if !string_sensors.is_empty() {
-            self.batch_query_string_samples(
-                &string_sensors,
-                start_time,
-                end_time,
-                limit_val,
-                &mut results,
-            )
-            .await?;
-        }
-        if !boolean_sensors.is_empty() {
-            self.batch_query_boolean_samples(
-                &boolean_sensors,
-                start_time,
-                end_time,
-                limit_val,
-                &mut results,
-            )
-            .await?;
-        }
-        if !location_sensors.is_empty() {
-            self.batch_query_location_samples(
-                &location_sensors,
-                start_time,
-                end_time,
-                limit_val,
-                &mut results,
-            )
-            .await?;
-        }
-        if !json_sensors.is_empty() {
-            self.batch_query_json_samples(
-                &json_sensors,
-                start_time,
-                end_time,
-                limit_val,
-                &mut results,
-            )
-            .await?;
-        }
-        if !blob_sensors.is_empty() {
-            self.batch_query_blob_samples(
-                &blob_sensors,
-                start_time,
-                end_time,
-                limit_val,
-                &mut results,
-            )
-            .await?;
+        // Spawn concurrent tasks for each sensor type that has data
+        let handles = [
+            (!integer_sensors.is_empty()).then(|| {
+                let pool = self.pool.clone();
+                tokio::spawn(async move {
+                    Self::batch_query_integer_samples_owned(
+                        &pool,
+                        integer_sensors,
+                        start_time,
+                        end_time,
+                        limit_val,
+                    )
+                    .await
+                })
+            }),
+            (!numeric_sensors.is_empty()).then(|| {
+                let pool = self.pool.clone();
+                tokio::spawn(async move {
+                    Self::batch_query_numeric_samples_owned(
+                        &pool,
+                        numeric_sensors,
+                        start_time,
+                        end_time,
+                        limit_val,
+                    )
+                    .await
+                })
+            }),
+            (!float_sensors.is_empty()).then(|| {
+                let pool = self.pool.clone();
+                tokio::spawn(async move {
+                    Self::batch_query_float_samples_owned(
+                        &pool,
+                        float_sensors,
+                        start_time,
+                        end_time,
+                        limit_val,
+                    )
+                    .await
+                })
+            }),
+            (!string_sensors.is_empty()).then(|| {
+                let pool = self.pool.clone();
+                tokio::spawn(async move {
+                    Self::batch_query_string_samples_owned(
+                        &pool,
+                        string_sensors,
+                        start_time,
+                        end_time,
+                        limit_val,
+                    )
+                    .await
+                })
+            }),
+            (!boolean_sensors.is_empty()).then(|| {
+                let pool = self.pool.clone();
+                tokio::spawn(async move {
+                    Self::batch_query_boolean_samples_owned(
+                        &pool,
+                        boolean_sensors,
+                        start_time,
+                        end_time,
+                        limit_val,
+                    )
+                    .await
+                })
+            }),
+            (!location_sensors.is_empty()).then(|| {
+                let pool = self.pool.clone();
+                tokio::spawn(async move {
+                    Self::batch_query_location_samples_owned(
+                        &pool,
+                        location_sensors,
+                        start_time,
+                        end_time,
+                        limit_val,
+                    )
+                    .await
+                })
+            }),
+            (!json_sensors.is_empty()).then(|| {
+                let pool = self.pool.clone();
+                tokio::spawn(async move {
+                    Self::batch_query_json_samples_owned(
+                        &pool,
+                        json_sensors,
+                        start_time,
+                        end_time,
+                        limit_val,
+                    )
+                    .await
+                })
+            }),
+            (!blob_sensors.is_empty()).then(|| {
+                let pool = self.pool.clone();
+                tokio::spawn(async move {
+                    Self::batch_query_blob_samples_owned(
+                        &pool,
+                        blob_sensors,
+                        start_time,
+                        end_time,
+                        limit_val,
+                    )
+                    .await
+                })
+            }),
+        ];
+
+        // Await all tasks and collect results
+        for handle in handles.into_iter().flatten() {
+            let type_results = handle.await??;
+            results.extend(type_results);
         }
 
         Ok(results)
     }
 
-    async fn batch_query_integer_samples(
-        &self,
-        sensor_ids: &[i64],
+    // Static helper methods for concurrent execution via tokio::spawn
+    // These accept owned Vec instead of &[i64] to support spawned tasks
+
+    async fn batch_query_integer_samples_owned(
+        pool: &sqlx::PgPool,
+        sensor_ids: Vec<i64>,
         start_time: Option<i64>,
         end_time: Option<i64>,
         limit: i64,
-        results: &mut HashMap<i64, TypedSamples>,
-    ) -> Result<()> {
+    ) -> Result<HashMap<i64, TypedSamples>> {
         #[derive(sqlx::FromRow)]
         struct Row {
             sensor_id: i64,
@@ -151,7 +186,8 @@ impl PostgresStorage {
             value: i64,
         }
 
-        // Use a lateral join to apply LIMIT per sensor_id
+        let mut results: HashMap<i64, TypedSamples> = HashMap::new();
+
         let rows: Vec<Row> = sqlx::query_as(
             r#"
             SELECT sub.sensor_id, sub.timestamp_us, sub.value
@@ -168,14 +204,13 @@ impl PostgresStorage {
             ORDER BY sub.sensor_id, sub.timestamp_us
             "#,
         )
-        .bind(sensor_ids)
+        .bind(&sensor_ids)
         .bind(start_time)
         .bind(end_time)
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(pool)
         .await?;
 
-        // Group by sensor_id
         for row in rows {
             let samples = results
                 .entry(row.sensor_id)
@@ -188,30 +223,30 @@ impl PostgresStorage {
             }
         }
 
-        // Ensure all requested sensors have an entry (even if empty)
         for sensor_id in sensor_ids {
             results
-                .entry(*sensor_id)
+                .entry(sensor_id)
                 .or_insert_with(|| TypedSamples::Integer(smallvec![]));
         }
 
-        Ok(())
+        Ok(results)
     }
 
-    async fn batch_query_numeric_samples(
-        &self,
-        sensor_ids: &[i64],
+    async fn batch_query_numeric_samples_owned(
+        pool: &sqlx::PgPool,
+        sensor_ids: Vec<i64>,
         start_time: Option<i64>,
         end_time: Option<i64>,
         limit: i64,
-        results: &mut HashMap<i64, TypedSamples>,
-    ) -> Result<()> {
+    ) -> Result<HashMap<i64, TypedSamples>> {
         #[derive(sqlx::FromRow)]
         struct Row {
             sensor_id: i64,
             timestamp_us: i64,
             value: rust_decimal::Decimal,
         }
+
+        let mut results: HashMap<i64, TypedSamples> = HashMap::new();
 
         let rows: Vec<Row> = sqlx::query_as(
             r#"
@@ -229,11 +264,11 @@ impl PostgresStorage {
             ORDER BY sub.sensor_id, sub.timestamp_us
             "#,
         )
-        .bind(sensor_ids)
+        .bind(&sensor_ids)
         .bind(start_time)
         .bind(end_time)
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(pool)
         .await?;
 
         for row in rows {
@@ -250,27 +285,28 @@ impl PostgresStorage {
 
         for sensor_id in sensor_ids {
             results
-                .entry(*sensor_id)
+                .entry(sensor_id)
                 .or_insert_with(|| TypedSamples::Numeric(smallvec![]));
         }
 
-        Ok(())
+        Ok(results)
     }
 
-    async fn batch_query_float_samples(
-        &self,
-        sensor_ids: &[i64],
+    async fn batch_query_float_samples_owned(
+        pool: &sqlx::PgPool,
+        sensor_ids: Vec<i64>,
         start_time: Option<i64>,
         end_time: Option<i64>,
         limit: i64,
-        results: &mut HashMap<i64, TypedSamples>,
-    ) -> Result<()> {
+    ) -> Result<HashMap<i64, TypedSamples>> {
         #[derive(sqlx::FromRow)]
         struct Row {
             sensor_id: i64,
             timestamp_us: i64,
             value: f64,
         }
+
+        let mut results: HashMap<i64, TypedSamples> = HashMap::new();
 
         let rows: Vec<Row> = sqlx::query_as(
             r#"
@@ -288,11 +324,11 @@ impl PostgresStorage {
             ORDER BY sub.sensor_id, sub.timestamp_us
             "#,
         )
-        .bind(sensor_ids)
+        .bind(&sensor_ids)
         .bind(start_time)
         .bind(end_time)
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(pool)
         .await?;
 
         for row in rows {
@@ -309,27 +345,28 @@ impl PostgresStorage {
 
         for sensor_id in sensor_ids {
             results
-                .entry(*sensor_id)
+                .entry(sensor_id)
                 .or_insert_with(|| TypedSamples::Float(smallvec![]));
         }
 
-        Ok(())
+        Ok(results)
     }
 
-    async fn batch_query_string_samples(
-        &self,
-        sensor_ids: &[i64],
+    async fn batch_query_string_samples_owned(
+        pool: &sqlx::PgPool,
+        sensor_ids: Vec<i64>,
         start_time: Option<i64>,
         end_time: Option<i64>,
         limit: i64,
-        results: &mut HashMap<i64, TypedSamples>,
-    ) -> Result<()> {
+    ) -> Result<HashMap<i64, TypedSamples>> {
         #[derive(sqlx::FromRow)]
         struct Row {
             sensor_id: i64,
             timestamp_us: i64,
             string_value: String,
         }
+
+        let mut results: HashMap<i64, TypedSamples> = HashMap::new();
 
         let rows: Vec<Row> = sqlx::query_as(
             r#"
@@ -348,11 +385,11 @@ impl PostgresStorage {
             ORDER BY sub.sensor_id, sub.timestamp_us
             "#,
         )
-        .bind(sensor_ids)
+        .bind(&sensor_ids)
         .bind(start_time)
         .bind(end_time)
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(pool)
         .await?;
 
         for row in rows {
@@ -369,27 +406,28 @@ impl PostgresStorage {
 
         for sensor_id in sensor_ids {
             results
-                .entry(*sensor_id)
+                .entry(sensor_id)
                 .or_insert_with(|| TypedSamples::String(smallvec![]));
         }
 
-        Ok(())
+        Ok(results)
     }
 
-    async fn batch_query_boolean_samples(
-        &self,
-        sensor_ids: &[i64],
+    async fn batch_query_boolean_samples_owned(
+        pool: &sqlx::PgPool,
+        sensor_ids: Vec<i64>,
         start_time: Option<i64>,
         end_time: Option<i64>,
         limit: i64,
-        results: &mut HashMap<i64, TypedSamples>,
-    ) -> Result<()> {
+    ) -> Result<HashMap<i64, TypedSamples>> {
         #[derive(sqlx::FromRow)]
         struct Row {
             sensor_id: i64,
             timestamp_us: i64,
             value: bool,
         }
+
+        let mut results: HashMap<i64, TypedSamples> = HashMap::new();
 
         let rows: Vec<Row> = sqlx::query_as(
             r#"
@@ -407,11 +445,11 @@ impl PostgresStorage {
             ORDER BY sub.sensor_id, sub.timestamp_us
             "#,
         )
-        .bind(sensor_ids)
+        .bind(&sensor_ids)
         .bind(start_time)
         .bind(end_time)
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(pool)
         .await?;
 
         for row in rows {
@@ -428,21 +466,20 @@ impl PostgresStorage {
 
         for sensor_id in sensor_ids {
             results
-                .entry(*sensor_id)
+                .entry(sensor_id)
                 .or_insert_with(|| TypedSamples::Boolean(smallvec![]));
         }
 
-        Ok(())
+        Ok(results)
     }
 
-    async fn batch_query_location_samples(
-        &self,
-        sensor_ids: &[i64],
+    async fn batch_query_location_samples_owned(
+        pool: &sqlx::PgPool,
+        sensor_ids: Vec<i64>,
         start_time: Option<i64>,
         end_time: Option<i64>,
         limit: i64,
-        results: &mut HashMap<i64, TypedSamples>,
-    ) -> Result<()> {
+    ) -> Result<HashMap<i64, TypedSamples>> {
         #[derive(sqlx::FromRow)]
         struct Row {
             sensor_id: i64,
@@ -450,6 +487,8 @@ impl PostgresStorage {
             latitude: f64,
             longitude: f64,
         }
+
+        let mut results: HashMap<i64, TypedSamples> = HashMap::new();
 
         let rows: Vec<Row> = sqlx::query_as(
             r#"
@@ -467,11 +506,11 @@ impl PostgresStorage {
             ORDER BY sub.sensor_id, sub.timestamp_us
             "#,
         )
-        .bind(sensor_ids)
+        .bind(&sensor_ids)
         .bind(start_time)
         .bind(end_time)
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(pool)
         .await?;
 
         for row in rows {
@@ -488,27 +527,28 @@ impl PostgresStorage {
 
         for sensor_id in sensor_ids {
             results
-                .entry(*sensor_id)
+                .entry(sensor_id)
                 .or_insert_with(|| TypedSamples::Location(smallvec![]));
         }
 
-        Ok(())
+        Ok(results)
     }
 
-    async fn batch_query_json_samples(
-        &self,
-        sensor_ids: &[i64],
+    async fn batch_query_json_samples_owned(
+        pool: &sqlx::PgPool,
+        sensor_ids: Vec<i64>,
         start_time: Option<i64>,
         end_time: Option<i64>,
         limit: i64,
-        results: &mut HashMap<i64, TypedSamples>,
-    ) -> Result<()> {
+    ) -> Result<HashMap<i64, TypedSamples>> {
         #[derive(sqlx::FromRow)]
         struct Row {
             sensor_id: i64,
             timestamp_us: i64,
             value: JsonValue,
         }
+
+        let mut results: HashMap<i64, TypedSamples> = HashMap::new();
 
         let rows: Vec<Row> = sqlx::query_as(
             r#"
@@ -526,11 +566,11 @@ impl PostgresStorage {
             ORDER BY sub.sensor_id, sub.timestamp_us
             "#,
         )
-        .bind(sensor_ids)
+        .bind(&sensor_ids)
         .bind(start_time)
         .bind(end_time)
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(pool)
         .await?;
 
         for row in rows {
@@ -547,27 +587,28 @@ impl PostgresStorage {
 
         for sensor_id in sensor_ids {
             results
-                .entry(*sensor_id)
+                .entry(sensor_id)
                 .or_insert_with(|| TypedSamples::Json(smallvec![]));
         }
 
-        Ok(())
+        Ok(results)
     }
 
-    async fn batch_query_blob_samples(
-        &self,
-        sensor_ids: &[i64],
+    async fn batch_query_blob_samples_owned(
+        pool: &sqlx::PgPool,
+        sensor_ids: Vec<i64>,
         start_time: Option<i64>,
         end_time: Option<i64>,
         limit: i64,
-        results: &mut HashMap<i64, TypedSamples>,
-    ) -> Result<()> {
+    ) -> Result<HashMap<i64, TypedSamples>> {
         #[derive(sqlx::FromRow)]
         struct Row {
             sensor_id: i64,
             timestamp_us: i64,
             value: Vec<u8>,
         }
+
+        let mut results: HashMap<i64, TypedSamples> = HashMap::new();
 
         let rows: Vec<Row> = sqlx::query_as(
             r#"
@@ -585,11 +626,11 @@ impl PostgresStorage {
             ORDER BY sub.sensor_id, sub.timestamp_us
             "#,
         )
-        .bind(sensor_ids)
+        .bind(&sensor_ids)
         .bind(start_time)
         .bind(end_time)
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(pool)
         .await?;
 
         for row in rows {
@@ -606,10 +647,10 @@ impl PostgresStorage {
 
         for sensor_id in sensor_ids {
             results
-                .entry(*sensor_id)
+                .entry(sensor_id)
                 .or_insert_with(|| TypedSamples::Blob(smallvec![]));
         }
 
-        Ok(())
+        Ok(results)
     }
 }

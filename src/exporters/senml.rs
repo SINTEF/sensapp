@@ -14,6 +14,36 @@ pub struct SenMLConverter;
 impl SenMLConverter {
     /// Convert SensorData to SenML JSON format according to RFC 8428
     pub fn to_senml_json(sensor_data: &SensorData) -> Result<Value> {
+        Self::sensor_data_to_senml_records(sensor_data)
+    }
+
+    /// Convert multiple SensorData to SenML JSON format according to RFC 8428
+    /// SenML naturally supports multiple records in a single array, so we concatenate
+    /// records from each sensor. Each sensor establishes its own base name (bn) and
+    /// base time (bt).
+    pub fn to_senml_json_multi(sensor_data_list: &[SensorData]) -> Result<Value> {
+        let mut all_records = Vec::new();
+
+        for (i, sensor_data) in sensor_data_list.iter().enumerate() {
+            let records = Self::sensor_data_to_senml_records(sensor_data)?;
+            if let Some(records_array) = records.as_array() {
+                let mut records_vec = records_array.clone();
+                // Only keep bver for the very first record of the entire array
+                if i > 0
+                    && let Some(first_record) = records_vec.first_mut()
+                    && let Some(obj) = first_record.as_object_mut()
+                {
+                    obj.remove("bver");
+                }
+                all_records.extend(records_vec);
+            }
+        }
+
+        Ok(json!(all_records))
+    }
+
+    /// Internal function to convert a single SensorData to SenML records
+    fn sensor_data_to_senml_records(sensor_data: &SensorData) -> Result<Value> {
         let mut senml_records = Vec::new();
 
         // Get the first timestamp to use as base time
@@ -312,7 +342,7 @@ impl SenMLConverter {
                 // Encode binary data as base64 for SenML
                 record.insert(
                     "vd".to_string(),
-                    json!(general_purpose::STANDARD.encode(&sample.value)),
+                    json!(general_purpose::URL_SAFE_NO_PAD.encode(&sample.value)),
                 );
                 json!(record)
             })
@@ -409,6 +439,13 @@ impl SenMLConverter {
                         .collect();
                     TypedSamples::Boolean(bool_samples?)
                 }
+                SensorType::Blob => {
+                    let blob_samples: Result<SmallVec<[Sample<Vec<u8>>; 4]>> = records
+                        .iter()
+                        .map(|record| Self::parse_blob_sample(record, current_base_time))
+                        .collect();
+                    TypedSamples::Blob(blob_samples?)
+                }
                 _ => return Err(anyhow::anyhow!("Unsupported sensor type for SenML import")),
             };
 
@@ -445,6 +482,8 @@ impl SenMLConverter {
             Ok(SensorType::String)
         } else if record.contains_key("vb") {
             Ok(SensorType::Boolean)
+        } else if record.contains_key("vd") {
+            Ok(SensorType::Blob)
         } else {
             Err(anyhow::anyhow!(
                 "SenML record must contain a value (v, vs, vb, etc.)"
@@ -521,6 +560,23 @@ impl SenMLConverter {
             .ok_or_else(|| anyhow::anyhow!("Missing or invalid boolean value"))?;
         Ok(Sample { datetime, value })
     }
+
+    fn parse_blob_sample(
+        record: &Map<String, Value>,
+        base_time: Option<f64>,
+    ) -> Result<Sample<Vec<u8>>> {
+        let datetime = Self::parse_timestamp(record, base_time)?;
+        let value_str = record
+            .get("vd")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing or invalid blob value"))?;
+
+        let value = general_purpose::URL_SAFE_NO_PAD
+            .decode(value_str)
+            .map_err(|e| anyhow::anyhow!("Failed to decode blob value: {}", e))?;
+
+        Ok(Sample { datetime, value })
+    }
 }
 
 #[cfg(test)]
@@ -572,5 +628,116 @@ mod tests {
         let second_record = &records[1];
         assert_eq!(second_record["v"], 24);
         assert_eq!(second_record["t"], 60.0); // 1 minute later
+    }
+
+    #[test]
+    fn test_blob_samples_senml_roundtrip() {
+        let sensor = Sensor::new(
+            Uuid::new_v4(),
+            "blob_sensor".to_string(),
+            SensorType::Blob,
+            None,
+            None,
+        );
+
+        let data = vec![1u8, 2, 3, 4, 255];
+        let samples = TypedSamples::Blob(smallvec![Sample {
+            datetime: SensAppDateTime::from_unix_seconds(1609459200.0),
+            value: data.clone(),
+        }]);
+
+        let sensor_data = SensorData::new(sensor, samples);
+        let senml_json = SenMLConverter::to_senml_json(&sensor_data).unwrap();
+
+        // Verify JSON structure
+        let json_str = senml_json.to_string();
+        assert!(json_str.contains("vd"));
+
+        // Verify roundtrip
+        let imported = SenMLConverter::from_senml_json(&json_str).unwrap();
+        assert_eq!(imported.len(), 1);
+        let (name, imported_data) = &imported[0];
+        assert_eq!(name, "blob_sensor");
+
+        if let TypedSamples::Blob(samples) = &imported_data.samples {
+            assert_eq!(samples.len(), 1);
+            assert_eq!(samples[0].value, data);
+        } else {
+            panic!("Wrong sample type");
+        }
+    }
+
+    #[test]
+    fn test_multi_sensor_to_senml() {
+        // Create first sensor with integer samples
+        let sensor1 = Sensor::new(
+            Uuid::new_v4(),
+            "temperature".to_string(),
+            SensorType::Integer,
+            Some(Unit::new("Celsius".to_string(), None)),
+            None,
+        );
+        let samples1 = TypedSamples::Integer(smallvec![
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1609459200.0),
+                value: 23,
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1609459260.0),
+                value: 24,
+            }
+        ]);
+        let sensor_data1 = SensorData::new(sensor1, samples1);
+
+        // Create second sensor with float samples
+        let sensor2 = Sensor::new(
+            Uuid::new_v4(),
+            "humidity".to_string(),
+            SensorType::Float,
+            Some(Unit::new("%".to_string(), None)),
+            None,
+        );
+        let samples2 = TypedSamples::Float(smallvec![
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1609459200.0),
+                value: 45.5,
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1609459260.0),
+                value: 46.2,
+            }
+        ]);
+        let sensor_data2 = SensorData::new(sensor2, samples2);
+
+        // Test multi-sensor conversion
+        let sensor_data_list = vec![sensor_data1, sensor_data2];
+        let senml_json = SenMLConverter::to_senml_json_multi(&sensor_data_list).unwrap();
+
+        // Verify result is an array
+        assert!(senml_json.is_array());
+        let records = senml_json.as_array().unwrap();
+
+        // Should have 4 records total (2 sensors * 2 samples each)
+        assert_eq!(records.len(), 4);
+
+        // First sensor records should have bver (only on first record)
+        assert_eq!(records[0]["bn"], "temperature");
+        assert_eq!(records[0]["bu"], "Celsius");
+        assert!(records[0].get("bver").is_some());
+
+        // Third record (first of second sensor) should NOT have bver
+        assert_eq!(records[2]["bn"], "humidity");
+        assert_eq!(records[2]["bu"], "%");
+        assert!(records[2].get("bver").is_none());
+    }
+
+    #[test]
+    fn test_multi_sensor_empty_list() {
+        let sensor_data_list: Vec<SensorData> = vec![];
+        let senml_json = SenMLConverter::to_senml_json_multi(&sensor_data_list).unwrap();
+
+        assert!(senml_json.is_array());
+        let records = senml_json.as_array().unwrap();
+        assert!(records.is_empty());
     }
 }

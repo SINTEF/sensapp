@@ -5377,6 +5377,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusty-promql-parser"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a9f9a20037ce456faae4f9e123f950d36ad6e1fda51f165b8e065d76ec4fc26"
+dependencies = [
+ "nom 8.0.0",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5525,6 +5534,7 @@ dependencies = [
  "rust_decimal",
  "rustls",
  "rusty-chunkenc",
+ "rusty-promql-parser",
  "sensapp",
  "sentry",
  "serde",

@@ -120,6 +120,7 @@ clickhouse = { version = "0.14", features = [
   "inserter",
 ], optional = true }
 rustls = "0.23"
+rusty-promql-parser = "0.1"
 
 [dev-dependencies]
 temp-env = "0.3"
