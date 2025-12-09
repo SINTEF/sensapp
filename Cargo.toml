@@ -7,7 +7,7 @@ edition = "2024"
 default = ["postgres"]
 # Storage backends
 postgres = ["sqlx/postgres"]
-sqlite = ["sqlx/sqlite"]
+sqlite = ["sqlx/sqlite", "sqlx/regexp"]
 timescaledb = ["sqlx/postgres"] # Uses same driver as postgres
 duckdb = ["dep:duckdb"]
 bigquery = [
@@ -36,21 +36,12 @@ test-utils = []
 # Apache Arrow support for efficient columnar data format
 arrow = { version = "57", features = ["ipc"] }
 arrow-ipc = "57"
-arrow-schema = "57"
-arrow-array = "57"
 anyhow = "1.0"
-#async-stream = "0.3"
 async-trait = "0.1"
 thiserror = "2.0"
 axum = { version = "0.8", features = ["multipart", "macros"] }
-#axum-streams = { version = "0.12", features = ["json", "csv", "text"] }
 base64 = "0.22"
-#bytes = "1.5"
 futures = "0.3"
-#futures-util = { version = "0.3", features = ["io"] }
-#http-body = "1.0"
-#http-body-util = "0.1"
-polars = { version = "0.52" }
 sqlx = { version = "0.8", features = [
   "runtime-tokio",
   "uuid",
@@ -63,7 +54,7 @@ tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = "0.7"
 tower = { version = "0.5", features = ["full"] }
 tower-http = { version = "0.6", features = ["full"] }
-tracing = { version = "0.1" }
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.18", features = ["serde"] }
 csv-async = "1.3"
@@ -71,41 +62,29 @@ rust_decimal = "1.37"
 geo = "0.32"
 cached = { version = "0.56", features = ["async", "tokio", "async-trait"] }
 nom = "8.0"
-sindit-senml = "0.2"
 serde_json = "1.0"
-num-traits = "0.2"
 hifitime = "4.1"
 iso8601 = "0.6"
 duckdb = { version = "1.3", features = ["bundled"], optional = true }
-config = "0.15"
 serde = "1.0"
 confique = { version = "0.4", features = ["toml"] }
 byte-unit = "5.1"
-#prost = "0.12"
 prost = "0.14"
 snap = "1.1"
 rusty-chunkenc = "0.1"
-hex = "0.4"
 blake3 = "1.8"
 regex = "1.11"
+sindit-senml = "0.2"
 influxdb-line-protocol = "2.0"
 flate2 = "1.1"
 smallvec = "1.15"
 once_cell = "1.21"
 urlencoding = "2.1"
 hybridmap = "0.1"
-clap = { version = "4.5", features = ["derive"] }
-serde-inline-default = "1.0"
-serde_bytes = "0.11"
 sentry = { version = "0.46", features = ["anyhow", "tower"] }
 url = "2.5"
-futures-lite = "2.6"
-#gcp-bigquery-client = { git = "https://github.com/lquerel/gcp-bigquery-client.git", rev = "107a5557df6336933f6b0bcf330aa91fe6ca866a" }
 gcp-bigquery-client = { version = "0.27", optional = true }
-#prost = { version = "0.12", features = ["derive"] }
-#enum_delegate = "0.2"
 sinteflake = { version = "0.1", features = ["async"] }
-#tonic = "0.11"
 tonic = "0.14"
 bigdecimal = { version = "0.4", optional = true }
 big-decimal-byte-string-encoder = { version = "0.1", optional = true }
