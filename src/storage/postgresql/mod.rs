@@ -411,6 +411,7 @@ impl StorageInstance for PostgresStorage {
         start_time: Option<SensAppDateTime>,
         end_time: Option<SensAppDateTime>,
         limit: Option<usize>,
+        numeric_only: bool,
     ) -> Result<Vec<SensorData>> {
         // If no matchers, return empty result (Prometheus behavior)
         if matchers.is_empty() {
@@ -423,7 +424,7 @@ impl StorageInstance for PostgresStorage {
 
         // Find matching sensors with full metadata (optimized: 2 queries instead of N+1)
         let sensors = self
-            .find_sensors_by_matchers(&name_matchers, &label_matchers)
+            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
             .await?;
 
         if sensors.is_empty() {

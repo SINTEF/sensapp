@@ -429,6 +429,7 @@ impl StorageInstance for SqliteStorage {
         _start_time: Option<SensAppDateTime>,
         _end_time: Option<SensAppDateTime>,
         _limit: Option<usize>,
+        _numeric_only: bool,
     ) -> Result<Vec<SensorData>> {
         // TODO: Implement label-based query for SQLite
         anyhow::bail!("query_sensors_by_labels not yet implemented for SQLite")

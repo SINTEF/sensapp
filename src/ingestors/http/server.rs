@@ -22,6 +22,7 @@ use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::http::HeaderMap;
+use axum::http::StatusCode;
 use axum::http::header;
 use axum::routing::get;
 use axum::routing::post;
@@ -70,7 +71,10 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
                 .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
         )
         .sensitive_response_headers(sensitive_headers)
-        .layer(TimeoutLayer::new(Duration::from_secs(timeout_seconds)))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(timeout_seconds),
+        ))
         .compression()
         .into_inner();
 

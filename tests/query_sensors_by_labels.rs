@@ -102,7 +102,7 @@ async fn test_query_by_exact_name() -> Result<()> {
     // Query by exact name
     let matchers = vec![LabelMatcher::eq("__name__", "cpu_usage")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 1, "Should find exactly one sensor");
@@ -137,7 +137,7 @@ async fn test_query_by_name_not_equal() -> Result<()> {
     // Query by name != cpu_usage
     let matchers = vec![LabelMatcher::neq("__name__", "cpu_usage")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 2, "Should find two sensors");
@@ -175,7 +175,7 @@ async fn test_query_by_name_regex() -> Result<()> {
     // Query by name matching regex "cpu.*"
     let matchers = vec![LabelMatcher::regex("__name__", "cpu.*")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 2, "Should find two cpu sensors");
@@ -212,7 +212,7 @@ async fn test_query_by_name_regex_not_match() -> Result<()> {
     // Query by name NOT matching regex "cpu.*"
     let matchers = vec![LabelMatcher::not_regex("__name__", "cpu.*")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 1, "Should find one non-cpu sensor");
@@ -263,7 +263,7 @@ async fn test_query_by_label_exact() -> Result<()> {
     // Query by label environment=production
     let matchers = vec![LabelMatcher::eq("environment", "production")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 2, "Should find two production sensors");
@@ -315,7 +315,7 @@ async fn test_query_by_label_not_equal() -> Result<()> {
     // Query by label environment != production
     let matchers = vec![LabelMatcher::neq("environment", "production")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 2, "Should find two non-production sensors");
@@ -364,7 +364,7 @@ async fn test_query_by_label_regex() -> Result<()> {
     // Query by label region matching regex "eu-.*"
     let matchers = vec![LabelMatcher::regex("region", "eu-.*")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 2, "Should find two EU servers");
@@ -407,7 +407,7 @@ async fn test_query_by_label_regex_not_match() -> Result<()> {
     // Query by label region NOT matching regex "eu-.*"
     let matchers = vec![LabelMatcher::not_regex("region", "eu-.*")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 1, "Should find one non-EU server");
@@ -461,7 +461,7 @@ async fn test_query_combined_name_and_label() -> Result<()> {
         LabelMatcher::eq("environment", "production"),
     ];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 1, "Should find exactly one sensor");
@@ -520,7 +520,7 @@ async fn test_query_multiple_labels() -> Result<()> {
         LabelMatcher::eq("service", "api"),
     ];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 1, "Should find exactly one sensor");
@@ -548,7 +548,7 @@ async fn test_query_empty_matchers() -> Result<()> {
     // Query with empty matchers
     let matchers: Vec<LabelMatcher> = vec![];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert!(
@@ -578,7 +578,7 @@ async fn test_query_no_matches() -> Result<()> {
     // Query for non-existent sensor name
     let matchers = vec![LabelMatcher::eq("__name__", "nonexistent_sensor")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert!(
@@ -604,7 +604,7 @@ async fn test_query_sensor_without_labels() -> Result<()> {
     // Query by label - should not match sensor without that label
     let matchers = vec![LabelMatcher::eq("environment", "production")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert!(
@@ -634,7 +634,7 @@ async fn test_query_with_time_range() -> Result<()> {
 
     let matchers = vec![LabelMatcher::eq("__name__", "time_test_sensor")];
     let results = storage
-        .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), None)
+        .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), None, false)
         .await?;
 
     assert_eq!(results.len(), 1, "Should find one sensor");
@@ -664,7 +664,7 @@ async fn test_query_with_limit() -> Result<()> {
 
     let matchers = vec![LabelMatcher::eq("__name__", "limit_test_sensor")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, Some(10))
+        .query_sensors_by_labels(&matchers, None, None, Some(10), false)
         .await?;
 
     assert_eq!(results.len(), 1, "Should find one sensor");
@@ -712,7 +712,7 @@ async fn test_query_integer_sensor() -> Result<()> {
 
     let matchers = vec![LabelMatcher::eq("endpoint", "/api/users")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 1);
@@ -752,7 +752,7 @@ async fn test_query_string_sensor() -> Result<()> {
 
     let matchers = vec![LabelMatcher::eq("severity", "info")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 1);
@@ -792,7 +792,7 @@ async fn test_query_boolean_sensor() -> Result<()> {
 
     let matchers = vec![LabelMatcher::eq("service", "database")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 1);
@@ -832,7 +832,7 @@ async fn test_query_regex_special_chars() -> Result<()> {
     // Query using regex with word boundary-like pattern
     let matchers = vec![LabelMatcher::regex("__name__", "http_request.*")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(
@@ -867,7 +867,7 @@ async fn test_query_regex_case_sensitive() -> Result<()> {
     // PostgreSQL ~ is case-sensitive by default
     let matchers = vec![LabelMatcher::regex("__name__", "cpu.*")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
 
     assert_eq!(results.len(), 1, "Should only match lowercase cpu_usage");
@@ -911,7 +911,7 @@ async fn test_query_performance_many_sensors() -> Result<()> {
     let start = std::time::Instant::now();
     let matchers = vec![LabelMatcher::eq("environment", "production")];
     let results = storage
-        .query_sensors_by_labels(&matchers, None, None, None)
+        .query_sensors_by_labels(&matchers, None, None, None, false)
         .await?;
     let duration = start.elapsed();
 

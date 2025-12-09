@@ -102,6 +102,7 @@ impl StorageInstance for DuckDBStorage {
         _start_time: Option<crate::datamodel::SensAppDateTime>,
         _end_time: Option<crate::datamodel::SensAppDateTime>,
         _limit: Option<usize>,
+        _numeric_only: bool,
     ) -> Result<Vec<crate::datamodel::SensorData>> {
         // TODO: Implement label-based query for DuckDB
         anyhow::bail!("query_sensors_by_labels not yet implemented for DuckDB")

@@ -439,6 +439,7 @@ impl StorageInstance for TimeScaleDBStorage {
         _start_time: Option<SensAppDateTime>,
         _end_time: Option<SensAppDateTime>,
         _limit: Option<usize>,
+        _numeric_only: bool,
     ) -> Result<Vec<SensorData>> {
         // TODO: Implement label-based query for TimescaleDB
         anyhow::bail!("query_sensors_by_labels not yet implemented for TimescaleDB")

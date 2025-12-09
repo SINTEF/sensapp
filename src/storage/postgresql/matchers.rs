@@ -19,6 +19,7 @@ impl PostgresStorage {
     /// This builds a dynamic SQL query to find sensors based on:
     /// - Name matchers: filter on sensors.name column
     /// - Label matchers: filter on labels table with dictionary joins
+    /// - numeric_only: if true, only return sensors with numeric types (Integer, Numeric, Float)
     ///
     /// Returns a vector of (sensor_id, Sensor) tuples with full metadata and labels.
     /// This is optimized to fetch all sensor metadata and labels in just two queries
@@ -27,6 +28,7 @@ impl PostgresStorage {
         &self,
         name_matchers: &[&LabelMatcher],
         label_matchers: &[&LabelMatcher],
+        numeric_only: bool,
     ) -> Result<Vec<(i64, Sensor)>> {
         // Build the base query to find matching sensor IDs with their metadata
         let mut sql = String::from(
@@ -38,6 +40,11 @@ impl PostgresStorage {
         let mut where_clauses: Vec<String> = Vec::new();
         let mut params: Vec<String> = Vec::new();
         let mut param_idx = 1;
+
+        // Filter by numeric types if requested (for Prometheus compatibility)
+        if numeric_only {
+            where_clauses.push("s.type IN ('Integer', 'Numeric', 'Float')".to_string());
+        }
 
         // Handle name matchers (__name__ -> sensors.name)
         for matcher in name_matchers {

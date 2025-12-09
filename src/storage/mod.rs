@@ -51,6 +51,8 @@ pub trait StorageInstance: Send + Sync + Debug {
     /// * `start_time` - Optional start of time range (inclusive)
     /// * `end_time` - Optional end of time range (inclusive)
     /// * `limit` - Optional maximum number of samples per sensor
+    /// * `numeric_only` - If true, only return sensors with numeric types (Integer, Numeric, Float).
+    ///                    This is useful for Prometheus compatibility which only supports numeric data.
     ///
     /// # Returns
     ///
@@ -61,6 +63,7 @@ pub trait StorageInstance: Send + Sync + Debug {
         start_time: Option<SensAppDateTime>,
         end_time: Option<SensAppDateTime>,
         limit: Option<usize>,
+        numeric_only: bool,
     ) -> Result<Vec<crate::datamodel::SensorData>>;
 
     /// Health check for the storage backend

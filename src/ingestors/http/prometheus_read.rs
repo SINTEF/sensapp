@@ -1,6 +1,16 @@
-use crate::parsing::prometheus::remote_read_parser::{
-    create_empty_read_response, parse_remote_read_request, serialize_read_response,
+use crate::datamodel::SensAppDateTime;
+use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+use crate::parsing::prometheus::chunk_encoder::ChunkEncoder;
+use crate::parsing::prometheus::converter::{build_prometheus_labels, sensor_data_to_timeseries};
+use crate::parsing::prometheus::remote_read_models::{
+    QueryResult, ReadResponse, read_request::ResponseType,
 };
+use crate::parsing::prometheus::remote_read_parser::{
+    parse_remote_read_request, serialize_read_response,
+};
+use crate::parsing::prometheus::remote_write_models::Sample as PromSample;
+use crate::parsing::prometheus::stream_writer::StreamWriter;
+use crate::storage::query::LabelMatcher;
 
 use super::{app_error::AppError, state::HttpServerState};
 use axum::{
@@ -10,7 +20,7 @@ use axum::{
     response::Response,
 };
 use tokio_util::bytes::Bytes;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
     // Check that we have the right content encoding, that must be snappy
@@ -93,7 +103,7 @@ fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
 )]
 #[debug_handler]
 pub async fn prometheus_remote_read(
-    State(_state): State<HttpServerState>,
+    State(state): State<HttpServerState>,
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Result<Response<axum::body::Body>, AppError> {
@@ -139,33 +149,198 @@ pub async fn prometheus_remote_read(
         read_request.accepted_response_types
     );
 
-    // For now, create an empty response
-    warn!("Returning empty response - data fetching not yet implemented");
-    let empty_response = create_empty_read_response(&read_request).map_err(|e| {
-        AppError::internal_server_error(anyhow::anyhow!("Failed to create response: {}", e))
-    })?;
+    // Check if client accepts streamed XOR chunks
+    let use_streaming = read_request
+        .accepted_response_types
+        .contains(&(ResponseType::StreamedXorChunks as i32));
+
+    if use_streaming {
+        // Return streamed chunked response
+        handle_streamed_response(&state, &read_request).await
+    } else {
+        // Return standard SAMPLES response
+        handle_samples_response(&state, &read_request).await
+    }
+}
+
+/// Handle standard SAMPLES response type
+async fn handle_samples_response(
+    state: &HttpServerState,
+    read_request: &crate::parsing::prometheus::remote_read_models::ReadRequest,
+) -> Result<Response<axum::body::Body>, AppError> {
+    let mut results = Vec::with_capacity(read_request.queries.len());
+
+    for query in &read_request.queries {
+        // Convert Prometheus matchers to SensApp matchers
+        let matchers: Vec<LabelMatcher> = query.matchers.iter().map(LabelMatcher::from).collect();
+
+        // Convert timestamps from milliseconds to SensAppDateTime
+        let start_time = SensAppDateTime::from_unix_milliseconds_i64(query.start_timestamp_ms);
+        let end_time = SensAppDateTime::from_unix_milliseconds_i64(query.end_timestamp_ms);
+
+        // Query storage (numeric_only=true for Prometheus compatibility)
+        let sensor_data = state
+            .storage
+            .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), None, true)
+            .await
+            .map_err(|e| {
+                AppError::internal_server_error(anyhow::anyhow!("Storage query failed: {}", e))
+            })?;
+
+        debug!("Query returned {} sensors", sensor_data.len());
+
+        // Convert to Prometheus TimeSeries
+        let timeseries = sensor_data
+            .iter()
+            .filter_map(sensor_data_to_timeseries)
+            .collect();
+
+        results.push(QueryResult { timeseries });
+    }
+
+    let response = ReadResponse { results };
 
     // Serialize and compress the response
-    let response_bytes = serialize_read_response(&empty_response).map_err(|e| {
+    let response_bytes = serialize_read_response(&response).map_err(|e| {
         AppError::internal_server_error(anyhow::anyhow!("Failed to serialize response: {}", e))
     })?;
 
     info!(
-        "Prometheus remote read: Returning response with {} bytes",
+        "Prometheus remote read: Returning SAMPLES response with {} bytes",
         response_bytes.len()
     );
 
     // Build HTTP response with appropriate headers
-    let response = Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/x-protobuf")
         .header("content-encoding", "snappy")
         .body(axum::body::Body::from(response_bytes))
         .map_err(|e| {
             AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
-        })?;
+        })
+}
 
-    Ok(response)
+/// Handle STREAMED_XOR_CHUNKS response type
+async fn handle_streamed_response(
+    state: &HttpServerState,
+    read_request: &crate::parsing::prometheus::remote_read_models::ReadRequest,
+) -> Result<Response<axum::body::Body>, AppError> {
+    let mut chunked_responses = Vec::with_capacity(read_request.queries.len());
+
+    for (query_index, query) in read_request.queries.iter().enumerate() {
+        // Convert Prometheus matchers to SensApp matchers
+        let matchers: Vec<LabelMatcher> = query.matchers.iter().map(LabelMatcher::from).collect();
+
+        // Convert timestamps from milliseconds to SensAppDateTime
+        let start_time = SensAppDateTime::from_unix_milliseconds_i64(query.start_timestamp_ms);
+        let end_time = SensAppDateTime::from_unix_milliseconds_i64(query.end_timestamp_ms);
+
+        // Query storage (numeric_only=true for Prometheus compatibility)
+        let sensor_data = state
+            .storage
+            .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), None, true)
+            .await
+            .map_err(|e| {
+                AppError::internal_server_error(anyhow::anyhow!("Storage query failed: {}", e))
+            })?;
+
+        debug!(
+            "Query {} returned {} sensors",
+            query_index,
+            sensor_data.len()
+        );
+
+        // Convert to ChunkedSeries
+        let chunked_series: Vec<_> = sensor_data
+            .iter()
+            .filter_map(|sd| {
+                // Extract labels
+                let labels = build_prometheus_labels(&sd.sensor);
+
+                // Extract samples as Prometheus format
+                let samples = extract_prom_samples_for_chunks(sd)?;
+
+                // Encode as XOR chunks
+                ChunkEncoder::encode_series(labels, samples).ok()
+            })
+            .collect();
+
+        let chunked_response = ChunkEncoder::create_response(query_index as i64, chunked_series);
+        chunked_responses.push(chunked_response);
+    }
+
+    // Create the streaming response body
+    let body = StreamWriter::create_stream_body(&chunked_responses).map_err(|e| {
+        AppError::internal_server_error(anyhow::anyhow!("Failed to create stream body: {}", e))
+    })?;
+
+    info!(
+        "Prometheus remote read: Returning STREAMED_XOR_CHUNKS response with {} bytes",
+        body.len()
+    );
+
+    // Build HTTP response with appropriate headers for streaming
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            "content-type",
+            "application/x-streamed-protobuf; proto=prometheus.ChunkedReadResponse",
+        )
+        .body(axum::body::Body::from(body))
+        .map_err(|e| {
+            AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
+        })
+}
+
+/// Extract Prometheus samples from SensorData for chunk encoding.
+/// Returns None for non-numeric types.
+fn extract_prom_samples_for_chunks(
+    sensor_data: &crate::datamodel::SensorData,
+) -> Option<Vec<PromSample>> {
+    use crate::datamodel::TypedSamples;
+
+    match &sensor_data.samples {
+        TypedSamples::Float(samples) => {
+            let prom_samples = samples
+                .iter()
+                .map(|s| PromSample {
+                    value: s.value,
+                    timestamp: s.datetime.to_unix_milliseconds().floor() as i64,
+                })
+                .collect();
+            Some(prom_samples)
+        }
+        TypedSamples::Integer(samples) => {
+            let prom_samples = samples
+                .iter()
+                .map(|s| PromSample {
+                    value: s.value as f64,
+                    timestamp: s.datetime.to_unix_milliseconds().floor() as i64,
+                })
+                .collect();
+            Some(prom_samples)
+        }
+        TypedSamples::Numeric(samples) => {
+            use rust_decimal::prelude::ToPrimitive;
+            let prom_samples = samples
+                .iter()
+                .filter_map(|s| {
+                    s.value.to_f64().map(|value| PromSample {
+                        value,
+                        timestamp: s.datetime.to_unix_milliseconds().floor() as i64,
+                    })
+                })
+                .collect();
+            Some(prom_samples)
+        }
+        // Non-numeric types cannot be represented in Prometheus format
+        TypedSamples::String(_)
+        | TypedSamples::Boolean(_)
+        | TypedSamples::Location(_)
+        | TypedSamples::Blob(_)
+        | TypedSamples::Json(_) => None,
+    }
 }
 
 #[cfg(test)]

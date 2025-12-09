@@ -262,10 +262,16 @@ pub async fn simple_promql_query(
     // Parse and validate the query
     let parsed = parse_promql_query(&query.query)?;
 
-    // Execute the query
+    // Execute the query (numeric_only=false since we support all types in export formats)
     let results = state
         .storage
-        .query_sensors_by_labels(&parsed.matchers, parsed.start_time, parsed.end_time, None)
+        .query_sensors_by_labels(
+            &parsed.matchers,
+            parsed.start_time,
+            parsed.end_time,
+            None,
+            false,
+        )
         .await?;
 
     // Parse format from query parameter, default to SenML/JSON
