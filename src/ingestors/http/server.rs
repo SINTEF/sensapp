@@ -1,21 +1,25 @@
 use super::app_error::AppError;
 use super::crud::{get_series_data, list_metrics, list_series};
 use super::influxdb::publish_influxdb;
-use super::prometheus::publish_prometheus;
+use super::prometheus_read::prometheus_remote_read;
+use super::prometheus_write::publish_prometheus;
+use super::simple_promql::simple_promql_query;
 use super::state::HttpServerState;
 use crate::config;
 use crate::importers::csv::publish_csv_async;
-use crate::storage::StorageInstance;
-use anyhow::Result;
-use axum::extract::DefaultBodyLimit;
 use crate::ingestors::http::crud::{
     __path_get_series_data, __path_list_metrics, __path_list_series,
 };
 use crate::ingestors::http::health::{__path_liveness, __path_readiness, liveness, readiness};
 use crate::ingestors::http::influxdb::__path_publish_influxdb;
-use crate::ingestors::http::prometheus::__path_publish_prometheus;
+use crate::ingestors::http::prometheus_read::__path_prometheus_remote_read;
+use crate::ingestors::http::prometheus_write::__path_publish_prometheus;
+use crate::ingestors::http::simple_promql::__path_simple_promql_query;
+use crate::storage::StorageInstance;
+use anyhow::Result;
 use axum::Json;
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
@@ -23,17 +27,14 @@ use axum::http::header;
 use axum::routing::get;
 use axum::routing::post;
 use futures::TryStreamExt;
-use polars::prelude::*;
 use std::io;
-use std::io::Cursor;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_util::bytes::Bytes;
 use tower::ServiceBuilder;
 use tower_http::trace;
 use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
-use tracing::{Level, debug};
+use tracing::Level;
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable as ScalarServable};
 
@@ -42,11 +43,11 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
     tags(
         (name = "SensApp", description = "SensApp API"),
         (name = "InfluxDB", description = "InfluxDB Write API"),
-        (name = "Prometheus", description = "Prometheus Remote Write API"),
+        (name = "Prometheus", description = "Prometheus Remote Write and Read API"),
         (name = "Admin", description = "Administrative operations"),
         (name = "Health", description = "Health check endpoints"),
     ),
-    paths(frontpage, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, vacuum_database, liveness, readiness),
+    paths(frontpage, publish_sensors_data, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, prometheus_remote_read, simple_promql_query, vacuum_database, liveness, readiness),
 )]
 struct ApiDoc;
 
@@ -70,7 +71,10 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
                 .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
         )
         .sensitive_response_headers(sensitive_headers)
-        .layer(TimeoutLayer::new(Duration::from_secs(timeout_seconds)))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(timeout_seconds),
+        ))
         .compression()
         .into_inner();
 
@@ -78,22 +82,12 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
     let app = Router::new()
         .route("/", get(frontpage))
         .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
-        // Health check endpoints
-        .route("/health/live", get(liveness))
-        .route("/health/ready", get(readiness))
-        .route("/publish", post(publish_handler).layer(max_body_layer))
-        .route(
-            "/sensors/publish",
-            post(publish_sensors_data).layer(max_body_layer),
-        )
-        .route(
-            "/sensors/{sensor_name_or_uuid}/publish_csv",
-            post(publish_csv),
-        )
         // Metrics and Series CRUD
         .route("/metrics", get(list_metrics))
         .route("/series", get(list_series))
         .route("/series/{series_uuid}", get(get_series_data))
+        // SensApp Write API
+        .route("/publish", post(publish_sensors_data).layer(max_body_layer))
         // InfluxDB Write API
         .route(
             "/api/v2/write",
@@ -104,8 +98,18 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             "/api/v1/prometheus_remote_write",
             post(publish_prometheus).layer(max_body_layer),
         )
+        // Prometheus Remote Read API
+        .route(
+            "/api/v1/prometheus_remote_read",
+            post(prometheus_remote_read).layer(max_body_layer),
+        )
+        // Simple PromQL Query API
+        .route("/api/v1/query", get(simple_promql_query))
         // Admin API
         .route("/api/v1/admin/vacuum", post(vacuum_database))
+        // Health check endpoints
+        .route("/health/live", get(liveness))
+        .route("/health/ready", get(readiness))
         .layer(middleware)
         .with_state(state);
 
@@ -149,34 +153,37 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
     Ok(Json(name))
 }
 
-async fn publish_csv(
-    State(state): State<HttpServerState>,
-    body: axum::body::Body,
-) -> Result<String, AppError> {
-    let stream = body.into_data_stream();
-    let stream = stream.map_err(io::Error::other);
-    let reader = stream.into_async_read();
-
-    let csv_reader = csv_async::AsyncReaderBuilder::new()
-        .has_headers(true)
-        .delimiter(b';')
-        .create_reader(reader);
-
-    publish_csv_async(csv_reader, 8192, state.storage.clone()).await?;
-
-    Ok("ok".to_string())
-}
-
+/// SensApp native data ingestion API supporting multiple formats.
+///
+/// Accepts sensor data in one of the following formats:
+/// - **SenML JSON** (RFC 8428): `Content-Type: application/json`
+/// - **CSV**: `Content-Type: text/csv` or `application/csv`
+/// - **Apache Arrow IPC**: `Content-Type: application/vnd.apache.arrow.file`
+///
+/// If no Content-Type header is provided, defaults to CSV format.
+#[utoipa::path(
+    post,
+    path = "/publish",
+    tag = "SensApp",
+    request_body(
+        content = String,
+        description = "Sensor data in SenML JSON, CSV, or Apache Arrow format"
+    ),
+    responses(
+        (status = 200, description = "Data ingested successfully", body = String),
+        (status = 400, description = "Bad Request - invalid data format", body = AppError),
+        (status = 500, description = "Internal Server Error", body = AppError),
+    )
+)]
 async fn publish_sensors_data(
     State(state): State<HttpServerState>,
     headers: HeaderMap,
     body: axum::body::Body,
 ) -> Result<String, AppError> {
-    // Determine content type from headers
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("text/csv"); // Default to CSV
+        .unwrap_or("text/csv");
 
     match content_type {
         ct if ct.contains("application/json") => {
@@ -189,7 +196,6 @@ async fn publish_sensors_data(
             publish_csv_format(body, state.storage.clone()).await?;
         }
         _ => {
-            // Default to CSV for unknown content types
             publish_csv_format(body, state.storage.clone()).await?;
         }
     }
@@ -240,7 +246,7 @@ async fn publish_csv_format(
         .delimiter(b',') // Use comma for standard CSV
         .create_reader(reader);
 
-    publish_csv_async(csv_reader, 8192, storage)
+    publish_csv_async(csv_reader, storage)
         .await
         .map_err(AppError::internal_server_error)
 }
@@ -252,11 +258,11 @@ pub async fn publish_senml_data(
     storage: Arc<dyn StorageInstance>,
 ) -> Result<(), AppError> {
     use crate::datamodel::batch_builder::BatchBuilder;
-    use crate::exporters::SenMLConverter;
+    use crate::importers::senml::SenMLImporter;
 
     // Parse SenML JSON
     let sensor_data_list =
-        SenMLConverter::from_senml_json(json_str).map_err(AppError::bad_request)?;
+        SenMLImporter::from_senml_json(json_str).map_err(AppError::bad_request)?;
 
     if sensor_data_list.is_empty() {
         return Err(AppError::bad_request(anyhow::anyhow!(
@@ -284,27 +290,10 @@ pub async fn publish_senml_data(
     Ok(())
 }
 
-async fn publish_handler(bytes: Bytes) -> Result<Json<String>, (StatusCode, String)> {
-    let cursor = Cursor::new(bytes);
-    let df_result = CsvReadOptions::default()
-        .with_has_header(true)
-        .with_parse_options(CsvParseOptions::default().with_separator(b';'))
-        .into_reader_with_file_handle(cursor)
-        .finish();
-
-    // debug the schema
-    let schema = df_result.as_ref().unwrap().schema();
-    debug!("CSV schema: {:?}", schema);
-
-    match df_result {
-        Ok(df) => Ok(Json(format!("Number of rows: {}", df.height()))),
-        Err(_) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Error reading CSV".to_string(),
-        )),
-    }
-}
-
+/// Database Vacuuming
+///
+/// Cleans up and optimizes the database by removing unused data and reclaiming space.
+/// (only if supported by the underlying storage engine).
 #[utoipa::path(
     post,
     path = "/api/v1/admin/vacuum",
@@ -321,7 +310,11 @@ async fn vacuum_database(State(state): State<HttpServerState>) -> Result<Json<St
 
 #[cfg(test)]
 mod tests {
-    use axum::{body::Body, http::Request};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use serial_test::serial;
     use tower::ServiceExt;
 
     use super::*;
@@ -332,6 +325,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_frontpage_handler() {
         use crate::storage::storage_factory::create_storage_from_connection_string;
 

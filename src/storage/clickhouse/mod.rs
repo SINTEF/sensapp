@@ -176,13 +176,16 @@ impl StorageInstance for ClickHouseStorage {
     }
 
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
-        let publisher = ClickHousePublisher::new(&self.client);
+        let mut publisher = ClickHousePublisher::new(&self.client);
 
         for single_sensor_batch in batch.sensors.as_ref() {
             publisher
                 .publish_single_sensor_batch(single_sensor_batch)
                 .await?;
         }
+
+        // Commit all inserters in parallel
+        publisher.commit_all().await?;
 
         Ok(())
     }
@@ -481,6 +484,18 @@ impl StorageInstance for ClickHouseStorage {
         };
 
         Ok(Some(sensor_data))
+    }
+
+    async fn query_sensors_by_labels(
+        &self,
+        _matchers: &[super::LabelMatcher],
+        _start_time: Option<SensAppDateTime>,
+        _end_time: Option<SensAppDateTime>,
+        _limit: Option<usize>,
+        _numeric_only: bool,
+    ) -> Result<Vec<SensorData>> {
+        // TODO: Implement label-based query for ClickHouse
+        anyhow::bail!("query_sensors_by_labels not yet implemented for ClickHouse")
     }
 
     /// Health check for ClickHouse storage

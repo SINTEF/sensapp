@@ -52,6 +52,26 @@ mod tests {
     }
 
     #[test]
+    fn test_milliseconds_roundtrip() {
+        // Test that from_unix_milliseconds_i64 -> to_unix_milliseconds roundtrips correctly
+        let test_cases: &[i64] = &[
+            1000,          // Small value
+            1704067200000, // Jan 1, 2024 00:00:00 UTC
+            1704067200123, // With subsecond precision
+        ];
+
+        for &input_ms in test_cases {
+            let epoch = SensAppDateTime::from_unix_milliseconds_i64(input_ms);
+            let output_ms = epoch.to_unix_milliseconds().floor() as i64;
+            assert_eq!(
+                input_ms, output_ms,
+                "from_unix_milliseconds_i64 should roundtrip for {}",
+                input_ms
+            );
+        }
+    }
+
+    #[test]
     fn test_sensapp_datetime_to_offset_datetime() {
         let hifitime_now = hifitime::Epoch::now().unwrap();
 

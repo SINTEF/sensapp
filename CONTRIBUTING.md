@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your contributions in making SensApp better!
+Thank you for considering contributing to SensApp! We welcome contributions, though it has never happened yet.
 
 ## Discuss Changes
 
@@ -68,6 +68,7 @@ Valid types are: fix, feat, chore, docs, style, refactor, perf, test, revert, ci
 To please the [gitmoji](https://gitmoji.dev) enthousiasts, unicode emojis are allowed but not enforced. Commit messages with emojis still must respect the conventional commit format.
 
 Examples:
+
 ```
 fix: 🐛 prevent infinite loop when it rains
 docs(architecture): 📝 correct spelling of banana

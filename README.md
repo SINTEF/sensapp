@@ -1,23 +1,50 @@
 # ![SensApp](./docs/sensapp_logo.png)
 
-SensApp is an open-source sensor data platform developed by SINTEF for research purposes. It manages time-series data from a multitude of sensors.
+SensApp is an open-source sensor data platform developed by SINTEF.
 
-It enables the handling of small time series data of the edge efficiently to large-scale big data digital twins.
+It handles time-series data ingestion, storage, and retrieval. From small edge devices to big data digital twins, SensApp *may* be useful.
+
+## SensApp allows you to process years of sensor data efficiently
+
+SensApp is compatible with Prometheus and InfluxDB, but with an alternative architecture that prioritise data analysis and long-term storage over ingestion performance and real-time monitoring.
+
+Handling CPU stats for the last 24 hours? InfluxDB or Prometheus are excellent choices. Fetching average bathroom temperature over the last 10 years grouped by day? SensApp will compute that instantly while InfluxDB or Prometheus will take a while as they must read many chunks of data.
+
+But you don't have to chose, both InfluxDB and Prometheus can replicate their data to SensApp for long-term storage and analysis.
+
+Of course you can also use Sensapp as a standalone time-series database.
 
 ## Features
 
-- **Flexible Time Series DataBase Storage**: Supports various time-series databases such as SQLite, PostgreSQL (with optional TimeScaleDB plugin), DuckDB, ClickHouse, BigQuery, and RRDCached, with the potential to extend support to other databases in the future.
-- **HTTP REST API**: Easy data ingestion via HTTP REST API with support for multiple data formats.
-- **Compatibility with Existing Pipelines**: Offers Prometheus Remote Write and InfluxDB line format support for seamless integration into existing sensor data pipelines.
-- **Data formats**: Supports various data formats like JSON, CSV, SenML, and Apache Arrow IPC.
+- **HTTP REST API**
+- **Compatible with existing sensor data pipelines**:
+  - **Prometheus Remote Write**: Prometheus can push data to SensApp.
+  - **Prometheus Remote Read**: Prometheus can also read data from SensApp.
+  - **InfluxDB Line Protocol**: InfluxDB can push data to SensApp, or you can use SensApp instead of InfluxDB, with [Telegraf](https://github.com/influxdata/telegraf) for example.
+- **Data formats**:
+  - **JSON**: Simple and widely used format for data interchange.
+  - **CSV**: Many users *love* CSV.
+  - **SenML**: Standardized format for sensor data representation, that is almost unheard of but actually pretty good.
+  - **Apache Arrow IPC Support**: Efficient IPC format for high-performance data interchange.
+- **Flexible Time Series DataBase Storage**:
+  - **SQLite**: Lightweight embedded database for edge deployments.
+  - **DuckDB**: Alternative to SQLite, potentially faster for analytical queries. *Not enabled by default*.
+  - **PostgreSQL**: Robust relational database for medium to large deployments, with optional TimeScaleDB plugin for enhanced time-series capabilities.
+  - **ClickHouse**: Columnar database management system for high-performance analytical queries on large volumes of data.
+  - **BigQuery**: Fully-managed serverless data warehouse for scalable analysis. *Not enabled by default*.
+  - **RRDCached**: Integration with RRDtools, mostly implemented for fun. *Not enabled by default*.
 
 ## Architecture
 
-SensApp should be stateless and scale from the edge to big data. The message queue software and the database software solve the complex problems. SensApp is a simple adapter between.
+SensApp's architecture is relatively simple as the complex problems are delegated to existing databases. It's a stateless adapter between HTTP clients and the chosen time-series database(s).
 
-* SensApp supports simple deployments without requiring a message queue and only an embedded SQLite database.
-* SensApp supports medium deployments with a single message broker and a PostgreSQL database.
-* For larger deployments, SensApp advises a distributed message queue, an automatic load balancer for the SensApp instances, and a ClickHouse cluster.
+Most of the complexity lies in the [database schema design](docs/DATAMODEL.md). After that, it's mostly some code glue.
+
+- On the **edge**, SensApp can be deployed as a single lightweight instance with an embedded SQLite database.
+- For **medium** deployments, SensApp can be deployed with a single message broker and a PostgreSQL database.
+- For **larger** deployments, many SensApp instances can be deployed behind a load balancer, connected to a ClickHouse database cluster.
+
+SensApp storage is based on the findings of the paper [TSM-Bench: Benchmarking Time Series Database Systems for Monitoring Applications](https://dl.acm.org/doi/abs/10.14778/3611479.3611532). ClickHouse also released [an experimental time-series engine](https://clickhouse.com/docs/engines/table-engines/special/time_series) that is somewhat similar to SensApp's storage schema.
 
 Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 
@@ -49,15 +76,11 @@ Override environment variables as needed: `DATABASE_URL`, `POSTGRES_USER`, etc.
 
 SensApp is developed using Rust, a language known for its performance, memory safety, and annoying borrow checker. SensApp used to be written in Scala, but the new author prefers Rust.
 
-Not only the language, it's also the extensive high quality open-source ecosystem that makes Rust a great choice for SensApp:
+Another reason is from the results from the paper [Energy efficiency across programming languages: how do energy, time, and memory relate?](https://dl.acm.org/doi/10.1145/3136014.3136031), which shows Rust as one of the most energy-efficient programming languages while having memory safety.
 
-* [Tokio](https://tokio.rs/) asynchronous runtime
-* [Serde](https://serde.rs/) serialization framework
-* [Axum](https://github.com/tokio-rs/axum) web framework
-* [SQLx](https://github.com/launchbadge/sqlx) database driver
-* [Polars](https://pola.rs) data frame library
-* [nom](https://github.com/rust-bakery/nom) parser combinator library
-* *and many more…*
+Not only the language, it's also the extensive high quality open-source ecosystem that makes Rust a great choice for SensApp.
+
+*Here ends the mandatory Rust promotion paragraph.*
 
 ## Contributing
 

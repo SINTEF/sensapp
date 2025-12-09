@@ -1,17 +1,29 @@
+//! PostgreSQL storage backend for SensApp.
+//!
+//! This module is split into several submodules:
+//! - `mod.rs` (this file): Core struct, connection, and StorageInstance trait implementation
+//! - `queries.rs`: Single-sensor sample query methods
+//! - `batch_queries.rs`: Optimized batch query methods for multiple sensors
+//! - `matchers.rs`: Label matcher query building for Prometheus-style queries
+//! - `postgresql_publishers.rs`: Value publishing functions
+//! - `postgresql_utilities.rs`: Helper functions for sensor/label/unit creation
+
 use super::{DEFAULT_QUERY_LIMIT, StorageError, StorageInstance, common::datetime_to_micros};
-use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
-    Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
+    Metric, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
 };
 use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use geo::Point;
-use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 use sqlx::{PgPool, postgres::PgConnectOptions};
 use std::{str::FromStr, sync::Arc};
 use uuid::Uuid;
+
+// Submodules with impl blocks for PostgresStorage
+mod batch_queries;
+mod matchers;
+mod queries;
 
 pub mod postgresql_publishers;
 pub mod postgresql_utilities;
@@ -354,7 +366,7 @@ impl StorageInstance for PostgresStorage {
         let start_time_us = start_time.as_ref().map(datetime_to_micros);
         let end_time_us = end_time.as_ref().map(datetime_to_micros);
 
-        // Query samples based on sensor type
+        // Query samples based on sensor type (methods defined in queries.rs)
         let samples = match sensor.sensor_type {
             SensorType::Integer => {
                 self.query_integer_samples(sensor_id, start_time_us, end_time_us, limit)
@@ -391,6 +403,55 @@ impl StorageInstance for PostgresStorage {
         };
 
         Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    async fn query_sensors_by_labels(
+        &self,
+        matchers: &[super::LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        limit: Option<usize>,
+        numeric_only: bool,
+    ) -> Result<Vec<SensorData>> {
+        // If no matchers, return empty result (Prometheus behavior)
+        if matchers.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Separate name matchers (__name__) from label matchers
+        let (name_matchers, label_matchers): (Vec<_>, Vec<_>) =
+            matchers.iter().partition(|m| m.is_name_matcher());
+
+        // Find matching sensors with full metadata (optimized: 2 queries instead of N+1)
+        let sensors = self
+            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
+            .await?;
+
+        if sensors.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Convert datetime to microseconds for batch queries
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+
+        // Combine sensors with their samples
+        let mut samples_map = self
+            .batch_query_samples(&sensors, start_time_us, end_time_us, limit)
+            .await?;
+
+        // Combine sensors with their samples
+        let results: Vec<SensorData> = sensors
+            .into_iter()
+            .map(|(sensor_id, sensor)| {
+                let samples = samples_map
+                    .remove(&sensor_id)
+                    .unwrap_or_else(|| TypedSamples::Float(smallvec![]));
+                SensorData::new(sensor, samples)
+            })
+            .collect();
+
+        Ok(results)
     }
 
     /// Health check for PostgreSQL storage
@@ -485,6 +546,30 @@ impl StorageInstance for PostgresStorage {
             .await
             .context("Failed to commit test data cleanup transaction")?;
 
+        // Step 5: Clear all cached function caches
+        // The cached macro generates cache variables named after the function in uppercase
+        use cached::Cached;
+        postgresql_utilities::GET_LABEL_NAME_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        postgresql_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        postgresql_utilities::GET_UNIT_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        postgresql_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
+            .lock()
+            .await
+            .cache_clear();
+        postgresql_utilities::GET_STRING_VALUE_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+
         Ok(())
     }
 }
@@ -527,329 +612,6 @@ impl PostgresStorage {
         }
 
         Ok(())
-    }
-
-    async fn query_integer_samples(
-        &self,
-        sensor_id: i64,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<TypedSamples> {
-        #[derive(sqlx::FromRow)]
-        struct IntegerValueRow {
-            timestamp_us: i64,
-            value: i64,
-        }
-
-        let rows: Vec<IntegerValueRow> = sqlx::query_as(
-            r#"
-            SELECT timestamp_us, value FROM integer_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
-            ORDER BY timestamp_us ASC
-            LIMIT $4
-            "#,
-        )
-        .bind(sensor_id)
-        .bind(start_time)
-        .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut samples = smallvec![];
-        for row in rows {
-            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = row.value;
-            samples.push(Sample { datetime, value });
-        }
-
-        Ok(TypedSamples::Integer(samples))
-    }
-
-    async fn query_numeric_samples(
-        &self,
-        sensor_id: i64,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<TypedSamples> {
-        #[derive(sqlx::FromRow)]
-        struct NumericValueRow {
-            timestamp_us: i64,
-            value: rust_decimal::Decimal,
-        }
-
-        let rows: Vec<NumericValueRow> = sqlx::query_as(
-            r#"
-            SELECT timestamp_us, value FROM numeric_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
-            ORDER BY timestamp_us ASC
-            LIMIT $4
-            "#,
-        )
-        .bind(sensor_id)
-        .bind(start_time)
-        .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut samples = smallvec![];
-        for row in rows {
-            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = row.value;
-            samples.push(Sample { datetime, value });
-        }
-
-        Ok(TypedSamples::Numeric(samples))
-    }
-
-    async fn query_float_samples(
-        &self,
-        sensor_id: i64,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<TypedSamples> {
-        #[derive(sqlx::FromRow)]
-        struct FloatValueRow {
-            timestamp_us: i64,
-            value: f64,
-        }
-
-        let rows: Vec<FloatValueRow> = sqlx::query_as(
-            r#"
-            SELECT timestamp_us, value FROM float_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
-            ORDER BY timestamp_us ASC
-            LIMIT $4
-            "#,
-        )
-        .bind(sensor_id)
-        .bind(start_time)
-        .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut samples = smallvec![];
-        for row in rows {
-            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = row.value;
-            samples.push(Sample { datetime, value });
-        }
-
-        Ok(TypedSamples::Float(samples))
-    }
-
-    async fn query_string_samples(
-        &self,
-        sensor_id: i64,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<TypedSamples> {
-        #[derive(sqlx::FromRow)]
-        struct StringValueRow {
-            timestamp_us: i64,
-            string_value: String,
-        }
-
-        let rows: Vec<StringValueRow> = sqlx::query_as(
-            r#"
-            SELECT sv.timestamp_us, svd.value as string_value
-            FROM string_values sv
-            JOIN strings_values_dictionary svd ON sv.value = svd.id
-            WHERE sv.sensor_id = $1
-            AND ($2::BIGINT IS NULL OR sv.timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR sv.timestamp_us <= $3)
-            ORDER BY sv.timestamp_us ASC
-            LIMIT $4
-            "#,
-        )
-        .bind(sensor_id)
-        .bind(start_time)
-        .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut samples = smallvec![];
-        for row in rows {
-            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = row.string_value;
-            samples.push(Sample { datetime, value });
-        }
-
-        Ok(TypedSamples::String(samples))
-    }
-
-    async fn query_boolean_samples(
-        &self,
-        sensor_id: i64,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<TypedSamples> {
-        #[derive(sqlx::FromRow)]
-        struct BooleanValueRow {
-            timestamp_us: i64,
-            value: bool,
-        }
-
-        let rows: Vec<BooleanValueRow> = sqlx::query_as(
-            r#"
-            SELECT timestamp_us, value FROM boolean_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
-            ORDER BY timestamp_us ASC
-            LIMIT $4
-            "#,
-        )
-        .bind(sensor_id)
-        .bind(start_time)
-        .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut samples = smallvec![];
-        for row in rows {
-            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = row.value;
-            samples.push(Sample { datetime, value });
-        }
-
-        Ok(TypedSamples::Boolean(samples))
-    }
-
-    async fn query_location_samples(
-        &self,
-        sensor_id: i64,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<TypedSamples> {
-        #[derive(sqlx::FromRow)]
-        struct LocationValueRow {
-            timestamp_us: i64,
-            latitude: f64,
-            longitude: f64,
-        }
-
-        let rows: Vec<LocationValueRow> = sqlx::query_as(
-            r#"
-            SELECT timestamp_us, latitude, longitude FROM location_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
-            ORDER BY timestamp_us ASC
-            LIMIT $4
-            "#,
-        )
-        .bind(sensor_id)
-        .bind(start_time)
-        .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut samples = smallvec![];
-        for row in rows {
-            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = Point::new(row.longitude, row.latitude);
-            samples.push(Sample { datetime, value });
-        }
-
-        Ok(TypedSamples::Location(samples))
-    }
-
-    async fn query_json_samples(
-        &self,
-        sensor_id: i64,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<TypedSamples> {
-        #[derive(sqlx::FromRow)]
-        struct JsonValueRow {
-            timestamp_us: i64,
-            value: JsonValue,
-        }
-
-        let rows: Vec<JsonValueRow> = sqlx::query_as(
-            r#"
-            SELECT timestamp_us, value FROM json_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
-            ORDER BY timestamp_us ASC
-            LIMIT $4
-            "#,
-        )
-        .bind(sensor_id)
-        .bind(start_time)
-        .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut samples = smallvec![];
-        for row in rows {
-            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value: JsonValue = row.value;
-            samples.push(Sample { datetime, value });
-        }
-
-        Ok(TypedSamples::Json(samples))
-    }
-
-    async fn query_blob_samples(
-        &self,
-        sensor_id: i64,
-        start_time: Option<i64>,
-        end_time: Option<i64>,
-        limit: Option<usize>,
-    ) -> Result<TypedSamples> {
-        #[derive(sqlx::FromRow)]
-        struct BlobValueRow {
-            timestamp_us: i64,
-            value: Vec<u8>,
-        }
-
-        let rows: Vec<BlobValueRow> = sqlx::query_as(
-            r#"
-            SELECT timestamp_us, value FROM blob_values
-            WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
-            ORDER BY timestamp_us ASC
-            LIMIT $4
-            "#,
-        )
-        .bind(sensor_id)
-        .bind(start_time)
-        .bind(end_time)
-        .bind(limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut samples = smallvec![];
-        for row in rows {
-            let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = row.value;
-            samples.push(Sample { datetime, value });
-        }
-
-        Ok(TypedSamples::Blob(samples))
     }
 }
 

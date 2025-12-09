@@ -333,6 +333,18 @@ impl StorageInstance for RrdCachedStorage {
         unimplemented!("RRDCached sensor data querying not yet implemented");
     }
 
+    async fn query_sensors_by_labels(
+        &self,
+        _matchers: &[super::LabelMatcher],
+        _start_time: Option<crate::datamodel::SensAppDateTime>,
+        _end_time: Option<crate::datamodel::SensAppDateTime>,
+        _limit: Option<usize>,
+        _numeric_only: bool,
+    ) -> Result<Vec<crate::datamodel::SensorData>> {
+        // TODO: Implement label-based query for RRDCached
+        anyhow::bail!("query_sensors_by_labels not yet implemented for RRDCached")
+    }
+
     /// Health check for RRDCached storage
     /// Verifies the connection to RRDCached by checking if client can respond
     async fn health_check(&self) -> Result<()> {

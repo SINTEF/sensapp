@@ -96,6 +96,18 @@ impl StorageInstance for DuckDBStorage {
         unimplemented!("DuckDB sensor data querying not yet implemented");
     }
 
+    async fn query_sensors_by_labels(
+        &self,
+        _matchers: &[super::LabelMatcher],
+        _start_time: Option<crate::datamodel::SensAppDateTime>,
+        _end_time: Option<crate::datamodel::SensAppDateTime>,
+        _limit: Option<usize>,
+        _numeric_only: bool,
+    ) -> Result<Vec<crate::datamodel::SensorData>> {
+        // TODO: Implement label-based query for DuckDB
+        anyhow::bail!("query_sensors_by_labels not yet implemented for DuckDB")
+    }
+
     /// Health check for DuckDB storage
     /// Executes a simple SELECT 1 query to verify database connectivity
     async fn health_check(&self) -> Result<()> {
@@ -135,6 +147,15 @@ impl StorageInstance for DuckDBStorage {
             .execute("DELETE FROM labels_name_dictionary", [])
             .ok();
         connection.execute("DELETE FROM units", []).ok();
+
+        // Step 2: Clear all cached function caches
+        // The cached macro generates cache variables named after the function in uppercase
+        use cached::Cached;
+        duckdb_utilities::GET_LABEL_NAME_ID_OR_CREATE.cache_clear();
+        duckdb_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE.cache_clear();
+        duckdb_utilities::GET_UNIT_ID_OR_CREATE.cache_clear();
+        duckdb_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR.cache_clear();
+        duckdb_utilities::GET_STRING_VALUE_ID_OR_CREATE.cache_clear();
 
         Ok(())
     }

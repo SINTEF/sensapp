@@ -433,6 +433,18 @@ impl StorageInstance for TimeScaleDBStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    async fn query_sensors_by_labels(
+        &self,
+        _matchers: &[super::LabelMatcher],
+        _start_time: Option<SensAppDateTime>,
+        _end_time: Option<SensAppDateTime>,
+        _limit: Option<usize>,
+        _numeric_only: bool,
+    ) -> Result<Vec<SensorData>> {
+        // TODO: Implement label-based query for TimescaleDB
+        anyhow::bail!("query_sensors_by_labels not yet implemented for TimescaleDB")
+    }
+
     /// Health check for TimescaleDB storage
     /// Executes a simple SELECT 1 query to verify database connectivity
     async fn health_check(&self) -> Result<()> {
@@ -497,6 +509,30 @@ impl StorageInstance for TimeScaleDBStorage {
         tx.commit()
             .await
             .context("Failed to commit test data cleanup transaction")?;
+
+        // Step 5: Clear all cached function caches
+        // The cached macro generates cache variables named after the function in uppercase
+        use cached::Cached;
+        timescaledb_utilities::GET_LABEL_NAME_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        timescaledb_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        timescaledb_utilities::GET_UNIT_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
+        timescaledb_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
+            .lock()
+            .await
+            .cache_clear();
+        timescaledb_utilities::GET_STRING_VALUE_ID_OR_CREATE
+            .lock()
+            .await
+            .cache_clear();
 
         Ok(())
     }

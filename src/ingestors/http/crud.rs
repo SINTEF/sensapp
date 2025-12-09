@@ -1,9 +1,13 @@
 use crate::datamodel::SensAppDateTime;
+use crate::datamodel::SensorType;
 use crate::exporters::{ArrowConverter, CsvConverter, JsonlConverter, SenMLConverter};
 use crate::ingestors::http::app_error::AppError;
 use crate::ingestors::http::state::HttpServerState;
+use crate::storage::query::{LabelMatcher, MatcherType};
 use axum::Json;
 use axum::extract::{Path, Query, State};
+use regex::Regex;
+use rusty_promql_parser::{Expr, expr};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::str::FromStr;
@@ -63,6 +67,118 @@ pub struct SensorDataQuery {
 #[derive(Debug, Deserialize)]
 pub struct SeriesQuery {
     pub metric: Option<String>,
+    /// PromQL-style label selector (e.g., `{env="prod",region=~"us.*"}`)
+    pub selector: Option<String>,
+}
+
+/// Query parameters for metrics filtering
+#[derive(Debug, Deserialize)]
+pub struct MetricsQuery {
+    /// Filter metrics by name (substring match)
+    pub name: Option<String>,
+    /// Filter metrics by name using regex
+    pub name_regex: Option<String>,
+    /// Filter metrics by sensor type (float, integer, string, boolean, location, json, blob, numeric)
+    pub r#type: Option<String>,
+}
+
+/// Convert PromQL LabelMatchOp to SensApp MatcherType
+fn convert_label_match_op(op: rusty_promql_parser::LabelMatchOp) -> MatcherType {
+    match op {
+        rusty_promql_parser::LabelMatchOp::Equal => MatcherType::Equal,
+        rusty_promql_parser::LabelMatchOp::NotEqual => MatcherType::NotEqual,
+        rusty_promql_parser::LabelMatchOp::RegexMatch => MatcherType::RegexMatch,
+        rusty_promql_parser::LabelMatchOp::RegexNotMatch => MatcherType::RegexNotMatch,
+    }
+}
+
+/// Parse a PromQL selector string and extract label matchers.
+/// Accepts formats like:
+/// - `{env="prod"}` - label matchers only
+/// - `my_metric{env="prod"}` - metric name with labels (metric name is ignored for series filtering)
+fn parse_selector_to_matchers(selector: &str) -> Result<Vec<LabelMatcher>, AppError> {
+    // If the selector is just braces with labels, wrap it in a dummy metric name
+    let query_str = if selector.trim().starts_with('{') {
+        format!("dummy{}", selector)
+    } else {
+        selector.to_string()
+    };
+
+    let (rest, ast) = expr(&query_str).map_err(|e| {
+        AppError::bad_request(anyhow::anyhow!(
+            "Failed to parse selector '{}': {:?}",
+            selector,
+            e
+        ))
+    })?;
+
+    if !rest.trim().is_empty() {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "Unexpected trailing content in selector: '{}'",
+            rest
+        )));
+    }
+
+    // Extract matchers from the AST
+    match ast {
+        Expr::VectorSelector(vs) => {
+            let matchers: Vec<LabelMatcher> = vs
+                .matchers
+                .iter()
+                .map(|m| {
+                    LabelMatcher::new(
+                        m.name.clone(),
+                        m.value.clone(),
+                        convert_label_match_op(m.op),
+                    )
+                })
+                .collect();
+            Ok(matchers)
+        }
+        _ => Err(AppError::bad_request(anyhow::anyhow!(
+            "Selector must be a simple label selector like '{{env=\"prod\"}}'"
+        ))),
+    }
+}
+
+/// Check if a sensor matches a set of label matchers
+fn sensor_matches_matchers(sensor: &crate::datamodel::Sensor, matchers: &[LabelMatcher]) -> bool {
+    for matcher in matchers {
+        // Find the label value in the sensor
+        let label_value = sensor
+            .labels
+            .iter()
+            .find(|(k, _)| k == &matcher.name)
+            .map(|(_, v)| v.as_str());
+
+        let matches = match matcher.matcher_type {
+            MatcherType::Equal => label_value == Some(&matcher.value as &str),
+            MatcherType::NotEqual => label_value != Some(&matcher.value as &str),
+            MatcherType::RegexMatch => {
+                if let Some(value) = label_value {
+                    Regex::new(&matcher.value)
+                        .map(|re| re.is_match(value))
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            }
+            MatcherType::RegexNotMatch => {
+                if let Some(value) = label_value {
+                    Regex::new(&matcher.value)
+                        .map(|re| !re.is_match(value))
+                        .unwrap_or(true)
+                } else {
+                    true // No label = doesn't match the regex
+                }
+            }
+        };
+
+        if !matches {
+            return false;
+        }
+    }
+    true
 }
 
 /// List unique metrics (measurement types) with aggregated information in DCAT catalog format.
@@ -70,15 +186,78 @@ pub struct SeriesQuery {
     get,
     path = "/metrics",
     tag = "SensApp",
+    params(
+        ("name" = Option<String>, Query, description = "Filter metrics by name (substring match)"),
+        ("name_regex" = Option<String>, Query, description = "Filter metrics by name using regex pattern"),
+        ("type" = Option<String>, Query, description = "Filter metrics by sensor type (float, integer, string, boolean, location, json, blob, numeric)")
+    ),
     responses(
         (status = 200, description = "Metrics catalog in DCAT format", body = Value)
     )
 )]
-pub async fn list_metrics(State(state): State<HttpServerState>) -> Result<Json<Value>, AppError> {
+pub async fn list_metrics(
+    State(state): State<HttpServerState>,
+    Query(query): Query<MetricsQuery>,
+) -> Result<Json<Value>, AppError> {
     let metrics = state.storage.list_metrics().await?;
 
+    // Compile regex if provided
+    let name_regex = match &query.name_regex {
+        Some(pattern) => Some(Regex::new(pattern).map_err(|e| {
+            AppError::bad_request(anyhow::anyhow!(
+                "Invalid regex pattern '{}': {}",
+                pattern,
+                e
+            ))
+        })?),
+        None => None,
+    };
+
+    // Parse type filter if provided
+    let type_filter = match &query.r#type {
+        Some(type_str) => Some(SensorType::from_str(type_str).map_err(|e| {
+            AppError::bad_request(anyhow::anyhow!(
+                "Invalid sensor type '{}': {}. Valid types: float, integer, string, boolean, location, json, blob, numeric",
+                type_str, e
+            ))
+        })?),
+        None => None,
+    };
+
+    // Filter metrics based on query parameters
+    let filtered_metrics: Vec<_> = metrics
+        .into_iter()
+        .filter(|metric| {
+            // Filter by name substring
+            if let Some(name_filter) = &query.name
+                && !metric
+                    .name
+                    .to_lowercase()
+                    .contains(&name_filter.to_lowercase())
+            {
+                return false;
+            }
+
+            // Filter by name regex
+            if let Some(regex) = &name_regex
+                && !regex.is_match(&metric.name)
+            {
+                return false;
+            }
+
+            // Filter by type
+            if let Some(type_filter) = &type_filter
+                && &metric.sensor_type != type_filter
+            {
+                return false;
+            }
+
+            true
+        })
+        .collect();
+
     // Create DCAT catalog structure for metrics
-    let datasets: Vec<Value> = metrics
+    let datasets: Vec<Value> = filtered_metrics
         .iter()
         .map(|metric| {
             // Create keywords from metric type and label dimensions
@@ -169,7 +348,8 @@ pub async fn list_metrics(State(state): State<HttpServerState>) -> Result<Json<V
     path = "/series",
     tag = "SensApp",
     params(
-        ("metric" = Option<String>, Query, description = "Filter series by metric name")
+        ("metric" = Option<String>, Query, description = "Filter series by metric name"),
+        ("selector" = Option<String>, Query, description = "PromQL-style label selector (e.g., '{env=\"prod\",region=~\"us.*\"}')")
     ),
     responses(
         (status = 200, description = "Time series catalog in DCAT format", body = Value)
@@ -182,8 +362,24 @@ pub async fn list_series(
     // Get the series metadata including labels and UUIDs, optionally filtered by metric
     let sensors = state.storage.list_series(query.metric.as_deref()).await?;
 
+    // Parse the selector if provided
+    let label_matchers = match &query.selector {
+        Some(selector) => Some(parse_selector_to_matchers(selector)?),
+        None => None,
+    };
+
+    // Filter sensors by label matchers if provided
+    let filtered_sensors: Vec<_> = if let Some(matchers) = &label_matchers {
+        sensors
+            .into_iter()
+            .filter(|sensor| sensor_matches_matchers(sensor, matchers))
+            .collect()
+    } else {
+        sensors
+    };
+
     // Create DCAT catalog structure
-    let datasets: Vec<Value> = sensors
+    let datasets: Vec<Value> = filtered_sensors
         .iter()
         .map(|sensor| {
             // Create keywords from sensor type, unit, and labels

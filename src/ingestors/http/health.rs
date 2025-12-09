@@ -16,8 +16,10 @@ pub struct ReadinessResponse {
     pub error: Option<String>,
 }
 
-/// Liveness endpoint - checks if the service is running
-/// This endpoint always returns 200 OK if the server is able to respond
+/// Liveness check
+///
+/// Checks if the service is running.
+/// This endpoint always returns 200 OK if the server is able to respond.
 #[utoipa::path(
     get,
     path = "/health/live",
@@ -35,7 +37,9 @@ pub async fn liveness() -> impl IntoResponse {
     )
 }
 
-/// Readiness endpoint - checks if the service is ready to accept traffic
+/// Readiness check
+///
+/// Checks if the service is ready to accept traffic.
 /// This includes checking if the database connection is working
 #[utoipa::path(
     get,

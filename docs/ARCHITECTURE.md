@@ -5,6 +5,7 @@ SensApp should be an accommodating platform to support sensor-based applications
 It should be relatively small and simple to transform incoming sensor data, persist it, and make it available to other applications.
 
 ## Simple SensApp Deployment Example
+
 ```mermaid
 graph LR
     Sensor1[Sensor 1] --> SensApp
@@ -16,7 +17,8 @@ graph LR
     SensApp[SensApp]
 ```
 
-## Advanced SensApp Deployment Example
+## Distributed SensApp Deployment Example
+
 ```mermaid
 graph LR
 
@@ -26,13 +28,6 @@ graph LR
     Sensor3(Sensor 3)
     Sensor4(Sensor 4)
     MoreSensors((...))
-    end
-
-    subgraph MQs["Distributed Message Queue"]
-    MQ1[MQ 1]
-    MQ2[MQ 2]
-    MQ3[MQ 3]
-    MoreMQ((...))
     end
 
     subgraph SensApp["SensApp Cluster"]
@@ -49,13 +44,10 @@ graph LR
     MoreDB((...))
     end
 
-    Sensor1 --> MQs
-    Sensor2 --> MQs
-    Sensor3 --> MQs
-    Sensor4 --> MQs
-    MQs --> SensApp
-    MQs --> SensApp
-    MQs --> SensApp
+    Sensor1 --> SensApp
+    Sensor2 --> SensApp
+    Sensor3 --> SensApp
+    Sensor4 --> SensApp
     SensApp <--> DBs
     SensApp <--> DBs
     SensApp <--> DBs
@@ -75,9 +67,9 @@ SensApp is designed to be stateless and horizontally scalable. It uses direct st
 
 SensApp focuses on HTTP-based data ingestion:
 
- - HTTP REST Push (primary ingestion method)
- - InfluxDB Write API
- - Prometheus Remote Write API
+- HTTP REST Push (primary ingestion method)
+- InfluxDB Write API
+- Prometheus Remote Write API
 
 For message queue protocols (MQTT, AMQP, Kafka, Nats), we recommend using dedicated integration tools like Telegraf, Vector, or Fluent Bit to bridge these protocols to SensApp's HTTP API. This architectural decision keeps SensApp stateless and horizontally scalable, as the complexity of maintaining message queue client connections and subscriptions is better handled by specialized tools.
 
@@ -93,14 +85,13 @@ We also support InfluxDB line protocol, and the Prometheus remote stores protoco
 
 SensApp should support various storage backends. The best storage backend for time series has yet to exist.
 
- * For small deployments, SQLite is used.
-  * It is possible to use Litestream to replicate and backup the SQLite database.
- * For medium deployments, PostgreSQL is used.
-   * It is optional to use the TimescaleDB plugin or Citus Columnar.
- * For larger deployments, ClickHouse is used.
+- For small deployments, SQLite is used.
+- It is possible to use Litestream to replicate and backup the SQLite database.
+- For medium deployments, PostgreSQL is used.
+  - It is optional to use the TimescaleDB plugin or Citus Columnar.
+- For larger deployments, ClickHouse is used.
 
- * SensApp can also produce Parquet files stored in S3-compatible object stores.
- * A experimental support for DuckDB is also available. The DuckDB database format isn't stable yet, and it may be wise to wait for the DuckDB 1.0 release before using it in production.
+- A experimental support for DuckDB is also available. The DuckDB database format isn't stable yet, and it may be wise to wait for the DuckDB 1.0 release before using it in production.
 
 SensApp can use other storage backends in the future. Could it be Cassandra, Apache IoTDB, OpenTSDB, QuestDB, HoraeDB, or something new?
 

@@ -2,8 +2,8 @@ mod common;
 
 use anyhow::Result;
 use axum::http::StatusCode;
-use common::http::TestApp;
 use common::TestDb;
+use common::http::TestApp;
 use sensapp::config::load_configuration_for_tests;
 use serde_json::Value;
 use serial_test::serial;
@@ -73,7 +73,8 @@ mod health_check_tests {
         let app = TestApp::new(storage.clone()).await;
 
         // Ingest some data
-        let csv_data = "datetime,sensor_name,value,unit\n2024-01-01T00:00:00Z,temperature,23.5,celsius\n";
+        let csv_data =
+            "datetime,sensor_name,value,unit\n2024-01-01T00:00:00Z,temperature,23.5,celsius\n";
         app.post_csv("/sensors/publish", csv_data).await?;
 
         // When: We query the readiness endpoint

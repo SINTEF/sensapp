@@ -21,7 +21,6 @@ type SensorDataMap = HashMap<String, (Arc<Sensor>, Vec<(SensAppDateTime, Infered
 
 pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
     mut csv_reader: AsyncReader<R>,
-    _batch_size: usize,
     storage: Arc<dyn StorageInstance>,
 ) -> Result<()> {
     // Read all CSV data into a StringDataGrid
