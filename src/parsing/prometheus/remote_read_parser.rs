@@ -1,5 +1,5 @@
 use super::common::decompress_snappy;
-use super::remote_read_models::{QueryResult, ReadRequest, ReadResponse};
+use super::remote_read_models::{ReadRequest, ReadResponse};
 use anyhow::Result;
 use prost::Message;
 use std::io::Cursor;
@@ -45,19 +45,6 @@ pub fn parse_remote_read_request(input: &[u8]) -> Result<ReadRequest> {
     );
 
     Ok(request)
-}
-
-pub fn create_empty_read_response(request: &ReadRequest) -> Result<ReadResponse> {
-    // Create an empty response with the same number of query results as queries
-    let results = request
-        .queries
-        .iter()
-        .map(|_| QueryResult {
-            timeseries: vec![], // Empty timeseries for now
-        })
-        .collect();
-
-    Ok(ReadResponse { results })
 }
 
 pub fn serialize_read_response(response: &ReadResponse) -> Result<Vec<u8>> {
@@ -134,32 +121,6 @@ mod tests {
         assert_eq!(output.queries[0].matchers[0].name, "__name__");
         assert_eq!(output.queries[0].matchers[0].value, "test_metric");
         assert_eq!(output.accepted_response_types.len(), 1);
-    }
-
-    #[test]
-    fn test_create_empty_read_response() {
-        let request = ReadRequest {
-            queries: vec![
-                Query {
-                    start_timestamp_ms: 1000,
-                    end_timestamp_ms: 2000,
-                    matchers: vec![],
-                    hints: None,
-                },
-                Query {
-                    start_timestamp_ms: 3000,
-                    end_timestamp_ms: 4000,
-                    matchers: vec![],
-                    hints: None,
-                },
-            ],
-            accepted_response_types: vec![],
-        };
-
-        let response = create_empty_read_response(&request).unwrap();
-        assert_eq!(response.results.len(), 2);
-        assert_eq!(response.results[0].timeseries.len(), 0);
-        assert_eq!(response.results[1].timeseries.len(), 0);
     }
 
     #[test]

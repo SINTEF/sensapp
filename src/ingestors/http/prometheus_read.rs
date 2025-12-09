@@ -124,6 +124,13 @@ pub async fn prometheus_remote_read(
 
     // Log detailed information about each query for debugging
     for (i, query) in read_request.queries.iter().enumerate() {
+        println!(
+            "[DEBUG PROM READ] Query {}: time range {}ms - {}ms ({} matchers)",
+            i,
+            query.start_timestamp_ms,
+            query.end_timestamp_ms,
+            query.matchers.len()
+        );
         info!(
             "Query {}: time range {}ms - {}ms ({} matchers)",
             i,
@@ -133,6 +140,10 @@ pub async fn prometheus_remote_read(
         );
 
         for matcher in &query.matchers {
+            println!(
+                "[DEBUG PROM READ]   Matcher: {}={} (type={})",
+                matcher.name, matcher.value, matcher.r#type
+            );
             debug!(
                 "  Matcher: {}={} (type={})",
                 matcher.name, matcher.value, matcher.r#type
@@ -226,7 +237,9 @@ async fn handle_streamed_response(
     state: &HttpServerState,
     read_request: &crate::parsing::prometheus::remote_read_models::ReadRequest,
 ) -> Result<Response<axum::body::Body>, AppError> {
-    let mut chunked_responses = Vec::with_capacity(read_request.queries.len());
+    // Prometheus expects ONE ChunkedReadResponse per series, not one per query
+    // Each message contains exactly one series
+    let mut chunked_responses = Vec::new();
 
     for (query_index, query) in read_request.queries.iter().enumerate() {
         // Convert Prometheus matchers to SensApp matchers
@@ -245,36 +258,88 @@ async fn handle_streamed_response(
                 AppError::internal_server_error(anyhow::anyhow!("Storage query failed: {}", e))
             })?;
 
+        println!(
+            "[DEBUG PROM READ] Query {} returned {} sensors from storage",
+            query_index,
+            sensor_data.len()
+        );
         debug!(
             "Query {} returned {} sensors",
             query_index,
             sensor_data.len()
         );
 
-        // Convert to ChunkedSeries
-        let chunked_series: Vec<_> = sensor_data
-            .iter()
-            .filter_map(|sd| {
-                // Extract labels
-                let labels = build_prometheus_labels(&sd.sensor);
+        // Log each sensor found
+        for sd in &sensor_data {
+            println!(
+                "[DEBUG PROM READ]   Sensor: {} (type={:?}, {} samples)",
+                sd.sensor.name,
+                sd.sensor.sensor_type,
+                sd.samples.len()
+            );
+        }
 
-                // Extract samples as Prometheus format
-                let samples = extract_prom_samples_for_chunks(sd)?;
+        // Convert each sensor to a separate ChunkedReadResponse
+        // Prometheus expects ONE series per response message!
+        for sd in &sensor_data {
+            // Extract labels
+            let labels = build_prometheus_labels(&sd.sensor);
+            println!(
+                "[DEBUG PROM READ]   Labels for sensor {}: {:?}",
+                sd.sensor.name,
+                labels
+                    .iter()
+                    .map(|l| format!("{}={}", l.name, l.value))
+                    .collect::<Vec<_>>()
+            );
 
-                // Encode as XOR chunks
-                ChunkEncoder::encode_series(labels, samples).ok()
-            })
-            .collect();
+            // Extract samples as Prometheus format
+            let samples = match extract_prom_samples_for_chunks(sd) {
+                Some(s) => s,
+                None => continue, // Skip non-numeric types
+            };
 
-        let chunked_response = ChunkEncoder::create_response(query_index as i64, chunked_series);
-        chunked_responses.push(chunked_response);
+            println!(
+                "[DEBUG PROM READ]   Encoding {} samples for sensor {} (first ts: {}, last ts: {})",
+                samples.len(),
+                sd.sensor.name,
+                samples.first().map(|s| s.timestamp).unwrap_or(0),
+                samples.last().map(|s| s.timestamp).unwrap_or(0)
+            );
+
+            // Encode as XOR chunks
+            let chunked_series = match ChunkEncoder::encode_series(labels, samples) {
+                Ok(cs) => cs,
+                Err(_) => continue, // Skip on encoding error
+            };
+
+            // Create ONE response per series (this is what Prometheus expects!)
+            let chunked_response =
+                ChunkEncoder::create_response(query_index as i64, vec![chunked_series]);
+            chunked_responses.push(chunked_response);
+        }
+
+        println!(
+            "[DEBUG PROM READ] Query {} produced {} chunked_responses (one per series)",
+            query_index,
+            chunked_responses.len()
+        );
     }
+
+    println!(
+        "[DEBUG PROM READ] Total {} chunked_responses to write",
+        chunked_responses.len()
+    );
 
     // Create the streaming response body
     let body = StreamWriter::create_stream_body(&chunked_responses).map_err(|e| {
         AppError::internal_server_error(anyhow::anyhow!("Failed to create stream body: {}", e))
     })?;
 
+    println!(
+        "[DEBUG PROM READ] Returning STREAMED_XOR_CHUNKS response with {} bytes",
+        body.len()
+    );
     info!(
         "Prometheus remote read: Returning STREAMED_XOR_CHUNKS response with {} bytes",
         body.len()

@@ -1,8 +1,7 @@
 use super::remote_read_models::{Chunk as ProtoChunk, ChunkedReadResponse, ChunkedSeries, chunk};
 use super::remote_write_models::{Label, Sample};
 use anyhow::Result;
-use rusty_chunkenc::chunk::Chunk;
-use rusty_chunkenc::xor::XORSample;
+use rusty_chunkenc::xor::{XORChunk, XORSample};
 use tracing::debug;
 
 /// Encodes time series samples into XOR-compressed chunks for Prometheus remote read.
@@ -45,11 +44,12 @@ impl ChunkEncoder {
         let max_time_ms = samples.last().map(|s| s.timestamp).unwrap_or(0);
 
         // Create the XOR chunk
-        let chunk = Chunk::new_xor(xor_samples);
+        let xor_chunk = XORChunk::new(xor_samples);
 
-        // Encode the chunk to bytes
+        // Encode just the raw XOR chunk data (NOT the full chunk format with length/type/crc)
+        // Prometheus remote read expects raw XOR data starting with 2-byte BE sample count
         let mut encoded_data = Vec::new();
-        chunk.write(&mut encoded_data)?;
+        xor_chunk.write(&mut encoded_data)?;
 
         debug!(
             "Encoded chunk: {} samples into {} bytes (time range: {}ms - {}ms)",

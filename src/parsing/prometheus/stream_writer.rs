@@ -8,19 +8,95 @@ use tracing::debug;
 ///
 /// The format for each message in the stream is:
 /// - Varint-encoded message length
+/// - 4-byte CRC32 checksum (Castagnoli polynomial, big-endian)
 /// - Protobuf-encoded message
-/// - 4-byte CRC32 checksum (Castagnoli polynomial)
 pub struct StreamWriter;
 
 impl StreamWriter {
     /// Write a ChunkedReadResponse to the output stream.
     ///
+    /// Note: If the response has no series with chunks, nothing is written.
+    /// This matches Prometheus behavior where empty responses are simply not sent.
+    ///
     /// # Arguments
     /// * `response` - The response to write
     /// * `writer` - The output writer (typically an HTTP response body)
     pub fn write_response<W: Write>(response: &ChunkedReadResponse, writer: &mut W) -> Result<()> {
+        // Skip empty responses - Prometheus expects no message when there's no data
+        // Otherwise, the client will try to access ChunkedSeries[0] and panic
+        if response.chunked_series.is_empty() {
+            println!(
+                "[DEBUG STREAM_WRITER] Skipping empty ChunkedReadResponse for query_index={} (no series)",
+                response.query_index
+            );
+            debug!(
+                "Skipping empty ChunkedReadResponse for query_index={}",
+                response.query_index
+            );
+            return Ok(());
+        }
+
+        // Also skip responses where all series have no chunks
+        let has_chunks = response.chunked_series.iter().any(|s| !s.chunks.is_empty());
+        if !has_chunks {
+            println!(
+                "[DEBUG STREAM_WRITER] Skipping ChunkedReadResponse for query_index={} (series exist but no chunks)",
+                response.query_index
+            );
+            debug!(
+                "Skipping ChunkedReadResponse with no chunks for query_index={}",
+                response.query_index
+            );
+            return Ok(());
+        }
+
         // Encode the protobuf message
         let encoded = response.encode_to_vec();
+
+        println!(
+            "[DEBUG STREAM_WRITER] Writing ChunkedReadResponse: query_index={}, series_count={}, encoded_size={} bytes",
+            response.query_index,
+            response.chunked_series.len(),
+            encoded.len()
+        );
+        // Log details about each series
+        for (i, series) in response.chunked_series.iter().enumerate() {
+            println!(
+                "[DEBUG STREAM_WRITER]   Series {}: {} labels, {} chunks",
+                i,
+                series.labels.len(),
+                series.chunks.len()
+            );
+            println!(
+                "[DEBUG STREAM_WRITER]     Labels: {:?}",
+                series
+                    .labels
+                    .iter()
+                    .map(|l| format!("{}={}", l.name, l.value))
+                    .collect::<Vec<_>>()
+            );
+            for chunk in &series.chunks {
+                println!(
+                    "[DEBUG STREAM_WRITER]     Chunk: {}ms - {}ms, {} bytes data, type={}",
+                    chunk.min_time_ms,
+                    chunk.max_time_ms,
+                    chunk.data.len(),
+                    chunk.r#type
+                );
+                // Print first 32 bytes of chunk data in hex for debugging
+                let hex_preview: String = chunk
+                    .data
+                    .iter()
+                    .take(32)
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                println!(
+                    "[DEBUG STREAM_WRITER]     Chunk data (first 32 bytes): {}",
+                    hex_preview
+                );
+            }
+        }
 
         debug!(
             "Writing ChunkedReadResponse: query_index={}, series_count={}, encoded_size={}",
@@ -32,12 +108,16 @@ impl StreamWriter {
         // Write varint-encoded length
         Self::write_varint(encoded.len() as u64, writer)?;
 
-        // Write the encoded message
-        writer.write_all(&encoded)?;
-
-        // Calculate and write CRC32 checksum
+        // Calculate and write CRC32 checksum BEFORE the data
+        // This matches the Prometheus chunked read format:
+        // 1. uvarint for the size of the data frame
+        // 2. big-endian uint32 for the CRC-32 checksum of the data frame
+        // 3. the bytes of the data
         let checksum = Self::calculate_crc32(&encoded);
         writer.write_all(&checksum.to_be_bytes())?;
+
+        // Write the encoded message AFTER the checksum
+        writer.write_all(&encoded)?;
 
         writer.flush()?;
 
@@ -49,6 +129,10 @@ impl StreamWriter {
         responses: &[ChunkedReadResponse],
         writer: &mut W,
     ) -> Result<()> {
+        println!(
+            "[DEBUG STREAM_WRITER] write_responses called with {} responses",
+            responses.len()
+        );
         debug!("Writing {} ChunkedReadResponses to stream", responses.len());
 
         for response in responses {
@@ -160,18 +244,28 @@ mod tests {
 
         // The buffer should contain:
         // - Varint length (at least 1 byte)
-        // - Protobuf message (several bytes)
         // - CRC32 (exactly 4 bytes)
+        // - Protobuf message (several bytes)
         assert!(buffer.len() > 5);
 
-        // Last 4 bytes should be the CRC32
-        let crc_bytes = &buffer[buffer.len() - 4..];
+        // Parse the varint to find where CRC32 starts
+        let mut varint_len = 0;
+        for (i, &byte) in buffer.iter().enumerate() {
+            varint_len = i + 1;
+            if byte & 0x80 == 0 {
+                break;
+            }
+        }
+
+        // CRC32 should be at bytes [varint_len..varint_len+4]
+        let crc_bytes = &buffer[varint_len..varint_len + 4];
         assert_eq!(crc_bytes.len(), 4);
     }
 
     #[test]
     fn test_create_stream_body() {
-        let responses = vec![
+        // Test with empty responses - should produce empty body
+        let empty_responses = vec![
             ChunkedReadResponse {
                 query_index: 0,
                 chunked_series: vec![],
@@ -182,7 +276,29 @@ mod tests {
             },
         ];
 
-        let body = StreamWriter::create_stream_body(&responses).unwrap();
+        let body = StreamWriter::create_stream_body(&empty_responses).unwrap();
+        // Empty responses should produce an empty body - this is expected!
+        // Prometheus client handles EOF gracefully when there's no data.
+        assert!(body.is_empty());
+
+        // Test with actual data
+        let responses_with_data = vec![ChunkedReadResponse {
+            query_index: 0,
+            chunked_series: vec![ChunkedSeries {
+                labels: vec![Label {
+                    name: "__name__".to_string(),
+                    value: "test_metric".to_string(),
+                }],
+                chunks: vec![Chunk {
+                    min_time_ms: 1000,
+                    max_time_ms: 2000,
+                    r#type: chunk::Encoding::Xor as i32,
+                    data: vec![1, 2, 3, 4],
+                }],
+            }],
+        }];
+
+        let body = StreamWriter::create_stream_body(&responses_with_data).unwrap();
         assert!(!body.is_empty());
     }
 }
