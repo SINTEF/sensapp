@@ -126,14 +126,14 @@ async fn test_simple_promql_metric_name() -> Result<()> {
     let records = json.as_array().expect("SenML response should be an array");
     assert!(!records.is_empty(), "Should have at least one record");
 
-    // First record should have bn (base name) containing the sensor name
+    // First record should have _name containing the sensor name (bn is now the UUID)
     let first_record = &records[0];
-    let bn = first_record["bn"]
+    let name = first_record["_name"]
         .as_str()
-        .expect("First record should have bn");
+        .expect("First record should have _name");
     assert!(
-        bn.contains("cpu_usage"),
-        "Base name should contain sensor name"
+        name.contains("cpu_usage"),
+        "_name should contain sensor name"
     );
 
     Ok(())
@@ -186,14 +186,14 @@ async fn test_simple_promql_with_labels() -> Result<()> {
     let records = json.as_array().expect("SenML response should be an array");
     assert!(!records.is_empty(), "Should have at least one record");
 
-    // Check that we only got the production sensor (all records should have the same base name)
+    // Check that we only got the production sensor (all records should have the same _name)
     let first_record = &records[0];
-    let bn = first_record["bn"]
+    let name = first_record["_name"]
         .as_str()
-        .expect("First record should have bn");
+        .expect("First record should have _name");
     assert!(
-        bn.contains("http_requests"),
-        "Base name should contain sensor name"
+        name.contains("http_requests"),
+        "_name should contain sensor name"
     );
 
     // Check that we have values

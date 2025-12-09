@@ -28,7 +28,7 @@ impl ArrowConverter {
     }
 
     /// Convert multiple SensorData to Arrow IPC file format (bytes)
-    /// Uses a "long" format similar to CSV (timestamp, sensor_name, value, type)
+    /// Uses a "long" format similar to CSV (timestamp, sensor_id, sensor_name, value, type, labels)
     /// which can accommodate multiple sensors in a single file.
     pub fn to_arrow_file_multi(sensor_data_list: &[SensorData]) -> Result<Vec<u8>> {
         if sensor_data_list.is_empty() {
@@ -39,9 +39,11 @@ impl ArrowConverter {
                     DataType::Timestamp(TimeUnit::Microsecond, None),
                     false,
                 ),
+                Field::new("sensor_id", DataType::Utf8, false),
                 Field::new("sensor_name", DataType::Utf8, false),
                 Field::new("value", DataType::Utf8, false),
                 Field::new("type", DataType::Utf8, false),
+                Field::new("labels", DataType::Utf8, false),
             ]));
             let batch = RecordBatch::new_empty(schema);
             return Self::record_batch_to_arrow_file(&batch);
@@ -52,19 +54,23 @@ impl ArrowConverter {
 
         // Create builders for the long format
         let mut timestamp_builder = TimestampMicrosecondBuilder::with_capacity(total_samples);
+        let mut sensor_id_builder = StringBuilder::with_capacity(total_samples, total_samples * 36); // UUID is 36 chars
         let mut sensor_name_builder =
             StringBuilder::with_capacity(total_samples, total_samples * 32);
         let mut value_builder = StringBuilder::with_capacity(total_samples, total_samples * 16);
         let mut type_builder = StringBuilder::with_capacity(total_samples, total_samples * 8);
+        let mut labels_builder = StringBuilder::with_capacity(total_samples, total_samples * 64);
 
         // Process each sensor's data
         for sensor_data in sensor_data_list {
             Self::append_samples_to_builders(
                 sensor_data,
                 &mut timestamp_builder,
+                &mut sensor_id_builder,
                 &mut sensor_name_builder,
                 &mut value_builder,
                 &mut type_builder,
+                &mut labels_builder,
             )?;
         }
 
@@ -75,16 +81,20 @@ impl ArrowConverter {
                 DataType::Timestamp(TimeUnit::Microsecond, None),
                 false,
             ),
+            Field::new("sensor_id", DataType::Utf8, false),
             Field::new("sensor_name", DataType::Utf8, false),
             Field::new("value", DataType::Utf8, false),
             Field::new("type", DataType::Utf8, false),
+            Field::new("labels", DataType::Utf8, false),
         ]));
 
         let columns: Vec<ArrayRef> = vec![
             Arc::new(timestamp_builder.finish()),
+            Arc::new(sensor_id_builder.finish()),
             Arc::new(sensor_name_builder.finish()),
             Arc::new(value_builder.finish()),
             Arc::new(type_builder.finish()),
+            Arc::new(labels_builder.finish()),
         ];
 
         let batch = RecordBatch::try_new(schema, columns)
@@ -93,60 +103,85 @@ impl ArrowConverter {
         Self::record_batch_to_arrow_file(&batch)
     }
 
+    /// Helper to convert labels to JSON string
+    fn labels_to_json_string(sensor_data: &SensorData) -> String {
+        use serde_json::{Map, Value};
+        let mut map = Map::new();
+        for (key, value) in sensor_data.sensor.labels.iter() {
+            map.insert(key.clone(), Value::String(value.clone()));
+        }
+        Value::Object(map).to_string()
+    }
+
     /// Internal helper to append samples from a sensor to the builders
     fn append_samples_to_builders(
         sensor_data: &SensorData,
         timestamp_builder: &mut TimestampMicrosecondBuilder,
+        sensor_id_builder: &mut StringBuilder,
         sensor_name_builder: &mut StringBuilder,
         value_builder: &mut StringBuilder,
         type_builder: &mut StringBuilder,
+        labels_builder: &mut StringBuilder,
     ) -> Result<()> {
+        let sensor_id = sensor_data.sensor.uuid.to_string();
         let sensor_name = &sensor_data.sensor.name;
+        let labels_json = Self::labels_to_json_string(sensor_data);
 
         match &sensor_data.samples {
             TypedSamples::Integer(samples) => {
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_id_builder.append_value(&sensor_id);
                     sensor_name_builder.append_value(sensor_name);
                     value_builder.append_value(sample.value.to_string());
                     type_builder.append_value("integer");
+                    labels_builder.append_value(&labels_json);
                 }
             }
             TypedSamples::Numeric(samples) => {
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_id_builder.append_value(&sensor_id);
                     sensor_name_builder.append_value(sensor_name);
                     value_builder.append_value(sample.value.to_string());
                     type_builder.append_value("numeric");
+                    labels_builder.append_value(&labels_json);
                 }
             }
             TypedSamples::Float(samples) => {
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_id_builder.append_value(&sensor_id);
                     sensor_name_builder.append_value(sensor_name);
                     value_builder.append_value(sample.value.to_string());
                     type_builder.append_value("float");
+                    labels_builder.append_value(&labels_json);
                 }
             }
             TypedSamples::String(samples) => {
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_id_builder.append_value(&sensor_id);
                     sensor_name_builder.append_value(sensor_name);
                     value_builder.append_value(&sample.value);
                     type_builder.append_value("string");
+                    labels_builder.append_value(&labels_json);
                 }
             }
             TypedSamples::Boolean(samples) => {
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_id_builder.append_value(&sensor_id);
                     sensor_name_builder.append_value(sensor_name);
                     value_builder.append_value(sample.value.to_string());
                     type_builder.append_value("boolean");
+                    labels_builder.append_value(&labels_json);
                 }
             }
             TypedSamples::Location(samples) => {
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_id_builder.append_value(&sensor_id);
                     sensor_name_builder.append_value(sensor_name);
                     value_builder.append_value(format!(
                         "{},{}",
@@ -154,25 +189,30 @@ impl ArrowConverter {
                         sample.value.x()
                     ));
                     type_builder.append_value("location");
+                    labels_builder.append_value(&labels_json);
                 }
             }
             TypedSamples::Json(samples) => {
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_id_builder.append_value(&sensor_id);
                     sensor_name_builder.append_value(sensor_name);
                     value_builder.append_value(sample.value.to_string());
                     type_builder.append_value("json");
+                    labels_builder.append_value(&labels_json);
                 }
             }
             TypedSamples::Blob(samples) => {
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    sensor_id_builder.append_value(&sensor_id);
                     sensor_name_builder.append_value(sensor_name);
                     value_builder.append_value(base64::Engine::encode(
                         &base64::engine::general_purpose::STANDARD,
                         &sample.value,
                     ));
                     type_builder.append_value("blob");
+                    labels_builder.append_value(&labels_json);
                 }
             }
         }
@@ -431,6 +471,8 @@ pub mod test_data_helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow_ipc::reader::FileReader;
+    use std::io::Cursor;
 
     #[test]
     fn test_arrow_conversion_integer() {
@@ -476,5 +518,151 @@ mod tests {
         // Check that location is converted to struct
         let schema = batch.schema();
         assert!(matches!(schema.field(1).data_type(), DataType::Struct(_)));
+    }
+
+    #[test]
+    fn test_arrow_multi_with_sensor_id_and_labels() {
+        use crate::datamodel::*;
+        use smallvec::smallvec;
+        use uuid::Uuid;
+
+        // Create sensor with labels
+        let sensor_uuid = Uuid::new_v4();
+        let sensor = Sensor {
+            uuid: sensor_uuid,
+            name: "test_sensor".to_string(),
+            sensor_type: SensorType::Float,
+            unit: None,
+            labels: smallvec![
+                ("env".to_string(), "production".to_string()),
+                ("region".to_string(), "us-east".to_string()),
+            ],
+        };
+
+        let datetime = SensAppDateTime::now().unwrap();
+        let samples = TypedSamples::Float(smallvec![Sample {
+            datetime,
+            value: 42.5
+        }]);
+
+        let sensor_data = SensorData::new(sensor, samples);
+        let sensor_data_list = vec![sensor_data];
+
+        let arrow_bytes = ArrowConverter::to_arrow_file_multi(&sensor_data_list).unwrap();
+
+        // Read it back
+        let cursor = Cursor::new(arrow_bytes);
+        let reader = FileReader::try_new(cursor, None).unwrap();
+        let schema = reader.schema();
+
+        // Verify schema has all fields
+        let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        assert!(
+            field_names.contains(&"sensor_id"),
+            "Schema should have sensor_id field, got: {:?}",
+            field_names
+        );
+        assert!(
+            field_names.contains(&"sensor_name"),
+            "Schema should have sensor_name field, got: {:?}",
+            field_names
+        );
+        assert!(
+            field_names.contains(&"labels"),
+            "Schema should have labels field, got: {:?}",
+            field_names
+        );
+
+        // Read batches and verify sensor_id value
+        let batches: Vec<_> = reader.into_iter().filter_map(|b| b.ok()).collect();
+        assert_eq!(batches.len(), 1);
+        let batch = &batches[0];
+
+        // Find sensor_id column
+        let sensor_id_idx = schema
+            .fields()
+            .iter()
+            .position(|f| f.name() == "sensor_id")
+            .unwrap();
+        let sensor_id_col = batch
+            .column(sensor_id_idx)
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        assert_eq!(sensor_id_col.value(0), sensor_uuid.to_string());
+
+        // Find labels column
+        let labels_idx = schema
+            .fields()
+            .iter()
+            .position(|f| f.name() == "labels")
+            .unwrap();
+        let labels_col = batch
+            .column(labels_idx)
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        let labels_json = labels_col.value(0);
+        assert!(
+            labels_json.contains("env"),
+            "Labels should contain env, got: {}",
+            labels_json
+        );
+        assert!(
+            labels_json.contains("production"),
+            "Labels should contain production, got: {}",
+            labels_json
+        );
+    }
+
+    #[test]
+    fn test_arrow_multi_without_labels() {
+        use crate::datamodel::*;
+        use smallvec::{SmallVec, smallvec};
+        use uuid::Uuid;
+
+        // Create sensor without labels
+        let sensor = Sensor {
+            uuid: Uuid::new_v4(),
+            name: "test_sensor".to_string(),
+            sensor_type: SensorType::Float,
+            unit: None,
+            labels: SmallVec::new(),
+        };
+
+        let datetime = SensAppDateTime::now().unwrap();
+        let samples = TypedSamples::Float(smallvec![Sample {
+            datetime,
+            value: 42.5
+        }]);
+
+        let sensor_data = SensorData::new(sensor, samples);
+        let sensor_data_list = vec![sensor_data];
+
+        let arrow_bytes = ArrowConverter::to_arrow_file_multi(&sensor_data_list).unwrap();
+
+        // Read it back
+        let cursor = Cursor::new(arrow_bytes);
+        let reader = FileReader::try_new(cursor, None).unwrap();
+        let schema = reader.schema();
+
+        // Should still have labels field even if empty
+        let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        assert!(field_names.contains(&"labels"));
+
+        // Read batches and verify labels is empty object
+        let batches: Vec<_> = reader.into_iter().filter_map(|b| b.ok()).collect();
+        let batch = &batches[0];
+        let labels_idx = schema
+            .fields()
+            .iter()
+            .position(|f| f.name() == "labels")
+            .unwrap();
+        let labels_col = batch
+            .column(labels_idx)
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        assert_eq!(labels_col.value(0), "{}");
     }
 }

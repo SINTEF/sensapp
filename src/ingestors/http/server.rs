@@ -254,11 +254,11 @@ pub async fn publish_senml_data(
     storage: Arc<dyn StorageInstance>,
 ) -> Result<(), AppError> {
     use crate::datamodel::batch_builder::BatchBuilder;
-    use crate::exporters::SenMLConverter;
+    use crate::importers::senml::SenMLImporter;
 
     // Parse SenML JSON
     let sensor_data_list =
-        SenMLConverter::from_senml_json(json_str).map_err(AppError::bad_request)?;
+        SenMLImporter::from_senml_json(json_str).map_err(AppError::bad_request)?;
 
     if sensor_data_list.is_empty() {
         return Err(AppError::bad_request(anyhow::anyhow!(
