@@ -215,9 +215,12 @@ pub async fn get_sensor_id_or_create_sensor(
     for (key, value) in sensor.labels.iter() {
         let label_name_id = get_label_name_id_or_create(transaction, key).await?;
         let label_description_id = get_label_description_id_or_create(transaction, value).await?;
+        // Use INSERT OR IGNORE to handle potential duplicates gracefully
+        // This can happen if a previous transaction partially failed after creating
+        // the sensor but before completing all label insertions
         let label_query = sqlx::query(
             r#"
-                INSERT INTO labels (sensor_id, name, description)
+                INSERT OR IGNORE INTO labels (sensor_id, name, description)
                 VALUES (?, ?, ?)
                 "#,
         )

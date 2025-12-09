@@ -26,7 +26,7 @@ use uuid::Uuid;
 // SQLite implementation
 #[derive(Debug)]
 pub struct SqliteStorage {
-    pool: SqlitePool,
+    pub(super) pool: SqlitePool,
 }
 
 impl SqliteStorage {
@@ -42,7 +42,10 @@ impl SqliteStorage {
             // in SQLite, but we want to make sure they stay disabled.
             .foreign_keys(false)
             // Set a busy timeout of 5 seconds
-            .busy_timeout(Duration::from_secs(5));
+            .busy_timeout(Duration::from_secs(5))
+            // Enable REGEXP support using Rust's regex crate
+            // This registers a regexp() function so we can use `col REGEXP 'pattern'` in SQL
+            .with_regexp();
 
         let pool = sqlx::SqlitePool::connect_with(connect_options)
             .await
@@ -425,14 +428,51 @@ impl StorageInstance for SqliteStorage {
 
     async fn query_sensors_by_labels(
         &self,
-        _matchers: &[crate::storage::LabelMatcher],
-        _start_time: Option<SensAppDateTime>,
-        _end_time: Option<SensAppDateTime>,
-        _limit: Option<usize>,
-        _numeric_only: bool,
+        matchers: &[crate::storage::LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        limit: Option<usize>,
+        numeric_only: bool,
     ) -> Result<Vec<SensorData>> {
-        // TODO: Implement label-based query for SQLite
-        anyhow::bail!("query_sensors_by_labels not yet implemented for SQLite")
+        // If no matchers, return empty result (Prometheus behavior)
+        if matchers.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Separate name matchers (__name__) from label matchers
+        let (name_matchers, label_matchers): (Vec<_>, Vec<_>) =
+            matchers.iter().partition(|m| m.is_name_matcher());
+
+        // Find matching sensors with full metadata
+        let sensors = self
+            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
+            .await?;
+
+        if sensors.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Convert datetime to microseconds for batch queries
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+
+        // Query samples for all matching sensors
+        let mut samples_map = self
+            .batch_query_samples(&sensors, start_time_us, end_time_us, limit)
+            .await?;
+
+        // Combine sensors with their samples
+        let results: Vec<SensorData> = sensors
+            .into_iter()
+            .map(|(sensor_id, sensor)| {
+                let samples = samples_map
+                    .remove(&sensor_id)
+                    .unwrap_or_else(|| TypedSamples::Float(smallvec![]));
+                SensorData::new(sensor, samples)
+            })
+            .collect();
+
+        Ok(results)
     }
 
     /// Health check for SQLite storage

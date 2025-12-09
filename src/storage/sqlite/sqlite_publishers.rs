@@ -59,6 +59,11 @@ pub async fn publish_float_values(
     values: &[Sample<f64>],
 ) -> Result<()> {
     for value in values {
+        // SQLite's REAL type doesn't support NaN or Inf - they get converted to NULL
+        // which violates the NOT NULL constraint. Skip these values.
+        if !value.value.is_finite() {
+            continue;
+        }
         let timestamp_us = datetime_to_micros(&value.datetime);
         let query = sqlx::query(
             r#"
