@@ -1,115 +1,89 @@
+use crate::datamodel::unit::Unit;
 use crate::datamodel::{Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples};
 use anyhow::Result;
-use base64::{Engine as _, engine::general_purpose};
-use serde_json::{Map, Value};
+use sindit_senml::time::datetime_to_timestamp;
+use sindit_senml::{SenMLResolvedRecord, SenMLValueField, parse_json};
 use smallvec::SmallVec;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Parser for SenML JSON format (RFC 8428)
+/// Uses the sindit-senml crate for RFC-compliant parsing
 pub struct SenMLImporter;
 
 impl SenMLImporter {
     /// Parse SenML JSON and create sensor data grouped by sensor name
     pub fn from_senml_json(json_str: &str) -> Result<Vec<(String, SensorData)>> {
-        let json_value: Value = serde_json::from_str(json_str)?;
-        let senml_array = json_value
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("SenML must be a JSON array"))?;
+        let records = parse_json(json_str, None)?;
 
-        if senml_array.is_empty() {
+        if records.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Group records by base name (sensor name)
-        let mut sensors_map: std::collections::HashMap<String, Vec<&Map<String, Value>>> =
-            std::collections::HashMap::new();
-        let mut current_base_name = String::new();
-        let mut current_base_time: Option<f64> = None;
+        // Group records by sensor name
+        let mut sensors_map: HashMap<String, Vec<&SenMLResolvedRecord>> = HashMap::new();
 
-        for record in senml_array {
-            let obj = record
-                .as_object()
-                .ok_or_else(|| anyhow::anyhow!("Each SenML record must be an object"))?;
-
-            // Update base name if present
-            if let Some(bn) = obj.get("bn").and_then(|v| v.as_str()) {
-                current_base_name = bn.to_string();
-            }
-
-            // Update base time if present
-            if let Some(bt) = obj.get("bt").and_then(|v| v.as_f64()) {
-                current_base_time = Some(bt);
-            }
-
-            // Use base name or individual name
-            let sensor_name = if let Some(name) = obj.get("n").and_then(|v| v.as_str()) {
-                format!("{}{}", current_base_name, name)
-            } else {
-                current_base_name.clone()
-            };
-
-            if sensor_name.is_empty() {
-                return Err(anyhow::anyhow!("SenML record must have a name (bn or n)"));
-            }
-
-            sensors_map.entry(sensor_name).or_default().push(obj);
+        for record in &records {
+            sensors_map
+                .entry(record.name.clone())
+                .or_default()
+                .push(record);
         }
 
         let mut result = Vec::new();
 
-        for (sensor_name, records) in sensors_map {
-            if records.is_empty() {
+        for (sensor_name, sensor_records) in sensors_map {
+            if sensor_records.is_empty() {
                 continue;
             }
 
             // Determine sensor type from first record with a value
-            let sensor_type = Self::infer_sensor_type(records.first().unwrap())?;
+            let sensor_type = Self::infer_sensor_type(sensor_records.first().unwrap())?;
 
             // Parse samples based on type
             let samples = match sensor_type {
-                SensorType::Integer => {
-                    let int_samples: Result<SmallVec<[Sample<i64>; 4]>> = records
-                        .iter()
-                        .map(|record| Self::parse_integer_sample(record, current_base_time))
-                        .collect();
-                    TypedSamples::Integer(int_samples?)
-                }
                 SensorType::Float => {
-                    let float_samples: Result<SmallVec<[Sample<f64>; 4]>> = records
+                    let float_samples: SmallVec<[Sample<f64>; 4]> = sensor_records
                         .iter()
-                        .map(|record| Self::parse_float_sample(record, current_base_time))
+                        .map(|record| Self::create_float_sample(record))
                         .collect();
-                    TypedSamples::Float(float_samples?)
+                    TypedSamples::Float(float_samples)
                 }
                 SensorType::String => {
-                    let string_samples: Result<SmallVec<[Sample<String>; 4]>> = records
+                    let string_samples: SmallVec<[Sample<String>; 4]> = sensor_records
                         .iter()
-                        .map(|record| Self::parse_string_sample(record, current_base_time))
+                        .map(|record| Self::create_string_sample(record))
                         .collect();
-                    TypedSamples::String(string_samples?)
+                    TypedSamples::String(string_samples)
                 }
                 SensorType::Boolean => {
-                    let bool_samples: Result<SmallVec<[Sample<bool>; 4]>> = records
+                    let bool_samples: SmallVec<[Sample<bool>; 4]> = sensor_records
                         .iter()
-                        .map(|record| Self::parse_boolean_sample(record, current_base_time))
+                        .map(|record| Self::create_boolean_sample(record))
                         .collect();
-                    TypedSamples::Boolean(bool_samples?)
+                    TypedSamples::Boolean(bool_samples)
                 }
                 SensorType::Blob => {
-                    let blob_samples: Result<SmallVec<[Sample<Vec<u8>>; 4]>> = records
+                    let blob_samples: SmallVec<[Sample<Vec<u8>>; 4]> = sensor_records
                         .iter()
-                        .map(|record| Self::parse_blob_sample(record, current_base_time))
+                        .map(|record| Self::create_blob_sample(record))
                         .collect();
-                    TypedSamples::Blob(blob_samples?)
+                    TypedSamples::Blob(blob_samples)
                 }
                 _ => return Err(anyhow::anyhow!("Unsupported sensor type for SenML import")),
             };
+
+            // Extract unit from first record if present
+            let unit = sensor_records
+                .first()
+                .and_then(|r| r.unit.as_ref())
+                .map(|u| Unit::new(u.clone(), None));
 
             let sensor = Sensor {
                 uuid: Uuid::new_v4(),
                 name: sensor_name.clone(),
                 sensor_type,
-                unit: None, // Could be extracted from SenML "u" field if needed
+                unit,
                 labels: SmallVec::new(),
             };
 
@@ -120,118 +94,49 @@ impl SenMLImporter {
         Ok(result)
     }
 
-    fn infer_sensor_type(record: &Map<String, Value>) -> Result<SensorType> {
-        if record.contains_key("v") {
-            // Numeric value
-            if let Some(value) = record.get("v") {
-                if value.is_i64() {
-                    Ok(SensorType::Integer)
-                } else if value.is_f64() {
-                    Ok(SensorType::Float)
-                } else {
-                    Err(anyhow::anyhow!("Invalid numeric value in SenML"))
-                }
-            } else {
-                Err(anyhow::anyhow!("Missing value in SenML record"))
+    /// Convert sindit-senml DateTime to SensAppDateTime using the time module
+    fn record_time_to_sensapp_datetime(record: &SenMLResolvedRecord) -> SensAppDateTime {
+        let (timestamp, precise_timestamp) = datetime_to_timestamp(&record.time);
+        // Use precise timestamp if available (has sub-second precision), otherwise use integer timestamp
+        let seconds = precise_timestamp.unwrap_or(timestamp as f64);
+        SensAppDateTime::from_unix_seconds(seconds)
+    }
+
+    fn infer_sensor_type(record: &SenMLResolvedRecord) -> Result<SensorType> {
+        match &record.value {
+            Some(SenMLValueField::FloatingPoint(_)) => Ok(SensorType::Float),
+            Some(SenMLValueField::StringValue(_)) => Ok(SensorType::String),
+            Some(SenMLValueField::BooleanValue(_)) => Ok(SensorType::Boolean),
+            Some(SenMLValueField::DataValue(_)) => Ok(SensorType::Blob),
+            None => {
+                // SenML defaults to 0.0 when no value is present
+                Ok(SensorType::Float)
             }
-        } else if record.contains_key("vs") {
-            Ok(SensorType::String)
-        } else if record.contains_key("vb") {
-            Ok(SensorType::Boolean)
-        } else if record.contains_key("vd") {
-            Ok(SensorType::Blob)
-        } else {
-            Err(anyhow::anyhow!(
-                "SenML record must contain a value (v, vs, vb, etc.)"
-            ))
         }
     }
 
-    fn parse_timestamp(
-        record: &Map<String, Value>,
-        base_time: Option<f64>,
-    ) -> Result<SensAppDateTime> {
-        let time = if let Some(t) = record.get("t").and_then(|v| v.as_f64()) {
-            // Relative time
-            base_time.unwrap_or(0.0) + t
-        } else {
-            // Use base time or current time
-            base_time.unwrap_or_else(|| {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as f64
-            })
-        };
-
-        // Convert Unix timestamp to SensAppDateTime
-        Ok(SensAppDateTime::from_unix_seconds(time))
+    fn create_float_sample(record: &SenMLResolvedRecord) -> Sample<f64> {
+        let datetime = Self::record_time_to_sensapp_datetime(record);
+        let value = record.get_float_value().unwrap_or(0.0);
+        Sample { datetime, value }
     }
 
-    fn parse_integer_sample(
-        record: &Map<String, Value>,
-        base_time: Option<f64>,
-    ) -> Result<Sample<i64>> {
-        let datetime = Self::parse_timestamp(record, base_time)?;
-        let value = record
-            .get("v")
-            .and_then(|v| v.as_i64())
-            .ok_or_else(|| anyhow::anyhow!("Missing or invalid integer value"))?;
-        Ok(Sample { datetime, value })
+    fn create_string_sample(record: &SenMLResolvedRecord) -> Sample<String> {
+        let datetime = Self::record_time_to_sensapp_datetime(record);
+        let value = record.get_string_value().cloned().unwrap_or_default();
+        Sample { datetime, value }
     }
 
-    fn parse_float_sample(
-        record: &Map<String, Value>,
-        base_time: Option<f64>,
-    ) -> Result<Sample<f64>> {
-        let datetime = Self::parse_timestamp(record, base_time)?;
-        let value = record
-            .get("v")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow::anyhow!("Missing or invalid float value"))?;
-        Ok(Sample { datetime, value })
+    fn create_boolean_sample(record: &SenMLResolvedRecord) -> Sample<bool> {
+        let datetime = Self::record_time_to_sensapp_datetime(record);
+        let value = record.get_bool_value().unwrap_or(false);
+        Sample { datetime, value }
     }
 
-    fn parse_string_sample(
-        record: &Map<String, Value>,
-        base_time: Option<f64>,
-    ) -> Result<Sample<String>> {
-        let datetime = Self::parse_timestamp(record, base_time)?;
-        let value = record
-            .get("vs")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing or invalid string value"))?
-            .to_string();
-        Ok(Sample { datetime, value })
-    }
-
-    fn parse_boolean_sample(
-        record: &Map<String, Value>,
-        base_time: Option<f64>,
-    ) -> Result<Sample<bool>> {
-        let datetime = Self::parse_timestamp(record, base_time)?;
-        let value = record
-            .get("vb")
-            .and_then(|v| v.as_bool())
-            .ok_or_else(|| anyhow::anyhow!("Missing or invalid boolean value"))?;
-        Ok(Sample { datetime, value })
-    }
-
-    fn parse_blob_sample(
-        record: &Map<String, Value>,
-        base_time: Option<f64>,
-    ) -> Result<Sample<Vec<u8>>> {
-        let datetime = Self::parse_timestamp(record, base_time)?;
-        let value_str = record
-            .get("vd")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing or invalid blob value"))?;
-
-        let value = general_purpose::URL_SAFE_NO_PAD
-            .decode(value_str)
-            .map_err(|e| anyhow::anyhow!("Failed to decode blob value: {}", e))?;
-
-        Ok(Sample { datetime, value })
+    fn create_blob_sample(record: &SenMLResolvedRecord) -> Sample<Vec<u8>> {
+        let datetime = Self::record_time_to_sensapp_datetime(record);
+        let value = record.get_data_value().cloned().unwrap_or_default();
+        Sample { datetime, value }
     }
 }
 
@@ -285,7 +190,8 @@ mod tests {
     }
 
     #[test]
-    fn test_integer_import() {
+    fn test_float_import() {
+        // Note: sindit-senml treats all numeric values as floats (per RFC 8428)
         let json_str = r#"[
             {"bn": "temp_sensor", "bt": 1609459200.0, "bver": 10, "v": 23, "t": 0},
             {"v": 24, "t": 60.0}
@@ -295,12 +201,12 @@ mod tests {
         assert_eq!(imported.len(), 1);
         let (name, data) = &imported[0];
         assert_eq!(name, "temp_sensor");
-        assert_eq!(data.sensor.sensor_type, SensorType::Integer);
+        assert_eq!(data.sensor.sensor_type, SensorType::Float);
 
-        if let TypedSamples::Integer(samples) = &data.samples {
+        if let TypedSamples::Float(samples) = &data.samples {
             assert_eq!(samples.len(), 2);
-            assert_eq!(samples[0].value, 23);
-            assert_eq!(samples[1].value, 24);
+            assert_eq!(samples[0].value, 23.0);
+            assert_eq!(samples[1].value, 24.0);
         } else {
             panic!("Wrong sample type");
         }
@@ -361,9 +267,47 @@ mod tests {
     }
 
     #[test]
-    fn test_not_array() {
-        let json_str = r#"{"bn": "test"}"#;
-        let result = SenMLImporter::from_senml_json(json_str);
-        assert!(result.is_err());
+    fn test_unit_extraction() {
+        let json_str = r#"[
+            {"n": "temperature", "u": "Cel", "v": 25.5, "t": 1609459200}
+        ]"#;
+
+        let imported = SenMLImporter::from_senml_json(json_str).unwrap();
+        assert_eq!(imported.len(), 1);
+        let (name, data) = &imported[0];
+        assert_eq!(name, "temperature");
+        assert!(data.sensor.unit.is_some());
+        assert_eq!(data.sensor.unit.as_ref().unwrap().name, "Cel");
+    }
+
+    #[test]
+    fn test_multiple_sensors() {
+        let json_str = r#"[
+            {"n": "sensor1", "v": 10.0, "t": 1609459200},
+            {"n": "sensor2", "v": 20.0, "t": 1609459200},
+            {"n": "sensor1", "v": 11.0, "t": 1609459260}
+        ]"#;
+
+        let imported = SenMLImporter::from_senml_json(json_str).unwrap();
+        assert_eq!(imported.len(), 2);
+
+        // Find sensor1 and sensor2
+        let sensor1 = imported.iter().find(|(n, _)| n == "sensor1");
+        let sensor2 = imported.iter().find(|(n, _)| n == "sensor2");
+
+        assert!(sensor1.is_some());
+        assert!(sensor2.is_some());
+
+        if let TypedSamples::Float(samples) = &sensor1.unwrap().1.samples {
+            assert_eq!(samples.len(), 2);
+        } else {
+            panic!("Wrong sample type for sensor1");
+        }
+
+        if let TypedSamples::Float(samples) = &sensor2.unwrap().1.samples {
+            assert_eq!(samples.len(), 1);
+        } else {
+            panic!("Wrong sample type for sensor2");
+        }
     }
 }
