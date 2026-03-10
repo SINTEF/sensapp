@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sensapp.fullname" . }}
+  labels:
+    {{- include "sensapp.labels" . | nindent 4 }}
+data:
+  SENSAPP_PORT: {{ .Values.service.port | quote }}
+  {{- range $key, $value := .Values.env }}
+  {{- if ne $key "SENSAPP_PORT" }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- end }}

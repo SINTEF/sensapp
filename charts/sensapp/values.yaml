@@ -1,0 +1,101 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/sintef/sensapp
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 10001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+
+service:
+  type: ClusterIP
+  port: 3000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: sensapp.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+persistence:
+  enabled: false
+  accessModes:
+    - ReadWriteOnce
+  size: 8Gi
+  storageClassName: ""
+
+env:
+  SENSAPP_ENDPOINT: 0.0.0.0
+  SENSAPP_PORT: "3000"
+  SENSAPP_HTTP_BODY_LIMIT: 10mb
+  SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS: "30"
+  SENSAPP_BATCH_SIZE: "8192"
+  SENSAPP_INFLUXDB_WITH_NUMERIC: "false"
+
+storage:
+  connectionString: sqlite:///var/lib/sensapp/sensapp.db
+
+secretEnv: {}
+extraEnv: []
+extraEnvFrom: []
+
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 15
+
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+startupProbe:
+  httpGet:
+    path: /health/live
+    port: http
+  failureThreshold: 30
+  periodSeconds: 5

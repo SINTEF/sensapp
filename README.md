@@ -58,6 +58,36 @@ Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 - `/api/v1/prometheus_remote_read`: Prometheus Remote Read endpoint.
 - `/api/v1/query`: Simple PromQL-compatible query endpoint.
 
+## Deployment
+
+SensApp now ships with a container build and a Helm chart in `charts/sensapp`.
+
+The default container image target is a practical self-hosted runtime feature set:
+
+- PostgreSQL
+- SQLite
+- TimeScaleDB
+- DuckDB
+- ClickHouse
+- RRDCached
+
+BigQuery is intentionally left out of the primary published image to keep image size, build time, and dependency surface under control. It is still suitable as a separate CI-built variant when needed.
+
+Example Docker build:
+
+```bash
+docker build -t sensapp:local .
+```
+
+Example Helm install using PostgreSQL:
+
+```bash
+helm install sensapp ./charts/sensapp \
+  --set storage.connectionString=postgres://postgres:postgres@postgres:5432/sensapp
+```
+
+By default, the Helm chart uses a local SQLite database under `/var/lib/sensapp/sensapp.db`, which is useful for single-replica or evaluation deployments. For multi-replica Kubernetes deployments, use an external shared backend such as PostgreSQL or ClickHouse.
+
 ## Development
 
 ```bash
