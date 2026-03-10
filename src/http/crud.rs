@@ -1,8 +1,8 @@
 use crate::datamodel::SensAppDateTime;
 use crate::datamodel::SensorType;
 use crate::exporters::{ArrowConverter, CsvConverter, JsonlConverter, SenMLConverter};
-use crate::ingestors::http::app_error::AppError;
-use crate::ingestors::http::state::HttpServerState;
+use crate::http::app_error::AppError;
+use crate::http::state::HttpServerState;
 use crate::storage::query::{LabelMatcher, MatcherType};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -69,6 +69,8 @@ pub struct SeriesQuery {
     pub metric: Option<String>,
     /// PromQL-style label selector (e.g., `{env="prod",region=~"us.*"}`)
     pub selector: Option<String>,
+    pub limit: Option<usize>,
+    pub bookmark: Option<String>,
 }
 
 /// Query parameters for metrics filtering
@@ -358,9 +360,15 @@ pub async fn list_metrics(
 pub async fn list_series(
     State(state): State<HttpServerState>,
     Query(query): Query<SeriesQuery>,
-) -> Result<Json<Value>, AppError> {
+) -> Result<axum::response::Response, AppError> {
+    // Validate and cap the limit
+    let limit = query.limit.map(|l| l.min(crate::storage::MAX_LIST_SERIES_LIMIT));
+
     // Get the series metadata including labels and UUIDs, optionally filtered by metric
-    let sensors = state.storage.list_series(query.metric.as_deref()).await?;
+    let result = state
+        .storage
+        .list_series(query.metric.as_deref(), limit, query.bookmark.as_deref())
+        .await?;
 
     // Parse the selector if provided
     let label_matchers = match &query.selector {
@@ -370,12 +378,12 @@ pub async fn list_series(
 
     // Filter sensors by label matchers if provided
     let filtered_sensors: Vec<_> = if let Some(matchers) = &label_matchers {
-        sensors
+        result.series
             .into_iter()
             .filter(|sensor| sensor_matches_matchers(sensor, matchers))
             .collect()
     } else {
-        sensors
+        result.series
     };
 
     // Create DCAT catalog structure
@@ -458,11 +466,13 @@ pub async fn list_series(
         })
         .collect();
 
-    let catalog = json!({
+    // Build catalog with Hydra pagination metadata if there's a next page
+    let mut catalog = json!({
         "@context": {
             "dcat": "http://www.w3.org/ns/dcat#",
             "dct": "http://purl.org/dc/terms/",
-            "foaf": "http://xmlns.com/foaf/0.1/"
+            "foaf": "http://xmlns.com/foaf/0.1/",
+            "hydra": "http://www.w3.org/ns/hydra/core#"
         },
         "@type": "dcat:Catalog",
         "@id": "sensapp_series_catalog",
@@ -475,7 +485,42 @@ pub async fn list_series(
         "dcat:dataset": datasets
     });
 
-    Ok(Json(catalog))
+    // Add Hydra pagination metadata if there's a next page
+    let link_header = if let Some(bookmark) = &result.bookmark {
+        // Build the next page URL
+        let mut next_url = format!("/series?limit={}&bookmark={}", limit.unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT), bookmark);
+        if let Some(metric) = &query.metric {
+            next_url = format!("{}&metric={}", next_url, urlencoding::encode(metric));
+        }
+
+        // Add Hydra view to catalog
+        catalog["hydra:view"] = json!({
+            "@type": "hydra:PartialCollectionView",
+            "hydra:next": next_url,
+            "hydra:itemsPerPage": limit.unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT)
+        });
+
+        // Return Link header value
+        Some(format!("<{}>; rel=\"next\"", next_url))
+    } else {
+        None
+    };
+
+    // Build response with optional Link header
+    let mut response = axum::response::Response::builder()
+        .status(200)
+        .header("Content-Type", "application/json");
+
+    if let Some(link) = link_header {
+        response = response.header("Link", link);
+    }
+
+    let body = serde_json::to_string(&catalog)
+        .map_err(|e| AppError::internal_server_error(anyhow::anyhow!("Failed to serialize catalog: {}", e)))?;
+
+    response
+        .body(axum::body::Body::from(body))
+        .map_err(|e| AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e)))
 }
 
 /// Get series data in various formats based on query parameter.

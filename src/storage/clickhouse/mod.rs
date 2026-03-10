@@ -219,7 +219,11 @@ impl StorageInstance for ClickHouseStorage {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>> {
+        _limit: Option<usize>,
+        _bookmark: Option<&str>,
+    ) -> Result<crate::storage::ListSeriesResult> {
+        // TODO: Implement pagination for ClickHouse backend
+        // For now, ignore limit and bookmark parameters and return all results
         let (query, use_filter) = match metric_filter {
             Some(_) => (
                 r#"
@@ -326,7 +330,10 @@ impl StorageInstance for ClickHouseStorage {
             sensors.push(sensor);
         }
 
-        Ok(sensors)
+        Ok(crate::storage::ListSeriesResult {
+            series: sensors,
+            bookmark: None,
+        })
     }
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {

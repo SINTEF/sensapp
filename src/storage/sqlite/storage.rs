@@ -88,7 +88,11 @@ impl StorageInstance for SqliteStorage {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>> {
+        _limit: Option<usize>,
+        _bookmark: Option<&str>,
+    ) -> Result<crate::storage::ListSeriesResult> {
+        // TODO: Implement pagination for SQLite backend
+        // For now, ignore limit and bookmark parameters and return all results
         #[derive(sqlx::FromRow)]
         struct SensorRow {
             sensor_id: Option<i64>,
@@ -192,7 +196,10 @@ impl StorageInstance for SqliteStorage {
             sensors.push(sensor);
         }
 
-        Ok(sensors)
+        Ok(crate::storage::ListSeriesResult {
+            series: sensors,
+            bookmark: None,
+        })
     }
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {

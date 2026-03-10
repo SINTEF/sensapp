@@ -17,6 +17,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use smallvec::smallvec;
 use sqlx::{PgPool, postgres::PgConnectOptions};
+use std::collections::HashMap;
 use std::{str::FromStr, sync::Arc};
 use uuid::Uuid;
 
@@ -81,7 +82,9 @@ impl StorageInstance for PostgresStorage {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>> {
+        limit: Option<usize>,
+        bookmark: Option<&str>,
+    ) -> Result<crate::storage::ListSeriesResult> {
         #[derive(sqlx::FromRow)]
         struct SensorRow {
             sensor_id: Option<i64>,
@@ -90,25 +93,52 @@ impl StorageInstance for PostgresStorage {
             r#type: Option<String>,
             unit_name: Option<String>,
             unit_description: Option<String>,
+            labels: Option<sqlx::types::Json<HashMap<String, String>>>,
         }
 
+        // Parse bookmark as sensor_id
+        let bookmark_id: Option<i64> = if let Some(bookmark_str) = bookmark {
+            Some(bookmark_str.parse::<i64>().map_err(|e| {
+                anyhow::Error::from(StorageError::invalid_data_format(
+                    &format!("Invalid bookmark format: {}", e),
+                    None,
+                    None,
+                ))
+            })?)
+        } else {
+            None
+        };
+
+        // Validate and apply limit
+        let effective_limit = limit
+            .unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT)
+            .min(crate::storage::MAX_LIST_SERIES_LIMIT);
+
         // Query sensors with their metadata using the catalog view, optionally filtered by metric name
+        // Use bookmark for cursor-based pagination (sensor_id > bookmark)
         let sensor_rows: Vec<SensorRow> = sqlx::query_as(
             r#"
-            SELECT sensor_id, uuid, name, type, unit_name, unit_description
+            SELECT sensor_id, uuid, name, type, unit_name, unit_description, labels
             FROM sensor_catalog_view
             WHERE ($1::TEXT IS NULL OR name = $1)
-            ORDER BY uuid ASC
+              AND ($2::BIGINT IS NULL OR sensor_id > $2)
+            ORDER BY sensor_id ASC
+            LIMIT $3
             "#,
         )
         .bind(metric_filter)
+        .bind(bookmark_id)
+        .bind(effective_limit as i64)
         .fetch_all(&self.pool)
         .await?;
 
         let mut sensors = Vec::new();
+        let mut last_sensor_id: Option<i64> = None;
 
         for sensor_row in sensor_rows {
-            // Parse sensor metadata with improved error handling
+            // Keep track of the last sensor_id for bookmark
+            last_sensor_id = sensor_row.sensor_id;
+
             let sensor_uuid = sensor_row
                 .uuid
                 .ok_or_else(|| {
@@ -141,51 +171,34 @@ impl StorageInstance for PostgresStorage {
                 _ => None,
             };
 
-            // Query labels for this sensor with proper error context
-            let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
-                anyhow::Error::from(StorageError::missing_field(
-                    "sensor_id",
-                    Some(sensor_uuid),
-                    Some(&sensor_name),
-                ))
-            })?;
+            let labels: Option<SensAppLabels> = if let Some(labels_json) = sensor_row.labels {
+                let mut labels: SensAppLabels = smallvec![];
+                for (label_name, label_value) in labels_json.0 {
+                    labels.push((label_name, label_value));
+                }
 
-            #[derive(sqlx::FromRow)]
-            struct LabelRow {
-                label_name: String,
-                label_value: String,
-            }
+                Some(labels)
+            } else {
+                None
+            };
 
-            let labels_rows: Vec<LabelRow> = sqlx::query_as(
-                r#"
-                SELECT lnd.name as label_name, ldd.description as label_value
-                FROM labels l
-                JOIN labels_name_dictionary lnd ON l.name = lnd.id
-                JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                WHERE l.sensor_id = $1
-                "#,
-            )
-            .bind(sensor_id)
-            .fetch_all(&self.pool)
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to query labels for sensor UUID={} name='{}'",
-                    sensor_uuid, sensor_name
-                )
-            })?;
-
-            let mut labels: SensAppLabels = smallvec![];
-            for label_row in labels_rows {
-                labels.push((label_row.label_name, label_row.label_value));
-            }
-
-            let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
+            let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, labels);
 
             sensors.push(sensor);
         }
 
-        Ok(sensors)
+        // Determine if there's a next page based on whether we got the full limit
+        // If we got exactly the limit, there might be more pages, so return the last sensor_id as bookmark
+        let next_bookmark = if sensors.len() == effective_limit {
+            last_sensor_id.map(|id| id.to_string())
+        } else {
+            None
+        };
+
+        Ok(crate::storage::ListSeriesResult {
+            series: sensors,
+            bookmark: next_bookmark,
+        })
     }
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {

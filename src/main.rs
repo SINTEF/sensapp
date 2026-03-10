@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 use crate::config::load_configuration;
-use crate::ingestors::http::server::run_http_server;
-use crate::ingestors::http::state::HttpServerState;
+use crate::http::server::run_http_server;
+use crate::http::state::HttpServerState;
 use anyhow::{Context, Result};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -11,9 +11,9 @@ use tracing::event;
 mod config;
 mod datamodel;
 mod exporters;
+mod http;
 mod importers;
 mod infer;
-mod ingestors;
 mod parsing;
 mod storage;
 

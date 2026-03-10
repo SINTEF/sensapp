@@ -449,8 +449,12 @@ impl StorageInstance for RrdCachedStorage {
 
     async fn list_series(
         &self,
+    async fn list_series(
+        &self,
         metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>> {
+        _limit: Option<usize>,
+        _bookmark: Option<&str>,
+    ) -> Result<crate::storage::ListSeriesResult> {
         // Use RRDcached's native LIST command to get available RRD files
         let mut client = self.client.write().await;
 
@@ -498,7 +502,10 @@ impl StorageInstance for RrdCachedStorage {
                     }
                 }
 
-                Ok(sensors)
+                Ok(crate::storage::ListSeriesResult {
+                    series: sensors,
+                    bookmark: None,
+                })
             }
             Err(e) => {
                 error!("Failed to list RRD files: {:?}", e);
@@ -518,7 +525,10 @@ impl StorageInstance for RrdCachedStorage {
                     sensors.push(sensor);
                 }
 
-                Ok(sensors)
+                Ok(crate::storage::ListSeriesResult {
+                    series: sensors,
+                    bookmark: None,
+                })
             }
         }
     }

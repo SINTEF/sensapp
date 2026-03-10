@@ -28,10 +28,10 @@ mod clickhouse_tests {
         storage.create_or_migrate().await?;
 
         // Then: The operations should succeed (database is accessible)
-        let sensors = storage.list_series(None).await?;
+        let result = storage.list_series(None, None, None).await?;
 
         // Database should be empty or contain existing sensors
-        println!("Found {} sensors in ClickHouse database", sensors.len());
+        println!("Found {} sensors in ClickHouse database", result.series.len());
 
         Ok(())
     }

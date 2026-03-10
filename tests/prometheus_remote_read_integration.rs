@@ -18,8 +18,8 @@ use sensapp::config::load_configuration_for_tests;
 use sensapp::datamodel::batch_builder::BatchBuilder;
 use sensapp::datamodel::sensapp_vec::SensAppLabels;
 use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples};
-use sensapp::ingestors::http::prometheus_read::prometheus_remote_read;
-use sensapp::ingestors::http::state::HttpServerState;
+use sensapp::http::prometheus_read::prometheus_remote_read;
+use sensapp::http::state::HttpServerState;
 use sensapp::parsing::prometheus::remote_read_models::{
     LabelMatcher as PromLabelMatcher, Query, ReadRequest, ReadResponse, label_matcher, read_request,
 };

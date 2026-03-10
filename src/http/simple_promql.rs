@@ -12,9 +12,9 @@
 
 use crate::datamodel::SensAppDateTime;
 use crate::exporters::{ArrowConverter, CsvConverter, JsonlConverter, SenMLConverter};
-use crate::ingestors::http::app_error::AppError;
-use crate::ingestors::http::crud::ExportFormat;
-use crate::ingestors::http::state::HttpServerState;
+use crate::http::app_error::AppError;
+use crate::http::crud::ExportFormat;
+use crate::http::state::HttpServerState;
 use crate::storage::query::{LabelMatcher, MatcherType};
 use axum::extract::{Query, State};
 use axum::response::Response;

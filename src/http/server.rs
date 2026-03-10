@@ -7,14 +7,14 @@ use super::simple_promql::simple_promql_query;
 use super::state::HttpServerState;
 use crate::config;
 use crate::importers::csv::publish_csv_async;
-use crate::ingestors::http::crud::{
+use crate::http::crud::{
     __path_get_series_data, __path_list_metrics, __path_list_series,
 };
-use crate::ingestors::http::health::{__path_liveness, __path_readiness, liveness, readiness};
-use crate::ingestors::http::influxdb::__path_publish_influxdb;
-use crate::ingestors::http::prometheus_read::__path_prometheus_remote_read;
-use crate::ingestors::http::prometheus_write::__path_publish_prometheus;
-use crate::ingestors::http::simple_promql::__path_simple_promql_query;
+use crate::http::health::{__path_liveness, __path_readiness, liveness, readiness};
+use crate::http::influxdb::__path_publish_influxdb;
+use crate::http::prometheus_read::__path_prometheus_remote_read;
+use crate::http::prometheus_write::__path_publish_prometheus;
+use crate::http::simple_promql::__path_simple_promql_query;
 use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::Json;
