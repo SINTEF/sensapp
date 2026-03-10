@@ -449,8 +449,6 @@ impl StorageInstance for RrdCachedStorage {
 
     async fn list_series(
         &self,
-    async fn list_series(
-        &self,
         metric_filter: Option<&str>,
         _limit: Option<usize>,
         _bookmark: Option<&str>,

@@ -362,7 +362,9 @@ pub async fn list_series(
     Query(query): Query<SeriesQuery>,
 ) -> Result<axum::response::Response, AppError> {
     // Validate and cap the limit
-    let limit = query.limit.map(|l| l.min(crate::storage::MAX_LIST_SERIES_LIMIT));
+    let limit = query
+        .limit
+        .map(|l| l.min(crate::storage::MAX_LIST_SERIES_LIMIT));
 
     // Get the series metadata including labels and UUIDs, optionally filtered by metric
     let result = state
@@ -378,7 +380,8 @@ pub async fn list_series(
 
     // Filter sensors by label matchers if provided
     let filtered_sensors: Vec<_> = if let Some(matchers) = &label_matchers {
-        result.series
+        result
+            .series
             .into_iter()
             .filter(|sensor| sensor_matches_matchers(sensor, matchers))
             .collect()
@@ -488,7 +491,11 @@ pub async fn list_series(
     // Add Hydra pagination metadata if there's a next page
     let link_header = if let Some(bookmark) = &result.bookmark {
         // Build the next page URL
-        let mut next_url = format!("/series?limit={}&bookmark={}", limit.unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT), bookmark);
+        let mut next_url = format!(
+            "/series?limit={}&bookmark={}",
+            limit.unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT),
+            bookmark
+        );
         if let Some(metric) = &query.metric {
             next_url = format!("{}&metric={}", next_url, urlencoding::encode(metric));
         }
@@ -515,12 +522,13 @@ pub async fn list_series(
         response = response.header("Link", link);
     }
 
-    let body = serde_json::to_string(&catalog)
-        .map_err(|e| AppError::internal_server_error(anyhow::anyhow!("Failed to serialize catalog: {}", e)))?;
+    let body = serde_json::to_string(&catalog).map_err(|e| {
+        AppError::internal_server_error(anyhow::anyhow!("Failed to serialize catalog: {}", e))
+    })?;
 
-    response
-        .body(axum::body::Body::from(body))
-        .map_err(|e| AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e)))
+    response.body(axum::body::Body::from(body)).map_err(|e| {
+        AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
+    })
 }
 
 /// Get series data in various formats based on query parameter.

@@ -538,15 +538,24 @@ mod crud_dcat_tests {
 
         // Should have hydra:view with next link
         assert!(catalog["hydra:view"].is_object(), "Should have hydra:view");
-        assert_eq!(catalog["hydra:view"]["@type"], "hydra:PartialCollectionView");
-        assert!(catalog["hydra:view"]["hydra:next"].is_string(), "Should have next link");
+        assert_eq!(
+            catalog["hydra:view"]["@type"],
+            "hydra:PartialCollectionView"
+        );
+        assert!(
+            catalog["hydra:view"]["hydra:next"].is_string(),
+            "Should have next link"
+        );
         assert_eq!(catalog["hydra:view"]["hydra:itemsPerPage"], 2);
 
         // Check Link header
         let link_header = response.headers().get("Link");
         assert!(link_header.is_some(), "Should have Link header");
         let link_str = link_header.unwrap().to_str().unwrap();
-        assert!(link_str.contains("rel=\"next\""), "Link header should have rel=next");
+        assert!(
+            link_str.contains("rel=\"next\""),
+            "Link header should have rel=next"
+        );
 
         Ok(())
     }
@@ -586,7 +595,9 @@ mod crud_dcat_tests {
             .unwrap();
 
         // When: We query the second page with the bookmark
-        let second_response = app.get(&format!("/series?limit=2&bookmark={}", bookmark)).await?;
+        let second_response = app
+            .get(&format!("/series?limit=2&bookmark={}", bookmark))
+            .await?;
         second_response.assert_status(StatusCode::OK);
         let second_catalog: Value = second_response.json()?;
 
@@ -628,11 +639,17 @@ mod crud_dcat_tests {
         let catalog: Value = response.json()?;
 
         // Should NOT have hydra:view (no next page)
-        assert!(catalog["hydra:view"].is_null(), "Should not have hydra:view on last page");
+        assert!(
+            catalog["hydra:view"].is_null(),
+            "Should not have hydra:view on last page"
+        );
 
         // Should NOT have Link header
         let link_header = response.headers().get("Link");
-        assert!(link_header.is_none(), "Should not have Link header on last page");
+        assert!(
+            link_header.is_none(),
+            "Should not have Link header on last page"
+        );
 
         Ok(())
     }
@@ -654,10 +671,14 @@ mod crud_dcat_tests {
         let all_response = app.get("/series").await?;
         all_response.assert_status(StatusCode::OK);
         let all_catalog: Value = all_response.json()?;
-        let first_metric = all_catalog["dcat:dataset"][0]["dct:title"].as_str().unwrap();
+        let first_metric = all_catalog["dcat:dataset"][0]["dct:title"]
+            .as_str()
+            .unwrap();
 
         // When: We query with metric filter and pagination
-        let response = app.get(&format!("/series?metric={}&limit=1", first_metric)).await?;
+        let response = app
+            .get(&format!("/series?metric={}&limit=1", first_metric))
+            .await?;
 
         // Then: Should only get sensors for that metric
         response.assert_status(StatusCode::OK);
