@@ -45,8 +45,11 @@ pub async fn list_sensors(
         .unwrap_or_else(|| Ok(ListCursor::default()))
         .map_err(AppError::BadRequest)?;
 
-    let limit = query.limit.unwrap_or(1000);
-    if limit == 0 || limit > 100_000 {
+    const DEFAULT_LIMIT: usize = 1000;
+    const MAX_LIMIT: usize = 100_000;
+
+    let limit = query.limit.unwrap_or(DEFAULT_LIMIT);
+    if limit == 0 || limit > MAX_LIMIT {
         return Err(AppError::BadRequest(anyhow::anyhow!(
             "Limit must be between 1 and 100,000"
         )));

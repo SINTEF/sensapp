@@ -230,8 +230,11 @@ impl ChunkedSeries {
             })),
         };
 
+        // Prometheus aims for 120 samples per chunk
+        const CHUNK_SIZE: usize = 120;
+
         let chunks: Vec<Chunk> = converted_samples
-            .chunks(120) // Prometheus aims for 120 samples per chunk
+            .chunks(CHUNK_SIZE)
             .into_iter()
             .map(|chunk| {
                 let xor_chunk = XORChunk::new(chunk.collect::<Vec<_>>());
@@ -283,7 +286,7 @@ impl ChunkedReadResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::datamodel::{unit::Unit, SensAppLabels, SensorType};
+    use crate::datamodel::{unit::Unit, SensAppDateTime, SensAppLabels, SensorType};
     use smallvec::smallvec;
     use std::sync::Arc;
 

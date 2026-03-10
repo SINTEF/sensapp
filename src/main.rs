@@ -94,15 +94,15 @@ async fn async_main(config: Arc<SensAppConfig>) {
         .await
         .expect("Failed to create or migrate database");*/
 
-    let storage = create_storage_from_connection_string("sqlite://test.db")
-        //let storage = create_storage_from_connection_string("postgres://localhost:5432/sensapp")
+    //let storage = create_storage_from_connection_string("sqlite://test.db")
+    let storage = create_storage_from_connection_string("postgres://localhost:5432/sensapp")
         // password is postgres
         //let storage = create_storage_from_connection_string(
         //    "timescaledb://postgres:postgres@localhost:5432/sensapp",
         //)
-        //let storage = create_storage_from_connection_string("duckdb://caca2.db")
+        //let storage = create_storage_from_connection_string("duckdb://caca3.db")
         //let storage = create_storage_from_connection_string(
-        //    "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_3",
+        //    "bigquery://key.json?project_id=smartbuildinghub&dataset_id=sensapp_dev_4",
         //)
         //let storage = create_storage_from_connection_string("rrdcached://localhost:42217?preset=munin")
         .await
@@ -179,7 +179,7 @@ async fn async_main(config: Arc<SensAppConfig>) {
     // spawn a task that prints the events to stdout
     tokio::spawn(async move {
         while let Ok(message) = wololo.recv().await {
-            println!("Received event a: {:?}", message);
+            //println!("Received event a: {:?}", message);
 
             use crate::storage::storage::StorageInstance;
             //let toto: &dyn StorageInstance = &storage;

@@ -23,6 +23,9 @@ fn parse_hex_char(data: &str) -> IResult<&str, u8> {
     })(data)
 }
 
+// We do not attempt to verify version and variant as many systems generate
+// UUIDs that do not conform to the standard. And life is too short
+// to have UUIDs shenanigans.
 pub fn parse_uuid(data: &str) -> IResult<&str, uuid::Uuid> {
     map(
         tuple((

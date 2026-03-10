@@ -4,6 +4,7 @@ sqlite_connection_string = "sqlite:test.db"
 postgres_connection_string = "postgres://postgres:postgres@localhost:5432/postgres"
 timescaledb_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp"
 
+skip_migrations = true
 #endpoint = "0.0.0.0"
 
 # OPCUA client support.
@@ -14,41 +15,90 @@ timescaledb_connection_string = "postgres://postgres:postgres@localhost:5432/sen
 # SensApp uses the opca Rust crate.
 # The following example uses a configuration similar of the simple-client example from the opcua crate.
 # It should run along the simple-server example from the same crate.
-[[opcua]]
+# [[opcua]]
 
-# The endpoint of the OPCUA server.
-# SensApp only supports one endpoint for now.
-endpoint = "opc.tcp://localhost:4855"
+# # The endpoint of the OPCUA server.
+# # SensApp only supports one endpoint for now.
+# endpoint = "opc.tcp://127.0.0.1:4855"
 
-# The name of the OPCUA client.
-application_name = "SensApp Simple OPCUA Client"
+# # The name of the OPCUA client.
+# application_name = "SensApp Simple OPCUA Client"
 
-# The URN of the OPCUA client.
-application_uri = "urn:localhost:OPCUA:SensAppSimpleClient"
+# # The URN of the OPCUA client.
+# application_uri = "urn:localhost:OPCUA:SensAppSimpleClient"
 
-# The OPCUA people think it's a good idea to have another unique identifier
-# to identify the product the application belongs to. So this is the product URI.
-product_uri = "urn:localhost:OPCUA:SensAppSimpleClient"
+# # The OPCUA people think it's a good idea to have another unique identifier
+# # to identify the product the application belongs to. So this is the product URI.
+# product_uri = "urn:localhost:OPCUA:SensAppSimpleClient"
 
-# The security policy, don't use this one in production obviously.
-security_policy = "None"
-security_mode = "None"
+# # The security policy, don't use this one in production obviously.
+# security_policy = "None"
+# security_mode = "None"
 
-# Used as example
-create_sample_keypair = true
-trust_server_cert = true
+# # Used as example
+# create_sample_keypair = true
+# trust_server_cert = true
 
-[[opcua.subscriptions]]
-namespace = 2
-identifiers = ["v1", "v2"]
-publishing_interval = 2000
+# [[opcua.subscriptions]]
+# namespace = 2
+# identifiers = ["v1", "v2"]
+# publishing_interval = 2000
 
-[[opcua.subscriptions]]
-namespace = 2
-identifiers = [
-  "v3",
-  { type = "String", identifier = "v4" },
-  5,
-  { type = "Guid", identifier = "f9168c5e-ceb2-4faa-b6bf-329bf39fa1e4" },
-]
-publishing_interval = 1000
+# [[opcua.subscriptions]]
+# namespace = 2
+# identifiers = [
+#   "v3",
+#   { type = "String", identifier = "v4" },
+#   5,
+#   { type = "Guid", identifier = "f9168c5e-ceb2-4faa-b6bf-329bf39fa1e4" },
+# ]
+# publishing_interval = 1000
+
+# [[opcua]]
+# #endpoint = "opc.tcp://192.168.1.81:4840"
+# endpoint = "opc.tcp://127.0.0.1:4840"
+# application_name = "SensApp Simple OPCUA Client"
+# application_uri = "urn:localhost:OPCUA:SensAppSimpleClient"
+# product_uri = "urn:localhost:OPCUA:SensAppSimpleClient"
+# security_policy = "None"
+# security_mode = "None"
+# create_sample_keypair = true
+# trust_server_cert = true
+# verify_server_cert = false
+# [[opcua.subscriptions]]
+# identifiers = [
+#   #"typ_Brightness_Sensor",
+#   #"\"gtyp_VGR\".\"vertical_Axis\".\"di_Actual_Position\"",
+#   #"\"gtyp_Interface_Dashboard\".\"Subscribe\".\"BrightnessSensor\".\"i_ldr\"",
+#   '''"gtyp_Interface_Dashboard"."Subscribe"."EnvironmentSensor"."r_rt"''',
+# ]
+# namespace = 3
+# publishing_interval = 1000
+# [opcua.subscriptions.autodiscovery]
+# start_node = "DataBlocksGlobal"
+# #start_node = '''"gtyp_MPO"'''
+# node_browse_name_exclude_regex = "^(Rack_History|History|Icon|(.+_ts))$"
+# #variable_identifier_include_regex = ".*a.*"
+
+# MQTT client.
+#
+# Please note that TLS configuration is not fully implemented yet.
+# We support our use cases, such as MQTT over Websockets with TLS and Basic Auth or plain MQTT.
+# [[mqtt]]
+
+# #url = "mqtt://localhost:1883?client_id=canard"
+# #url = "mqtt://localhost:1883?client_id=canard"
+# #url = "ws://localhost:9001/mqtt"
+# #client_id = "lapin"
+# url = "wss://gaia.sintef.cloud:443/ws"
+# client_id = "sensapp-gaia-dev-antoine"
+# username = "frontend"
+# password = "public"
+
+# [[mqtt.subscriptions]]
+# topic = "GAIA/AIS"
+# qos = 1
+
+# [[mqtt.subscriptions]]
+# topic = "GAIA/+/path"
+# qos = 1

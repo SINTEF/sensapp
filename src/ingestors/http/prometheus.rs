@@ -215,9 +215,14 @@ pub async fn prometheus_remote_read(
     }
 }
 
-fn prometheus_read_stream(queries: Vec<Query>) -> impl Stream<Item = (usize, SingleSensorBatch)> {
+fn prometheus_read_stream(
+    queries: Vec<Query>,
+) -> impl Stream<Item = Result<(usize, SingleSensorBatch)>> {
     stream! {
         for (i, query) in queries.into_iter().enumerate() {
+
+            let matcher = query.to_sensor_matcher();
+
             let start = query.start_timestamp_ms;
             let end = query.end_timestamp_ms;
 
@@ -241,12 +246,11 @@ fn prometheus_read_stream(queries: Vec<Query>) -> impl Stream<Item = (usize, Sin
                     crate::datamodel::SensorType::Float,
                     None,
                     None,
-                )
-                .unwrap()),
+                )?),
                 TypedSamples::Float(samples.into()),
             );
 
-            yield (i, batch);
+            yield Ok((i, batch));
         }
     }
 }
@@ -255,7 +259,7 @@ async fn prometheus_read_protobuf<S>(
     mut chunk_stream: S,
 ) -> Result<(StatusCode, HeaderMap, Body), AppError>
 where
-    S: Stream<Item = (usize, SingleSensorBatch)> + Unpin,
+    S: Stream<Item = Result<(usize, SingleSensorBatch)>> + Unpin,
 {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -270,7 +274,8 @@ where
     };
     let mut read_response = ReadResponse { results: vec![] };
 
-    while let Some((query_index, batch)) = chunk_stream.next().await {
+    while let Some(result) = chunk_stream.next().await {
+        let (query_index, batch) = result?;
         if query_index != current_query_index {
             read_response.results.push(current_query_result);
             current_query_index = query_index;
@@ -285,11 +290,11 @@ where
 
     // Serialise to protobuf binary
     let mut proto_buffer: Vec<u8> = Vec::new();
-    read_response.encode(&mut proto_buffer).unwrap();
+    read_response.encode(&mut proto_buffer)?;
 
     // Snappy it
     let mut encoder = snap::raw::Encoder::new();
-    let buffer = encoder.compress_vec(&proto_buffer).unwrap();
+    let buffer = encoder.compress_vec(&proto_buffer)?;
 
     // It could be possible to have some performance gains by writing the
     // buffer directly to the stream instead of a temporary buffer.
@@ -300,9 +305,11 @@ where
 
 fn prometheus_read_xor<S>(chunk_stream: S) -> Result<(StatusCode, HeaderMap, Body), AppError>
 where
-    S: Stream<Item = (usize, SingleSensorBatch)> + Unpin + Send + 'static,
+    S: Stream<Item = Result<(usize, SingleSensorBatch)>> + Unpin + Send + 'static,
 {
-    let body_stream = chunk_stream.then(|(query_index, batch)| async move {
+    let body_stream = chunk_stream.then(|result| async move {
+        let (query_index, batch) = result?;
+
         let chunked_serie = ChunkedSeries::from_single_sensor_batch(&batch).await;
 
         let chunked_read_response = ChunkedReadResponse {
