@@ -68,7 +68,7 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 - [ ] Unit tests for TimescaleDB storage backend
 - [ ] Unit tests for DuckDB storage backend
 - [ ] Unit tests for BigQuery storage backend
-- [ ] Unit tests for RRDCached storage backend
+- [x] Unit tests for RRDCached storage backend
 - [ ] Unit tests for ClickHouse storage backend (when implemented)
 - [x] Unit tests for data type inference (`src/infer/`)
 - [x] Unit tests for CSV parsing (`src/importers/`)
@@ -112,7 +112,7 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 - [x] Add runtime storage backend selection
 - [ ] Add connection pooling configuration
 - [ ] Add batch processing configuration
-- [ ] Environment variable override support
+- [x] Environment variable override support
 
 ### 📈 Metrics & Monitoring
 

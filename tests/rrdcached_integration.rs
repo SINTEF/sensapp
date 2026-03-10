@@ -335,7 +335,7 @@ mod rrdcached_tests {
         };
 
         let base_time = 1704067200.0; // 2024-01-01 00:00:00 UTC
-        let test_values = vec![23.5, 24.1, 22.8];
+        let test_values = [23.5, 24.1, 22.8];
         let samples: Vec<Sample<f64>> = test_values
             .iter()
             .enumerate()

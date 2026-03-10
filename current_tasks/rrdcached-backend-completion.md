@@ -16,7 +16,7 @@ The rrdcached branch has been merged. The storage backend now supports:
 1. ~~Complete `query_sensor_data` implementation~~ — **DONE**
 2. ~~Implement proper pagination in `list_series`~~ — **DONE** (limit/bookmark support)
 3. ~~Implement `query_sensors_by_labels`~~ — **DONE** (name matching + label filtering)
-4. Improve error handling and reconnection logic
+4. ~~Improve error handling and reconnection logic~~ — **DONE** (retry-on-reconnectable client failures + unit tests)
 5. Test with real rrdcached instances
 6. Consider supporting more RRD consolidation functions
 7. Update documentation with production deployment guide

@@ -5,6 +5,7 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use rrdcached_client::{
     RRDCachedClient,
     batch_update::BatchUpdate,
@@ -15,7 +16,7 @@ use rrdcached_client::{
 use smallvec::SmallVec;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::error;
+use tracing::{error, warn};
 use url::Url;
 use uuid::Uuid;
 
@@ -114,8 +115,22 @@ impl std::str::FromStr for Preset {
 #[derive(Debug)]
 pub struct RrdCachedStorage {
     client: Arc<RwLock<Box<dyn RRDCachedClientTrait>>>,
+    connector: Arc<dyn RRDCachedConnectorTrait>,
     created_sensors: Arc<RwLock<HashSet<Uuid>>>,
     preset: Preset,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedBatchUpdate {
+    path: String,
+    timestamp: Option<usize>,
+    data: Vec<f64>,
+}
+
+impl PreparedBatchUpdate {
+    fn into_batch_update(self) -> Result<BatchUpdate, RRDCachedClientError> {
+        BatchUpdate::new(&self.path, self.timestamp, self.data)
+    }
 }
 
 // Trait to abstract over TCP and Unix socket clients
@@ -146,6 +161,33 @@ trait RRDCachedClientTrait: Send + Sync + std::fmt::Debug {
         rrdcached_client::fetch::FetchResponse,
         rrdcached_client::errors::RRDCachedClientError,
     >;
+}
+
+#[async_trait]
+trait RRDCachedConnectorTrait: Send + Sync + std::fmt::Debug {
+    async fn connect(&self) -> Result<Box<dyn RRDCachedClientTrait>, RRDCachedClientError>;
+}
+
+#[derive(Debug, Clone)]
+enum RRDCachedConnectionTarget {
+    Tcp { address: String },
+    Unix { socket_path: String },
+}
+
+#[async_trait]
+impl RRDCachedConnectorTrait for RRDCachedConnectionTarget {
+    async fn connect(&self) -> Result<Box<dyn RRDCachedClientTrait>, RRDCachedClientError> {
+        match self {
+            RRDCachedConnectionTarget::Tcp { address } => {
+                let client = RRDCachedClient::connect_tcp(address).await?;
+                Ok(Box::new(client))
+            }
+            RRDCachedConnectionTarget::Unix { socket_path } => {
+                let client = RRDCachedClient::connect_unix(socket_path).await?;
+                Ok(Box::new(client))
+            }
+        }
+    }
 }
 
 // Implement the trait for TCP client
@@ -262,12 +304,11 @@ impl RrdCachedStorage {
                     ))
                 })?;
 
-                let client = RRDCachedClient::connect_tcp(&format!("{}:{}", host, port)).await?;
-                Ok(Self {
-                    client: Arc::new(RwLock::new(Box::new(client))),
-                    created_sensors: Arc::new(RwLock::new(HashSet::new())),
-                    preset,
-                })
+                let connector = Arc::new(RRDCachedConnectionTarget::Tcp {
+                    address: format!("{}:{}", host, port),
+                });
+
+                Self::connect_with_connector(connector, preset).await
             }
             "rrdcached+unix" => {
                 // Extract Unix socket path from the URL
@@ -276,14 +317,103 @@ impl RrdCachedStorage {
                     bail!("RRDCached Unix socket connection URL missing socket path");
                 }
 
-                let client = RRDCachedClient::connect_unix(socket_path).await?;
-                Ok(Self {
-                    client: Arc::new(RwLock::new(Box::new(client))),
-                    created_sensors: Arc::new(RwLock::new(HashSet::new())),
-                    preset,
-                })
+                let connector = Arc::new(RRDCachedConnectionTarget::Unix {
+                    socket_path: socket_path.to_string(),
+                });
+
+                Self::connect_with_connector(connector, preset).await
             }
             _ => bail!("Invalid scheme in connection string: {}", scheme),
+        }
+    }
+
+    async fn connect_with_connector(
+        connector: Arc<dyn RRDCachedConnectorTrait>,
+        preset: Preset,
+    ) -> Result<Self> {
+        let client = connector.connect().await?;
+        Ok(Self::new_with_parts(client, connector, preset))
+    }
+
+    fn new_with_parts(
+        client: Box<dyn RRDCachedClientTrait>,
+        connector: Arc<dyn RRDCachedConnectorTrait>,
+        preset: Preset,
+    ) -> Self {
+        Self {
+            client: Arc::new(RwLock::new(client)),
+            connector,
+            created_sensors: Arc::new(RwLock::new(HashSet::new())),
+            preset,
+        }
+    }
+
+    #[cfg(test)]
+    fn new_for_test(
+        client: Box<dyn RRDCachedClientTrait>,
+        connector: Arc<dyn RRDCachedConnectorTrait>,
+    ) -> Self {
+        Self::new_with_parts(client, connector, Preset::Hoarder)
+    }
+
+    fn is_reconnectable_error(error: &RRDCachedClientError) -> bool {
+        matches!(
+            error,
+            RRDCachedClientError::Io(_) | RRDCachedClientError::Parsing(_)
+        )
+    }
+
+    fn log_client_error(operation: &str, error: &RRDCachedClientError) {
+        error!("RRDCached {} failed: {:?}", operation, error);
+        if let RRDCachedClientError::BatchUpdateErrorResponse(message, errors) = error {
+            error!("RRDCached batch update error response: {:?}", message);
+            for item in errors {
+                error!("RRDCached batch update error: {:?}", item);
+            }
+        }
+    }
+
+    async fn reconnect(&self, operation: &str) -> Result<()> {
+        let client =
+            self.connector.connect().await.with_context(|| {
+                format!("Failed to reconnect RRDCached client after {}", operation)
+            })?;
+        let mut current_client = self.client.write().await;
+        *current_client = client;
+        Ok(())
+    }
+
+    async fn with_reconnect<T>(
+        &self,
+        operation: &str,
+        mut action: impl for<'a> FnMut(
+            &'a mut dyn RRDCachedClientTrait,
+        ) -> BoxFuture<'a, Result<T, RRDCachedClientError>>,
+    ) -> Result<T> {
+        let mut retried = false;
+
+        loop {
+            let result = {
+                let mut client = self.client.write().await;
+                action(client.as_mut()).await
+            };
+
+            match result {
+                Ok(value) => return Ok(value),
+                Err(error) if !retried && Self::is_reconnectable_error(&error) => {
+                    Self::log_client_error(operation, &error);
+                    warn!(
+                        "RRDCached {} hit a reconnectable error; reconnecting and retrying once",
+                        operation
+                    );
+                    retried = true;
+                    self.reconnect(operation).await?;
+                }
+                Err(error) => {
+                    Self::log_client_error(operation, &error);
+                    return Err(error).context(format!("RRDCached {} failed", operation));
+                }
+            }
         }
     }
 
@@ -291,24 +421,36 @@ impl RrdCachedStorage {
         if sensors.is_empty() {
             return Ok(());
         }
-        let mut client = self.client.write().await;
-        let mut created_sensors = self.created_sensors.write().await;
+
         for sensor in sensors {
-            client
-                .create(CreateArguments {
-                    path: sensor.uuid.to_string(),
-                    data_sources: vec![CreateDataSource {
-                        name: "sensapp".to_string(),
-                        minimum: None,
-                        maximum: None,
-                        heartbeat: 20,
-                        serie_type: CreateDataSourceType::Gauge,
-                    }],
-                    round_robin_archives: self.preset.get_round_robin_archives(),
-                    start_timestamp,
-                    step_seconds: 10,
+            let sensor = sensor.clone();
+            let sensor_for_create = sensor.clone();
+            let preset = self.preset.clone();
+
+            self.with_reconnect("create", move |client| {
+                let sensor = sensor_for_create.clone();
+                let preset = preset.clone();
+                Box::pin(async move {
+                    client
+                        .create(CreateArguments {
+                            path: sensor.uuid.to_string(),
+                            data_sources: vec![CreateDataSource {
+                                name: "sensapp".to_string(),
+                                minimum: None,
+                                maximum: None,
+                                heartbeat: 20,
+                                serie_type: CreateDataSourceType::Gauge,
+                            }],
+                            round_robin_archives: preset.get_round_robin_archives(),
+                            start_timestamp,
+                            step_seconds: 10,
+                        })
+                        .await
                 })
-                .await?;
+            })
+            .await?;
+
+            let mut created_sensors = self.created_sensors.write().await;
             created_sensors.insert(sensor.uuid);
         }
         Ok(())
@@ -339,11 +481,11 @@ impl StorageInstance for RrdCachedStorage {
                         if timestamp < min_timestamp {
                             min_timestamp = timestamp;
                         }
-                        batch_updates.push(BatchUpdate::new(
-                            &name,
-                            Some(timestamp),
-                            vec![value.value],
-                        )?);
+                        batch_updates.push(PreparedBatchUpdate {
+                            path: name.clone(),
+                            timestamp: Some(timestamp),
+                            data: vec![value.value],
+                        });
                     }
                 }
                 TypedSamples::Numeric(samples) => {
@@ -353,11 +495,11 @@ impl StorageInstance for RrdCachedStorage {
                             min_timestamp = timestamp;
                         }
                         use rust_decimal::prelude::ToPrimitive;
-                        batch_updates.push(BatchUpdate::new(
-                            &name,
-                            Some(timestamp),
-                            vec![value.value.to_f64().unwrap_or(f64::NAN)],
-                        )?);
+                        batch_updates.push(PreparedBatchUpdate {
+                            path: name.clone(),
+                            timestamp: Some(timestamp),
+                            data: vec![value.value.to_f64().unwrap_or(f64::NAN)],
+                        });
                     }
                 }
                 TypedSamples::Integer(samples) => {
@@ -366,11 +508,11 @@ impl StorageInstance for RrdCachedStorage {
                         if timestamp < min_timestamp {
                             min_timestamp = timestamp;
                         }
-                        batch_updates.push(BatchUpdate::new(
-                            &name,
-                            Some(timestamp),
-                            vec![value.value as f64],
-                        )?);
+                        batch_updates.push(PreparedBatchUpdate {
+                            path: name.clone(),
+                            timestamp: Some(timestamp),
+                            data: vec![value.value as f64],
+                        });
                     }
                 }
                 TypedSamples::Boolean(samples) => {
@@ -379,11 +521,11 @@ impl StorageInstance for RrdCachedStorage {
                         if timestamp < min_timestamp {
                             min_timestamp = timestamp;
                         }
-                        batch_updates.push(BatchUpdate::new(
-                            &name,
-                            Some(timestamp),
-                            vec![if value.value { 1.0 } else { 0.0 }],
-                        )?);
+                        batch_updates.push(PreparedBatchUpdate {
+                            path: name.clone(),
+                            timestamp: Some(timestamp),
+                            data: vec![if value.value { 1.0 } else { 0.0 }],
+                        });
                     }
                 }
                 _ => {
@@ -418,30 +560,26 @@ impl StorageInstance for RrdCachedStorage {
                 .await?;
         }
 
-        {
-            let mut client = self.client.write().await;
-            match client.batch(batch_updates).await {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("RRDCached: Failed to batch update: {:?}", e);
-                    match e {
-                        RRDCachedClientError::BatchUpdateErrorResponse(string, errors) => {
-                            error!("RRDCached: Batch update error response: {:?}", string);
-                            for error in errors {
-                                error!("RRDCached: Batch update error: {:?}", error);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
+        if batch_updates.is_empty() {
+            return Ok(());
         }
 
-        // Flush the RRD cached client
-        {
-            let mut client = self.client.write().await;
-            client.flush_all().await?;
-        }
+        self.with_reconnect("batch update", move |client| {
+            let batch_updates = batch_updates.clone();
+            Box::pin(async move {
+                let batch_updates = batch_updates
+                    .into_iter()
+                    .map(PreparedBatchUpdate::into_batch_update)
+                    .collect::<Result<Vec<_>, _>>()?;
+                client.batch(batch_updates).await
+            })
+        })
+        .await?;
+
+        self.with_reconnect("flush_all", |client| {
+            Box::pin(async move { client.flush_all().await })
+        })
+        .await?;
 
         Ok(())
     }
@@ -461,10 +599,12 @@ impl StorageInstance for RrdCachedStorage {
             .unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT)
             .min(crate::storage::MAX_LIST_SERIES_LIMIT);
 
-        // Use RRDcached's native LIST command to get available RRD files
-        let mut client = self.client.write().await;
-
-        match client.list(true, None).await {
+        match self
+            .with_reconnect("list", |client| {
+                Box::pin(async move { client.list(true, None).await })
+            })
+            .await
+        {
             Ok(rrd_files) => {
                 let mut sensors = Vec::new();
                 let mut last_uuid: Option<String> = None;
@@ -474,10 +614,10 @@ impl StorageInstance for RrdCachedStorage {
                     let rrd_file = rrd_file.trim();
 
                     // Filter by metric name if provided
-                    if let Some(filter) = metric_filter {
-                        if !rrd_file.contains(filter) {
-                            continue;
-                        }
+                    if let Some(filter) = metric_filter
+                        && !rrd_file.contains(filter)
+                    {
+                        continue;
                     }
 
                     // Extract UUID from filename (assuming format: "<uuid>.rrd")
@@ -485,10 +625,10 @@ impl StorageInstance for RrdCachedStorage {
                     let uuid_str = filename.strip_suffix(".rrd").unwrap_or(filename);
 
                     // Apply bookmark-based pagination: skip entries <= bookmark
-                    if let Some(bm) = bookmark {
-                        if uuid_str <= bm {
-                            continue;
-                        }
+                    if let Some(bm) = bookmark
+                        && uuid_str <= bm
+                    {
+                        continue;
                     }
 
                     if let Ok(uuid) = uuid_str.parse::<Uuid>() {
@@ -586,22 +726,31 @@ impl StorageInstance for RrdCachedStorage {
         let end_timestamp = end_time.map(|t| t.to_unix_seconds().floor() as i64);
 
         // Fetch data from RRDcached - first flush to ensure data is written
-        let mut client = self.client.write().await;
-
-        // Force flush to ensure all pending data is written to RRD files
-        if let Err(e) = client.flush_all().await {
+        if let Err(e) = self
+            .with_reconnect("flush before query", |client| {
+                Box::pin(async move { client.flush_all().await })
+            })
+            .await
+        {
             tracing::warn!("Failed to flush before query: {:?}", e);
         }
-        let rrd_path = sensor_uuid; // RRD file path is just the UUID
+        let rrd_path = sensor_uuid.to_string();
 
-        let fetch_response = match client
-            .fetch(
-                &rrd_path,
-                ConsolidationFunction::Average, // Use AVERAGE consolidation by default
-                start_timestamp,
-                end_timestamp,
-                None, // columns - use default
-            )
+        let fetch_response = match self
+            .with_reconnect("fetch", |client| {
+                let rrd_path = rrd_path.clone();
+                Box::pin(async move {
+                    client
+                        .fetch(
+                            &rrd_path,
+                            ConsolidationFunction::Average,
+                            start_timestamp,
+                            end_timestamp,
+                            None,
+                        )
+                        .await
+                })
+            })
             .await
         {
             Ok(response) => {
@@ -729,12 +878,11 @@ impl StorageInstance for RrdCachedStorage {
     /// Health check for RRDCached storage
     /// Verifies the connection to RRDCached by checking if client can respond
     async fn health_check(&self) -> Result<()> {
-        // For RRDCached, we can try to flush which should return quickly if connected
-        let mut client = self.client.write().await;
-        client
-            .flush_all()
-            .await
-            .context("RRDCached health check failed")?;
+        self.with_reconnect("health check", |client| {
+            Box::pin(async move { client.flush_all().await })
+        })
+        .await
+        .context("RRDCached health check failed")?;
         Ok(())
     }
 
@@ -747,5 +895,155 @@ impl StorageInstance for RrdCachedStorage {
         let mut created_sensors = self.created_sensors.write().await;
         created_sensors.clear();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        collections::VecDeque,
+        io,
+        sync::{
+            Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    #[derive(Debug)]
+    struct MockClient {
+        list_results: Mutex<VecDeque<Result<Vec<String>, RRDCachedClientError>>>,
+        flush_results: Mutex<VecDeque<Result<(), RRDCachedClientError>>>,
+    }
+
+    impl MockClient {
+        fn with_list_results(results: Vec<Result<Vec<String>, RRDCachedClientError>>) -> Self {
+            Self {
+                list_results: Mutex::new(results.into()),
+                flush_results: Mutex::new(VecDeque::new()),
+            }
+        }
+
+        fn with_flush_results(results: Vec<Result<(), RRDCachedClientError>>) -> Self {
+            Self {
+                list_results: Mutex::new(VecDeque::new()),
+                flush_results: Mutex::new(results.into()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl RRDCachedClientTrait for MockClient {
+        async fn create(&mut self, _args: CreateArguments) -> Result<(), RRDCachedClientError> {
+            Ok(())
+        }
+
+        async fn batch(
+            &mut self,
+            _batch_updates: Vec<BatchUpdate>,
+        ) -> Result<(), RRDCachedClientError> {
+            Ok(())
+        }
+
+        async fn flush_all(&mut self) -> Result<(), RRDCachedClientError> {
+            self.flush_results
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(Ok(()))
+        }
+
+        async fn list(
+            &mut self,
+            _recursive: bool,
+            _path: Option<&str>,
+        ) -> Result<Vec<String>, RRDCachedClientError> {
+            self.list_results
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(Ok(Vec::new()))
+        }
+
+        async fn fetch(
+            &mut self,
+            _path: &str,
+            _consolidation_function: ConsolidationFunction,
+            _start: Option<i64>,
+            _end: Option<i64>,
+            _columns: Option<Vec<String>>,
+        ) -> Result<rrdcached_client::fetch::FetchResponse, RRDCachedClientError> {
+            Ok(rrdcached_client::fetch::FetchResponse {
+                flush_version: 0,
+                start: 0,
+                end: 0,
+                step: 1,
+                ds_count: 0,
+                ds_names: Vec::new(),
+                data: Vec::new(),
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockConnector {
+        connect_calls: AtomicUsize,
+        clients: Mutex<VecDeque<Box<dyn RRDCachedClientTrait>>>,
+    }
+
+    impl MockConnector {
+        fn new(clients: Vec<Box<dyn RRDCachedClientTrait>>) -> Self {
+            Self {
+                connect_calls: AtomicUsize::new(0),
+                clients: Mutex::new(clients.into()),
+            }
+        }
+
+        fn connect_calls(&self) -> usize {
+            self.connect_calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl RRDCachedConnectorTrait for MockConnector {
+        async fn connect(&self) -> Result<Box<dyn RRDCachedClientTrait>, RRDCachedClientError> {
+            self.connect_calls.fetch_add(1, Ordering::SeqCst);
+            self.clients
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_else(|| RRDCachedClientError::Parsing("missing mock client".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn list_series_reconnects_after_io_error() {
+        let initial_client = Box::new(MockClient::with_list_results(vec![Err(
+            RRDCachedClientError::Io(io::Error::new(io::ErrorKind::BrokenPipe, "boom")),
+        )]));
+        let connector = Arc::new(MockConnector::new(vec![Box::new(
+            MockClient::with_list_results(vec![Ok(vec![format!("{}.rrd\n", Uuid::nil())])]),
+        )]));
+        let storage = RrdCachedStorage::new_for_test(initial_client, connector.clone());
+
+        let result = storage.list_series(None, Some(10), None).await.unwrap();
+
+        assert_eq!(result.series.len(), 1);
+        assert_eq!(result.series[0].uuid, Uuid::nil());
+        assert_eq!(connector.connect_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn health_check_does_not_retry_non_reconnectable_errors() {
+        let initial_client = Box::new(MockClient::with_flush_results(vec![Err(
+            RRDCachedClientError::UnexpectedResponse(-1, "protocol failure".to_string()),
+        )]));
+        let connector = Arc::new(MockConnector::new(Vec::new()));
+        let storage = RrdCachedStorage::new_for_test(initial_client, connector.clone());
+
+        let error = storage.health_check().await.unwrap_err().to_string();
+
+        assert!(error.contains("RRDCached health check failed"));
+        assert_eq!(connector.connect_calls(), 0);
     }
 }
