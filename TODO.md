@@ -84,8 +84,8 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 - [x] Integration tests for Apache Arrow export (`tests/arrow_integration.rs`)
 - [x] Integration tests for datamodel edge cases (`tests/datamodel.rs`)
 - [x] Integration tests for parser edge cases (`tests/parser_edge_cases.rs`)
-- [ ] Integration tests for InfluxDB compatibility endpoints
-- [ ] Integration tests for Prometheus compatibility endpoints
+- [x] Integration tests for InfluxDB compatibility endpoints (`tests/influxdb_integration.rs`)
+- [x] Integration tests for Prometheus compatibility endpoints (`tests/prometheus_write_integration.rs`)
 - [ ] Cross-storage backend data consistency tests
 
 ### ⚡ Performance Benchmarks

@@ -387,7 +387,10 @@ impl StorageInstance for RrdCachedStorage {
                     }
                 }
                 _ => {
-                    print!("Unsupported type");
+                    tracing::warn!(
+                        "RRDCached: unsupported sensor type {:?}, skipping",
+                        single_sensor_batch.sensor.sensor_type
+                    );
                 }
             }
         }
@@ -450,15 +453,21 @@ impl StorageInstance for RrdCachedStorage {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-        _limit: Option<usize>,
-        _bookmark: Option<&str>,
+        limit: Option<usize>,
+        bookmark: Option<&str>,
     ) -> Result<crate::storage::ListSeriesResult> {
+        // Validate and cap the limit
+        let effective_limit = limit
+            .unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT)
+            .min(crate::storage::MAX_LIST_SERIES_LIMIT);
+
         // Use RRDcached's native LIST command to get available RRD files
         let mut client = self.client.write().await;
 
         match client.list(true, None).await {
             Ok(rrd_files) => {
                 let mut sensors = Vec::new();
+                let mut last_uuid: Option<String> = None;
 
                 for rrd_file in rrd_files {
                     // Trim whitespace from filename (RRDcached LIST returns names with trailing newlines)
@@ -472,23 +481,27 @@ impl StorageInstance for RrdCachedStorage {
                     }
 
                     // Extract UUID from filename (assuming format: "<uuid>.rrd")
-                    let filename = rrd_file.rsplit('/').next().unwrap_or(&rrd_file);
+                    let filename = rrd_file.rsplit('/').next().unwrap_or(rrd_file);
                     let uuid_str = filename.strip_suffix(".rrd").unwrap_or(filename);
 
+                    // Apply bookmark-based pagination: skip entries <= bookmark
+                    if let Some(bm) = bookmark {
+                        if uuid_str <= bm {
+                            continue;
+                        }
+                    }
+
                     if let Ok(uuid) = uuid_str.parse::<Uuid>() {
-                        // Create a basic sensor object from RRD file info
-                        // Note: RRDcached doesn't store full sensor metadata,
-                        // so we create minimal sensor objects with defaults
                         let sensor = crate::datamodel::Sensor {
                             uuid,
-                            name: uuid.to_string(), // Use UUID as name
-                            sensor_type: crate::datamodel::SensorType::Float, // Default type
+                            name: uuid.to_string(),
+                            sensor_type: crate::datamodel::SensorType::Float,
                             unit: None,
                             labels: SmallVec::new(),
                         };
+                        last_uuid = Some(uuid_str.to_string());
                         sensors.push(sensor);
                     } else {
-                        // If filename is not a valid UUID, create a sensor with a new UUID
                         let sensor = crate::datamodel::Sensor {
                             uuid: Uuid::new_v4(),
                             name: filename.to_string(),
@@ -496,13 +509,25 @@ impl StorageInstance for RrdCachedStorage {
                             unit: None,
                             labels: SmallVec::new(),
                         };
+                        last_uuid = Some(uuid_str.to_string());
                         sensors.push(sensor);
+                    }
+
+                    if sensors.len() >= effective_limit {
+                        break;
                     }
                 }
 
+                // Return bookmark for next page if we hit the limit
+                let next_bookmark = if sensors.len() == effective_limit {
+                    last_uuid
+                } else {
+                    None
+                };
+
                 Ok(crate::storage::ListSeriesResult {
                     series: sensors,
-                    bookmark: None,
+                    bookmark: next_bookmark,
                 })
             }
             Err(e) => {
@@ -513,14 +538,13 @@ impl StorageInstance for RrdCachedStorage {
                 let mut sensors = Vec::new();
 
                 for uuid in created_sensors.iter() {
-                    let sensor = crate::datamodel::Sensor {
+                    sensors.push(crate::datamodel::Sensor {
                         uuid: *uuid,
                         name: uuid.to_string(),
                         sensor_type: crate::datamodel::SensorType::Float,
                         unit: None,
                         labels: SmallVec::new(),
-                    };
-                    sensors.push(sensor);
+                    });
                 }
 
                 Ok(crate::storage::ListSeriesResult {
@@ -581,7 +605,7 @@ impl StorageInstance for RrdCachedStorage {
             .await
         {
             Ok(response) => {
-                tracing::info!(
+                tracing::debug!(
                     "Fetch successful for sensor {}: {} data points",
                     sensor_uuid,
                     response.data.len()
@@ -590,7 +614,7 @@ impl StorageInstance for RrdCachedStorage {
             }
             Err(e) => {
                 // If fetch fails, it might be because no data exists yet
-                tracing::info!("Failed to fetch data for sensor {}: {:?}", sensor_uuid, e);
+                tracing::debug!("Failed to fetch data for sensor {}: {:?}", sensor_uuid, e);
                 return Ok(None);
             }
         };
@@ -598,7 +622,7 @@ impl StorageInstance for RrdCachedStorage {
         // Convert RRD data to SensApp samples
         let mut samples = SmallVec::new();
 
-        tracing::info!("Processing {} RRD data points", fetch_response.data.len());
+        tracing::debug!("Processing {} RRD data points", fetch_response.data.len());
 
         // RRD returns data as Vec<(timestamp, Vec<f64>)>
         // We use the first data source (index 0) since we create RRDs with one DS
@@ -608,23 +632,23 @@ impl StorageInstance for RrdCachedStorage {
                 timestamp,
                 values
             );
-            if let Some(&value) = values.get(0) {
+            if let Some(&value) = values.first() {
                 // Skip NaN values (RRD uses NaN for missing data)
                 if !value.is_nan() {
                     let datetime =
                         crate::datamodel::SensAppDateTime::from_unix_seconds_i64(timestamp as i64);
                     samples.push(Sample { datetime, value });
-                    tracing::debug!("Added sample: time={:?}, value={}", datetime, value);
+                    tracing::trace!("Added sample: time={:?}, value={}", datetime, value);
                 } else {
-                    tracing::debug!("Skipped NaN value at timestamp {}", timestamp);
+                    tracing::trace!("Skipped NaN value at timestamp {}", timestamp);
                 }
             }
         }
 
-        tracing::info!("Converted {} valid samples from RRD data", samples.len());
+        tracing::debug!("Converted {} valid samples from RRD data", samples.len());
 
         if samples.is_empty() {
-            tracing::info!("No valid samples found, returning None");
+            tracing::debug!("No valid samples found, returning None");
             return Ok(None);
         }
 
@@ -645,14 +669,61 @@ impl StorageInstance for RrdCachedStorage {
 
     async fn query_sensors_by_labels(
         &self,
-        _matchers: &[super::LabelMatcher],
-        _start_time: Option<crate::datamodel::SensAppDateTime>,
-        _end_time: Option<crate::datamodel::SensAppDateTime>,
-        _limit: Option<usize>,
+        matchers: &[super::LabelMatcher],
+        start_time: Option<crate::datamodel::SensAppDateTime>,
+        end_time: Option<crate::datamodel::SensAppDateTime>,
+        limit: Option<usize>,
         _numeric_only: bool,
     ) -> Result<Vec<crate::datamodel::SensorData>> {
-        // TODO: Implement label-based query for RRDCached
-        anyhow::bail!("query_sensors_by_labels not yet implemented for RRDCached")
+        // RRDcached doesn't store label metadata, so we can only match on __name__
+        // (which corresponds to sensor name / UUID).
+        // All RRD data is numeric, so numeric_only is always satisfied.
+        if matchers.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Get all available series
+        let result = self.list_series(None, None, None).await?;
+
+        // Filter sensors by matchers (only __name__ is meaningful for RRDcached)
+        let filtered_sensors: Vec<_> = result
+            .series
+            .into_iter()
+            .filter(|sensor| {
+                matchers.iter().all(|matcher| {
+                    if matcher.is_name_matcher() {
+                        match matcher.matcher_type {
+                            super::MatcherType::Equal => sensor.name == matcher.value,
+                            super::MatcherType::NotEqual => sensor.name != matcher.value,
+                            super::MatcherType::RegexMatch => regex::Regex::new(&matcher.value)
+                                .map(|re| re.is_match(&sensor.name))
+                                .unwrap_or(false),
+                            super::MatcherType::RegexNotMatch => regex::Regex::new(&matcher.value)
+                                .map(|re| !re.is_match(&sensor.name))
+                                .unwrap_or(true),
+                        }
+                    } else {
+                        // RRDcached has no labels, so non-name matchers
+                        // match nothing for Equal/RegexMatch, everything for NotEqual/RegexNotMatch
+                        matcher.matcher_type.is_negated()
+                    }
+                })
+            })
+            .collect();
+
+        // Fetch data for each matching sensor
+        let mut results = Vec::with_capacity(filtered_sensors.len());
+        for sensor in filtered_sensors {
+            let uuid_str = sensor.uuid.to_string();
+            if let Some(sensor_data) = self
+                .query_sensor_data(&uuid_str, start_time, end_time, limit)
+                .await?
+            {
+                results.push(sensor_data);
+            }
+        }
+
+        Ok(results)
     }
 
     /// Health check for RRDCached storage

@@ -251,7 +251,8 @@ impl StorageInstance for DuckDBStorage {
                     ))
                 })?;
 
-                let unit = unit_name.map(|unit_name| Unit::new(unit_name, unit_description.clone()));
+                let unit =
+                    unit_name.map(|unit_name| Unit::new(unit_name, unit_description.clone()));
 
                 metrics.push(Metric::new(
                     metric_name,
@@ -646,7 +647,13 @@ impl StorageInstance for DuckDBStorage {
         let mut bookmark = None;
 
         loop {
-            let page = self.list_series(None, Some(crate::storage::MAX_LIST_SERIES_LIMIT), bookmark.as_deref()).await?;
+            let page = self
+                .list_series(
+                    None,
+                    Some(crate::storage::MAX_LIST_SERIES_LIMIT),
+                    bookmark.as_deref(),
+                )
+                .await?;
 
             for sensor in page.series {
                 if numeric_only && !is_numeric_sensor_type(sensor.sensor_type) {

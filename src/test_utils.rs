@@ -58,7 +58,9 @@ fn isolate_test_database_path(path: &str) -> String {
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_else(|| file_name.into_owned());
-    let extension = path.extension().map(|ext| ext.to_string_lossy().into_owned());
+    let extension = path
+        .extension()
+        .map(|ext| ext.to_string_lossy().into_owned());
 
     let isolated_name = match extension {
         Some(extension) => format!("{}-{}.{}", stem, process_id, extension),

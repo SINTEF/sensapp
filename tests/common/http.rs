@@ -6,6 +6,7 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
 use sensapp::http::crud::{get_series_data, list_metrics, list_series};
 use sensapp::http::health::{liveness, readiness};
+use sensapp::http::influxdb::publish_influxdb;
 use sensapp::http::server::publish_senml_data;
 use sensapp::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
@@ -32,6 +33,7 @@ impl TestApp {
         // We'll define simple test handlers that delegate to the import functions
         let app = Router::new()
             .route("/sensors/publish", post(test_publish_handler))
+            .route("/api/v2/write", post(publish_influxdb))
             .route("/metrics", get(list_metrics))
             .route("/series", get(list_series))
             .route("/series/{series_uuid}", get(get_series_data))
@@ -120,6 +122,13 @@ impl TestApp {
             .header("content-type", "text/plain")
             .body(Body::from(influx_data.to_string()))?;
 
+        let response = self.app.clone().oneshot(request).await?;
+        Ok(TestResponse::new(response).await)
+    }
+
+    /// Send a raw request (for custom headers, compression, etc.)
+    #[allow(dead_code)] // Test helper method
+    pub async fn raw_request(&self, request: Request<Body>) -> Result<TestResponse> {
         let response = self.app.clone().oneshot(request).await?;
         Ok(TestResponse::new(response).await)
     }
