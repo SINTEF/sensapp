@@ -1,6 +1,7 @@
 use crate::datamodel::{Sample, TypedSamples, batch::SingleSensorBatch};
 use crate::storage::clickhouse::clickhouse_utilities::{
-    datetime_to_micros, get_sensor_id_or_create_sensor, map_clickhouse_error,
+    datetime_to_micros, decimal_to_clickhouse_raw, get_sensor_id_or_create_sensor,
+    map_clickhouse_error,
 };
 use anyhow::Result;
 use base64::prelude::*;
@@ -19,7 +20,7 @@ struct IntegerValueRow {
 struct NumericValueRow {
     sensor_id: u64,
     timestamp_us: i64,
-    value: rust_decimal::Decimal,
+    value: i128,
 }
 
 #[derive(Serialize, clickhouse::Row)]
@@ -245,7 +246,7 @@ impl<'a> ClickHousePublisher<'a> {
             let row = NumericValueRow {
                 sensor_id,
                 timestamp_us: datetime_to_micros(&sample.datetime),
-                value: sample.value,
+                value: decimal_to_clickhouse_raw(&sample.value)?,
             };
             inserter
                 .write(&row)

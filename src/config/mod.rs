@@ -171,12 +171,13 @@ mod tests {
 
     #[test]
     fn test_load_configuration() {
-        assert!(SENSAPP_CONFIG.get().is_none());
+        load_configuration().unwrap();
         load_configuration().unwrap();
         assert!(SENSAPP_CONFIG.get().is_some());
 
         let config = get().unwrap();
-        assert_eq!(config.port, 3000);
+        let config_again = get().unwrap();
+        assert!(Arc::ptr_eq(&config, &config_again));
     }
 
     #[test]

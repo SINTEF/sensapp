@@ -48,6 +48,25 @@ pub fn multi_sensor_csv() -> String {
     )
 }
 
+/// Sample CSV data for three sensors
+#[allow(dead_code)] // Test fixture
+pub fn three_sensor_csv() -> String {
+    let test_id = generate_test_id();
+    format!(
+        r#"datetime,sensor_name,value,unit
+2024-01-01T00:00:00Z,temperature_{},20.5,°C
+2024-01-01T00:00:00Z,humidity_{},65.0,%
+2024-01-01T00:00:00Z,pressure_{},1013.0,hPa
+2024-01-01T00:01:00Z,temperature_{},21.0,°C
+2024-01-01T00:01:00Z,humidity_{},64.5,%
+2024-01-01T00:01:00Z,pressure_{},1012.8,hPa
+2024-01-01T00:02:00Z,temperature_{},21.5,°C
+2024-01-01T00:02:00Z,humidity_{},64.0,%
+2024-01-01T00:02:00Z,pressure_{},1012.6,hPa"#,
+        test_id, test_id, test_id, test_id, test_id, test_id, test_id, test_id, test_id
+    )
+}
+
 /// Sample CSV data for multiple sensors with known sensor names
 /// Returns (csv_data, temperature_sensor_name, humidity_sensor_name)
 #[allow(dead_code)] // Test fixture

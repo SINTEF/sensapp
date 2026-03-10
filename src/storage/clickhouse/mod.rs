@@ -15,10 +15,13 @@ use uuid::Uuid;
 
 pub mod clickhouse_publishers;
 pub mod clickhouse_utilities;
+mod matchers;
 
+use crate::storage::{DEFAULT_LIST_SERIES_LIMIT, MAX_LIST_SERIES_LIMIT};
 use clickhouse_publishers::ClickHousePublisher;
 use clickhouse_utilities::{
-    datetime_to_micros, map_clickhouse_error, micros_to_datetime, uuid_to_sensor_id,
+    datetime_to_micros, decimal_from_clickhouse_raw, map_clickhouse_error, micros_to_datetime,
+    uuid_to_sensor_id,
 };
 
 pub struct ClickHouseStorage {
@@ -219,35 +222,84 @@ impl StorageInstance for ClickHouseStorage {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-        _limit: Option<usize>,
-        _bookmark: Option<&str>,
+        limit: Option<usize>,
+        bookmark: Option<&str>,
     ) -> Result<crate::storage::ListSeriesResult> {
-        // TODO: Implement pagination for ClickHouse backend
-        // For now, ignore limit and bookmark parameters and return all results
-        let (query, use_filter) = match metric_filter {
-            Some(_) => (
-                r#"
-                    SELECT s.sensor_id, s.uuid, s.name, s.type,
-                           COALESCE(u.name, '') as unit_name,
-                           COALESCE(u.description, '') as unit_description
-                    FROM sensors s
-                    LEFT JOIN units u ON s.unit = u.id
-                    WHERE s.name = ? ORDER BY s.uuid ASC
-                "#,
-                true,
-            ),
-            None => (
-                r#"
-                    SELECT s.sensor_id, s.uuid, s.name, s.type,
-                           COALESCE(u.name, '') as unit_name,
-                           COALESCE(u.description, '') as unit_description
-                    FROM sensors s
-                    LEFT JOIN units u ON s.unit = u.id
-                    ORDER BY s.uuid ASC
-                "#,
-                false,
-            ),
+        let bookmark_id = if let Some(bookmark_str) = bookmark {
+            Some(bookmark_str.parse::<u64>().map_err(|e| {
+                anyhow::Error::from(StorageError::invalid_data_format(
+                    &format!("Invalid bookmark format: {}", e),
+                    None,
+                    None,
+                ))
+            })?)
+        } else {
+            None
         };
+
+        let effective_limit = limit
+            .unwrap_or(DEFAULT_LIST_SERIES_LIMIT)
+            .min(MAX_LIST_SERIES_LIMIT);
+        let fetch_limit = effective_limit.saturating_add(1);
+
+        let (query, use_filter, use_bookmark) =
+            match (metric_filter.is_some(), bookmark_id.is_some()) {
+                (true, true) => (
+                    r#"
+                    SELECT s.sensor_id, s.uuid, s.name, s.type,
+                           COALESCE(u.name, '') as unit_name,
+                           COALESCE(u.description, '') as unit_description
+                    FROM sensors s
+                    LEFT JOIN units u ON s.unit = u.id
+                    WHERE s.name = ? AND s.sensor_id > ?
+                    ORDER BY s.sensor_id ASC
+                    LIMIT ?
+                "#,
+                    true,
+                    true,
+                ),
+                (true, false) => (
+                    r#"
+                    SELECT s.sensor_id, s.uuid, s.name, s.type,
+                           COALESCE(u.name, '') as unit_name,
+                           COALESCE(u.description, '') as unit_description
+                    FROM sensors s
+                    LEFT JOIN units u ON s.unit = u.id
+                    WHERE s.name = ?
+                    ORDER BY s.sensor_id ASC
+                    LIMIT ?
+                "#,
+                    true,
+                    false,
+                ),
+                (false, true) => (
+                    r#"
+                    SELECT s.sensor_id, s.uuid, s.name, s.type,
+                           COALESCE(u.name, '') as unit_name,
+                           COALESCE(u.description, '') as unit_description
+                    FROM sensors s
+                    LEFT JOIN units u ON s.unit = u.id
+                    WHERE s.sensor_id > ?
+                    ORDER BY s.sensor_id ASC
+                    LIMIT ?
+                "#,
+                    false,
+                    true,
+                ),
+                (false, false) => (
+                    r#"
+                    SELECT s.sensor_id, s.uuid, s.name, s.type,
+                           COALESCE(u.name, '') as unit_name,
+                           COALESCE(u.description, '') as unit_description
+                    FROM sensors s
+                    LEFT JOIN units u ON s.unit = u.id
+                    ORDER BY s.sensor_id ASC
+                    LIMIT ?
+                "#,
+                    false,
+                    false,
+                ),
+            };
 
         #[derive(clickhouse::Row, serde::Deserialize)]
         struct SensorRow {
@@ -260,24 +312,31 @@ impl StorageInstance for ClickHouseStorage {
             unit_description: String,
         }
 
-        let mut cursor = if use_filter {
-            self.client
-                .query(query)
-                .bind(metric_filter.unwrap())
-                .fetch::<SensorRow>()
-                .map_err(|e| map_clickhouse_error(e, None, None))?
-        } else {
-            self.client
-                .query(query)
-                .fetch::<SensorRow>()
-                .map_err(|e| map_clickhouse_error(e, None, None))?
-        };
+        let mut query_builder = self.client.query(query);
+        if use_filter {
+            query_builder = query_builder.bind(metric_filter.unwrap());
+        }
+        if use_bookmark {
+            query_builder = query_builder.bind(bookmark_id.unwrap());
+        }
+        let mut cursor = query_builder
+            .bind(fetch_limit as u64)
+            .fetch::<SensorRow>()
+            .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         // Process sensors directly from cursor
         let mut sensors = Vec::new();
+        let mut last_sensor_id = None;
+        let mut has_more = false;
 
         while let Some(row) = cursor.next().await? {
+            if sensors.len() == effective_limit {
+                has_more = true;
+                break;
+            }
+
             let sensor_id = row.sensor_id;
+            last_sensor_id = Some(sensor_id);
             let uuid = row.uuid;
             let name = row.name;
             let sensor_type_str = row.r#type;
@@ -332,7 +391,11 @@ impl StorageInstance for ClickHouseStorage {
 
         Ok(crate::storage::ListSeriesResult {
             series: sensors,
-            bookmark: None,
+            bookmark: if has_more {
+                last_sensor_id.map(|sensor_id| sensor_id.to_string())
+            } else {
+                None
+            },
         })
     }
 
@@ -495,14 +558,40 @@ impl StorageInstance for ClickHouseStorage {
 
     async fn query_sensors_by_labels(
         &self,
-        _matchers: &[super::LabelMatcher],
-        _start_time: Option<SensAppDateTime>,
-        _end_time: Option<SensAppDateTime>,
-        _limit: Option<usize>,
-        _numeric_only: bool,
+        matchers: &[super::LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        limit: Option<usize>,
+        numeric_only: bool,
     ) -> Result<Vec<SensorData>> {
-        // TODO: Implement label-based query for ClickHouse
-        anyhow::bail!("query_sensors_by_labels not yet implemented for ClickHouse")
+        if matchers.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let (name_matchers, label_matchers): (Vec<_>, Vec<_>) = matchers
+            .iter()
+            .partition(|matcher| matcher.is_name_matcher());
+
+        let sensors = self
+            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
+            .await?;
+
+        if sensors.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT);
+        let mut results = Vec::with_capacity(sensors.len());
+
+        for (sensor_id, sensor) in sensors {
+            let samples = self
+                .query_samples_by_type(sensor_id, &sensor.sensor_type, start_time, end_time, limit)
+                .await?;
+
+            results.push(SensorData::new(sensor, samples));
+        }
+
+        Ok(results)
     }
 
     /// Health check for ClickHouse storage
@@ -605,21 +694,14 @@ impl ClickHouseStorage {
                 }
 
                 let mut result_cursor = cursor
-                    .fetch::<(i64, String)>()
+                    .fetch::<(i64, i128)>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
 
                 if let TypedSamples::Numeric(ref mut samples) = typed_samples {
-                    while let Some((timestamp_us, value_str)) = result_cursor.next().await? {
-                        let value = rust_decimal::Decimal::from_str(&value_str).map_err(|e| {
-                            StorageError::invalid_data_format(
-                                &format!("Failed to parse decimal value: {}", e),
-                                None,
-                                None,
-                            )
-                        })?;
+                    while let Some((timestamp_us, value_raw)) = result_cursor.next().await? {
                         samples.push(Sample {
                             datetime: micros_to_datetime(timestamp_us),
-                            value,
+                            value: decimal_from_clickhouse_raw(value_raw),
                         });
                     }
                 }

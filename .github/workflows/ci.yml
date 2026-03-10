@@ -58,12 +58,14 @@ jobs:
         os: [ubuntu-latest]
         rust: [stable]
         #rust: [stable, beta]
-        feature: [sqlite, postgres]
+        feature: [sqlite, postgres, clickhouse]
         include:
           - feature: sqlite
             test-env: "TEST_DATABASE_URL_SQLITE=sqlite://test.db"
           - feature: postgres
             test-env: "TEST_DATABASE_URL_POSTGRES=postgres://postgres:postgres@localhost:5432/sensapp"
+          - feature: clickhouse
+            test-env: "TEST_DATABASE_URL_CLICKHOUSE=clickhouse://default:password@localhost:8123/sensapp_test"
 
     services:
       postgres:
@@ -79,6 +81,20 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_DB: sensapp_test
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: password
+        options: >-
+          --health-cmd "clickhouse-client --password password --query 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 8123:8123
+          - 9000:9000
 
     steps:
       - name: Checkout repository

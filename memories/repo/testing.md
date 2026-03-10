@@ -1,0 +1,1 @@
+- ClickHouse integration tests and the ClickHouse Rust client use the HTTP endpoint on port 8123; using port 9000 in `TEST_DATABASE_URL` causes migrations/tests to fail.

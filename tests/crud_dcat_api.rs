@@ -5,8 +5,12 @@ use axum::http::StatusCode;
 use common::http::TestApp;
 use common::{TestDb, fixtures};
 use sensapp::config::load_configuration_for_tests;
+use sensapp::datamodel::batch_builder::BatchBuilder;
+use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples};
 use serde_json::Value;
 use serial_test::serial;
+use std::sync::Arc;
+use uuid::Uuid;
 
 // Ensure configuration is loaded once for all tests in this module
 static INIT: std::sync::Once = std::sync::Once::new();
@@ -14,6 +18,43 @@ fn ensure_config() {
     INIT.call_once(|| {
         load_configuration_for_tests().expect("Failed to load configuration for tests");
     });
+}
+
+fn create_float_sensor(name: &str, start_value: f64) -> (Sensor, TypedSamples) {
+    let sensor = Sensor::new(
+        Uuid::new_v4(),
+        name.to_string(),
+        SensorType::Float,
+        None,
+        None,
+    );
+    let samples = TypedSamples::Float(smallvec::smallvec![
+        Sample {
+            datetime: hifitime::Epoch::from_unix_seconds(1704067200.0),
+            value: start_value,
+        },
+        Sample {
+            datetime: hifitime::Epoch::from_unix_seconds(1704067260.0),
+            value: start_value + 0.5,
+        }
+    ]);
+    (sensor, samples)
+}
+
+async fn seed_three_series(storage: &Arc<dyn sensapp::storage::StorageInstance>) -> Result<()> {
+    let mut batch_builder = BatchBuilder::new()?;
+
+    for (sensor, samples) in [
+        create_float_sensor("temperature_test", 20.0),
+        create_float_sensor("humidity_test", 60.0),
+        create_float_sensor("pressure_test", 1013.0),
+    ] {
+        let sensor = Arc::new(sensor);
+        batch_builder.add(sensor.clone(), samples).await?;
+    }
+
+    batch_builder.send_what_is_left(storage.clone()).await?;
+    Ok(())
 }
 
 /// Test CRUD/DCAT API functionality with new series terminology
@@ -30,8 +71,7 @@ mod crud_dcat_tests {
         let app = TestApp::new(storage.clone()).await;
 
         // Ingest data from multiple sensors with same name but different labels
-        let csv_data = fixtures::multi_sensor_csv();
-        app.post_csv("/sensors/publish", &csv_data).await?;
+        seed_three_series(&storage).await?;
 
         // When: We query the metrics endpoint
         let response = app.get("/metrics").await?;
@@ -230,8 +270,7 @@ mod crud_dcat_tests {
         let app = TestApp::new(storage.clone()).await;
 
         // Ingest data with labels (using multi-sensor CSV which should have varied data)
-        let csv_data = fixtures::multi_sensor_csv();
-        app.post_csv("/sensors/publish", &csv_data).await?;
+        seed_three_series(&storage).await?;
 
         // When: We query the series endpoint
         let response = app.get("/series").await?;
@@ -522,9 +561,19 @@ mod crud_dcat_tests {
         let storage = test_db.storage();
         let app = TestApp::new(storage.clone()).await;
 
-        // Ingest multiple sensors
-        let csv_data = fixtures::multi_sensor_csv();
-        app.post_csv("/sensors/publish", &csv_data).await?;
+        // Seed multiple sensors directly so pagination tests do not depend on importer behavior
+        seed_three_series(&storage).await?;
+
+        let seeded_page = storage.list_series(None, Some(2), None).await?;
+        assert_eq!(
+            seeded_page.series.len(),
+            2,
+            "Seeded first page should have 2 series"
+        );
+        assert!(
+            seeded_page.bookmark.is_some(),
+            "Seeded storage pagination should produce a bookmark"
+        );
 
         // When: We query with a limit of 2
         let response = app.get("/series?limit=2").await?;
@@ -569,9 +618,19 @@ mod crud_dcat_tests {
         let storage = test_db.storage();
         let app = TestApp::new(storage.clone()).await;
 
-        // Ingest multiple sensors
-        let csv_data = fixtures::multi_sensor_csv();
-        app.post_csv("/sensors/publish", &csv_data).await?;
+        // Seed multiple sensors directly so pagination tests do not depend on importer behavior
+        seed_three_series(&storage).await?;
+
+        let seeded_page = storage.list_series(None, Some(2), None).await?;
+        assert_eq!(
+            seeded_page.series.len(),
+            2,
+            "Seeded first page should have 2 series"
+        );
+        assert!(
+            seeded_page.bookmark.is_some(),
+            "Seeded storage pagination should produce a bookmark"
+        );
 
         // When: We query the first page
         let first_response = app.get("/series?limit=2").await?;

@@ -97,17 +97,12 @@ fn influxdb_field_to_sensapp(
         }
         FieldValue::F64(value) => {
             if with_numeric {
+                let decimal = Decimal::from_str(&value.to_string()).map_err(|e| {
+                    anyhow::anyhow!("Failed to convert f64 value {} to Decimal: {}", value, e)
+                })?;
                 Ok((
                     SensorType::Numeric,
-                    TypedSamples::one_numeric(
-                        Decimal::from_f64_retain(value).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "Failed to convert f64 value {} to Decimal - precision may be too high",
-                                value
-                            )
-                        })?,
-                        datetime,
-                    ),
+                    TypedSamples::one_numeric(decimal, datetime),
                 ))
             } else {
                 Ok((SensorType::Float, TypedSamples::one_float(value, datetime)))
@@ -588,7 +583,7 @@ mod tests {
             result,
             (
                 SensorType::Numeric,
-                TypedSamples::one_numeric(Decimal::from_f64_retain(42.0).unwrap(), datetime)
+                TypedSamples::one_numeric(Decimal::from(42), datetime)
             )
         );
 
