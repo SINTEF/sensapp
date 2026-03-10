@@ -95,7 +95,7 @@ SETTINGS index_granularity_bytes = 10485760;
 CREATE TABLE IF NOT EXISTS json_values (
     sensor_id UInt64,
     timestamp_us Int64 CODEC(DoubleDelta, LZ4),
-    value JSON  -- Native JSON type (ClickHouse 24.8+) for better performance and compression
+    value String CODEC(ZSTD(3))
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)

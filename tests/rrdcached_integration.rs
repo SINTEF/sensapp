@@ -36,7 +36,7 @@ mod rrdcached_tests {
         storage.create_or_migrate().await?;
 
         // Then: The operations should succeed (database is accessible)
-        let sensors = storage.list_series(None).await?;
+        let sensors = storage.list_series(None, None, None).await?.series;
 
         // Database should be empty initially (or may contain existing RRD files)
         println!("Found {} sensors in RRDcached database", sensors.len());
@@ -78,11 +78,10 @@ mod rrdcached_tests {
         sensors_vec.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors_vec));
 
-        let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
-        storage.publish(batch, sync_sender.clone()).await?;
+        storage.publish(batch).await?;
 
         // When: We list the series
-        let sensors = storage.list_series(None).await?;
+        let sensors = storage.list_series(None, None, None).await?.series;
 
         // Then: We should find the sensor we just created
         println!("Found {} sensors after publishing data", sensors.len());
@@ -163,8 +162,7 @@ mod rrdcached_tests {
         let batch = Arc::new(Batch::new(sensors));
 
         // When: We publish the batch
-        let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
-        storage.publish(batch, sync_sender.clone()).await?;
+        storage.publish(batch).await?;
 
         // Then: The data should be stored
         // Note: RRDcached doesn't support querying data back easily,
@@ -172,7 +170,7 @@ mod rrdcached_tests {
         println!("Successfully published float data to RRDcached");
 
         // Verify the sensor appears in our created sensors list
-        let sensors = storage.list_series(None).await?;
+        let sensors = storage.list_series(None, None, None).await?.series;
         assert!(!sensors.is_empty(), "Should have at least one sensor");
 
         let found_sensor = sensors.iter().find(|s| s.uuid == sensor_uuid);
@@ -193,8 +191,6 @@ mod rrdcached_tests {
         let storage = test_db.storage();
 
         let base_time = 1704067200.0; // 2024-01-01 00:00:00 UTC
-        let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
-
         // Test Integer data
         let int_sensor = Sensor {
             uuid: Uuid::new_v4(),
@@ -218,7 +214,7 @@ mod rrdcached_tests {
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
 
-        storage.publish(batch, sync_sender.clone()).await?;
+        storage.publish(batch).await?;
         println!("Successfully published integer data to RRDcached");
 
         // Test Boolean data
@@ -244,11 +240,11 @@ mod rrdcached_tests {
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
 
-        storage.publish(batch, sync_sender.clone()).await?;
+        storage.publish(batch).await?;
         println!("Successfully published boolean data to RRDcached");
 
         // Verify all sensors are tracked
-        let sensors = storage.list_series(None).await?;
+        let sensors = storage.list_series(None, None, None).await?.series;
         assert!(
             sensors.len() >= 2,
             "Should have at least 2 sensors (integer and boolean)"
@@ -306,12 +302,11 @@ mod rrdcached_tests {
         let batch = Arc::new(Batch::new(sensors));
 
         // When: We try to publish unsupported data
-        let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
-        storage.publish(batch, sync_sender.clone()).await?;
+        storage.publish(batch).await?;
 
         // Then: The operation should succeed but the sensor shouldn't be created
         // (since unsupported types are filtered out in the create_sensors method)
-        let sensors = storage.list_series(None).await?;
+        let sensors = storage.list_series(None, None, None).await?.series;
         let found_sensor = sensors.iter().find(|s| s.uuid == string_sensor_arc.uuid);
         assert!(
             found_sensor.is_none(),
@@ -358,8 +353,7 @@ mod rrdcached_tests {
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
 
-        let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
-        storage.publish(batch, sync_sender.clone()).await?;
+        storage.publish(batch).await?;
 
         // Give RRD time to process and consolidate the data
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -435,8 +429,7 @@ mod rrdcached_tests {
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
 
-        let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
-        storage.publish(batch, sync_sender.clone()).await?;
+        storage.publish(batch).await?;
 
         // Give RRD time to process and consolidate the data
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -529,8 +522,7 @@ mod rrdcached_tests {
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
 
-        let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
-        storage.publish(batch, sync_sender.clone()).await?;
+        storage.publish(batch).await?;
 
         // When: We query the sensor
         let sensor_data = storage
@@ -586,8 +578,7 @@ mod rrdcached_tests {
         sensors.push(single_sensor_batch);
         let batch = Arc::new(Batch::new(sensors));
 
-        let (sync_sender, _sync_receiver) = async_broadcast::broadcast(10);
-        storage.publish(batch, sync_sender.clone()).await?;
+        storage.publish(batch).await?;
 
         // Give RRD time to process and consolidate the data
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;

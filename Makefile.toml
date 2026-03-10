@@ -19,6 +19,8 @@ DATABASE_URL = { value = "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POS
 # Test database URLs with conditional setting
 TEST_DATABASE_URL_POSTGRES = { value = "${DATABASE_URL}", condition = { env_not_set = ["TEST_DATABASE_URL_POSTGRES"] } }
 TEST_DATABASE_URL_SQLITE = { value = "sqlite://test.db", condition = { env_not_set = ["TEST_DATABASE_URL_SQLITE"] } }
+TEST_DATABASE_URL_TIMESCALEDB = { value = "timescaledb://postgres:postgres@localhost:5433/sensapp-test", condition = { env_not_set = ["TEST_DATABASE_URL_TIMESCALEDB"] } }
+TEST_DATABASE_URL_DUCKDB = { value = "duckdb://test.duckdb", condition = { env_not_set = ["TEST_DATABASE_URL_DUCKDB"] } }
 TEST_DATABASE_URL_CLICKHOUSE = { value = "clickhouse://default:password@localhost:8123/sensapp_test", condition = { env_not_set = ["TEST_DATABASE_URL_CLICKHOUSE"] } }
 TEST_DATABASE_URL_RRDCACHED = { value = "rrdcached://127.0.0.1:42217?preset=hoarder", condition = { env_not_set = ["TEST_DATABASE_URL_RRDCACHED"] } }
 
@@ -49,6 +51,24 @@ args = ["test"]
 [tasks.test-all]
 description = "Test all storage backend features"
 dependencies = ["test-sqlite", "test-postgres", "test-clickhouse", "test-timescaledb", "test-duckdb", "test-bigquery", "test-rrdcached"]
+
+[tasks.start-local-test-stack]
+description = "Start the local Docker test services (PostgreSQL, TimescaleDB, ClickHouse, RRDCached)"
+command = "docker"
+args = ["compose", "-f", "compose.test-services.yml", "up", "-d", "--build"]
+
+[tasks.stop-local-test-stack]
+description = "Stop the local Docker test services"
+command = "docker"
+args = ["compose", "-f", "compose.test-services.yml", "down"]
+
+[tasks.test-local-matrix]
+description = "Run the local backend test matrix (SQLite, PostgreSQL, TimescaleDB, ClickHouse, DuckDB, RRDCached)"
+dependencies = ["start-local-test-stack", "test-sqlite", "test-postgres", "test-clickhouse", "test-timescaledb", "test-duckdb", "test-rrdcached"]
+
+[tasks.check-local-matrix]
+description = "Run build, test, and clippy for the local backend matrix (excludes BigQuery)"
+dependencies = ["start-local-test-stack", "check-sqlite", "check-postgres", "check-clickhouse", "check-timescaledb", "check-duckdb", "check-rrdcached"]
 
 [tasks.check-all]
 description = "Run all checks for working features (PostgreSQL and SQLite)"
@@ -218,7 +238,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb" }
 extend = "template-test"
 private = false
 description = "Test with TimescaleDB feature"
-env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_POSTGRES}" }
+env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_TIMESCALEDB}" }
 
 [tasks.clippy-timescaledb]
 extend = "template-clippy"
@@ -252,7 +272,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "duckdb" }
 extend = "template-test"
 private = false
 description = "Test with DuckDB feature"
-env = { "CARGO_MAKE_TASK_FEATURE" = "duckdb" }
+env = { "CARGO_MAKE_TASK_FEATURE" = "duckdb", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_DUCKDB}" }
 
 [tasks.clippy-duckdb]
 extend = "template-clippy"

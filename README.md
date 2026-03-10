@@ -57,6 +57,7 @@ cargo build
 # Test
 cargo test
 cargo make test-all         # all storage backends
+cargo make test-local-matrix # all local backends via Docker Compose (no BigQuery)
 
 # Lint (format + clippy)
 cargo make lint
@@ -65,12 +66,27 @@ cargo make lint-all         # all storage backends
 # Full validation
 cargo make check-all        # working features (postgres + sqlite)
 cargo make check-all-storage # all storage backends
+cargo make check-local-matrix # all local backends via Docker Compose (no BigQuery)
 
 # Setup (runs migrations)
 cargo make setup-dev
 ```
 
 Override environment variables as needed: `DATABASE_URL`, `POSTGRES_USER`, etc.
+
+If `cargo make` is not installed in your environment, install it once with:
+
+```bash
+cargo install cargo-make
+```
+
+For the full local backend matrix in a Codespace or dev container, the project now ships a Docker Compose stack in [compose.test-services.yml](compose.test-services.yml). The intended workflow is:
+
+```bash
+cargo make test-local-matrix
+```
+
+That command starts local PostgreSQL, TimescaleDB, ClickHouse, and RRDCached services, then runs the local backend suites. BigQuery is intentionally excluded from the local matrix because it requires external GCP credentials.
 
 ## Built With Rust™️
 

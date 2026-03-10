@@ -140,11 +140,7 @@ impl<'a> ClickHousePublisher<'a> {
 
         // Get or create the label inserter
         if self.label_inserter.is_none() {
-            self.label_inserter = Some(
-                self.client
-                    .inserter("labels")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?,
-            );
+            self.label_inserter = Some(self.client.inserter("labels"));
         }
 
         let inserter = self.label_inserter.as_mut().unwrap();
@@ -157,6 +153,7 @@ impl<'a> ClickHousePublisher<'a> {
             };
             inserter
                 .write(&row)
+                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
 
@@ -207,11 +204,7 @@ impl<'a> ClickHousePublisher<'a> {
 
         // Get or create the integer inserter
         if self.integer_inserter.is_none() {
-            self.integer_inserter = Some(
-                self.client
-                    .inserter("integer_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?,
-            );
+            self.integer_inserter = Some(self.client.inserter("integer_values"));
         }
 
         let inserter = self.integer_inserter.as_mut().unwrap();
@@ -224,6 +217,7 @@ impl<'a> ClickHousePublisher<'a> {
             };
             inserter
                 .write(&row)
+                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
 
@@ -242,11 +236,7 @@ impl<'a> ClickHousePublisher<'a> {
 
         // Get or create the numeric inserter
         if self.numeric_inserter.is_none() {
-            self.numeric_inserter = Some(
-                self.client
-                    .inserter("numeric_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?,
-            );
+            self.numeric_inserter = Some(self.client.inserter("numeric_values"));
         }
 
         let inserter = self.numeric_inserter.as_mut().unwrap();
@@ -259,6 +249,7 @@ impl<'a> ClickHousePublisher<'a> {
             };
             inserter
                 .write(&row)
+                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
 
@@ -277,11 +268,7 @@ impl<'a> ClickHousePublisher<'a> {
 
         // Get or create the float inserter
         if self.float_inserter.is_none() {
-            self.float_inserter = Some(
-                self.client
-                    .inserter("float_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?,
-            );
+            self.float_inserter = Some(self.client.inserter("float_values"));
         }
 
         let inserter = self.float_inserter.as_mut().unwrap();
@@ -294,6 +281,7 @@ impl<'a> ClickHousePublisher<'a> {
             };
             inserter
                 .write(&row)
+                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
 
@@ -312,11 +300,7 @@ impl<'a> ClickHousePublisher<'a> {
 
         // Get or create the string inserter
         if self.string_inserter.is_none() {
-            self.string_inserter = Some(
-                self.client
-                    .inserter("string_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?,
-            );
+            self.string_inserter = Some(self.client.inserter("string_values"));
         }
 
         let inserter = self.string_inserter.as_mut().unwrap();
@@ -329,6 +313,7 @@ impl<'a> ClickHousePublisher<'a> {
             };
             inserter
                 .write(&row)
+                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
 
@@ -347,11 +332,7 @@ impl<'a> ClickHousePublisher<'a> {
 
         // Get or create the boolean inserter
         if self.boolean_inserter.is_none() {
-            self.boolean_inserter = Some(
-                self.client
-                    .inserter("boolean_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?,
-            );
+            self.boolean_inserter = Some(self.client.inserter("boolean_values"));
         }
 
         let inserter = self.boolean_inserter.as_mut().unwrap();
@@ -364,6 +345,7 @@ impl<'a> ClickHousePublisher<'a> {
             };
             inserter
                 .write(&row)
+                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
 
@@ -382,11 +364,7 @@ impl<'a> ClickHousePublisher<'a> {
 
         // Get or create the location inserter
         if self.location_inserter.is_none() {
-            self.location_inserter = Some(
-                self.client
-                    .inserter("location_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?,
-            );
+            self.location_inserter = Some(self.client.inserter("location_values"));
         }
 
         let inserter = self.location_inserter.as_mut().unwrap();
@@ -400,6 +378,7 @@ impl<'a> ClickHousePublisher<'a> {
             };
             inserter
                 .write(&row)
+                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
 
@@ -418,11 +397,7 @@ impl<'a> ClickHousePublisher<'a> {
 
         // Get or create the json inserter
         if self.json_inserter.is_none() {
-            self.json_inserter = Some(
-                self.client
-                    .inserter("json_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?,
-            );
+            self.json_inserter = Some(self.client.inserter("json_values"));
         }
 
         let inserter = self.json_inserter.as_mut().unwrap();
@@ -435,6 +410,7 @@ impl<'a> ClickHousePublisher<'a> {
             };
             inserter
                 .write(&row)
+                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
 
@@ -453,11 +429,7 @@ impl<'a> ClickHousePublisher<'a> {
 
         // Get or create the blob inserter
         if self.blob_inserter.is_none() {
-            self.blob_inserter = Some(
-                self.client
-                    .inserter("blob_values")
-                    .map_err(|e| map_clickhouse_error(e, None, None))?,
-            );
+            self.blob_inserter = Some(self.client.inserter("blob_values"));
         }
 
         let inserter = self.blob_inserter.as_mut().unwrap();
@@ -470,6 +442,7 @@ impl<'a> ClickHousePublisher<'a> {
             };
             inserter
                 .write(&row)
+                .await
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
         }
 
