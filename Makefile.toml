@@ -20,6 +20,7 @@ DATABASE_URL = { value = "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POS
 TEST_DATABASE_URL_POSTGRES = { value = "${DATABASE_URL}", condition = { env_not_set = ["TEST_DATABASE_URL_POSTGRES"] } }
 TEST_DATABASE_URL_SQLITE = { value = "sqlite://test.db", condition = { env_not_set = ["TEST_DATABASE_URL_SQLITE"] } }
 TEST_DATABASE_URL_CLICKHOUSE = { value = "clickhouse://default:password@localhost:8123/sensapp_test", condition = { env_not_set = ["TEST_DATABASE_URL_CLICKHOUSE"] } }
+TEST_DATABASE_URL_RRDCACHED = { value = "rrdcached://127.0.0.1:42217?preset=hoarder", condition = { env_not_set = ["TEST_DATABASE_URL_RRDCACHED"] } }
 
 # Environment profiles
 [env.ci]
@@ -319,7 +320,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached" }
 extend = "template-test"
 private = false
 description = "Test with RRDCached feature"
-env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached" }
+env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_RRDCACHED}" }
 
 [tasks.clippy-rrdcached]
 extend = "template-clippy"
