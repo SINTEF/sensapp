@@ -109,6 +109,7 @@ fn create_test_app(storage: Arc<dyn sensapp::storage::StorageInstance>) -> Route
         storage,
         metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
+        auth: None,
     };
 
     Router::new()

@@ -366,6 +366,7 @@ mod tests {
             storage,
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
+            auth: None,
         });
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
@@ -651,6 +652,7 @@ mod tests {
             storage: storage.clone(),
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: true,
+            auth: None,
         });
 
         // Test with integer value

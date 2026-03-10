@@ -58,6 +58,38 @@ Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 - `/api/v1/prometheus_remote_read`: Prometheus Remote Read endpoint.
 - `/api/v1/query`: Simple PromQL-compatible query endpoint.
 
+## Authentication
+
+SensApp supports **optional JWT authentication**. By default, all endpoints are open — just like Prometheus. Set `SENSAPP_JWT_SECRET` (≥ 32 characters) to enable it.
+
+```bash
+export SENSAPP_JWT_SECRET="my-super-secret-key-at-least-32-characters-long"
+```
+
+When enabled:
+- **Public endpoints** (health checks, docs, `/prometheus/metrics`) remain open.
+- **Read endpoints** (`/metrics`, `/series`, queries) require a token with `read` scope.
+- **Write endpoints** (`/publish`, InfluxDB/Prometheus write) require a token with `write` scope.
+
+Generate tokens with the built-in CLI:
+
+```bash
+sensapp generate-token my-service                           # read+write, 1h
+sensapp generate-token scraper --scope read --duration 86400  # read-only, 24h
+sensapp generate-token device --scope write --sensors "temp,humidity"  # write, restricted sensors
+```
+
+Use in requests: `Authorization: Bearer <token>`
+
+For Helm deployments, set `auth.jwtSecret` in your values:
+
+```yaml
+auth:
+  jwtSecret: "my-super-secret-key-at-least-32-characters-long"
+```
+
+See [docs/JWT_AUTH.md](docs/JWT_AUTH.md) for full details on claims, time validation, and route protection.
+
 ## Deployment
 
 SensApp now ships with a container build and a Helm chart in `charts/sensapp`.

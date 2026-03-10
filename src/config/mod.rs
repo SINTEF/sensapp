@@ -42,6 +42,13 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_INFLUXDB_WITH_NUMERIC", default = false)]
     pub influxdb_with_numeric: bool,
+
+    /// JWT secret for optional authentication.
+    /// When set, all protected endpoints require a valid JWT bearer token.
+    /// Must be at least 32 characters long.
+    /// When unset, all endpoints are open (no security).
+    #[config(env = "SENSAPP_JWT_SECRET")]
+    pub jwt_secret: Option<String>,
 }
 
 impl SensAppConfig {

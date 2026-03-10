@@ -1,4 +1,5 @@
 use super::app_error::AppError;
+use super::auth::{require_read_auth, require_write_auth};
 use super::crud::{get_series_data, list_metrics, list_series};
 use super::influxdb::publish_influxdb;
 use super::metrics::{prometheus_metrics, track_http_metrics};
@@ -79,39 +80,51 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .compression()
         .into_inner();
 
-    // Create our application with a single route
-    let app = Router::new()
+    // Create our application with route groups split by auth requirements.
+    //
+    // Public routes — always accessible (health checks, docs, prometheus scrape):
+    let public_routes = Router::new()
         .route("/", get(frontpage))
         .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
-        // Metrics catalog and Prometheus scrape endpoints
-        .route("/metrics", get(list_metrics))
         .route("/prometheus/metrics", get(prometheus_metrics))
+        .route("/health/live", get(liveness))
+        .route("/health/ready", get(readiness));
+
+    // Read-protected routes — require a valid JWT with "read" scope when auth is enabled:
+    let read_routes = Router::new()
+        .route("/metrics", get(list_metrics))
         .route("/series", get(list_series))
         .route("/series/{series_uuid}", get(get_series_data))
-        // SensApp Write API
-        .route("/publish", post(publish_sensors_data).layer(max_body_layer))
-        // InfluxDB Write API
-        .route(
-            "/api/v2/write",
-            post(publish_influxdb).layer(max_body_layer),
-        )
-        // Prometheus Remote Write API
-        .route(
-            "/api/v1/prometheus_remote_write",
-            post(publish_prometheus).layer(max_body_layer),
-        )
-        // Prometheus Remote Read API
+        .route("/api/v1/query", get(simple_promql_query))
         .route(
             "/api/v1/prometheus_remote_read",
             post(prometheus_remote_read).layer(max_body_layer),
         )
-        // Simple PromQL Query API
-        .route("/api/v1/query", get(simple_promql_query))
-        // Admin API
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.auth.clone(),
+            require_read_auth,
+        ));
+
+    // Write-protected routes — require a valid JWT with "write" scope when auth is enabled:
+    let write_routes = Router::new()
+        .route("/publish", post(publish_sensors_data).layer(max_body_layer))
+        .route(
+            "/api/v2/write",
+            post(publish_influxdb).layer(max_body_layer),
+        )
+        .route(
+            "/api/v1/prometheus_remote_write",
+            post(publish_prometheus).layer(max_body_layer),
+        )
         .route("/api/v1/admin/vacuum", post(vacuum_database))
-        // Health check endpoints
-        .route("/health/live", get(liveness))
-        .route("/health/ready", get(readiness))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.auth.clone(),
+            require_write_auth,
+        ));
+
+    let app = public_routes
+        .merge(read_routes)
+        .merge(write_routes)
         .layer(axum::middleware::from_fn_with_state(
             state.metrics.clone(),
             track_http_metrics,
@@ -352,6 +365,7 @@ mod tests {
             storage,
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
+            auth: None,
         };
         let app = Router::new().route("/", get(frontpage)).with_state(state);
         let request = Request::builder().uri("/").body(Body::empty()).unwrap();

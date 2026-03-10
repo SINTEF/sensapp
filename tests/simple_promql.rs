@@ -91,6 +91,7 @@ async fn create_test_app(storage: Arc<dyn StorageInstance>) -> Router {
         storage,
         metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
+        auth: None,
     };
 
     Router::new()

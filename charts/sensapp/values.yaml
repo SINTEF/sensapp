@@ -75,6 +75,15 @@ env:
 storage:
   connectionString: sqlite:///var/lib/sensapp/sensapp.db
 
+# Optional JWT authentication.
+# When jwtSecret is set, read/write endpoints require a valid Bearer token.
+# Health checks, docs, and prometheus scrape remain open.
+# Use `sensapp generate-token <subject>` to create tokens.
+auth:
+  # Set to a random string of at least 32 characters to enable JWT auth.
+  # Leave empty (or omit) to run without authentication (default).
+  jwtSecret: ""
+
 secretEnv: {}
 extraEnv: []
 extraEnvFrom: []

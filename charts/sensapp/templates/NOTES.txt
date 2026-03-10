@@ -13,3 +13,14 @@
   kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 3000:3000
   echo http://127.0.0.1:3000
 {{- end }}
+
+{{- if .Values.auth.jwtSecret }}
+2. JWT authentication is ENABLED.
+   Generate a token with:
+     sensapp generate-token <subject> --scope readwrite --duration 3600
+   Use it in requests:
+     curl -H "Authorization: Bearer <token>" http://<sensapp-url>/metrics
+{{- else }}
+2. JWT authentication is DISABLED. All endpoints are open.
+   To enable, set auth.jwtSecret to a random string (≥ 32 chars).
+{{- end }}

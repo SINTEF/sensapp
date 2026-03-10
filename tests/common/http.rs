@@ -29,6 +29,7 @@ impl TestApp {
             storage,
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
+            auth: None,
         };
 
         // Create a minimal router for testing (without middleware that might interfere)

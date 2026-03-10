@@ -1,4 +1,5 @@
 pub mod app_error;
+pub mod auth;
 pub mod crud;
 pub mod health;
 pub mod influxdb;

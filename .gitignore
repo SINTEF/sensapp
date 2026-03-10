@@ -22,12 +22,13 @@ coverage/
 
 pki
 
-test.db*
-test-*.db*
-test.duckdb*
-test-*.duckdb*
+*.db
+*.db-shm
+*.db-wal
+*.duckdb
 
 # Claude
 .claude/settings.local.json
 
 reference/
+

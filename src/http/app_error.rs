@@ -17,6 +17,10 @@ pub enum AppError {
     BadRequest(anyhow::Error),
     #[schema(example = "Not Found", value_type = String)]
     NotFound(anyhow::Error),
+    #[schema(example = "Unauthorized", value_type = String)]
+    Unauthorized(String),
+    #[schema(example = "Forbidden", value_type = String)]
+    Forbidden(String),
     #[schema(example = "Storage Error", value_type = String)]
     Storage(StorageError),
 }
@@ -33,6 +37,8 @@ impl IntoResponse for AppError {
             }
             AppError::BadRequest(error) => (StatusCode::BAD_REQUEST, error.to_string()),
             AppError::NotFound(error) => (StatusCode::NOT_FOUND, error.to_string()),
+            AppError::Unauthorized(message) => (StatusCode::UNAUTHORIZED, message),
+            AppError::Forbidden(message) => (StatusCode::FORBIDDEN, message),
             AppError::Storage(storage_error) => match &storage_error {
                 StorageError::SensorNotFound { .. } | StorageError::MetricNotFound { .. } => {
                     (StatusCode::NOT_FOUND, storage_error.to_string())

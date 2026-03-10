@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 use crate::config::load_configuration;
+use crate::http::auth::AuthConfig;
 use crate::http::metrics::HttpMetrics;
 use crate::http::server::run_http_server;
 use crate::http::state::HttpServerState;
@@ -19,6 +20,12 @@ mod parsing;
 mod storage;
 
 fn main() -> Result<()> {
+    // Handle `generate-token` subcommand before any server setup
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "generate-token" {
+        return generate_token_command(&args[2..]);
+    }
+
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .map_err(|e| anyhow::anyhow!("Failed to install CryptoProvider: {:?}", e))?;
@@ -89,12 +96,27 @@ async fn async_main() -> Result<()> {
     let address = SocketAddr::from((endpoint, port));
 
     println!("📡 Starting HTTP server on {}...", address);
+    // Build optional JWT authentication config
+    let auth = match &config.jwt_secret {
+        Some(secret) => {
+            let auth_config = AuthConfig::from_secret(secret)
+                .context("Failed to configure JWT authentication")?;
+            println!("🔐 JWT authentication enabled");
+            Some(auth_config)
+        }
+        None => {
+            println!("🔓 No JWT secret configured — all endpoints are open");
+            None
+        }
+    };
+
     match run_http_server(
         HttpServerState {
             name: Arc::new("SensApp".to_string()),
             storage,
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: config.influxdb_with_numeric,
+            auth,
         },
         address,
     )
@@ -110,4 +132,80 @@ async fn async_main() -> Result<()> {
             Err(err)
         }
     }
+}
+
+/// CLI subcommand: generate a signed JWT token.
+///
+/// Usage: sensapp generate-token <subject> [OPTIONS]
+///   --scope <read|write|readwrite>  (default: "read write")
+///   --duration <seconds>            (default: 3600)
+///   --sensors <name1,name2,...>      (optional sensor allow list)
+fn generate_token_command(args: &[String]) -> Result<()> {
+    load_configuration().context("Failed to load configuration")?;
+    let config = config::get().context("Failed to get configuration")?;
+
+    let secret = config
+        .jwt_secret
+        .as_deref()
+        .context("SENSAPP_JWT_SECRET must be set to generate tokens")?;
+
+    let auth_config =
+        AuthConfig::from_secret(secret).context("Failed to configure JWT authentication")?;
+
+    if args.is_empty() {
+        eprintln!("Usage: sensapp generate-token <subject> [OPTIONS]");
+        eprintln!();
+        eprintln!("Options:");
+        eprintln!("  --scope <read|write|readwrite>  Token scope (default: \"read write\")");
+        eprintln!("  --duration <seconds>            Token validity duration (default: 3600)");
+        eprintln!("  --sensors <name1,name2,...>      Restrict to specific sensors");
+        eprintln!();
+        eprintln!("Environment:");
+        eprintln!("  SENSAPP_JWT_SECRET              Required. The shared secret for signing.");
+        std::process::exit(1);
+    }
+
+    let subject = &args[0];
+    let mut scope = "read write".to_string();
+    let mut duration: u64 = 3600;
+    let mut sensors: Option<Vec<String>> = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--scope" => {
+                i += 1;
+                let raw = args.get(i).context("--scope requires a value")?;
+                scope = match raw.as_str() {
+                    "read" => "read".to_string(),
+                    "write" => "write".to_string(),
+                    "readwrite" | "read write" | "read,write" => "read write".to_string(),
+                    other => anyhow::bail!("Unknown scope: {other}. Use read, write, or readwrite"),
+                };
+            }
+            "--duration" => {
+                i += 1;
+                let raw = args.get(i).context("--duration requires a value")?;
+                duration = raw
+                    .parse()
+                    .context("--duration must be a number of seconds")?;
+            }
+            "--sensors" => {
+                i += 1;
+                let raw = args.get(i).context("--sensors requires a value")?;
+                sensors = Some(raw.split(',').map(|s| s.trim().to_string()).collect());
+            }
+            other => {
+                anyhow::bail!("Unknown option: {other}");
+            }
+        }
+        i += 1;
+    }
+
+    let token = auth_config
+        .create_token(subject, &scope, duration, sensors)
+        .context("Failed to create token")?;
+
+    println!("{token}");
+    Ok(())
 }

@@ -100,6 +100,7 @@ clickhouse = { version = "0.14", features = [
   "time",
   "inserter",
 ], optional = true }
+jsonwebtoken = "9"
 rustls = "0.23"
 rusty-promql-parser = "0.1"
 prometheus-client = "0.23"
@@ -108,5 +109,6 @@ prometheus-client = "0.23"
 temp-env = "0.3"
 tokio-test = "0.4"
 serial_test = "3.1"
+jsonwebtoken = "9"
 # Re-import the same crate with test-utils feature for integration tests
 sensapp = { path = ".", features = ["test-utils"], default-features = false }

@@ -1,3 +1,4 @@
+use crate::http::auth::AuthConfig;
 use crate::http::metrics::HttpMetrics;
 use crate::storage::StorageInstance;
 use std::sync::Arc;
@@ -13,4 +14,7 @@ pub struct HttpServerState {
     pub metrics: Arc<HttpMetrics>,
     /// If true, InfluxDB numeric types are stored as Decimal/Numeric instead of Integer/Float
     pub influxdb_with_numeric: bool,
+    /// Optional JWT authentication configuration.
+    /// When `None`, all endpoints are open (no security).
+    pub auth: Option<AuthConfig>,
 }
