@@ -5,6 +5,7 @@ SensApp should be an accommodating platform to support sensor-based applications
 It should be relatively small and simple to transform incoming sensor data, persist it, and make it available to other applications.
 
 ## Simple SensApp Deployment Example
+
 ```mermaid
 graph LR
     Sensor1[Sensor 1] --> SensApp
@@ -17,6 +18,7 @@ graph LR
 ```
 
 ## Advanced SensApp Deployment Example
+
 ```mermaid
 graph LR
 
@@ -75,9 +77,9 @@ SensApp is designed to be stateless and horizontally scalable. It uses direct st
 
 SensApp focuses on HTTP-based data ingestion:
 
- - HTTP REST Push (primary ingestion method)
- - InfluxDB Write API
- - Prometheus Remote Write API
+- HTTP REST Push (primary ingestion method)
+- InfluxDB Write API
+- Prometheus Remote Write API
 
 For message queue protocols (MQTT, AMQP, Kafka, Nats), we recommend using dedicated integration tools like Telegraf, Vector, or Fluent Bit to bridge these protocols to SensApp's HTTP API. This architectural decision keeps SensApp stateless and horizontally scalable, as the complexity of maintaining message queue client connections and subscriptions is better handled by specialized tools.
 
@@ -93,14 +95,13 @@ We also support InfluxDB line protocol, and the Prometheus remote stores protoco
 
 SensApp should support various storage backends. The best storage backend for time series has yet to exist.
 
- * For small deployments, SQLite is used.
-  * It is possible to use Litestream to replicate and backup the SQLite database.
- * For medium deployments, PostgreSQL is used.
-   * It is optional to use the TimescaleDB plugin or Citus Columnar.
- * For larger deployments, ClickHouse is used.
-
- * SensApp can also produce Parquet files stored in S3-compatible object stores.
- * A experimental support for DuckDB is also available. The DuckDB database format isn't stable yet, and it may be wise to wait for the DuckDB 1.0 release before using it in production.
+- For small deployments, SQLite is used.
+  - It is possible to use Litestream to replicate and backup the SQLite database.
+- For medium deployments, PostgreSQL is used.
+  - It is optional to use the TimescaleDB plugin or Citus Columnar.
+- For larger deployments, ClickHouse is used.
+- SensApp can also produce Parquet files stored in S3-compatible object stores.
+- A experimental support for DuckDB is also available. The DuckDB database format isn't stable yet, and it may be wise to wait for the DuckDB 1.0 release before using it in production.
 
 SensApp can use other storage backends in the future. Could it be Cassandra, Apache IoTDB, OpenTSDB, QuestDB, HoraeDB, or something new?
 
@@ -141,3 +142,104 @@ The storage backend and the message queue should be resilient.
 ## Internal Software Architecture
 
 Internally, SensApp uses direct storage calls for simplicity and performance. Components communicate through shared storage interfaces with async/await patterns.
+
+### Component Architecture
+
+```mermaid
+graph TB
+    subgraph Ingestors["Data Ingestors (HTTP)"]
+        REST["HTTP REST API<br/>Axum Framework"]
+        INFLUX["InfluxDB Write API"]
+        PROM["Prometheus<br/>Remote Write"]
+    end
+
+    subgraph Formats["Supported Formats"]
+        JSON["JSON"]
+        CSV["CSV"]
+        SENML["SenML"]
+        INFLUXLP["InfluxDB<br/>Line Protocol"]
+        PROMRW["Prometheus<br/>Remote Write"]
+    end
+
+    subgraph Processing["Data Processing Layer"]
+        PARSE["Parsing<br/>src/parsing/"]
+        INFER["Type Inference<br/>src/infer/"]
+        GEO["Geolocation<br/>Detection"]
+    end
+
+    subgraph DataModel["Data Model<br/>src/datamodel/"]
+        TYPES["Type-safe Sensor Data<br/>UUID v7, μs precision"]
+        DICT["Dictionary Tables<br/>String Deduplication"]
+    end
+
+    subgraph StorageAbstraction["Storage Abstraction Layer<br/>src/storage/"]
+        TRAIT["Unified Storage Trait<br/>Async-first, Direct Calls"]
+    end
+
+    subgraph Backends["Storage Backends"]
+        SQLITE["SQLite<br/>Edge/Small"]
+        POSTGRES["PostgreSQL<br/>+ TimescaleDB/Citus<br/>Medium"]
+        CLICKHOUSE["ClickHouse<br/>Large Scale"]
+        DUCKDB["DuckDB<br/>Experimental"]
+        BIGQUERY["BigQuery<br/>Cloud Analytics"]
+        PARQUET["Parquet + S3<br/>Object Storage"]
+    end
+
+    REST --> PARSE
+    INFLUX --> PARSE
+    PROM --> PARSE
+
+    JSON --> PARSE
+    CSV --> PARSE
+    SENML --> PARSE
+    INFLUXLP --> PARSE
+    PROMRW --> PARSE
+
+    PARSE --> INFER
+    INFER --> GEO
+    GEO --> DataModel
+
+    DataModel --> TRAIT
+
+    TRAIT --> SQLITE
+    TRAIT --> POSTGRES
+    TRAIT --> CLICKHOUSE
+    TRAIT --> DUCKDB
+    TRAIT --> BIGQUERY
+    TRAIT --> PARQUET
+
+    style Ingestors fill:#e1f5ff
+    style Formats fill:#f3e5f5
+    style Processing fill:#e8f5e9
+    style DataModel fill:#fff3e0
+    style StorageAbstraction fill:#fce4ec
+    style Backends fill:#f1f8e9
+```
+
+### Data Flow
+
+```mermaid
+graph LR
+    A["Sensors<br/>External Systems"] -->|HTTP| B["Ingestors"]
+    B -->|Parse| C["Processing<br/>Layer"]
+    C -->|Transform| D["Data Model<br/>Type-safe"]
+    D -->|Store| E["Storage Trait"]
+    E -->|Persist| F["Database<br/>Backend"]
+    F -->|Query| G["Client<br/>Applications"]
+
+    style A fill:#e3f2fd
+    style B fill:#e1f5ff
+    style C fill:#e8f5e9
+    style D fill:#fff3e0
+    style E fill:#fce4ec
+    style F fill:#f1f8e9
+    style G fill:#e0f2f1
+```
+
+### Key Design Principles
+
+- **Stateless**: Direct storage calls enable horizontal scalability
+- **Async-first**: Built on Tokio runtime for high concurrency
+- **Type-safe**: Compile-time guarantees for sensor data
+- **Storage-agnostic**: Trait-based abstraction for backend independence
+- **Simple**: Minimal internal complexity, delegating distribution to storage layer

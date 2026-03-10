@@ -38,10 +38,10 @@ arrow = { version = "57", features = ["ipc"] }
 arrow-ipc = "57"
 arrow-schema = "57"
 arrow-array = "57"
-anyhow = "1.0.100"
+anyhow = "1.0"
 async-trait = "0.1"
-thiserror = "2.0.17"
-axum = { version = "0.8.6", features = ["multipart", "macros"] }
+thiserror = "2.0"
+axum = { version = "0.8", features = ["multipart", "macros"] }
 base64 = "0.22"
 futures = "0.3"
 sqlx = { version = "0.8", features = [
@@ -69,9 +69,9 @@ serde_json = "1.0.145"
 hifitime = "4.2"
 iso8601 = "0.6"
 duckdb = { version = "1.4", features = ["bundled"], optional = true }
-config = "0.15.18"
-serde = "1.0.228"
-confique = { version = "0.3", features = ["toml"] }
+config = "0.15"
+serde = "1.0"
+confique = { version = "0.4", features = ["toml"] }
 byte-unit = "5.1"
 prost = "0.14"
 snap = "1.1"
