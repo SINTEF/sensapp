@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 use crate::config::load_configuration;
+use crate::http::metrics::HttpMetrics;
 use crate::http::server::run_http_server;
 use crate::http::state::HttpServerState;
 use anyhow::{Context, Result};
@@ -92,6 +93,7 @@ async fn async_main() -> Result<()> {
         HttpServerState {
             name: Arc::new("SensApp".to_string()),
             storage,
+            metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: config.influxdb_with_numeric,
         },
         address,

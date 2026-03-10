@@ -1,3 +1,4 @@
+use crate::http::metrics::HttpMetrics;
 use crate::storage::StorageInstance;
 use std::sync::Arc;
 
@@ -8,6 +9,8 @@ pub struct HttpServerState {
     pub name: Arc<String>,
     /// Storage backend (PostgreSQL, SQLite, etc.)
     pub storage: Arc<dyn StorageInstance>,
+    /// Shared Prometheus metrics registry and counters
+    pub metrics: Arc<HttpMetrics>,
     /// If true, InfluxDB numeric types are stored as Decimal/Numeric instead of Integer/Float
     pub influxdb_with_numeric: bool,
 }

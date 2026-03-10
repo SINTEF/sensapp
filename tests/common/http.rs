@@ -7,6 +7,7 @@ use axum::routing::{get, post};
 use sensapp::http::crud::{get_series_data, list_metrics, list_series};
 use sensapp::http::health::{liveness, readiness};
 use sensapp::http::influxdb::publish_influxdb;
+use sensapp::http::metrics::{HttpMetrics, prometheus_metrics, track_http_metrics};
 use sensapp::http::server::publish_senml_data;
 use sensapp::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
@@ -26,6 +27,7 @@ impl TestApp {
         let state = HttpServerState {
             name: Arc::new("SensApp Test".to_string()),
             storage,
+            metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
         };
 
@@ -35,10 +37,15 @@ impl TestApp {
             .route("/sensors/publish", post(test_publish_handler))
             .route("/api/v2/write", post(publish_influxdb))
             .route("/metrics", get(list_metrics))
+            .route("/prometheus/metrics", get(prometheus_metrics))
             .route("/series", get(list_series))
             .route("/series/{series_uuid}", get(get_series_data))
             .route("/health/live", get(liveness))
             .route("/health/ready", get(readiness))
+            .layer(axum::middleware::from_fn_with_state(
+                state.metrics.clone(),
+                track_http_metrics,
+            ))
             .with_state(state);
 
         Self { app }

@@ -308,6 +308,7 @@ pub async fn publish_influxdb(
 mod tests {
     use super::*;
     use crate::config::load_configuration_for_tests;
+    use crate::http::metrics::HttpMetrics;
     use crate::storage::storage_factory::create_storage_from_connection_string;
     use flate2::Compression;
     use flate2::write::GzEncoder;
@@ -368,6 +369,7 @@ mod tests {
         let state = State(HttpServerState {
             name: Arc::new("influxdb test".to_string()),
             storage,
+            metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
         });
         let headers = HeaderMap::new();
@@ -652,6 +654,7 @@ mod tests {
         let state = State(HttpServerState {
             name: Arc::new("influxdb numeric test".to_string()),
             storage: storage.clone(),
+            metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: true,
         });
 

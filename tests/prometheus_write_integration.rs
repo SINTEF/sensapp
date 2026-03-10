@@ -9,6 +9,7 @@ use common::TestDb;
 use common::db::DbHelpers;
 use prost::Message;
 use sensapp::config::load_configuration_for_tests;
+use sensapp::http::metrics::HttpMetrics;
 use sensapp::http::prometheus_write::publish_prometheus;
 use sensapp::http::state::HttpServerState;
 use sensapp::parsing::prometheus::remote_write_models::{
@@ -30,6 +31,7 @@ fn create_test_app(storage: Arc<dyn sensapp::storage::StorageInstance>) -> Route
     let state = HttpServerState {
         name: Arc::new("SensApp Test".to_string()),
         storage,
+        metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
     };
 

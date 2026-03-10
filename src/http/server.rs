@@ -1,6 +1,7 @@
 use super::app_error::AppError;
 use super::crud::{get_series_data, list_metrics, list_series};
 use super::influxdb::publish_influxdb;
+use super::metrics::{prometheus_metrics, track_http_metrics};
 use super::prometheus_read::prometheus_remote_read;
 use super::prometheus_write::publish_prometheus;
 use super::simple_promql::simple_promql_query;
@@ -9,6 +10,7 @@ use crate::config;
 use crate::http::crud::{__path_get_series_data, __path_list_metrics, __path_list_series};
 use crate::http::health::{__path_liveness, __path_readiness, liveness, readiness};
 use crate::http::influxdb::__path_publish_influxdb;
+use crate::http::metrics::__path_prometheus_metrics;
 use crate::http::prometheus_read::__path_prometheus_remote_read;
 use crate::http::prometheus_write::__path_publish_prometheus;
 use crate::http::simple_promql::__path_simple_promql_query;
@@ -41,11 +43,12 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
     tags(
         (name = "SensApp", description = "SensApp API"),
         (name = "InfluxDB", description = "InfluxDB Write API"),
+        (name = "Observability", description = "Prometheus-compatible service metrics"),
         (name = "Prometheus", description = "Prometheus Remote Write and Read API"),
         (name = "Admin", description = "Administrative operations"),
         (name = "Health", description = "Health check endpoints"),
     ),
-    paths(frontpage, publish_sensors_data, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, prometheus_remote_read, simple_promql_query, vacuum_database, liveness, readiness),
+    paths(frontpage, publish_sensors_data, prometheus_metrics, list_metrics, list_series, get_series_data, publish_influxdb, publish_prometheus, prometheus_remote_read, simple_promql_query, vacuum_database, liveness, readiness),
 )]
 struct ApiDoc;
 
@@ -80,8 +83,9 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
     let app = Router::new()
         .route("/", get(frontpage))
         .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
-        // Metrics and Series CRUD
+        // Metrics catalog and Prometheus scrape endpoints
         .route("/metrics", get(list_metrics))
+        .route("/prometheus/metrics", get(prometheus_metrics))
         .route("/series", get(list_series))
         .route("/series/{series_uuid}", get(get_series_data))
         // SensApp Write API
@@ -108,6 +112,10 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         // Health check endpoints
         .route("/health/live", get(liveness))
         .route("/health/ready", get(readiness))
+        .layer(axum::middleware::from_fn_with_state(
+            state.metrics.clone(),
+            track_http_metrics,
+        ))
         .layer(middleware)
         .with_state(state);
 
@@ -308,6 +316,7 @@ async fn vacuum_database(State(state): State<HttpServerState>) -> Result<Json<St
 
 #[cfg(test)]
 mod tests {
+    use crate::http::metrics::HttpMetrics;
     use axum::{
         body::Body,
         http::{Request, StatusCode},
@@ -341,6 +350,7 @@ mod tests {
         let state = HttpServerState {
             name: Arc::new("hello world".to_string()),
             storage,
+            metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
         };
         let app = Router::new().route("/", get(frontpage)).with_state(state);

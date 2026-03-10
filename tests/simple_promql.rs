@@ -15,6 +15,7 @@ use sensapp::config::load_configuration_for_tests;
 use sensapp::datamodel::batch_builder::BatchBuilder;
 use sensapp::datamodel::sensapp_vec::SensAppLabels;
 use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples};
+use sensapp::http::metrics::HttpMetrics;
 use sensapp::http::simple_promql::simple_promql_query;
 use sensapp::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
@@ -88,6 +89,7 @@ async fn create_test_app(storage: Arc<dyn StorageInstance>) -> Router {
     let state = HttpServerState {
         name: Arc::new("SensApp Test".to_string()),
         storage,
+        metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
     };
 

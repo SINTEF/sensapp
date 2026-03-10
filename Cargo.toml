@@ -102,6 +102,7 @@ clickhouse = { version = "0.14", features = [
 ], optional = true }
 rustls = "0.23"
 rusty-promql-parser = "0.1"
+prometheus-client = "0.23"
 
 [dev-dependencies]
 temp-env = "0.3"

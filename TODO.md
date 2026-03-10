@@ -81,6 +81,7 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 - [x] Integration tests for HTTP CRUD/DCAT endpoints (`tests/crud_dcat_api.rs`)
 - [x] Integration tests for data ingestion (`tests/ingestion.rs`)
 - [x] Integration tests for query and export functionality (`tests/query_export.rs`)
+- [x] Integration tests for Prometheus scrape endpoint (`tests/prometheus_metrics.rs`)
 - [x] Integration tests for Apache Arrow export (`tests/arrow_integration.rs`)
 - [x] Integration tests for datamodel edge cases (`tests/datamodel.rs`)
 - [x] Integration tests for parser edge cases (`tests/parser_edge_cases.rs`)
@@ -116,7 +117,7 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 
 ### 📈 Metrics & Monitoring
 
-- [ ] Add Prometheus metrics endpoint (`/metrics`)
+- [x] Add Prometheus metrics endpoint (`/prometheus/metrics`)
 - [ ] Write latency metrics per storage backend
 - [ ] Query latency metrics per storage backend
 - [ ] Data ingestion rate metrics
@@ -185,7 +186,7 @@ This document tracks the comprehensive refactoring plan for SensApp to create a 
 - [ ] Create research data collection guide
 - [ ] Performance comparison methodology
 - [ ] Deployment guide for each storage backend
-- [ ] API documentation updates
+- [x] API documentation updates
 - [ ] Configuration reference guide
 
 ### ✅ Phase 7 Completed

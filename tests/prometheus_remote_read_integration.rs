@@ -18,6 +18,7 @@ use sensapp::config::load_configuration_for_tests;
 use sensapp::datamodel::batch_builder::BatchBuilder;
 use sensapp::datamodel::sensapp_vec::SensAppLabels;
 use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples};
+use sensapp::http::metrics::HttpMetrics;
 use sensapp::http::prometheus_read::prometheus_remote_read;
 use sensapp::http::state::HttpServerState;
 use sensapp::parsing::prometheus::remote_read_models::{
@@ -106,6 +107,7 @@ fn create_test_app(storage: Arc<dyn sensapp::storage::StorageInstance>) -> Route
     let state = HttpServerState {
         name: Arc::new("SensApp Test".to_string()),
         storage,
+        metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
     };
 

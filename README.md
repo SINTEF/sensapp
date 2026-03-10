@@ -20,6 +20,7 @@ Of course you can also use Sensapp as a standalone time-series database.
 - **Compatible with existing sensor data pipelines**:
   - **Prometheus Remote Write**: Prometheus can push data to SensApp.
   - **Prometheus Remote Read**: Prometheus can also read data from SensApp.
+  - **Prometheus Scrape Endpoint**: SensApp exposes internal service metrics on `/prometheus/metrics`.
   - **InfluxDB Line Protocol**: InfluxDB can push data to SensApp, or you can use SensApp instead of InfluxDB, with [Telegraf](https://github.com/influxdata/telegraf) for example.
 - **Data formats**:
   - **JSON**: Simple and widely used format for data interchange.
@@ -47,6 +48,15 @@ Most of the complexity lies in the [database schema design](docs/DATAMODEL.md). 
 SensApp storage is based on the findings of the paper [TSM-Bench: Benchmarking Time Series Database Systems for Monitoring Applications](https://dl.acm.org/doi/abs/10.14778/3611479.3611532). ClickHouse also released [an experimental time-series engine](https://clickhouse.com/docs/engines/table-engines/special/time_series) that is somewhat similar to SensApp's storage schema.
 
 Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
+
+## HTTP Endpoints
+
+- `/metrics`: DCAT metrics catalog endpoint for querying the available measurement series metadata.
+- `/prometheus/metrics`: Prometheus-compatible scrape endpoint for SensApp service metrics such as HTTP request totals, request duration, in-flight requests, uptime, and storage readiness.
+- `/series`: DCAT series catalog endpoint.
+- `/api/v1/prometheus_remote_write`: Prometheus Remote Write ingestion endpoint.
+- `/api/v1/prometheus_remote_read`: Prometheus Remote Read endpoint.
+- `/api/v1/query`: Simple PromQL-compatible query endpoint.
 
 ## Development
 
