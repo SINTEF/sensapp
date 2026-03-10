@@ -11,7 +11,7 @@ RUST_BACKTRACE = { value = "1", condition = { env_not_set = ["RUST_BACKTRACE"] }
 # PostgreSQL defaults (can be overridden)
 POSTGRES_USER = { value = "postgres", condition = { env_not_set = ["POSTGRES_USER"] } }
 POSTGRES_PASSWORD = { value = "postgres", condition = { env_not_set = ["POSTGRES_PASSWORD"] } }
-POSTGRES_DB = { value = "sensapp", condition = { env_not_set = ["POSTGRES_DB"] } }
+POSTGRES_DB = { value = "sensapp-test", condition = { env_not_set = ["POSTGRES_DB"] } }
 POSTGRES_HOST = { value = "localhost", condition = { env_not_set = ["POSTGRES_HOST"] } }
 POSTGRES_PORT = { value = "5432", condition = { env_not_set = ["POSTGRES_PORT"] } }
 DATABASE_URL = { value = "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}", condition = { env_not_set = ["DATABASE_URL"] } }
@@ -170,7 +170,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "postgres" }
 extend = "template-test"
 private = false
 description = "Test with PostgreSQL feature"
-env = { "CARGO_MAKE_TASK_FEATURE" = "postgres", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_POSTGRES}" }
+env = { "CARGO_MAKE_TASK_FEATURE" = "postgres", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_POSTGRES}", "SENSAPP_PG_POOL_MAX_CONNECTIONS" = "1" }
 
 [tasks.clippy-postgres]
 extend = "template-clippy"
@@ -238,7 +238,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb" }
 extend = "template-test"
 private = false
 description = "Test with TimescaleDB feature"
-env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_TIMESCALEDB}" }
+env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_TIMESCALEDB}", "SENSAPP_PG_POOL_MAX_CONNECTIONS" = "1" }
 
 [tasks.clippy-timescaledb]
 extend = "template-clippy"
@@ -457,6 +457,13 @@ sqlx migrate run --source src/storage/sqlite/migrations
 [tasks.migrate-postgres]
 description = "Run PostgreSQL migrations"
 env = { "DATABASE_URL" = "${DATABASE_URL}" }
+script = '''
+sqlx migrate run --source src/storage/postgresql/migrations
+'''
+
+[tasks.migrate-timescaledb]
+description = "Run TimescaleDB migrations"
+env = { "DATABASE_URL" = "${TEST_DATABASE_URL_TIMESCALEDB}" }
 script = '''
 sqlx migrate run --source src/storage/postgresql/migrations
 '''

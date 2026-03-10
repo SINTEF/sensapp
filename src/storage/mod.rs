@@ -14,6 +14,7 @@ pub use query::{LabelMatcher, MatcherType};
 
 /// Default limit for timeseries queries when no limit is specified
 /// Set to 10 million records - appropriate for timeseries data
+#[allow(dead_code)]
 pub const DEFAULT_QUERY_LIMIT: usize = 10_000_000;
 
 /// Default limit for list_series when no limit is specified

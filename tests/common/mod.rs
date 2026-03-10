@@ -13,6 +13,8 @@ pub enum DatabaseType {
     PostgreSQL,
     SQLite,
     ClickHouse,
+    TimescaleDB,
+    DuckDB,
     RRDcached,
 }
 
@@ -26,6 +28,11 @@ impl DatabaseType {
             DatabaseType::ClickHouse => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
                 "clickhouse://default:password@localhost:8123/sensapp_test".to_string()
             }),
+            DatabaseType::TimescaleDB => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+                "timescaledb://postgres:postgres@localhost:5433/sensapp-test".to_string()
+            }),
+            DatabaseType::DuckDB => std::env::var("TEST_DATABASE_URL")
+                .unwrap_or_else(|_| "duckdb://test.duckdb".to_string()),
             DatabaseType::RRDcached => std::env::var("TEST_DATABASE_URL")
                 .unwrap_or_else(|_| "rrdcached://127.0.0.1:42217?preset=hoarder".to_string()),
         }
@@ -37,6 +44,10 @@ impl DatabaseType {
             DatabaseType::SQLite
         } else if connection_string.starts_with("clickhouse://") {
             DatabaseType::ClickHouse
+        } else if connection_string.starts_with("timescaledb://") {
+            DatabaseType::TimescaleDB
+        } else if connection_string.starts_with("duckdb://") {
+            DatabaseType::DuckDB
         } else if connection_string.starts_with("rrdcached://") {
             DatabaseType::RRDcached
         } else {
@@ -78,6 +89,8 @@ impl TestDb {
             DatabaseType::PostgreSQL => "sensapp".to_string(),
             DatabaseType::SQLite => "test.db".to_string(),
             DatabaseType::ClickHouse => "sensapp_test".to_string(),
+            DatabaseType::TimescaleDB => "sensapp-test".to_string(),
+            DatabaseType::DuckDB => "test.duckdb".to_string(),
             DatabaseType::RRDcached => "rrdcached".to_string(),
         };
 

@@ -8,7 +8,8 @@ use crate::datamodel::{
     sensapp_vec::SensAppLabels,
 };
 use crate::storage::{
-    DEFAULT_QUERY_LIMIT, StorageError, StorageInstance, common::datetime_to_micros,
+    DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT, StorageError,
+    StorageInstance, common::datetime_to_micros,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -88,11 +89,26 @@ impl StorageInstance for SqliteStorage {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-        _limit: Option<usize>,
-        _bookmark: Option<&str>,
+        limit: Option<usize>,
+        bookmark: Option<&str>,
     ) -> Result<crate::storage::ListSeriesResult> {
-        // TODO: Implement pagination for SQLite backend
-        // For now, ignore limit and bookmark parameters and return all results
+        let bookmark_id = if let Some(bookmark_str) = bookmark {
+            Some(bookmark_str.parse::<i64>().map_err(|e| {
+                anyhow::Error::from(StorageError::invalid_data_format(
+                    &format!("Invalid bookmark format: {}", e),
+                    None,
+                    None,
+                ))
+            })?)
+        } else {
+            None
+        };
+
+        let effective_limit = limit
+            .unwrap_or(DEFAULT_LIST_SERIES_LIMIT)
+            .min(MAX_LIST_SERIES_LIMIT);
+        let fetch_limit = effective_limit.saturating_add(1) as i64;
+
         #[derive(sqlx::FromRow)]
         struct SensorRow {
             sensor_id: Option<i64>,
@@ -103,22 +119,28 @@ impl StorageInstance for SqliteStorage {
             unit_description: Option<String>,
         }
 
-        // Query sensors with their metadata using the catalog view, optionally filtered by metric name
+        // Query sensors with cursor pagination based on sensor_id.
         let sensor_rows: Vec<SensorRow> = sqlx::query_as(
             r#"
             SELECT sensor_id, uuid, name, type, unit_name, unit_description
             FROM sensor_catalog_view
             WHERE (?1 IS NULL OR name = ?1)
-            ORDER BY uuid ASC
+              AND (?2 IS NULL OR sensor_id > ?2)
+            ORDER BY sensor_id ASC
+            LIMIT ?3
             "#,
         )
         .bind(metric_filter)
+        .bind(bookmark_id)
+        .bind(fetch_limit)
         .fetch_all(&self.pool)
         .await?;
 
+        let has_more = sensor_rows.len() > effective_limit;
         let mut sensors = Vec::new();
+        let mut last_sensor_id = None;
 
-        for sensor_row in sensor_rows {
+        for sensor_row in sensor_rows.into_iter().take(effective_limit) {
             // Parse sensor metadata with improved error handling
             let sensor_uuid = Uuid::parse_str(&sensor_row.uuid).map_err(|e| {
                 anyhow::Error::from(StorageError::invalid_data_format(
@@ -154,6 +176,7 @@ impl StorageInstance for SqliteStorage {
                     Some(sensor_name),
                 ))
             })?;
+            last_sensor_id = Some(sensor_id);
 
             #[derive(sqlx::FromRow)]
             struct LabelRow {
@@ -198,7 +221,11 @@ impl StorageInstance for SqliteStorage {
 
         Ok(crate::storage::ListSeriesResult {
             series: sensors,
-            bookmark: None,
+            bookmark: if has_more {
+                last_sensor_id.map(|sensor_id| sensor_id.to_string())
+            } else {
+                None
+            },
         })
     }
 

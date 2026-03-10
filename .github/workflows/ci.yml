@@ -58,14 +58,18 @@ jobs:
         os: [ubuntu-latest]
         rust: [stable]
         #rust: [stable, beta]
-        feature: [sqlite, postgres, clickhouse]
+        feature: [sqlite, postgres, clickhouse, duckdb, timescaledb]
         include:
           - feature: sqlite
             test-env: "TEST_DATABASE_URL_SQLITE=sqlite://test.db"
           - feature: postgres
-            test-env: "TEST_DATABASE_URL_POSTGRES=postgres://postgres:postgres@localhost:5432/sensapp"
+            test-env: "TEST_DATABASE_URL_POSTGRES=postgres://postgres:postgres@localhost:5432/sensapp-test"
           - feature: clickhouse
             test-env: "TEST_DATABASE_URL_CLICKHOUSE=clickhouse://default:password@localhost:8123/sensapp_test"
+          - feature: duckdb
+            test-env: "TEST_DATABASE_URL_DUCKDB=duckdb://test.duckdb"
+          - feature: timescaledb
+            test-env: "TEST_DATABASE_URL_TIMESCALEDB=timescaledb://postgres:postgres@localhost:5433/sensapp-test"
 
     services:
       postgres:
@@ -73,7 +77,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
-          POSTGRES_DB: sensapp
+          POSTGRES_DB: sensapp-test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -95,6 +99,19 @@ jobs:
         ports:
           - 8123:8123
           - 9000:9000
+      timescaledb:
+        image: timescale/timescaledb:2.17.2-pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: sensapp-test
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sensapp-test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5433:5432
 
     steps:
       - name: Checkout repository
@@ -133,6 +150,10 @@ jobs:
       - name: Run migrations (SQLite)
         if: matrix.feature == 'sqlite'
         run: cargo make migrate-sqlite
+
+      - name: Run migrations (TimescaleDB)
+        if: matrix.feature == 'timescaledb'
+        run: cargo make migrate-timescaledb
 
       - name: Run tests
         run: cargo make check-${{ matrix.feature }}

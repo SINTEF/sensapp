@@ -27,17 +27,8 @@ use hifitime::{UNIX_REF_EPOCH, Unit};
 use sqlx::types::time::OffsetDateTime;
 #[allow(dead_code)]
 pub fn sensapp_datetime_to_offset_datetime(datetime: &SensAppDateTime) -> Result<OffsetDateTime> {
-    let unix_timestamp = datetime.to_unix_seconds().floor() as i128;
-
-    let duration = datetime.to_et_duration();
-    let (_sign, _days, _hours, _minutes, _seconds, miliseconds, microseconds, ns_left) =
-        duration.decompose();
-    let sum_after_seconds: i128 = (miliseconds as i128) * 1_000_000_i128
-        + (microseconds as i128) * 1_000_i128
-        + ns_left as i128;
-
-    let sum = unix_timestamp * 1_000_000_000_i128 + sum_after_seconds;
-    Ok(OffsetDateTime::from_unix_timestamp_nanos(sum)?)
+    let unix_timestamp_us = datetime.to_unix(Unit::Microsecond).floor() as i128;
+    Ok(OffsetDateTime::from_unix_timestamp_nanos(unix_timestamp_us * 1_000_i128)?)
 }
 
 #[cfg(test)]
@@ -84,10 +75,10 @@ mod tests {
             offset_now.unix_timestamp(),
         );
 
-        // Compare sub-second precision: extract nanoseconds within the current second
-        let hifitime_total_nanoseconds = hifitime_now.to_et_duration().total_nanoseconds();
-        let hifitime_subsec_nanoseconds = (hifitime_total_nanoseconds % 1_000_000_000) as u32;
+        // The database path stores timestamps at microsecond precision.
+        let hifitime_subsec_microseconds = hifitime_now.to_unix(Unit::Microsecond).floor() as i64;
+        let offset_subsec_microseconds = (offset_now.unix_timestamp_nanos() / 1_000) as i64;
 
-        assert_eq!(hifitime_subsec_nanoseconds, offset_now.nanosecond());
+        assert_eq!(hifitime_subsec_microseconds, offset_subsec_microseconds);
     }
 }

@@ -16,7 +16,7 @@ use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use smallvec::smallvec;
-use sqlx::{PgPool, postgres::PgConnectOptions};
+use sqlx::{PgPool, postgres::{PgConnectOptions, PgPoolOptions}};
 use std::collections::HashMap;
 use std::{str::FromStr, sync::Arc};
 use uuid::Uuid;
@@ -42,7 +42,15 @@ impl PostgresStorage {
         let connect_options = PgConnectOptions::from_str(connection_string)
             .context("Failed to create postgres connection options")?;
 
-        let pool = PgPool::connect_with(connect_options)
+        let max_connections = std::env::var("SENSAPP_PG_POOL_MAX_CONNECTIONS")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(10);
+
+        let pool = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .connect_with(connect_options)
             .await
             .context("Failed to create postgres pool")?;
 
@@ -113,6 +121,7 @@ impl StorageInstance for PostgresStorage {
         let effective_limit = limit
             .unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT)
             .min(crate::storage::MAX_LIST_SERIES_LIMIT);
+        let fetch_limit = effective_limit.saturating_add(1);
 
         // Query sensors with their metadata using the catalog view, optionally filtered by metric name
         // Use bookmark for cursor-based pagination (sensor_id > bookmark)
@@ -128,14 +137,15 @@ impl StorageInstance for PostgresStorage {
         )
         .bind(metric_filter)
         .bind(bookmark_id)
-        .bind(effective_limit as i64)
+        .bind(fetch_limit as i64)
         .fetch_all(&self.pool)
         .await?;
 
+        let has_more = sensor_rows.len() > effective_limit;
         let mut sensors = Vec::new();
         let mut last_sensor_id: Option<i64> = None;
 
-        for sensor_row in sensor_rows {
+        for sensor_row in sensor_rows.into_iter().take(effective_limit) {
             // Keep track of the last sensor_id for bookmark
             last_sensor_id = sensor_row.sensor_id;
 
@@ -189,7 +199,7 @@ impl StorageInstance for PostgresStorage {
 
         // Determine if there's a next page based on whether we got the full limit
         // If we got exactly the limit, there might be more pages, so return the last sensor_id as bookmark
-        let next_bookmark = if sensors.len() == effective_limit {
+        let next_bookmark = if has_more {
             last_sensor_id.map(|id| id.to_string())
         } else {
             None

@@ -111,31 +111,75 @@ impl StorageInstance for DuckDBStorage {
         let effective_limit = limit
             .unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT)
             .min(crate::storage::MAX_LIST_SERIES_LIMIT);
+        let fetch_limit = effective_limit.saturating_add(1) as i64;
 
         spawn_blocking(move || -> Result<crate::storage::ListSeriesResult> {
             let connection = connection.blocking_lock();
-            let sql = if metric_filter.is_some() {
-                r#"
-                SELECT s.sensor_id, CAST(s.uuid AS TEXT) AS uuid, s.name, s.type, u.name, u.description
-                FROM sensors s
-                LEFT JOIN units u ON s.unit = u.id
-                WHERE s.name = ?
-                ORDER BY s.sensor_id ASC
-                "#
-            } else {
-                r#"
-                SELECT s.sensor_id, CAST(s.uuid AS TEXT) AS uuid, s.name, s.type, u.name, u.description
-                FROM sensors s
-                LEFT JOIN units u ON s.unit = u.id
-                ORDER BY s.sensor_id ASC
-                "#
+            let (sql, use_filter, use_bookmark) = match (metric_filter.is_some(), bookmark_id.is_some()) {
+                (true, true) => (
+                    r#"
+                    SELECT s.sensor_id, CAST(s.uuid AS TEXT) AS uuid, s.name, s.type, u.name, u.description
+                    FROM sensors s
+                    LEFT JOIN units u ON s.unit = u.id
+                    WHERE s.name = ? AND s.sensor_id > ?
+                    ORDER BY s.sensor_id ASC
+                    LIMIT ?
+                    "#,
+                    true,
+                    true,
+                ),
+                (true, false) => (
+                    r#"
+                    SELECT s.sensor_id, CAST(s.uuid AS TEXT) AS uuid, s.name, s.type, u.name, u.description
+                    FROM sensors s
+                    LEFT JOIN units u ON s.unit = u.id
+                    WHERE s.name = ?
+                    ORDER BY s.sensor_id ASC
+                    LIMIT ?
+                    "#,
+                    true,
+                    false,
+                ),
+                (false, true) => (
+                    r#"
+                    SELECT s.sensor_id, CAST(s.uuid AS TEXT) AS uuid, s.name, s.type, u.name, u.description
+                    FROM sensors s
+                    LEFT JOIN units u ON s.unit = u.id
+                    WHERE s.sensor_id > ?
+                    ORDER BY s.sensor_id ASC
+                    LIMIT ?
+                    "#,
+                    false,
+                    true,
+                ),
+                (false, false) => (
+                    r#"
+                    SELECT s.sensor_id, CAST(s.uuid AS TEXT) AS uuid, s.name, s.type, u.name, u.description
+                    FROM sensors s
+                    LEFT JOIN units u ON s.unit = u.id
+                    ORDER BY s.sensor_id ASC
+                    LIMIT ?
+                    "#,
+                    false,
+                    false,
+                ),
             };
 
             let mut statement = connection.prepare(sql)?;
-            let mut rows = if let Some(filter) = metric_filter.as_deref() {
-                statement.query([filter])?
-            } else {
-                statement.query([])?
+            let mut rows = match (use_filter, use_bookmark) {
+                (true, true) => statement.query(duckdb::params![
+                    metric_filter.as_deref().unwrap(),
+                    bookmark_id.unwrap(),
+                    fetch_limit,
+                ])?,
+                (true, false) => statement.query(duckdb::params![
+                    metric_filter.as_deref().unwrap(),
+                    fetch_limit,
+                ])?,
+                (false, true) => {
+                    statement.query(duckdb::params![bookmark_id.unwrap(), fetch_limit])?
+                }
+                (false, false) => statement.query(duckdb::params![fetch_limit])?,
             };
 
             let mut label_statement = connection.prepare(
@@ -150,12 +194,15 @@ impl StorageInstance for DuckDBStorage {
 
             let mut sensors = Vec::new();
             let mut last_sensor_id = None;
+            let mut has_more = false;
 
             while let Some(row) = rows.next()? {
-                let sensor_id: i64 = row.get(0)?;
-                if bookmark_id.is_some_and(|bookmark| sensor_id <= bookmark) {
-                    continue;
+                if sensors.len() == effective_limit {
+                    has_more = true;
+                    break;
                 }
+
+                let sensor_id: i64 = row.get(0)?;
 
                 let sensor_uuid: String = row.get(1)?;
                 let sensor_name: String = row.get(2)?;
@@ -198,13 +245,9 @@ impl StorageInstance for DuckDBStorage {
                 ));
 
                 last_sensor_id = Some(sensor_id);
-
-                if sensors.len() >= effective_limit {
-                    break;
-                }
             }
 
-            let next_bookmark = if sensors.len() == effective_limit {
+            let next_bookmark = if has_more {
                 last_sensor_id.map(|value| value.to_string())
             } else {
                 None
