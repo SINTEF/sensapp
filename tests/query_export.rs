@@ -85,6 +85,113 @@ mod query_tests {
 
     #[tokio::test]
     #[serial]
+    async fn test_query_last_sample_endpoint_returns_latest_value() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let (csv_data, sensor_name) = fixtures::temperature_sensor_csv_with_name();
+        app.post_csv("/sensors/publish", &csv_data).await?;
+
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("Temperature sensor should exist");
+
+        let response = app.get(&format!("/series/{}/last", sensor.uuid)).await?;
+        response.assert_status(StatusCode::OK);
+
+        let payload: serde_json::Value = response.json()?;
+        assert_eq!(payload["series_uuid"], sensor.uuid.to_string());
+        assert_eq!(payload["sensor_name"], sensor_name);
+        assert_eq!(payload["sensor_type"], "float");
+        assert_eq!(payload["value"], 20.8);
+        assert!(payload["timestamp"]
+            .as_str()
+            .expect("timestamp should be a string")
+            .contains("2024-01-01T00:04:00"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_query_last_sample_endpoint_honors_time_window() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let (csv_data, sensor_name) = fixtures::temperature_sensor_csv_with_name();
+        app.post_csv("/sensors/publish", &csv_data).await?;
+
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("Temperature sensor should exist");
+
+        let response = app
+            .get(&format!(
+                "/series/{}/last?start=2024-01-01T00:00:00Z&end=2024-01-01T00:03:30Z",
+                sensor.uuid
+            ))
+            .await?;
+        response.assert_status(StatusCode::OK);
+
+        let payload: serde_json::Value = response.json()?;
+        assert_eq!(payload["value"], 22.0);
+        assert!(payload["timestamp"]
+            .as_str()
+            .expect("timestamp should be a string")
+            .contains("2024-01-01T00:03:00"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_availability_endpoint_reports_presence_and_coverage() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let (csv_data, sensor_name) = fixtures::temperature_sensor_csv_with_name();
+        app.post_csv("/sensors/publish", &csv_data).await?;
+
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("Temperature sensor should exist");
+
+        let response = app
+            .get(&format!(
+                "/series/{}/availability?start=2024-01-01T00:00:00Z&end=2024-01-01T00:04:00Z&step=2m",
+                sensor.uuid
+            ))
+            .await?;
+        response.assert_status(StatusCode::OK);
+
+        let payload: serde_json::Value = response.json()?;
+        assert_eq!(payload["series_uuid"], sensor.uuid.to_string());
+        assert_eq!(payload["sensor_name"], sensor_name);
+        assert_eq!(payload["present"], true);
+        assert_eq!(payload["sample_count"], 5);
+        assert_eq!(payload["covered_buckets"], 3);
+        assert_eq!(payload["total_buckets"], 3);
+        assert_eq!(payload["coverage_ratio"], 1.0);
+        assert!(payload["first_sample_at"]
+            .as_str()
+            .expect("first_sample_at should be a string")
+            .contains("2024-01-01T00:00:00"));
+        assert!(payload["last_sample_at"]
+            .as_str()
+            .expect("last_sample_at should be a string")
+            .contains("2024-01-01T00:04:00"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn test_query_nonexistent_sensor() -> Result<()> {
         ensure_config();
         // Given: An empty database

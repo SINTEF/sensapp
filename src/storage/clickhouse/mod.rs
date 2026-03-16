@@ -1,4 +1,7 @@
-use super::{Aggregation, DEFAULT_QUERY_LIMIT, SensorDataQueryOptions, StorageError, StorageInstance};
+use super::{
+    Aggregation, DEFAULT_QUERY_LIMIT, SensorAvailabilitySummary, SensorDataQueryOptions,
+    StorageError, StorageInstance,
+};
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::{
     Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
@@ -32,6 +35,26 @@ pub struct ClickHouseStorage {
     port: u16,
     user: String,
     password: Option<String>,
+}
+
+#[derive(clickhouse::Row, serde::Deserialize)]
+struct LatestTimestampRow {
+    timestamp_us: i64,
+}
+
+#[derive(clickhouse::Row, serde::Deserialize)]
+struct AvailabilitySummaryWithStepRow {
+    sample_count: u64,
+    first_sample_at: Option<i64>,
+    last_sample_at: Option<i64>,
+    covered_buckets: u64,
+}
+
+#[derive(clickhouse::Row, serde::Deserialize)]
+struct AvailabilitySummaryRow {
+    sample_count: u64,
+    first_sample_at: Option<i64>,
+    last_sample_at: Option<i64>,
 }
 
 impl std::fmt::Debug for ClickHouseStorage {
@@ -253,6 +276,133 @@ impl ClickHouseStorage {
                 labels: SensAppLabels::from(labels),
             },
         )))
+    }
+
+    fn sensor_table_name(sensor_type: SensorType) -> &'static str {
+        match sensor_type {
+            SensorType::Integer => "integer_values",
+            SensorType::Numeric => "numeric_values",
+            SensorType::Float => "float_values",
+            SensorType::String => "string_values",
+            SensorType::Boolean => "boolean_values",
+            SensorType::Location => "location_values",
+            SensorType::Json => "json_values",
+            SensorType::Blob => "blob_values",
+        }
+    }
+
+    async fn query_latest_timestamp_us(
+        &self,
+        table_name: &str,
+        sensor_id: u64,
+        start_time_us: Option<i64>,
+        end_time_us: Option<i64>,
+    ) -> Result<Option<i64>> {
+        let query = format!(
+            "SELECT timestamp_us FROM {table_name} WHERE sensor_id = ?{} ORDER BY timestamp_us DESC LIMIT 1",
+            clickhouse_time_where(start_time_us, end_time_us)
+        );
+
+        let mut cursor = self.client.query(&query).bind(sensor_id);
+        if let Some(start_time_us) = start_time_us {
+            cursor = cursor.bind(start_time_us);
+        }
+        if let Some(end_time_us) = end_time_us {
+            cursor = cursor.bind(end_time_us);
+        }
+
+        let mut rows = cursor
+            .fetch::<LatestTimestampRow>()
+            .map_err(|e| map_clickhouse_error(e, None, None))?;
+
+        Ok(rows.next().await?.map(|row| row.timestamp_us))
+    }
+
+    async fn query_availability_summary_native(
+        &self,
+        table_name: &str,
+        sensor_id: u64,
+        sensor: Sensor,
+        start_time_us: i64,
+        end_time_us: i64,
+        step_ms: Option<i64>,
+    ) -> Result<SensorAvailabilitySummary> {
+        if let Some(step_ms) = step_ms {
+            let step_us = step_ms.checked_mul(1000).context("step is too large")?;
+            let query = format!(
+                r#"
+                SELECT
+                    count() AS sample_count,
+                    minOrNull(timestamp_us) AS first_sample_at,
+                    maxOrNull(timestamp_us) AS last_sample_at,
+                    countDistinct(intDiv(timestamp_us - ?, ?)) AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = ?
+                  AND timestamp_us >= ?
+                  AND timestamp_us <= ?
+                "#
+            );
+
+            let mut rows = self.client
+                .query(&query)
+                .bind(start_time_us)
+                .bind(step_us)
+                .bind(sensor_id)
+                .bind(start_time_us)
+                .bind(end_time_us)
+                .fetch::<AvailabilitySummaryWithStepRow>()
+                .map_err(|e| map_clickhouse_error(e, Some(sensor.uuid), Some(&sensor.name)))?;
+
+            let row = rows.next().await?.unwrap_or(AvailabilitySummaryWithStepRow {
+                sample_count: 0,
+                first_sample_at: None,
+                last_sample_at: None,
+                covered_buckets: 0,
+            });
+
+            return Ok(SensorAvailabilitySummary {
+                sensor,
+                sample_count: row.sample_count as usize,
+                first_sample_at: row.first_sample_at.map(micros_to_datetime),
+                last_sample_at: row.last_sample_at.map(micros_to_datetime),
+                covered_buckets: Some(row.covered_buckets as usize),
+            });
+        }
+
+        let query = format!(
+            r#"
+            SELECT
+                count() AS sample_count,
+                minOrNull(timestamp_us) AS first_sample_at,
+                maxOrNull(timestamp_us) AS last_sample_at
+            FROM {table_name}
+            WHERE sensor_id = ?
+              AND timestamp_us >= ?
+              AND timestamp_us <= ?
+            "#
+        );
+
+        let mut rows = self.client
+            .query(&query)
+            .bind(sensor_id)
+            .bind(start_time_us)
+            .bind(end_time_us)
+            .fetch::<AvailabilitySummaryRow>()
+            .map_err(|e| map_clickhouse_error(e, Some(sensor.uuid), Some(&sensor.name)))?;
+
+        let row = rows.next().await?.unwrap_or(AvailabilitySummaryRow {
+            sample_count: 0,
+            first_sample_at: None,
+            last_sample_at: None,
+        });
+
+        Ok(SensorAvailabilitySummary {
+            sensor,
+            sample_count: row.sample_count as usize,
+            first_sample_at: row.first_sample_at.map(micros_to_datetime),
+            last_sample_at: row.last_sample_at.map(micros_to_datetime),
+            covered_buckets: None,
+        })
     }
 }
 
@@ -751,6 +901,65 @@ impl StorageInstance for ClickHouseStorage {
 
         raw.map(|sensor_data| crate::storage::common::apply_query_options(sensor_data, options))
             .transpose()
+    }
+
+    async fn query_sensor_data_latest(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<Option<SensorData>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+        let table_name = Self::sensor_table_name(sensor.sensor_type);
+
+        let Some(latest_timestamp_us) = self
+            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let samples = self
+            .query_samples_by_type(
+                sensor_id,
+                &sensor.sensor_type,
+                Some(micros_to_datetime(latest_timestamp_us)),
+                Some(micros_to_datetime(latest_timestamp_us)),
+                1,
+            )
+            .await?;
+
+        Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    async fn query_sensor_data_availability(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<Option<SensorAvailabilitySummary>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let summary = self
+            .query_availability_summary_native(
+                Self::sensor_table_name(sensor.sensor_type),
+                sensor_id,
+                sensor,
+                datetime_to_micros(&start_time),
+                datetime_to_micros(&end_time),
+                step_ms,
+            )
+            .await?;
+
+        Ok(Some(summary))
     }
 
     async fn query_sensors_by_labels(

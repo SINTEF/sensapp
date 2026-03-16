@@ -1,0 +1,97 @@
+name: Python SDK Check
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "python/sensapp-sdk/**"
+      - ".github/workflows/python-sdk-check.yaml"
+      - "docs/PYTHON_SDK.md"
+  pull_request:
+    paths:
+      - "python/sensapp-sdk/**"
+      - ".github/workflows/python-sdk-check.yaml"
+      - "docs/PYTHON_SDK.md"
+
+jobs:
+  python-sdk-unit:
+    name: Python SDK Unit (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    defaults:
+      run:
+        working-directory: python/sensapp-sdk
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install SDK dependencies
+        run: uv pip install --system -e '.[dev]'
+
+      - name: Run Ruff check
+        if: matrix.python-version == '3.12'
+        uses: astral-sh/ruff-action@v3
+        with:
+          src: python/sensapp-sdk
+          args: check .
+
+      - name: Run Ruff format check
+        if: matrix.python-version == '3.12'
+        run: python -m ruff format --check .
+
+      - name: Run unit tests
+        run: python -m pytest -m 'not integration'
+
+      - name: Build distributions
+        if: matrix.python-version == '3.12'
+        run: python -m build
+
+      - name: Smoke test wheel install
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m venv /tmp/sensapp-sdk-wheel
+          /tmp/sensapp-sdk-wheel/bin/python -m pip install dist/*.whl
+          /tmp/sensapp-sdk-wheel/bin/python -c "import sensapp_sdk; print(sensapp_sdk.__all__[0])"
+
+  python-sdk-integration:
+    name: Python SDK Integration
+    runs-on: ubuntu-latest
+    needs: python-sdk-unit
+    defaults:
+      run:
+        working-directory: python/sensapp-sdk
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Rust toolchain
+        uses: moonrepo/setup-rust@v1
+        with:
+          channel: stable
+
+      - name: Install SDK dependencies
+        run: uv pip install --system -e '.[dev]'
+
+      - name: Run live integration tests
+        run: python -m pytest -m integration

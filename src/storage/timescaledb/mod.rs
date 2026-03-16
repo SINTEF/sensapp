@@ -3,7 +3,11 @@ pub mod timescaledb_utilities;
 
 use self::timescaledb_publishers::*;
 use self::timescaledb_utilities::get_sensor_id_or_create_sensor;
-use super::{Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT, SensorDataQueryOptions, StorageError, StorageInstance, common::datetime_to_micros};
+use super::{
+    Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT,
+    SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
+    common::datetime_to_micros,
+};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
     Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
@@ -355,6 +359,121 @@ impl TimeScaleDBStorage {
             sensor_id,
             Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels)),
         )))
+    }
+
+    fn sensor_table_name(sensor_type: SensorType) -> &'static str {
+        match sensor_type {
+            SensorType::Integer => "integer_values",
+            SensorType::Numeric => "numeric_values",
+            SensorType::Float => "float_values",
+            SensorType::String => "string_values",
+            SensorType::Boolean => "boolean_values",
+            SensorType::Location => "location_values",
+            SensorType::Json => "json_values",
+            SensorType::Blob => "blob_values",
+        }
+    }
+
+    async fn query_latest_timestamp_us(
+        &self,
+        table_name: &str,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+    ) -> Result<Option<i64>> {
+        let sql = format!(
+            r#"
+            SELECT (EXTRACT(EPOCH FROM MAX(time)) * 1000000)::bigint AS timestamp_us
+            FROM {table_name}
+            WHERE sensor_id = $1
+            AND ($2::TIMESTAMPTZ IS NULL OR time >= $2)
+            AND ($3::TIMESTAMPTZ IS NULL OR time <= $3)
+            "#
+        );
+
+        let timestamp_us: Option<i64> = sqlx::query_scalar(&sql)
+            .bind(sensor_id)
+            .bind(start_time.map(micros_to_offset_datetime))
+            .bind(end_time.map(micros_to_offset_datetime))
+            .fetch_one(&self.pool)
+            .await?;
+
+        Ok(timestamp_us)
+    }
+
+    async fn query_availability_summary_native(
+        &self,
+        table_name: &str,
+        sensor_id: i64,
+        sensor: Sensor,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<SensorAvailabilitySummary> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            sample_count: i64,
+            first_sample_at: Option<sqlx::types::time::OffsetDateTime>,
+            last_sample_at: Option<sqlx::types::time::OffsetDateTime>,
+            covered_buckets: Option<i64>,
+        }
+
+        let start_ts = micros_to_offset_datetime(datetime_to_micros(&start_time));
+        let end_ts = micros_to_offset_datetime(datetime_to_micros(&end_time));
+
+        let row: Row = if let Some(step_ms) = step_ms {
+            let sql = format!(
+                r#"
+                SELECT
+                    COUNT(*)::bigint AS sample_count,
+                    MIN(time) AS first_sample_at,
+                    MAX(time) AS last_sample_at,
+                    COUNT(DISTINCT time_bucket($1::bigint * INTERVAL '1 millisecond', time, $2::timestamptz))::bigint AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = $3
+                AND time >= $4
+                AND time <= $5
+                "#
+            );
+
+            sqlx::query_as(&sql)
+                .bind(step_ms)
+                .bind(start_ts)
+                .bind(sensor_id)
+                .bind(start_ts)
+                .bind(end_ts)
+                .fetch_one(&self.pool)
+                .await?
+        } else {
+            let sql = format!(
+                r#"
+                SELECT
+                    COUNT(*)::bigint AS sample_count,
+                    MIN(time) AS first_sample_at,
+                    MAX(time) AS last_sample_at,
+                    NULL::bigint AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = $1
+                AND time >= $2
+                AND time <= $3
+                "#
+            );
+
+            sqlx::query_as(&sql)
+                .bind(sensor_id)
+                .bind(start_ts)
+                .bind(end_ts)
+                .fetch_one(&self.pool)
+                .await?
+        };
+
+        Ok(SensorAvailabilitySummary {
+            sensor,
+            sample_count: row.sample_count.max(0) as usize,
+            first_sample_at: row.first_sample_at.map(offset_datetime_to_sensapp),
+            last_sample_at: row.last_sample_at.map(offset_datetime_to_sensapp),
+            covered_buckets: row.covered_buckets.map(|value| value.max(0) as usize),
+        })
     }
 }
 
@@ -942,6 +1061,82 @@ impl StorageInstance for TimeScaleDBStorage {
 
         raw.map(|sensor_data| crate::storage::common::apply_query_options(sensor_data, options))
             .transpose()
+    }
+
+    async fn query_sensor_data_latest(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<Option<SensorData>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+        let table_name = Self::sensor_table_name(sensor.sensor_type);
+
+        let Some(latest_timestamp_us) = self
+            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let samples = match sensor.sensor_type {
+            SensorType::Integer => {
+                self.query_integer_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Numeric => {
+                self.query_numeric_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Float => {
+                self.query_float_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::String => {
+                self.query_string_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Boolean => {
+                self.query_boolean_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Location => {
+                self.query_location_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Json => {
+                self.query_json_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Blob => {
+                self.query_blob_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+        };
+
+        Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    async fn query_sensor_data_availability(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<Option<SensorAvailabilitySummary>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let summary = self
+            .query_availability_summary_native(
+                Self::sensor_table_name(sensor.sensor_type),
+                sensor_id,
+                sensor,
+                start_time,
+                end_time,
+                step_ms,
+            )
+            .await?;
+
+        Ok(Some(summary))
     }
 
     async fn query_sensors_by_labels(

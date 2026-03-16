@@ -147,6 +147,19 @@ pub struct SensorDataQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct LastSampleQuery {
+    pub start: Option<String>,
+    pub end: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AvailabilityQuery {
+    pub start: String,
+    pub end: String,
+    pub step: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SeriesQuery {
     pub metric: Option<String>,
     /// PromQL-style label selector (e.g., `{env="prod",region=~"us.*"}`)
@@ -263,6 +276,83 @@ fn sensor_matches_matchers(sensor: &crate::datamodel::Sensor, matchers: &[LabelM
         }
     }
     true
+}
+
+fn sensor_type_name(sensor_type: SensorType) -> &'static str {
+    match sensor_type {
+        SensorType::Integer => "integer",
+        SensorType::Numeric => "numeric",
+        SensorType::Float => "float",
+        SensorType::String => "string",
+        SensorType::Boolean => "boolean",
+        SensorType::Location => "location",
+        SensorType::Blob => "blob",
+        SensorType::Json => "json",
+    }
+}
+
+fn parse_optional_time_bounds(
+    start: Option<&String>,
+    end: Option<&String>,
+) -> Result<(Option<SensAppDateTime>, Option<SensAppDateTime>), AppError> {
+    let start_time = match start {
+        Some(value) => Some(parse_datetime_string(value).map_err(|e| {
+            AppError::bad_request(anyhow::anyhow!("Invalid start datetime: {}", e))
+        })?),
+        None => None,
+    };
+
+    let end_time = match end {
+        Some(value) => Some(parse_datetime_string(value).map_err(|e| {
+            AppError::bad_request(anyhow::anyhow!("Invalid end datetime: {}", e))
+        })?),
+        None => None,
+    };
+
+    if let (Some(start_time), Some(end_time)) = (start_time, end_time)
+        && start_time > end_time
+    {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "'start' must be less than or equal to 'end'"
+        )));
+    }
+
+    Ok((start_time, end_time))
+}
+
+fn last_sample_json(samples: &crate::datamodel::TypedSamples) -> Option<(String, Value)> {
+    match samples {
+        crate::datamodel::TypedSamples::Integer(samples) => samples
+            .last()
+            .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),
+        crate::datamodel::TypedSamples::Numeric(samples) => samples
+            .last()
+            .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value.to_string()))),
+        crate::datamodel::TypedSamples::Float(samples) => samples
+            .last()
+            .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),
+        crate::datamodel::TypedSamples::String(samples) => samples
+            .last()
+            .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),
+        crate::datamodel::TypedSamples::Boolean(samples) => samples
+            .last()
+            .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),
+        crate::datamodel::TypedSamples::Location(samples) => samples.last().map(|sample| {
+            (
+                sample.datetime.to_rfc3339(),
+                json!({
+                    "longitude": sample.value.x(),
+                    "latitude": sample.value.y(),
+                }),
+            )
+        }),
+        crate::datamodel::TypedSamples::Blob(samples) => samples
+            .last()
+            .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),
+        crate::datamodel::TypedSamples::Json(samples) => samples
+            .last()
+            .map(|sample| (sample.datetime.to_rfc3339(), sample.value.clone())),
+    }
 }
 
 /// List unique metrics (measurement types) with aggregated information in DCAT catalog format.
@@ -767,6 +857,141 @@ pub async fn get_series_data(
     })?;
 
     Ok(response)
+}
+
+/// Get the most recent sample for a series, optionally within a bounded time window.
+#[utoipa::path(
+    get,
+    path = "/series/{series_uuid}/last",
+    tag = "SensApp",
+    params(
+        ("series_uuid" = String, Path, description = "UUID of the series"),
+        ("start" = Option<String>, Query, description = "Optional inclusive start datetime in ISO 8601 format"),
+        ("end" = Option<String>, Query, description = "Optional inclusive end datetime in ISO 8601 format")
+    ),
+    responses(
+        (status = 200, description = "Latest sample for the requested series", body = Value),
+        (status = 404, description = "Series not found or no sample matched the requested window"),
+        (status = 400, description = "Invalid query parameters")
+    )
+)]
+pub async fn get_series_last_sample(
+    State(state): State<HttpServerState>,
+    Path(series_uuid): Path<String>,
+    Query(query): Query<LastSampleQuery>,
+) -> Result<Json<Value>, AppError> {
+    let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
+        AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+    })?;
+
+    let (start_time, end_time) = parse_optional_time_bounds(query.start.as_ref(), query.end.as_ref())?;
+
+    let sensor_data = state
+        .storage
+        .query_sensor_data_latest(&series_uuid, start_time, end_time)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found(anyhow::anyhow!(
+                "Series with UUID '{}' has no sample in the requested window",
+                series_uuid
+            ))
+        })?;
+
+    let (timestamp, value) = last_sample_json(&sensor_data.samples).ok_or_else(|| {
+        AppError::not_found(anyhow::anyhow!(
+            "Series with UUID '{}' has no sample in the requested window",
+            series_uuid
+        ))
+    })?;
+
+    Ok(Json(json!({
+        "series_uuid": sensor_data.sensor.uuid,
+        "sensor_name": sensor_data.sensor.name,
+        "sensor_type": sensor_type_name(sensor_data.sensor.sensor_type),
+        "unit": sensor_data.sensor.unit.as_ref().map(|unit| unit.name.clone()),
+        "timestamp": timestamp,
+        "value": value,
+    })))
+}
+
+/// Get presence and optional bucket coverage for a series over a time window.
+#[utoipa::path(
+    get,
+    path = "/series/{series_uuid}/availability",
+    tag = "SensApp",
+    params(
+        ("series_uuid" = String, Path, description = "UUID of the series"),
+        ("start" = String, Query, description = "Inclusive start datetime in ISO 8601 format"),
+        ("end" = String, Query, description = "Inclusive end datetime in ISO 8601 format"),
+        ("step" = Option<String>, Query, description = "Optional bucket width using Prometheus duration syntax for coverage calculation")
+    ),
+    responses(
+        (status = 200, description = "Availability information for the requested series and window", body = Value),
+        (status = 404, description = "Series not found"),
+        (status = 400, description = "Invalid query parameters")
+    )
+)]
+pub async fn get_series_availability(
+    State(state): State<HttpServerState>,
+    Path(series_uuid): Path<String>,
+    Query(query): Query<AvailabilityQuery>,
+) -> Result<Json<Value>, AppError> {
+    let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
+        AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+    })?;
+
+    let (start_time, end_time) = parse_optional_time_bounds(Some(&query.start), Some(&query.end))?;
+    let start_time = start_time.expect("validated required start time");
+    let end_time = end_time.expect("validated required end time");
+    let parsed_step_ms = match query.step.as_deref() {
+        Some(step) => Some(promql_duration::parse_duration_millis(step).map_err(|e| {
+            AppError::bad_request(anyhow::anyhow!("Invalid step duration: {}", e))
+        })?),
+        None => None,
+    };
+
+    let summary = state
+        .storage
+        .query_sensor_data_availability(&series_uuid, start_time, end_time, parsed_step_ms)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found(anyhow::anyhow!("Series with UUID '{}' not found", series_uuid))
+        })?;
+
+    let (step_value, covered_buckets, total_buckets, coverage_ratio) = if let (Some(step), Some(step_ms)) = (query.step.as_deref(), parsed_step_ms) {
+        let step_us = step_ms.checked_mul(1000).ok_or_else(|| {
+            AppError::bad_request(anyhow::anyhow!("step is too large"))
+        })?;
+
+        let start_us = crate::storage::common::datetime_to_micros(&start_time);
+        let end_us = crate::storage::common::datetime_to_micros(&end_time);
+        let total = ((end_us - start_us).div_euclid(step_us) + 1).max(1) as usize;
+        let covered = summary.covered_buckets.unwrap_or(0);
+
+        (
+            Some(step.to_string()),
+            Some(covered),
+            Some(total),
+            Some(covered as f64 / total as f64),
+        )
+    } else {
+        (None, None, None, None)
+    };
+
+    Ok(Json(json!({
+        "series_uuid": summary.sensor.uuid,
+        "sensor_name": summary.sensor.name,
+        "start": start_time.to_rfc3339(),
+        "end": end_time.to_rfc3339(),
+        "present": summary.sample_count > 0,
+        "sample_count": summary.sample_count,
+        "first_sample_at": summary.first_sample_at.map(|value| value.to_rfc3339()),
+        "last_sample_at": summary.last_sample_at.map(|value| value.to_rfc3339()),
+        "step": step_value,
+        "covered_buckets": covered_buckets,
+        "total_buckets": total_buckets,
+        "coverage_ratio": coverage_ratio,
+    })))
 }
 
 #[cfg(test)]

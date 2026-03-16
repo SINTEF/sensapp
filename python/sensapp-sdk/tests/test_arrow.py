@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 import pyarrow as pa
 import pytest
@@ -64,6 +65,62 @@ def test_build_upload_table_for_location_samples() -> None:
     assert table["value"].to_pylist() == [{"latitude": 63.4305, "longitude": 10.3951}]
 
 
+@pytest.mark.parametrize(
+    ("sample_value", "expected_type"),
+    [
+        (True, pa.bool_()),
+        (7, pa.int64()),
+        ("ok", pa.string()),
+        (b"abc", pa.binary()),
+    ],
+)
+def test_build_upload_table_supports_multiple_scalar_types(
+    sample_value: Any,
+    expected_type: pa.DataType,
+) -> None:
+    table = build_upload_table(
+        "generic_sensor",
+        [
+            SamplePoint(
+                datetime(2026, 3, 16, 12, 0, tzinfo=timezone.utc),
+                sample_value,
+            ),
+        ],
+    )
+
+    assert table.schema.field("value").type == expected_type
+
+
+def test_build_upload_table_accepts_mapping_samples() -> None:
+    table = build_upload_table(
+        "temperature",
+        [{"timestamp": "2026-03-16T12:00:00Z", "value": 21.5}],
+    )
+
+    assert table["value"].to_pylist() == [21.5]
+
+
+def test_build_upload_table_rejects_mapping_without_required_keys() -> None:
+    with pytest.raises(SensAppValidationError, match="timestamp"):
+        build_upload_table("temperature", [{"value": 21.5}])
+
+
+def test_build_upload_table_rejects_invalid_timestamp_string() -> None:
+    with pytest.raises(SensAppValidationError, match="invalid timestamp string"):
+        build_upload_table(
+            "temperature",
+            [SamplePoint("not-a-timestamp", 21.5)],
+        )
+
+
+def test_build_upload_table_rejects_unsupported_value_type() -> None:
+    with pytest.raises(SensAppValidationError, match="cannot infer sensor type"):
+        build_upload_table(
+            "temperature",
+            [SamplePoint(datetime(2026, 3, 16, 12, 0, tzinfo=timezone.utc), object())],
+        )
+
+
 def test_arrow_round_trip() -> None:
     source = pa.table(
         {
@@ -88,3 +145,8 @@ def test_arrow_round_trip() -> None:
 def test_build_upload_table_rejects_empty_samples() -> None:
     with pytest.raises(SensAppValidationError):
         build_upload_table("temperature", [])
+
+
+def test_read_arrow_table_rejects_invalid_bytes() -> None:
+    with pytest.raises((pa.ArrowInvalid, pa.ArrowTypeError, OSError)):
+        read_arrow_table(b"not-arrow")

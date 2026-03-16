@@ -1,11 +1,12 @@
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{Sample, SensAppDateTime, SensorData, SensorType, TypedSamples};
-use crate::storage::{Aggregation, SensorDataQueryOptions, SimplifyOptions};
+use crate::storage::{Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, SimplifyOptions};
 use anyhow::{Result, anyhow};
 use hifitime::Unit;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use simplify_polyline::{Point, simplify};
 use smallvec::smallvec;
+use std::collections::BTreeSet;
 
 /// Convert SensAppDateTime to Unix microseconds for database storage
 #[allow(dead_code)] // Used by SQLite backend when enabled
@@ -28,6 +29,76 @@ pub fn apply_query_options(
     }
 
     Ok(sensor_data)
+}
+
+pub fn keep_only_last_sample(mut sensor_data: SensorData) -> Option<SensorData> {
+    sensor_data.samples = match sensor_data.samples {
+        TypedSamples::Integer(mut samples) => TypedSamples::Integer(smallvec![samples.pop()?]),
+        TypedSamples::Numeric(mut samples) => TypedSamples::Numeric(smallvec![samples.pop()?]),
+        TypedSamples::Float(mut samples) => TypedSamples::Float(smallvec![samples.pop()?]),
+        TypedSamples::String(mut samples) => TypedSamples::String(smallvec![samples.pop()?]),
+        TypedSamples::Boolean(mut samples) => TypedSamples::Boolean(smallvec![samples.pop()?]),
+        TypedSamples::Location(mut samples) => TypedSamples::Location(smallvec![samples.pop()?]),
+        TypedSamples::Blob(mut samples) => TypedSamples::Blob(smallvec![samples.pop()?]),
+        TypedSamples::Json(mut samples) => TypedSamples::Json(smallvec![samples.pop()?]),
+    };
+
+    Some(sensor_data)
+}
+
+pub fn summarize_sensor_data_availability(
+    sensor_data: SensorData,
+    start_time: SensAppDateTime,
+    step_ms: Option<i64>,
+) -> Result<SensorAvailabilitySummary> {
+    let start_us = datetime_to_micros(&start_time);
+    let step_us = step_ms
+        .map(|value| {
+            value
+                .checked_mul(1000)
+                .ok_or_else(|| anyhow!("step is too large"))
+        })
+        .transpose()?;
+
+    let (sample_count, first_sample_at, last_sample_at, covered_buckets) = match &sensor_data.samples {
+        TypedSamples::Integer(samples) => availability_stats_for_samples(samples, start_us, step_us),
+        TypedSamples::Numeric(samples) => availability_stats_for_samples(samples, start_us, step_us),
+        TypedSamples::Float(samples) => availability_stats_for_samples(samples, start_us, step_us),
+        TypedSamples::String(samples) => availability_stats_for_samples(samples, start_us, step_us),
+        TypedSamples::Boolean(samples) => availability_stats_for_samples(samples, start_us, step_us),
+        TypedSamples::Location(samples) => availability_stats_for_samples(samples, start_us, step_us),
+        TypedSamples::Blob(samples) => availability_stats_for_samples(samples, start_us, step_us),
+        TypedSamples::Json(samples) => availability_stats_for_samples(samples, start_us, step_us),
+    };
+
+    Ok(SensorAvailabilitySummary {
+        sensor: sensor_data.sensor,
+        sample_count,
+        first_sample_at,
+        last_sample_at,
+        covered_buckets,
+    })
+}
+
+fn availability_stats_for_samples<V>(
+    samples: &[Sample<V>],
+    start_us: i64,
+    step_us: Option<i64>,
+) -> (usize, Option<SensAppDateTime>, Option<SensAppDateTime>, Option<usize>) {
+    let covered_buckets = step_us.map(|step_us| {
+        samples
+            .iter()
+            .map(|sample| (datetime_to_micros(&sample.datetime) - start_us).div_euclid(step_us))
+            .collect::<BTreeSet<_>>()
+            .len()
+    });
+
+    (
+        samples.len(),
+        samples.first().map(|sample| sample.datetime),
+        samples.last().map(|sample| sample.datetime),
+        covered_buckets,
+    )
 }
 
 fn aggregate_sensor_data(

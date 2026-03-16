@@ -63,18 +63,18 @@ impl SensorDataQueryOptions {
             ));
         }
 
-        if let Some(step_ms) = self.step_ms {
-            if step_ms <= 0 {
-                return Err(anyhow!("'step' must be greater than zero"));
-            }
+        if let Some(step_ms) = self.step_ms
+            && step_ms <= 0
+        {
+            return Err(anyhow!("'step' must be greater than zero"));
         }
 
-        if let Some(simplify) = self.simplify {
-            if !simplify.tolerance.is_finite() || simplify.tolerance <= 0.0 {
-                return Err(anyhow!(
-                    "'simplify_tolerance' must be a finite number greater than zero"
-                ));
-            }
+        if let Some(simplify) = self.simplify
+            && (!simplify.tolerance.is_finite() || simplify.tolerance <= 0.0)
+        {
+            return Err(anyhow!(
+                "'simplify_tolerance' must be a finite number greater than zero"
+            ));
         }
 
         Ok(())

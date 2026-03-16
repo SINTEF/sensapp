@@ -1,5 +1,5 @@
 // Core storage traits and factory - always available
-use crate::datamodel::SensAppDateTime;
+use crate::datamodel::{SensAppDateTime, Sensor};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::fmt::Debug;
@@ -33,6 +33,15 @@ pub struct ListSeriesResult {
     /// Bookmark for the next page (sensor_id as string)
     /// None if this is the last page
     pub bookmark: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct SensorAvailabilitySummary {
+    pub sensor: Sensor,
+    pub sample_count: usize,
+    pub first_sample_at: Option<SensAppDateTime>,
+    pub last_sample_at: Option<SensAppDateTime>,
+    pub covered_buckets: Option<usize>,
 }
 
 #[async_trait]
@@ -78,6 +87,44 @@ pub trait StorageInstance: Send + Sync + Debug {
 
         raw.map(|sensor_data| crate::storage::common::apply_query_options(sensor_data, options))
             .transpose()
+    }
+
+    async fn query_sensor_data_latest(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        let Some(sensor_data) = self
+            .query_sensor_data(sensor_uuid, start_time, end_time, None)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        Ok(crate::storage::common::keep_only_last_sample(sensor_data))
+    }
+
+    async fn query_sensor_data_availability(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<Option<SensorAvailabilitySummary>> {
+        let Some(sensor_data) = self
+            .query_sensor_data(sensor_uuid, Some(start_time), Some(end_time), None)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        crate::storage::common::summarize_sensor_data_availability(
+            sensor_data,
+            start_time,
+            step_ms,
+        )
+        .map(Some)
     }
 
     /// Query sensors and their data by label matchers.

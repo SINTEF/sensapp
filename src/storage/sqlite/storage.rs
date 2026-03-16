@@ -13,7 +13,8 @@ use crate::datamodel::{
 };
 use crate::storage::{
     DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT, StorageError,
-    StorageInstance, common::datetime_to_micros, Aggregation, SensorDataQueryOptions,
+    StorageInstance, common::datetime_to_micros, Aggregation, SensorAvailabilitySummary,
+    SensorDataQueryOptions,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -574,6 +575,82 @@ impl StorageInstance for SqliteStorage {
             .transpose()
     }
 
+    async fn query_sensor_data_latest(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<Option<SensorData>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+        let table_name = Self::sensor_table_name(sensor.sensor_type);
+
+        let Some(latest_timestamp_us) = self
+            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let samples = match sensor.sensor_type {
+            SensorType::Integer => {
+                self.query_integer_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Numeric => {
+                self.query_numeric_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Float => {
+                self.query_float_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::String => {
+                self.query_string_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Boolean => {
+                self.query_boolean_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Location => {
+                self.query_location_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Json => {
+                self.query_json_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+            SensorType::Blob => {
+                self.query_blob_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+            }
+        };
+
+        Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    async fn query_sensor_data_availability(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<Option<SensorAvailabilitySummary>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let summary = self
+            .query_availability_summary_native(
+                Self::sensor_table_name(sensor.sensor_type),
+                sensor_id,
+                sensor,
+                datetime_to_micros(&start_time),
+                datetime_to_micros(&end_time),
+                step_ms,
+            )
+            .await?;
+
+        Ok(Some(summary))
+    }
+
     async fn query_sensors_by_labels(
         &self,
         matchers: &[crate::storage::LabelMatcher],
@@ -837,6 +914,127 @@ impl SqliteStorage {
                 Some(labels),
             ),
         )))
+    }
+
+    fn sensor_table_name(sensor_type: SensorType) -> &'static str {
+        match sensor_type {
+            SensorType::Integer => "integer_values",
+            SensorType::Numeric => "numeric_values",
+            SensorType::Float => "float_values",
+            SensorType::String => "string_values",
+            SensorType::Boolean => "boolean_values",
+            SensorType::Location => "location_values",
+            SensorType::Json => "json_values",
+            SensorType::Blob => "blob_values",
+        }
+    }
+
+    async fn query_latest_timestamp_us(
+        &self,
+        table_name: &str,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+    ) -> Result<Option<i64>> {
+        let sql = format!(
+            r#"
+            SELECT MAX(timestamp_us) AS timestamp_us
+            FROM {table_name}
+            WHERE sensor_id = ?
+            AND (? IS NULL OR timestamp_us >= ?)
+            AND (? IS NULL OR timestamp_us <= ?)
+            "#
+        );
+
+        let timestamp_us: Option<i64> = sqlx::query_scalar(&sql)
+            .bind(sensor_id)
+            .bind(start_time)
+            .bind(start_time)
+            .bind(end_time)
+            .bind(end_time)
+            .fetch_one(&self.pool)
+            .await?;
+
+        Ok(timestamp_us)
+    }
+
+    async fn query_availability_summary_native(
+        &self,
+        table_name: &str,
+        sensor_id: i64,
+        sensor: Sensor,
+        start_time: i64,
+        end_time: i64,
+        step_ms: Option<i64>,
+    ) -> Result<SensorAvailabilitySummary> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            sample_count: i64,
+            first_sample_at: Option<i64>,
+            last_sample_at: Option<i64>,
+            covered_buckets: Option<i64>,
+        }
+
+        let row: Row = if let Some(step_ms) = step_ms {
+            let step_us = step_ms
+                .checked_mul(1000)
+                .context("step is too large")?;
+            let sql = format!(
+                r#"
+                SELECT
+                    COUNT(*) AS sample_count,
+                    MIN(timestamp_us) AS first_sample_at,
+                    MAX(timestamp_us) AS last_sample_at,
+                    COUNT(DISTINCT ((timestamp_us - ?) / ?)) AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = ?
+                AND timestamp_us >= ?
+                AND timestamp_us <= ?
+                "#
+            );
+
+            sqlx::query_as(&sql)
+                .bind(start_time)
+                .bind(step_us)
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .fetch_one(&self.pool)
+                .await?
+        } else {
+            let sql = format!(
+                r#"
+                SELECT
+                    COUNT(*) AS sample_count,
+                    MIN(timestamp_us) AS first_sample_at,
+                    MAX(timestamp_us) AS last_sample_at,
+                    NULL AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = ?
+                AND timestamp_us >= ?
+                AND timestamp_us <= ?
+                "#
+            );
+
+            sqlx::query_as(&sql)
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .fetch_one(&self.pool)
+                .await?
+        };
+
+        Ok(SensorAvailabilitySummary {
+            sensor,
+            sample_count: row.sample_count.max(0) as usize,
+            first_sample_at: row
+                .first_sample_at
+                .map(SensAppDateTime::from_unix_microseconds_i64),
+            last_sample_at: row
+                .last_sample_at
+                .map(SensAppDateTime::from_unix_microseconds_i64),
+            covered_buckets: row.covered_buckets.map(|value| value.max(0) as usize),
+        })
     }
 
     async fn publish_single_sensor_batch(

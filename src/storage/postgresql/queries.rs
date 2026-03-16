@@ -13,6 +13,7 @@ use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 
 impl PostgresStorage {
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn query_integer_samples_aggregated(
         &self,
         sensor_id: i64,
@@ -129,6 +130,7 @@ impl PostgresStorage {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn query_float_samples_aggregated(
         &self,
         sensor_id: i64,
@@ -212,6 +214,7 @@ impl PostgresStorage {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn query_numeric_samples_aggregated(
         &self,
         sensor_id: i64,

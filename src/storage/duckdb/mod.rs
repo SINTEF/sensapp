@@ -2,7 +2,7 @@ use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::unit::Unit;
-use crate::datamodel::{Metric, Sample, Sensor, SensorData, SensorType, TypedSamples};
+use crate::datamodel::{Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples};
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use duckdb::Connection;
@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 use uuid::Uuid;
 
-use super::{Aggregation, SensorDataQueryOptions, StorageError, StorageInstance};
+use super::{Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance};
 
 mod duckdb_publishers;
 mod duckdb_utilities;
@@ -723,6 +723,79 @@ impl StorageInstance for DuckDBStorage {
             .transpose()
     }
 
+    async fn query_sensor_data_latest(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<Option<SensorData>> {
+        let connection = Arc::clone(&self.connection);
+        let sensor_uuid_owned = sensor_uuid.to_string();
+        let start_time_ms = start_time.map(|time| time.to_unix_milliseconds().floor() as i64);
+        let end_time_ms = end_time.map(|time| time.to_unix_milliseconds().floor() as i64);
+
+        let latest_timestamp_ms = spawn_blocking(move || -> Result<Option<i64>> {
+            let connection = connection.blocking_lock();
+            let Some((sensor_id, sensor)) = duckdb_get_sensor_metadata(&connection, &sensor_uuid_owned)? else {
+                return Ok(None);
+            };
+
+            duckdb_query_latest_timestamp_ms(
+                &connection,
+                duckdb_sensor_table_name(sensor.sensor_type),
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+            )
+        })
+        .await??;
+
+        let Some(latest_timestamp_ms) = latest_timestamp_ms else {
+            return Ok(None);
+        };
+
+        self.query_sensor_data(
+            sensor_uuid,
+            Some(SensAppDateTime::from_unix_milliseconds_i64(latest_timestamp_ms)),
+            Some(SensAppDateTime::from_unix_milliseconds_i64(latest_timestamp_ms)),
+            Some(1),
+        )
+        .await
+    }
+
+    async fn query_sensor_data_availability(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<Option<SensorAvailabilitySummary>> {
+        let connection = Arc::clone(&self.connection);
+        let sensor_uuid_owned = sensor_uuid.to_string();
+        let start_time_ms = start_time.to_unix_milliseconds().floor() as i64;
+        let end_time_ms = end_time.to_unix_milliseconds().floor() as i64;
+
+        spawn_blocking(move || -> Result<Option<SensorAvailabilitySummary>> {
+            let connection = connection.blocking_lock();
+            let Some((sensor_id, sensor)) = duckdb_get_sensor_metadata(&connection, &sensor_uuid_owned)? else {
+                return Ok(None);
+            };
+
+            let summary = duckdb_query_availability_summary(
+                &connection,
+                duckdb_sensor_table_name(sensor.sensor_type),
+                sensor_id,
+                sensor,
+                start_time_ms,
+                end_time_ms,
+                step_ms,
+            )?;
+
+            Ok(Some(summary))
+        })
+        .await?
+    }
+
     async fn query_sensors_by_labels(
         &self,
         matchers: &[super::LabelMatcher],
@@ -1000,6 +1073,109 @@ fn duckdb_get_sensor_metadata(connection: &Connection, sensor_uuid: &str) -> Res
         sensor_id,
         Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels)),
     )))
+}
+
+fn duckdb_sensor_table_name(sensor_type: SensorType) -> &'static str {
+    match sensor_type {
+        SensorType::Integer => "integer_values",
+        SensorType::Numeric => "numeric_values",
+        SensorType::Float => "float_values",
+        SensorType::String => "string_values",
+        SensorType::Boolean => "boolean_values",
+        SensorType::Location => "location_values",
+        SensorType::Json => "json_values",
+        SensorType::Blob => "blob_values",
+    }
+}
+
+fn duckdb_query_latest_timestamp_ms(
+    connection: &Connection,
+    table_name: &str,
+    sensor_id: i64,
+    start_time_ms: Option<i64>,
+    end_time_ms: Option<i64>,
+) -> Result<Option<i64>> {
+    let sql = format!(
+        r#"
+        SELECT epoch_ms(MAX(timestamp_ms))
+        FROM {table_name}
+        WHERE sensor_id = ?1
+          AND (?2 IS NULL OR timestamp_ms >= epoch_ms(?2))
+          AND (?3 IS NULL OR timestamp_ms <= epoch_ms(?3))
+        "#
+    );
+
+    let mut statement = connection.prepare(&sql)?;
+    let value: Option<i64> = statement.query_row(
+        duckdb::params![sensor_id, start_time_ms, end_time_ms],
+        |row| row.get(0),
+    )?;
+
+    Ok(value)
+}
+
+fn duckdb_query_availability_summary(
+    connection: &Connection,
+    table_name: &str,
+    sensor_id: i64,
+    sensor: Sensor,
+    start_time_ms: i64,
+    end_time_ms: i64,
+    step_ms: Option<i64>,
+) -> Result<SensorAvailabilitySummary> {
+    let (sql, params): (String, Vec<i64>) = if let Some(step_ms) = step_ms {
+        (
+            format!(
+                r#"
+                SELECT
+                    COUNT(*) AS sample_count,
+                    epoch_ms(MIN(timestamp_ms)) AS first_sample_at,
+                    epoch_ms(MAX(timestamp_ms)) AS last_sample_at,
+                                        COUNT(DISTINCT time_bucket(INTERVAL '{step_ms} milliseconds', timestamp_ms, epoch_ms(?2))) AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = ?1
+                  AND timestamp_ms >= epoch_ms(?2)
+                                    AND timestamp_ms <= epoch_ms(?3)
+                "#
+            ),
+            vec![sensor_id, start_time_ms, end_time_ms],
+        )
+    } else {
+        (
+            format!(
+                r#"
+                SELECT
+                    COUNT(*) AS sample_count,
+                    epoch_ms(MIN(timestamp_ms)) AS first_sample_at,
+                    epoch_ms(MAX(timestamp_ms)) AS last_sample_at,
+                    NULL AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = ?1
+                  AND timestamp_ms >= epoch_ms(?2)
+                  AND timestamp_ms <= epoch_ms(?3)
+                "#
+            ),
+            vec![sensor_id, start_time_ms, end_time_ms],
+        )
+    };
+
+    let mut statement = connection.prepare(&sql)?;
+    let row = statement.query_row(duckdb::params_from_iter(params.iter()), |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, Option<i64>>(1)?,
+            row.get::<_, Option<i64>>(2)?,
+            row.get::<_, Option<i64>>(3)?,
+        ))
+    })?;
+
+    Ok(SensorAvailabilitySummary {
+        sensor,
+        sample_count: row.0.max(0) as usize,
+        first_sample_at: row.1.map(SensAppDateTime::from_unix_milliseconds_i64),
+        last_sample_at: row.2.map(SensAppDateTime::from_unix_milliseconds_i64),
+        covered_buckets: row.3.map(|value| value.max(0) as usize),
+    })
 }
 
 fn duckdb_bucketed_cte(table_name: &str, step_ms: i64) -> String {
