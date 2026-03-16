@@ -4408,6 +4408,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "simplify-polyline",
  "sindit-senml",
  "sinteflake",
  "smallvec 1.15.1",
@@ -4774,6 +4775,15 @@ dependencies = [
  "num-traits",
  "thiserror 2.0.18",
  "time",
+]
+
+[[package]]
+name = "simplify-polyline"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d236f7d768695e098c0c026be222f48b6c26558ce472e4c1abcbc3cc7e0fd69e"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

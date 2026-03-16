@@ -3,10 +3,10 @@ pub mod timescaledb_utilities;
 
 use self::timescaledb_publishers::*;
 use self::timescaledb_utilities::get_sensor_id_or_create_sensor;
-use super::{DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT, StorageError, StorageInstance, common::datetime_to_micros};
+use super::{Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT, SensorDataQueryOptions, StorageError, StorageInstance, common::datetime_to_micros};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
-    SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
+    Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
 };
 use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
 use anyhow::{Context, Result};
@@ -256,6 +256,165 @@ impl TimeScaleDBStorage {
         }
 
         Ok(results)
+    }
+
+    async fn get_sensor_metadata(&self, sensor_uuid: &str) -> Result<Option<(i64, Sensor)>> {
+        let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
+
+        #[derive(sqlx::FromRow)]
+        struct SensorMetadataRow {
+            sensor_id: Option<i64>,
+            uuid: Option<Uuid>,
+            name: Option<String>,
+            r#type: Option<String>,
+            unit_name: Option<String>,
+            unit_description: Option<String>,
+        }
+
+        let sensor_row: Option<SensorMetadataRow> = sqlx::query_as(
+            r#"
+            SELECT sensor_id, uuid, name, type, unit_name, unit_description
+            FROM sensor_catalog_view
+            WHERE uuid = $1
+            "#,
+        )
+        .bind(parsed_uuid)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(sensor_row) = sensor_row else {
+            return Ok(None);
+        };
+
+        let sensor_uuid = sensor_row.uuid.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "UUID",
+                None,
+                sensor_row.name.as_deref(),
+            ))
+        })?;
+
+        let sensor_name = sensor_row.name.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("name", Some(sensor_uuid), None))
+        })?;
+
+        let sensor_type_str = sensor_row.r#type.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "type",
+                Some(sensor_uuid),
+                Some(&sensor_name),
+            ))
+        })?;
+
+        let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
+            anyhow::Error::from(StorageError::invalid_data_format(
+                &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
+                Some(sensor_uuid),
+                Some(&sensor_name),
+            ))
+        })?;
+
+        let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
+            (Some(name), description) => Some(Unit::new(name, description)),
+            _ => None,
+        };
+
+        let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "sensor_id",
+                Some(sensor_uuid),
+                Some(&sensor_name),
+            ))
+        })?;
+
+        #[derive(sqlx::FromRow)]
+        struct LabelRow {
+            label_name: String,
+            label_value: String,
+        }
+
+        let labels_rows: Vec<LabelRow> = sqlx::query_as(
+            r#"
+            SELECT lnd.name as label_name, ldd.description as label_value
+            FROM labels l
+            JOIN labels_name_dictionary lnd ON l.name = lnd.id
+            JOIN labels_description_dictionary ldd ON l.description = ldd.id
+            WHERE l.sensor_id = $1
+            "#,
+        )
+        .bind(sensor_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut labels: SensAppLabels = smallvec![];
+        for label_row in labels_rows {
+            labels.push((label_row.label_name, label_row.label_value));
+        }
+
+        Ok(Some((
+            sensor_id,
+            Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels)),
+        )))
+    }
+}
+
+fn timescaledb_bucketed_cte(table_name: &str) -> String {
+    format!(
+        r#"
+        WITH bucketed AS (
+            SELECT
+                time_bucket(
+                    $4::bigint * INTERVAL '1 millisecond',
+                    time,
+                    to_timestamp($5::double precision / 1000000.0)
+                ) AS bucket_time,
+                time,
+                value
+            FROM {table_name}
+            WHERE sensor_id = $1
+              AND ($2::TIMESTAMPTZ IS NULL OR time >= $2)
+              AND ($3::TIMESTAMPTZ IS NULL OR time <= $3)
+        )
+        "#
+    )
+}
+
+fn timescaledb_group_by_clause() -> &'static str {
+    "FROM bucketed GROUP BY 1 ORDER BY 1 ASC LIMIT $6"
+}
+
+fn timescaledb_integer_expression(aggregation: Aggregation) -> &'static str {
+    match aggregation {
+        Aggregation::Min => "MIN(value)",
+        Aggregation::Max => "MAX(value)",
+        Aggregation::Sum => "SUM(value)",
+        Aggregation::First => "first(value, time)",
+        Aggregation::Last => "last(value, time)",
+        Aggregation::Avg | Aggregation::Count => unreachable!("handled separately"),
+    }
+}
+
+fn timescaledb_float_expression(aggregation: Aggregation) -> &'static str {
+    match aggregation {
+        Aggregation::Avg => "AVG(value)",
+        Aggregation::Min => "MIN(value)",
+        Aggregation::Max => "MAX(value)",
+        Aggregation::Sum => "SUM(value)",
+        Aggregation::First => "first(value, time)",
+        Aggregation::Last => "last(value, time)",
+        Aggregation::Count => unreachable!("handled separately"),
+    }
+}
+
+fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'static str {
+    match aggregation {
+        Aggregation::Avg => "AVG(value)",
+        Aggregation::Min => "MIN(value)",
+        Aggregation::Max => "MAX(value)",
+        Aggregation::Sum => "SUM(value)",
+        Aggregation::First => "first(value, time)",
+        Aggregation::Last => "last(value, time)",
+        Aggregation::Count => unreachable!("handled separately"),
     }
 }
 
@@ -676,6 +835,115 @@ impl StorageInstance for TimeScaleDBStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    async fn query_sensor_data_advanced(
+        &self,
+        sensor_uuid: &str,
+        options: &SensorDataQueryOptions,
+    ) -> Result<Option<SensorData>> {
+        options.validate()?;
+
+        if let (Some(step_ms), Some(aggregation)) = (options.step_ms, options.aggregation) {
+            if let Some((sensor_id, mut sensor)) = self.get_sensor_metadata(sensor_uuid).await? {
+                let start_time_us = options.start_time.as_ref().map(datetime_to_micros);
+                let end_time_us = options.end_time.as_ref().map(datetime_to_micros);
+                let origin_us = start_time_us.unwrap_or(0);
+
+                let samples = match sensor.sensor_type {
+                    SensorType::Integer => {
+                        self.query_integer_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_ms,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    SensorType::Numeric => {
+                        self.query_numeric_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_ms,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    SensorType::Float => {
+                        self.query_float_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_ms,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    _ => {
+                        let raw = self
+                            .query_sensor_data(
+                                sensor_uuid,
+                                options.start_time,
+                                options.end_time,
+                                options.limit,
+                            )
+                            .await?;
+                        return raw
+                            .map(|sensor_data| {
+                                crate::storage::common::apply_query_options(sensor_data, options)
+                            })
+                            .transpose();
+                    }
+                };
+
+                sensor.sensor_type = match &samples {
+                    TypedSamples::Integer(_) => SensorType::Integer,
+                    TypedSamples::Numeric(_) => SensorType::Numeric,
+                    TypedSamples::Float(_) => SensorType::Float,
+                    _ => sensor.sensor_type,
+                };
+                if aggregation.output_is_count() {
+                    sensor.unit = None;
+                }
+
+                let post_query_options = SensorDataQueryOptions {
+                    start_time: options.start_time,
+                    end_time: options.end_time,
+                    limit: options.limit,
+                    step_ms: None,
+                    aggregation: None,
+                    simplify: options.simplify,
+                };
+
+                return crate::storage::common::apply_query_options(
+                    SensorData::new(sensor, samples),
+                    &post_query_options,
+                )
+                .map(Some);
+            }
+
+            return Ok(None);
+        }
+
+        let raw = self
+            .query_sensor_data(
+                sensor_uuid,
+                options.start_time,
+                options.end_time,
+                options.limit,
+            )
+            .await?;
+
+        raw.map(|sensor_data| crate::storage::common::apply_query_options(sensor_data, options))
+            .transpose()
+    }
+
     async fn query_sensors_by_labels(
         &self,
         matchers: &[super::LabelMatcher],
@@ -885,6 +1153,273 @@ impl TimeScaleDBStorage {
             .context("Failed to vacuum database")?;
 
         Ok(())
+    }
+
+    async fn query_integer_samples_aggregated(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        step_ms: i64,
+        origin_us: i64,
+        aggregation: Aggregation,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
+        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
+
+        match aggregation {
+            Aggregation::Avg => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    bucket_time: sqlx::types::time::OffsetDateTime,
+                    value: f64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_time, AVG(value)::double precision AS value {}",
+                    timescaledb_bucketed_cte("integer_values"),
+                    timescaledb_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time_ts)
+                .bind(end_time_ts)
+                .bind(step_ms)
+                .bind(origin_us as f64)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: offset_datetime_to_sensapp(row.bucket_time),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Float(samples))
+            }
+            Aggregation::Count => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    bucket_time: sqlx::types::time::OffsetDateTime,
+                    value: i64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
+                    timescaledb_bucketed_cte("integer_values"),
+                    timescaledb_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time_ts)
+                .bind(end_time_ts)
+                .bind(step_ms)
+                .bind(origin_us as f64)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: offset_datetime_to_sensapp(row.bucket_time),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+            _ => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    bucket_time: sqlx::types::time::OffsetDateTime,
+                    value: i64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_time, {} AS value {}",
+                    timescaledb_bucketed_cte("integer_values"),
+                    timescaledb_integer_expression(aggregation),
+                    timescaledb_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time_ts)
+                .bind(end_time_ts)
+                .bind(step_ms)
+                .bind(origin_us as f64)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: offset_datetime_to_sensapp(row.bucket_time),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+        }
+    }
+
+    async fn query_float_samples_aggregated(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        step_ms: i64,
+        origin_us: i64,
+        aggregation: Aggregation,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
+        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
+
+        match aggregation {
+            Aggregation::Count => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    bucket_time: sqlx::types::time::OffsetDateTime,
+                    value: i64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
+                    timescaledb_bucketed_cte("float_values"),
+                    timescaledb_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time_ts)
+                .bind(end_time_ts)
+                .bind(step_ms)
+                .bind(origin_us as f64)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: offset_datetime_to_sensapp(row.bucket_time),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+            _ => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    bucket_time: sqlx::types::time::OffsetDateTime,
+                    value: f64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_time, {} AS value {}",
+                    timescaledb_bucketed_cte("float_values"),
+                    timescaledb_float_expression(aggregation),
+                    timescaledb_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time_ts)
+                .bind(end_time_ts)
+                .bind(step_ms)
+                .bind(origin_us as f64)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: offset_datetime_to_sensapp(row.bucket_time),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Float(samples))
+            }
+        }
+    }
+
+    async fn query_numeric_samples_aggregated(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        step_ms: i64,
+        origin_us: i64,
+        aggregation: Aggregation,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
+        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
+
+        match aggregation {
+            Aggregation::Count => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    bucket_time: sqlx::types::time::OffsetDateTime,
+                    value: i64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
+                    timescaledb_bucketed_cte("numeric_values"),
+                    timescaledb_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time_ts)
+                .bind(end_time_ts)
+                .bind(step_ms)
+                .bind(origin_us as f64)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: offset_datetime_to_sensapp(row.bucket_time),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+            _ => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    bucket_time: sqlx::types::time::OffsetDateTime,
+                    value: rust_decimal::Decimal,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_time, {} AS value {}",
+                    timescaledb_bucketed_cte("numeric_values"),
+                    timescaledb_numeric_expression(aggregation),
+                    timescaledb_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time_ts)
+                .bind(end_time_ts)
+                .bind(step_ms)
+                .bind(origin_us as f64)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: offset_datetime_to_sensapp(row.bucket_time),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Numeric(samples))
+            }
+        }
     }
 
     async fn query_integer_samples(

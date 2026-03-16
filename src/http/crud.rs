@@ -3,6 +3,7 @@ use crate::datamodel::SensorType;
 use crate::exporters::{ArrowConverter, CsvConverter, JsonlConverter, SenMLConverter};
 use crate::http::app_error::AppError;
 use crate::http::state::HttpServerState;
+use crate::storage::{Aggregation, SensorDataQueryOptions, SimplifyOptions};
 use crate::storage::query::{LabelMatcher, MatcherType};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -11,6 +12,82 @@ use rusty_promql_parser::{Expr, expr};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::str::FromStr;
+
+mod promql_duration {
+    use anyhow::{Result, anyhow};
+    use nom::{
+        Parser,
+        branch::alt,
+        bytes::complete::tag,
+        character::complete::digit1,
+        combinator::{map, map_res},
+        multi::many1,
+        sequence::pair,
+    };
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum DurationUnit {
+        Millisecond,
+        Second,
+        Minute,
+        Hour,
+        Day,
+        Week,
+        Year,
+    }
+
+    impl DurationUnit {
+        const fn millis(self) -> i64 {
+            match self {
+                Self::Millisecond => 1,
+                Self::Second => 1_000,
+                Self::Minute => 60_000,
+                Self::Hour => 3_600_000,
+                Self::Day => 86_400_000,
+                Self::Week => 604_800_000,
+                Self::Year => 31_536_000_000,
+            }
+        }
+    }
+
+    fn duration_unit(input: &str) -> nom::IResult<&str, DurationUnit> {
+        alt((
+            map(tag("ms"), |_| DurationUnit::Millisecond),
+            map(tag("s"), |_| DurationUnit::Second),
+            map(tag("m"), |_| DurationUnit::Minute),
+            map(tag("h"), |_| DurationUnit::Hour),
+            map(tag("d"), |_| DurationUnit::Day),
+            map(tag("w"), |_| DurationUnit::Week),
+            map(tag("y"), |_| DurationUnit::Year),
+        ))
+        .parse(input)
+    }
+
+    fn duration_component(input: &str) -> nom::IResult<&str, (i64, DurationUnit)> {
+        pair(map_res(digit1, |s: &str| s.parse::<i64>()), duration_unit).parse(input)
+    }
+
+    pub fn parse_duration_millis(input: &str) -> Result<i64> {
+        let (remaining, parts) = many1(duration_component)
+            .parse(input)
+            .map_err(|_| anyhow!("Invalid duration '{}'", input))?;
+        if !remaining.is_empty() {
+            return Err(anyhow!("Invalid duration '{}'", input));
+        }
+
+        let mut total_ms = 0i64;
+        for (value, unit) in parts {
+            let component = value
+                .checked_mul(unit.millis())
+                .ok_or_else(|| anyhow!("Duration '{}' is too large", input))?;
+            total_ms = total_ms
+                .checked_add(component)
+                .ok_or_else(|| anyhow!("Duration '{}' is too large", input))?;
+        }
+
+        Ok(total_ms)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExportFormat {
@@ -62,6 +139,11 @@ pub struct SensorDataQuery {
     pub end: Option<String>,
     pub limit: Option<usize>,
     pub format: Option<String>,
+    pub step: Option<String>,
+    pub aggregation: Option<String>,
+    pub simplify: Option<bool>,
+    pub simplify_tolerance: Option<f64>,
+    pub simplify_high_quality: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -541,7 +623,12 @@ pub async fn list_series(
         ("format" = Option<String>, Query, description = "Output format: senml, csv, or jsonl (default: senml)"),
         ("start" = Option<String>, Query, description = "Start datetime in ISO 8601 format (e.g., '2024-01-15T10:30:00Z')"),
         ("end" = Option<String>, Query, description = "End datetime in ISO 8601 format (e.g., '2024-01-15T11:00:00Z')"),
-        ("limit" = Option<usize>, Query, description = "Maximum number of samples (default: 10,000,000)")
+        ("limit" = Option<usize>, Query, description = "Maximum number of samples (default: 10,000,000)"),
+        ("step" = Option<String>, Query, description = "Bucket width using Prometheus duration syntax (e.g., '1h', '5m', '1d')"),
+        ("aggregation" = Option<String>, Query, description = "Aggregation function: avg, min, max, sum, count, first, last"),
+        ("simplify" = Option<bool>, Query, description = "Explicitly enable simplify-based point reduction"),
+        ("simplify_tolerance" = Option<f64>, Query, description = "Dimensionless simplify tolerance on normalized time/value coordinates"),
+        ("simplify_high_quality" = Option<bool>, Query, description = "Use Douglas-Peucker only when simplifying")
     ),
     responses(
         (status = 200, description = "Series data in requested format", body = Value),
@@ -586,10 +673,52 @@ pub async fn get_series_data(
             None => None,
         };
 
+    let step_ms = match query.step.as_deref() {
+        Some(step) => Some(promql_duration::parse_duration_millis(step).map_err(|e| {
+            AppError::bad_request(anyhow::anyhow!("Invalid step duration: {}", e))
+        })?),
+        None => None,
+    };
+
+    let aggregation = match query.aggregation.as_deref() {
+        Some(value) => Some(value.parse::<Aggregation>().map_err(AppError::bad_request)?),
+        None => None,
+    };
+
+    let simplify = if query.simplify.unwrap_or(false) {
+        let tolerance = query.simplify_tolerance.ok_or_else(|| {
+            AppError::bad_request(anyhow::anyhow!(
+                "'simplify_tolerance' is required when simplify=true"
+            ))
+        })?;
+        Some(SimplifyOptions {
+            tolerance,
+            high_quality: query.simplify_high_quality.unwrap_or(false),
+        })
+    } else {
+        if query.simplify_tolerance.is_some() || query.simplify_high_quality.is_some() {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "'simplify=true' is required when simplify options are provided"
+            )));
+        }
+        None
+    };
+
+    let query_options = SensorDataQueryOptions {
+        start_time,
+        end_time,
+        limit: query.limit,
+        step_ms,
+        aggregation,
+        simplify,
+    };
+
+    query_options.validate().map_err(AppError::bad_request)?;
+
     // Query series data from storage by UUID
     let series_data = state
         .storage
-        .query_sensor_data(&series_uuid, start_time, end_time, query.limit)
+        .query_sensor_data_advanced(&series_uuid, &query_options)
         .await?;
 
     let series_data = match series_data {
@@ -765,6 +894,14 @@ mod tests {
         // Test end of year
         let result = parse_datetime_string("2024-12-31T23:59:59Z");
         assert!(result.is_ok(), "Should handle end of year");
+    }
+
+    #[test]
+    fn test_parse_duration_millis() {
+        assert_eq!(promql_duration::parse_duration_millis("5m").unwrap(), 300_000);
+        assert_eq!(promql_duration::parse_duration_millis("1h30m").unwrap(), 5_400_000);
+        assert_eq!(promql_duration::parse_duration_millis("250ms").unwrap(), 250);
+        assert!(promql_duration::parse_duration_millis("bad").is_err());
     }
 
     #[test]

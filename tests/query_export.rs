@@ -592,3 +592,121 @@ mod time_query_tests {
         Ok(())
     }
 }
+
+mod advanced_series_query_tests {
+    use super::*;
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_query_supports_bucketed_average() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let (csv_data, sensor_name) = fixtures::temperature_sensor_csv_with_name();
+        app.post_csv("/sensors/publish", &csv_data).await?;
+
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("sensor should exist");
+
+        let response = app
+            .get(&format!(
+                "/series/{}?format=csv&step=2m&aggregation=avg",
+                sensor.uuid
+            ))
+            .await?;
+
+        response.assert_status(StatusCode::OK);
+
+        let lines: Vec<&str> = response.body().trim().lines().collect();
+        assert_eq!(lines.len(), 4, "expected header + 3 aggregated rows");
+        assert_eq!(lines[1], "2024-01-01T00:00:00+00:00,20.75");
+        assert_eq!(lines[2], "2024-01-01T00:02:00+00:00,21.75");
+        assert_eq!(lines[3], "2024-01-01T00:04:00+00:00,20.8");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_query_requires_explicit_simplify_enablement() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let (csv_data, sensor_name) = fixtures::temperature_sensor_csv_with_name();
+        app.post_csv("/sensors/publish", &csv_data).await?;
+
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("sensor should exist");
+
+        let response = app
+            .get(&format!(
+                "/series/{}?format=csv&simplify_tolerance=0.1",
+                sensor.uuid
+            ))
+            .await?;
+
+        response.assert_status(StatusCode::BAD_REQUEST);
+        response.assert_body_contains("simplify=true");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_query_reduces_points_with_simplify() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let sensor_name = format!("simplify_{}", uuid::Uuid::new_v4().simple());
+        let mut csv_data = String::from("datetime,sensor_name,value,unit\n");
+        for minute in 0..20u32 {
+            let value = 20.0 + (minute as f64 * 0.2) + if minute % 5 == 0 { 0.01 } else { 0.0 };
+            csv_data.push_str(&format!(
+                "2024-01-01T00:{:02}:00Z,{},{}{},°C\n",
+                minute,
+                sensor_name,
+                value,
+                ""
+            ));
+        }
+        app.post_csv("/sensors/publish", &csv_data).await?;
+
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("sensor should exist");
+
+        let raw_response = app
+            .get(&format!("/series/{}?format=csv", sensor.uuid))
+            .await?;
+        raw_response.assert_status(StatusCode::OK);
+        let raw_line_count = raw_response.body().trim().lines().count();
+
+        let simplified_response = app
+            .get(&format!(
+                "/series/{}?format=csv&simplify=true&simplify_tolerance=0.05",
+                sensor.uuid
+            ))
+            .await?;
+        simplified_response.assert_status(StatusCode::OK);
+
+        let simplified_lines: Vec<&str> = simplified_response.body().trim().lines().collect();
+        assert!(simplified_lines.len() < raw_line_count);
+        assert_eq!(simplified_lines.first().copied(), Some("timestamp,value"));
+        assert!(simplified_lines[1].starts_with("2024-01-01T00:00:00+00:00,"));
+        assert!(simplified_lines
+            .last()
+            .copied()
+            .unwrap_or_default()
+            .starts_with("2024-01-01T00:19:00+00:00,"));
+
+        Ok(())
+    }
+}

@@ -32,3 +32,8 @@ pki
 
 reference/
 integrations/
+
+# Python
+__pycache__/
+.venv/
+dist/

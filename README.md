@@ -161,6 +161,24 @@ See [docs/JWT_AUTH.md](docs/JWT_AUTH.md) for full details on claims, time valida
 
 SensApp now ships with a container build and a Helm chart in `charts/sensapp`.
 
+## Python SDK
+
+There is now an in-repo Python SDK under `python/sensapp-sdk`.
+
+- Arrow-first reads and writes using `pyarrow`
+- sync client built on `httpx`
+- simple examples and mocked tests included
+
+For local development:
+
+```bash
+cd python/sensapp-sdk
+python -m pip install -e '.[dev]'
+python -m pytest
+```
+
+See [docs/PYTHON_SDK.md](docs/PYTHON_SDK.md) for a short walkthrough.
+
 The default container image target is a practical self-hosted runtime feature set:
 
 - PostgreSQL

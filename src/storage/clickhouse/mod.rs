@@ -1,4 +1,4 @@
-use super::{DEFAULT_QUERY_LIMIT, StorageError, StorageInstance};
+use super::{Aggregation, DEFAULT_QUERY_LIMIT, SensorDataQueryOptions, StorageError, StorageInstance};
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::{
     Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
@@ -166,6 +166,93 @@ impl ClickHouseStorage {
         }
 
         Ok(())
+    }
+
+    async fn get_sensor_metadata(&self, sensor_uuid: &str) -> Result<Option<(u64, Sensor)>> {
+        let uuid = Uuid::from_str(sensor_uuid).map_err(|e| {
+            StorageError::invalid_data_format(
+                &format!("Invalid UUID '{}': {}", sensor_uuid, e),
+                None,
+                None,
+            )
+        })?;
+
+        let sensor_id = uuid_to_sensor_id(&uuid);
+
+        let sensor_query = r#"
+            SELECT
+                s.uuid,
+                s.name,
+                s.type,
+                u.name AS unit_name,
+                u.description AS unit_description
+            FROM sensors s
+            LEFT JOIN units u ON s.unit = u.id
+            WHERE s.sensor_id = ?
+            LIMIT 1
+        "#;
+
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct SensorMetadataRow {
+            #[serde(with = "clickhouse::serde::uuid")]
+            uuid: Uuid,
+            name: String,
+            r#type: String,
+            unit_name: String,
+            unit_description: Option<String>,
+        }
+
+        let mut sensor_cursor = self
+            .client
+            .query(sensor_query)
+            .bind(sensor_id)
+            .fetch::<SensorMetadataRow>()
+            .map_err(|e| map_clickhouse_error(e, Some(uuid), None))?;
+
+        let Some(row) = sensor_cursor.next().await? else {
+            return Ok(None);
+        };
+
+        let sensor_type = SensorType::from_str(&row.r#type).map_err(|e| {
+            StorageError::invalid_data_format(
+                &format!("Failed to parse sensor type '{}': {}", row.r#type, e),
+                Some(row.uuid),
+                Some(&row.name),
+            )
+        })?;
+
+        let unit = if !row.unit_name.is_empty() {
+            Some(Unit {
+                name: row.unit_name,
+                description: row.unit_description,
+            })
+        } else {
+            None
+        };
+
+        let labels_query = "SELECT name, COALESCE(description, '') FROM labels WHERE sensor_id = ?";
+        let mut labels_cursor = self
+            .client
+            .query(labels_query)
+            .bind(sensor_id)
+            .fetch::<(String, String)>()
+            .map_err(|e| map_clickhouse_error(e, Some(row.uuid), Some(&row.name)))?;
+
+        let mut labels = Vec::new();
+        while let Some((label_name, label_description)) = labels_cursor.next().await? {
+            labels.push((label_name, label_description));
+        }
+
+        Ok(Some((
+            sensor_id,
+            Sensor {
+                uuid: row.uuid,
+                name: row.name,
+                sensor_type,
+                unit,
+                labels: SensAppLabels::from(labels),
+            },
+        )))
     }
 }
 
@@ -556,6 +643,116 @@ impl StorageInstance for ClickHouseStorage {
         Ok(Some(sensor_data))
     }
 
+    async fn query_sensor_data_advanced(
+        &self,
+        sensor_uuid: &str,
+        options: &SensorDataQueryOptions,
+    ) -> Result<Option<SensorData>> {
+        options.validate()?;
+
+        if let (Some(step_ms), Some(aggregation)) = (options.step_ms, options.aggregation) {
+            if let Some((sensor_id, mut sensor)) = self.get_sensor_metadata(sensor_uuid).await? {
+                let start_time_us = options.start_time.as_ref().map(datetime_to_micros);
+                let end_time_us = options.end_time.as_ref().map(datetime_to_micros);
+                let step_us = step_ms * 1000;
+                let origin_us = start_time_us.unwrap_or(0);
+
+                let samples = match sensor.sensor_type {
+                    SensorType::Integer => {
+                        self.query_integer_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_us,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    SensorType::Numeric => {
+                        self.query_numeric_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_us,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    SensorType::Float => {
+                        self.query_float_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_us,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    _ => {
+                        let raw = self
+                            .query_sensor_data(
+                                sensor_uuid,
+                                options.start_time,
+                                options.end_time,
+                                options.limit,
+                            )
+                            .await?;
+                        return raw
+                            .map(|sensor_data| {
+                                crate::storage::common::apply_query_options(sensor_data, options)
+                            })
+                            .transpose();
+                    }
+                };
+
+                sensor.sensor_type = match &samples {
+                    TypedSamples::Integer(_) => SensorType::Integer,
+                    TypedSamples::Numeric(_) => SensorType::Numeric,
+                    TypedSamples::Float(_) => SensorType::Float,
+                    _ => sensor.sensor_type,
+                };
+                if aggregation.output_is_count() {
+                    sensor.unit = None;
+                }
+
+                let post_query_options = SensorDataQueryOptions {
+                    start_time: options.start_time,
+                    end_time: options.end_time,
+                    limit: options.limit,
+                    step_ms: None,
+                    aggregation: None,
+                    simplify: options.simplify,
+                };
+
+                return crate::storage::common::apply_query_options(
+                    SensorData::new(sensor, samples),
+                    &post_query_options,
+                )
+                .map(Some);
+            }
+
+            return Ok(None);
+        }
+
+        let raw = self
+            .query_sensor_data(
+                sensor_uuid,
+                options.start_time,
+                options.end_time,
+                options.limit,
+            )
+            .await?;
+
+        raw.map(|sensor_data| crate::storage::common::apply_query_options(sensor_data, options))
+            .transpose()
+    }
+
     async fn query_sensors_by_labels(
         &self,
         matchers: &[super::LabelMatcher],
@@ -612,6 +809,254 @@ impl StorageInstance for ClickHouseStorage {
 }
 
 impl ClickHouseStorage {
+    async fn query_integer_samples_aggregated(
+        &self,
+        sensor_id: u64,
+        start_time_us: Option<i64>,
+        end_time_us: Option<i64>,
+        step_us: i64,
+        origin_us: i64,
+        aggregation: Aggregation,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT);
+        let bucket_expr = format!(
+            "{} + intDiv(timestamp_us - {}, {}) * {}",
+            origin_us, origin_us, step_us, step_us
+        );
+        let where_clause = clickhouse_time_where(start_time_us, end_time_us);
+
+        match aggregation {
+            Aggregation::Avg => {
+                #[derive(clickhouse::Row, serde::Deserialize)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: f64,
+                }
+
+                let query = format!(
+                    "SELECT {bucket_expr} AS timestamp_us, avg(value) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                );
+                let mut cursor = self.client.query(&query).bind(sensor_id);
+                if let Some(start_time_us) = start_time_us {
+                    cursor = cursor.bind(start_time_us);
+                }
+                if let Some(end_time_us) = end_time_us {
+                    cursor = cursor.bind(end_time_us);
+                }
+                let mut rows_cursor = cursor
+                    .fetch::<Row>()
+                    .map_err(|e| map_clickhouse_error(e, None, None))?;
+                let mut samples = smallvec::smallvec![];
+                while let Some(row) = rows_cursor.next().await? {
+                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                }
+                Ok(TypedSamples::Float(samples))
+            }
+            Aggregation::Count => {
+                #[derive(clickhouse::Row, serde::Deserialize)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: i64,
+                }
+
+                let query = format!(
+                    "SELECT {bucket_expr} AS timestamp_us, toInt64(count()) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                );
+                let mut cursor = self.client.query(&query).bind(sensor_id);
+                if let Some(start_time_us) = start_time_us {
+                    cursor = cursor.bind(start_time_us);
+                }
+                if let Some(end_time_us) = end_time_us {
+                    cursor = cursor.bind(end_time_us);
+                }
+                let mut rows_cursor = cursor
+                    .fetch::<Row>()
+                    .map_err(|e| map_clickhouse_error(e, None, None))?;
+                let mut samples = smallvec::smallvec![];
+                while let Some(row) = rows_cursor.next().await? {
+                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+            _ => {
+                #[derive(clickhouse::Row, serde::Deserialize)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: i64,
+                }
+
+                let expression = clickhouse_integer_expression(aggregation);
+                let query = format!(
+                    "SELECT {bucket_expr} AS timestamp_us, {expression} AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                );
+                let mut cursor = self.client.query(&query).bind(sensor_id);
+                if let Some(start_time_us) = start_time_us {
+                    cursor = cursor.bind(start_time_us);
+                }
+                if let Some(end_time_us) = end_time_us {
+                    cursor = cursor.bind(end_time_us);
+                }
+                let mut rows_cursor = cursor
+                    .fetch::<Row>()
+                    .map_err(|e| map_clickhouse_error(e, None, None))?;
+                let mut samples = smallvec::smallvec![];
+                while let Some(row) = rows_cursor.next().await? {
+                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+        }
+    }
+
+    async fn query_float_samples_aggregated(
+        &self,
+        sensor_id: u64,
+        start_time_us: Option<i64>,
+        end_time_us: Option<i64>,
+        step_us: i64,
+        origin_us: i64,
+        aggregation: Aggregation,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT);
+        let bucket_expr = format!(
+            "{} + intDiv(timestamp_us - {}, {}) * {}",
+            origin_us, origin_us, step_us, step_us
+        );
+        let where_clause = clickhouse_time_where(start_time_us, end_time_us);
+
+        match aggregation {
+            Aggregation::Count => {
+                #[derive(clickhouse::Row, serde::Deserialize)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: i64,
+                }
+
+                let query = format!(
+                    "SELECT {bucket_expr} AS timestamp_us, toInt64(count()) AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                );
+                let mut cursor = self.client.query(&query).bind(sensor_id);
+                if let Some(start_time_us) = start_time_us {
+                    cursor = cursor.bind(start_time_us);
+                }
+                if let Some(end_time_us) = end_time_us {
+                    cursor = cursor.bind(end_time_us);
+                }
+                let mut rows_cursor = cursor
+                    .fetch::<Row>()
+                    .map_err(|e| map_clickhouse_error(e, None, None))?;
+                let mut samples = smallvec::smallvec![];
+                while let Some(row) = rows_cursor.next().await? {
+                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+            _ => {
+                #[derive(clickhouse::Row, serde::Deserialize)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: f64,
+                }
+
+                let expression = clickhouse_float_expression(aggregation);
+                let query = format!(
+                    "SELECT {bucket_expr} AS timestamp_us, {expression} AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                );
+                let mut cursor = self.client.query(&query).bind(sensor_id);
+                if let Some(start_time_us) = start_time_us {
+                    cursor = cursor.bind(start_time_us);
+                }
+                if let Some(end_time_us) = end_time_us {
+                    cursor = cursor.bind(end_time_us);
+                }
+                let mut rows_cursor = cursor
+                    .fetch::<Row>()
+                    .map_err(|e| map_clickhouse_error(e, None, None))?;
+                let mut samples = smallvec::smallvec![];
+                while let Some(row) = rows_cursor.next().await? {
+                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                }
+                Ok(TypedSamples::Float(samples))
+            }
+        }
+    }
+
+    async fn query_numeric_samples_aggregated(
+        &self,
+        sensor_id: u64,
+        start_time_us: Option<i64>,
+        end_time_us: Option<i64>,
+        step_us: i64,
+        origin_us: i64,
+        aggregation: Aggregation,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT);
+        let bucket_expr = format!(
+            "{} + intDiv(timestamp_us - {}, {}) * {}",
+            origin_us, origin_us, step_us, step_us
+        );
+        let where_clause = clickhouse_time_where(start_time_us, end_time_us);
+
+        match aggregation {
+            Aggregation::Count => {
+                #[derive(clickhouse::Row, serde::Deserialize)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: i64,
+                }
+
+                let query = format!(
+                    "SELECT {bucket_expr} AS timestamp_us, toInt64(count()) AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                );
+                let mut cursor = self.client.query(&query).bind(sensor_id);
+                if let Some(start_time_us) = start_time_us {
+                    cursor = cursor.bind(start_time_us);
+                }
+                if let Some(end_time_us) = end_time_us {
+                    cursor = cursor.bind(end_time_us);
+                }
+                let mut rows_cursor = cursor
+                    .fetch::<Row>()
+                    .map_err(|e| map_clickhouse_error(e, None, None))?;
+                let mut samples = smallvec::smallvec![];
+                while let Some(row) = rows_cursor.next().await? {
+                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+            _ => {
+                #[derive(clickhouse::Row, serde::Deserialize)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: i128,
+                }
+
+                let expression = clickhouse_numeric_expression(aggregation);
+                let query = format!(
+                    "SELECT {bucket_expr} AS timestamp_us, {expression} AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                );
+                let mut cursor = self.client.query(&query).bind(sensor_id);
+                if let Some(start_time_us) = start_time_us {
+                    cursor = cursor.bind(start_time_us);
+                }
+                if let Some(end_time_us) = end_time_us {
+                    cursor = cursor.bind(end_time_us);
+                }
+                let mut rows_cursor = cursor
+                    .fetch::<Row>()
+                    .map_err(|e| map_clickhouse_error(e, None, None))?;
+                let mut samples = smallvec::smallvec![];
+                while let Some(row) = rows_cursor.next().await? {
+                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: decimal_from_clickhouse_raw(row.value) });
+                }
+                Ok(TypedSamples::Numeric(samples))
+            }
+        }
+    }
+
     /// Query samples by type with time range filtering
     async fn query_samples_by_type(
         &self,
@@ -879,5 +1324,51 @@ impl ClickHouseStorage {
         }
 
         Ok(typed_samples)
+    }
+}
+
+fn clickhouse_time_where(start_time_us: Option<i64>, end_time_us: Option<i64>) -> String {
+    let mut conditions = String::new();
+    if start_time_us.is_some() {
+        conditions.push_str(" AND timestamp_us >= ?");
+    }
+    if end_time_us.is_some() {
+        conditions.push_str(" AND timestamp_us <= ?");
+    }
+    conditions
+}
+
+fn clickhouse_integer_expression(aggregation: Aggregation) -> &'static str {
+    match aggregation {
+        Aggregation::Min => "min(value)",
+        Aggregation::Max => "max(value)",
+        Aggregation::Sum => "sum(value)",
+        Aggregation::First => "argMin(value, timestamp_us)",
+        Aggregation::Last => "argMax(value, timestamp_us)",
+        Aggregation::Avg | Aggregation::Count => unreachable!("handled separately"),
+    }
+}
+
+fn clickhouse_float_expression(aggregation: Aggregation) -> &'static str {
+    match aggregation {
+        Aggregation::Avg => "avg(value)",
+        Aggregation::Min => "min(value)",
+        Aggregation::Max => "max(value)",
+        Aggregation::Sum => "sum(value)",
+        Aggregation::First => "argMin(value, timestamp_us)",
+        Aggregation::Last => "argMax(value, timestamp_us)",
+        Aggregation::Count => unreachable!("handled separately"),
+    }
+}
+
+fn clickhouse_numeric_expression(aggregation: Aggregation) -> &'static str {
+    match aggregation {
+        Aggregation::Avg => "toDecimal128(avg(value), 8)",
+        Aggregation::Min => "min(value)",
+        Aggregation::Max => "max(value)",
+        Aggregation::Sum => "sum(value)",
+        Aggregation::First => "argMin(value, timestamp_us)",
+        Aggregation::Last => "argMax(value, timestamp_us)",
+        Aggregation::Count => unreachable!("handled separately"),
     }
 }

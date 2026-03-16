@@ -8,8 +8,10 @@ pub mod error;
 pub use error::StorageError;
 
 pub mod common;
+pub mod data_query;
 pub mod query;
 
+pub use data_query::{Aggregation, SensorDataQueryOptions, SimplifyOptions};
 pub use query::{LabelMatcher, MatcherType};
 
 /// Default limit for timeseries queries when no limit is specified
@@ -57,6 +59,26 @@ pub trait StorageInstance: Send + Sync + Debug {
         end_time: Option<SensAppDateTime>,
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>>;
+
+    async fn query_sensor_data_advanced(
+        &self,
+        sensor_uuid: &str,
+        options: &crate::storage::SensorDataQueryOptions,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        options.validate()?;
+
+        let raw = self
+            .query_sensor_data(
+                sensor_uuid,
+                options.start_time,
+                options.end_time,
+                options.limit,
+            )
+            .await?;
+
+        raw.map(|sensor_data| crate::storage::common::apply_query_options(sensor_data, options))
+            .transpose()
+    }
 
     /// Query sensors and their data by label matchers.
     ///

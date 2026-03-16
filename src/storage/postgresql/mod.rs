@@ -56,6 +56,105 @@ impl PostgresStorage {
 
         Ok(Self { pool })
     }
+
+    async fn get_sensor_metadata(&self, sensor_uuid: &str) -> Result<Option<(i64, Sensor)>> {
+        let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
+
+        #[derive(sqlx::FromRow)]
+        struct SensorRow {
+            sensor_id: Option<i64>,
+            uuid: Option<Uuid>,
+            name: Option<String>,
+            r#type: Option<String>,
+            unit_name: Option<String>,
+            unit_description: Option<String>,
+        }
+
+        let sensor_row = sqlx::query_as::<_, SensorRow>(
+            r#"
+            SELECT s.sensor_id AS sensor_id, s.uuid, s.name, s.type, u.name AS unit_name, u.description AS unit_description
+            FROM sensors s
+            LEFT JOIN units u ON s.unit = u.id
+            WHERE s.uuid = $1
+            "#,
+        )
+        .bind(parsed_uuid)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(sensor_row) = sensor_row else {
+            return Ok(None);
+        };
+
+        let sensor_uuid = sensor_row.uuid.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "UUID",
+                None,
+                sensor_row.name.as_deref(),
+            ))
+        })?;
+
+        let sensor_name = sensor_row.name.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("name", Some(sensor_uuid), None))
+        })?;
+
+        let sensor_type_str = sensor_row.r#type.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "type",
+                Some(sensor_uuid),
+                Some(&sensor_name),
+            ))
+        })?;
+
+        let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
+            anyhow::Error::from(StorageError::invalid_data_format(
+                &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
+                Some(sensor_uuid),
+                Some(&sensor_name),
+            ))
+        })?;
+
+        let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
+            (Some(name), description) => Some(Unit::new(name, description)),
+            _ => None,
+        };
+
+        let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "sensor_id",
+                Some(sensor_uuid),
+                Some(&sensor_name),
+            ))
+        })?;
+
+        #[derive(sqlx::FromRow)]
+        struct LabelRow {
+            label_name: String,
+            label_value: String,
+        }
+
+        let labels_rows: Vec<LabelRow> = sqlx::query_as(
+            r#"
+            SELECT lnd.name as label_name, ldd.description as label_value
+            FROM labels l
+            JOIN labels_name_dictionary lnd ON l.name = lnd.id
+            JOIN labels_description_dictionary ldd ON l.description = ldd.id
+            WHERE l.sensor_id = $1
+            "#,
+        )
+        .bind(sensor_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut labels: SensAppLabels = smallvec![];
+        for label_row in labels_rows {
+            labels.push((label_row.label_name, label_row.label_value));
+        }
+
+        let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
+
+        Ok(Some((sensor_id, sensor)))
+    }
 }
 
 #[async_trait]
@@ -287,105 +386,10 @@ impl StorageInstance for PostgresStorage {
         end_time: Option<SensAppDateTime>,
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
-        // Parse UUID
-        let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
-
-        #[derive(sqlx::FromRow)]
-        struct SensorMetadataRow {
-            sensor_id: Option<i64>,
-            uuid: Option<Uuid>,
-            name: Option<String>,
-            r#type: Option<String>,
-            unit_name: Option<String>,
-            unit_description: Option<String>,
-        }
-
-        // Query sensor metadata by UUID using the catalog view
-        let sensor_row: Option<SensorMetadataRow> = sqlx::query_as(
-            r#"
-            SELECT sensor_id, uuid, name, type, unit_name, unit_description
-            FROM sensor_catalog_view
-            WHERE uuid = $1
-            "#,
-        )
-        .bind(parsed_uuid)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        let sensor_row = match sensor_row {
-            Some(row) => row,
-            None => return Ok(None),
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
         };
 
-        // Parse sensor metadata with improved error handling
-        let sensor_uuid = sensor_row.uuid.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field(
-                "UUID",
-                None,
-                sensor_row.name.as_deref(),
-            ))
-        })?;
-
-        let sensor_name = sensor_row.name.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field("name", Some(sensor_uuid), None))
-        })?;
-
-        let sensor_type_str = sensor_row.r#type.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field(
-                "type",
-                Some(sensor_uuid),
-                Some(&sensor_name),
-            ))
-        })?;
-
-        let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
-            anyhow::Error::from(StorageError::invalid_data_format(
-                &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
-                Some(sensor_uuid),
-                Some(&sensor_name),
-            ))
-        })?;
-
-        let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
-            (Some(name), description) => Some(Unit::new(name, description)),
-            _ => None,
-        };
-
-        // Query labels for this sensor with proper context
-        let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field(
-                "sensor_id",
-                Some(sensor_uuid),
-                Some(&sensor_name),
-            ))
-        })?;
-        #[derive(sqlx::FromRow)]
-        struct LabelRow {
-            label_name: String,
-            label_value: String,
-        }
-
-        let labels_rows: Vec<LabelRow> = sqlx::query_as(
-            r#"
-            SELECT lnd.name as label_name, ldd.description as label_value
-            FROM labels l
-            JOIN labels_name_dictionary lnd ON l.name = lnd.id
-            JOIN labels_description_dictionary ldd ON l.description = ldd.id
-            WHERE l.sensor_id = $1
-            "#,
-        )
-        .bind(sensor_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut labels: SensAppLabels = smallvec![];
-        for label_row in labels_rows {
-            labels.push((label_row.label_name, label_row.label_value));
-        }
-
-        let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
-
-        // Convert SensAppDateTime to microseconds for database queries using common utility
         let start_time_us = start_time.as_ref().map(datetime_to_micros);
         let end_time_us = end_time.as_ref().map(datetime_to_micros);
 
@@ -426,6 +430,110 @@ impl StorageInstance for PostgresStorage {
         };
 
         Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    async fn query_sensor_data_advanced(
+        &self,
+        sensor_uuid: &str,
+        options: &crate::storage::SensorDataQueryOptions,
+    ) -> Result<Option<SensorData>> {
+        options.validate()?;
+
+        if let (Some(step_ms), Some(aggregation)) = (options.step_ms, options.aggregation) {
+            if let Some((sensor_id, mut sensor)) = self.get_sensor_metadata(sensor_uuid).await? {
+                let start_time_us = options.start_time.as_ref().map(datetime_to_micros);
+                let end_time_us = options.end_time.as_ref().map(datetime_to_micros);
+                let origin_us = start_time_us.unwrap_or(0);
+
+                let samples = match sensor.sensor_type {
+                    SensorType::Integer => self
+                        .query_integer_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_ms,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?,
+                    SensorType::Numeric => self
+                        .query_numeric_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_ms,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?,
+                    SensorType::Float => self
+                        .query_float_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_ms,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?,
+                    _ => {
+                        let raw = self
+                            .query_sensor_data(
+                                sensor_uuid,
+                                options.start_time,
+                                options.end_time,
+                                options.limit,
+                            )
+                            .await?;
+                        return raw
+                            .map(|sensor_data| {
+                                crate::storage::common::apply_query_options(sensor_data, options)
+                            })
+                            .transpose();
+                    }
+                };
+
+                sensor.sensor_type = match &samples {
+                    TypedSamples::Integer(_) => SensorType::Integer,
+                    TypedSamples::Numeric(_) => SensorType::Numeric,
+                    TypedSamples::Float(_) => SensorType::Float,
+                    _ => sensor.sensor_type,
+                };
+                if aggregation.output_is_count() {
+                    sensor.unit = None;
+                }
+
+                let query_options = crate::storage::SensorDataQueryOptions {
+                    start_time: options.start_time,
+                    end_time: options.end_time,
+                    limit: options.limit,
+                    step_ms: None,
+                    aggregation: None,
+                    simplify: options.simplify,
+                };
+
+                let sensor_data = SensorData::new(sensor, samples);
+                return crate::storage::common::apply_query_options(sensor_data, &query_options)
+                    .map(Some);
+            }
+
+            return Ok(None);
+        }
+
+        let raw = self
+            .query_sensor_data(
+                sensor_uuid,
+                options.start_time,
+                options.end_time,
+                options.limit,
+            )
+            .await?;
+
+        raw.map(|sensor_data| crate::storage::common::apply_query_options(sensor_data, options))
+            .transpose()
     }
 
     async fn query_sensors_by_labels(

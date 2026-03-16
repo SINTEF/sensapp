@@ -104,6 +104,7 @@ jsonwebtoken = "9"
 rustls = "0.23"
 rusty-promql-parser = "0.1"
 prometheus-client = "0.23"
+simplify-polyline = "0.5"
 
 [dev-dependencies]
 temp-env = "0.3"
