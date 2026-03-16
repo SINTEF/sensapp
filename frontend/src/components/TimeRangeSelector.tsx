@@ -38,41 +38,31 @@ export function TimeRangeSelector() {
   }
 
   return (
-    <div className="flex flex-wrap gap-3 items-end">
-      <div>
-        <span className="text-xs font-medium text-base-content/60 block mb-1">Presets</span>
-        <div className="join">
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.label}
-              className="join-item btn btn-sm btn-outline"
-              onClick={() => handlePreset(preset.minutes)}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
+    <div className="flex flex-wrap gap-2 items-center">
+      <div className="join">
+        {PRESETS.map((preset) => (
+          <button
+            key={preset.label}
+            className="join-item btn btn-xs btn-outline"
+            onClick={() => handlePreset(preset.minutes)}
+          >
+            {preset.label}
+          </button>
+        ))}
       </div>
 
-      <div className="form-control">
-        <label className="label pb-1">
-          <span className="label-text text-xs font-medium text-base-content/60">From</span>
-        </label>
+      <div className="flex items-center gap-1 text-xs text-base-content/50">
+        <span>from</span>
         <input
           type="datetime-local"
-          className="input input-bordered input-sm text-xs"
+          className="input input-bordered input-xs text-xs h-7"
           value={toLocalDatetime(timeRange.start)}
           onChange={(e) => handleStartChange(e.target.value)}
         />
-      </div>
-
-      <div className="form-control">
-        <label className="label pb-1">
-          <span className="label-text text-xs font-medium text-base-content/60">To</span>
-        </label>
+        <span>to</span>
         <input
           type="datetime-local"
-          className="input input-bordered input-sm text-xs"
+          className="input input-bordered input-xs text-xs h-7"
           value={toLocalDatetime(timeRange.end)}
           onChange={(e) => handleEndChange(e.target.value)}
         />

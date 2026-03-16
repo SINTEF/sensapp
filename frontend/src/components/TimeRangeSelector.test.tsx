@@ -44,9 +44,9 @@ describe('TimeRangeSelector', () => {
     expect(diffMs).toBeCloseTo(24 * 60 * 60 * 1000, -3);
   });
 
-  it('renders From and To datetime inputs', () => {
+  it('renders from and to datetime inputs', () => {
     render(<TimeRangeSelector />);
-    expect(screen.getByText('From')).toBeInTheDocument();
-    expect(screen.getByText('To')).toBeInTheDocument();
+    expect(screen.getByText('from')).toBeInTheDocument();
+    expect(screen.getByText('to')).toBeInTheDocument();
   });
 });

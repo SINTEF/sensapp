@@ -73,7 +73,7 @@ describe('MetricsTable', () => {
   it('shows loading state while fetching metrics', () => {
     mockListMetrics.mockReturnValue(new Promise(() => {})); // never resolves
     render(<MetricsTable />, { wrapper: createWrapper() });
-    expect(screen.getByText('Loading metrics...')).toBeInTheDocument();
+    expect(screen.getByText('Loading...')).toBeInTheDocument();
   });
 
   it('renders metrics with type badges and series counts', async () => {

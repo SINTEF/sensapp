@@ -55,47 +55,38 @@ export function MetricsTable() {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-3 items-end">
-        <div className="form-control flex-1 min-w-48 max-w-xs">
-          <label className="label pb-1">
-            <span className="label-text text-xs font-medium text-base-content/60">Search metrics</span>
-          </label>
-          <input
-            type="text"
-            placeholder="Filter by name..."
-            className="input input-bordered input-sm"
-            value={nameFilter}
-            onChange={(e) => setNameFilter(e.target.value)}
-          />
-        </div>
-        <div className="form-control">
-          <label className="label pb-1">
-            <span className="label-text text-xs font-medium text-base-content/60">Type</span>
-          </label>
-          <select
-            className="select select-bordered select-sm"
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-          >
-            {SENSOR_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t || 'All types'}
-              </option>
-            ))}
-          </select>
-        </div>
+    <div className="flex flex-col h-full gap-2">
+      <div className="flex flex-wrap gap-2 items-center shrink-0">
+        <input
+          type="text"
+          placeholder="Filter by name..."
+          className="input input-bordered input-xs text-xs flex-1 min-w-36 max-w-xs h-7"
+          value={nameFilter}
+          onChange={(e) => setNameFilter(e.target.value)}
+        />
+        <select
+          className="select select-bordered select-xs text-xs h-7"
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+        >
+          {SENSOR_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t || 'All types'}
+            </option>
+          ))}
+        </select>
         {!isLoading && !error && (
-          <span className="text-xs text-base-content/40 pb-2">
+          <span className="text-xs text-base-content/40">
             {metrics.length} metric{metrics.length !== 1 ? 's' : ''}
           </span>
         )}
       </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
       {isLoading && (
-        <div className="flex items-center justify-center gap-2 py-12">
-          <span className="loading loading-spinner loading-sm text-primary" />
-          <span className="text-sm text-base-content/50">Loading metrics...</span>
+        <div className="flex items-center justify-center gap-2 py-6">
+          <span className="loading loading-spinner loading-xs text-primary" />
+          <span className="text-xs text-base-content/50">Loading...</span>
         </div>
       )}
 
@@ -109,8 +100,8 @@ export function MetricsTable() {
       )}
 
       {!isLoading && !error && metrics.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-sm text-base-content/40">No metrics found</p>
+        <div className="text-center py-6">
+          <p className="text-xs text-base-content/40">No metrics found</p>
           {(nameFilter || typeFilter) && (
             <button
               className="btn btn-ghost btn-xs mt-2"
@@ -123,8 +114,8 @@ export function MetricsTable() {
       )}
 
       {!isLoading && !error && metrics.length > 0 && (
-        <div className="overflow-x-auto -mx-1">
-          <table className="table table-sm w-full">
+        <div>
+          <table className="table table-xs w-full">
             <thead>
               <tr className="text-xs text-base-content/50">
                 <th className="font-medium">Metric Name</th>
@@ -150,9 +141,9 @@ export function MetricsTable() {
                     onClick={() => handleSelectMetric(metric)}
                   >
                     <td>
-                      <div className="font-mono text-sm font-medium">{name}</div>
+                      <span className="font-mono text-xs font-medium">{name}</span>
                       {metric['sensor:unit'] && (
-                        <div className="text-xs text-base-content/40 mt-0.5">Unit: {metric['sensor:unit']}</div>
+                        <span className="text-xs text-base-content/40 ml-1">({metric['sensor:unit']})</span>
                       )}
                     </td>
                     <td>
@@ -160,7 +151,7 @@ export function MetricsTable() {
                         {metric['sensor:type']}
                       </span>
                     </td>
-                    <td className="tabular-nums text-sm">
+                    <td className="tabular-nums text-xs">
                       {seriesCount ?? '—'}
                     </td>
                     <td className="hidden sm:table-cell">
@@ -182,6 +173,7 @@ export function MetricsTable() {
           </table>
         </div>
       )}
+      </div>
     </div>
   );
 }

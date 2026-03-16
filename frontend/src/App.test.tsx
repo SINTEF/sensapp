@@ -117,7 +117,7 @@ describe('App integration', () => {
     expect(useSelectionStore.getState().selectedMetric).toBe('temperature');
   });
 
-  it('shows the series section after a metric is selected', async () => {
+  it('shows the series panel after a metric is selected', async () => {
     const user = userEvent.setup();
     render(<App />, { wrapper: createWrapper() });
 
@@ -125,15 +125,15 @@ describe('App integration', () => {
     const tempRow = await screen.findByText('temperature');
     await user.click(tempRow);
 
-    // Series section header should appear
-    expect(await screen.findByText('Series for')).toBeInTheDocument();
+    // Series panel should show the metric name
+    expect(await screen.findByText((_, el) => el?.tagName === 'CODE' && el?.textContent === 'temperature')).toBeInTheDocument();
   });
 
-  it('shows empty guidance when no metric is selected', async () => {
+  it('shows chart placeholder when no series selected', async () => {
     render(<App />, { wrapper: createWrapper() });
     await screen.findByText('temperature'); // wait for load
 
-    expect(screen.getByText(/Select a metric above/)).toBeInTheDocument();
+    expect(screen.getByText(/Select a metric, then choose series to chart/)).toBeInTheDocument();
   });
 
   it('renders footer', () => {

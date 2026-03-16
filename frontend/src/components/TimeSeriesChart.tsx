@@ -152,23 +152,23 @@ export function TimeSeriesChart() {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col h-full">
       {isLoading && (
-        <div className="flex items-center justify-center gap-2 py-4">
+        <div className="flex items-center justify-center gap-2 py-2 shrink-0">
           <span className="loading loading-spinner loading-sm text-primary" />
           <span className="text-sm text-base-content/50">Loading chart data...</span>
         </div>
       )}
 
       {errors.length > 0 && (
-        <div className="alert alert-warning">
+        <div className="alert alert-warning shrink-0">
           <span>Some series failed to load: {errors.map(q => q.error instanceof Error ? q.error.message : 'Unknown error').join(', ')}</span>
         </div>
       )}
 
       <ReactECharts
         option={option}
-        style={{ height: '400px', width: '100%' }}
+        style={{ height: '100%', width: '100%' }}
         notMerge={true}
         lazyUpdate={true}
       />

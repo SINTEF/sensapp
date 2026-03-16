@@ -64,45 +64,34 @@ export function SeriesTable() {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-3 items-end">
-        <div className="form-control flex-1 min-w-56 max-w-sm">
-          <label className="label pb-1">
-            <span className="label-text text-xs font-medium text-base-content/60">
-              PromQL Label Selector
-            </span>
-          </label>
-          <input
-            type="text"
-            placeholder='{env="prod", region=~"us.*"}'
-            className="input input-bordered input-sm font-mono text-xs"
-            value={selectorInput}
-            onChange={(e) => setSelectorInput(e.target.value)}
-          />
-        </div>
-        <div className="form-control min-w-36 max-w-48">
-          <label className="label pb-1">
-            <span className="label-text text-xs font-medium text-base-content/60">Quick filter</span>
-          </label>
-          <input
-            type="text"
-            placeholder="Filter labels..."
-            className="input input-bordered input-sm"
-            value={labelFilter}
-            onChange={(e) => setLabelFilter(e.target.value)}
-          />
-        </div>
+    <div className="flex flex-col h-full gap-2">
+      <div className="flex flex-wrap gap-2 items-center shrink-0">
+        <input
+          type="text"
+          placeholder='{env="prod", region=~"us.*"}'
+          className="input input-bordered input-xs font-mono text-xs flex-1 min-w-44 max-w-xs h-7"
+          value={selectorInput}
+          onChange={(e) => setSelectorInput(e.target.value)}
+        />
+        <input
+          type="text"
+          placeholder="Quick filter..."
+          className="input input-bordered input-xs text-xs min-w-28 max-w-40 h-7"
+          value={labelFilter}
+          onChange={(e) => setLabelFilter(e.target.value)}
+        />
         {selectedSeries.length > 0 && (
-          <span className="text-xs text-primary font-medium pb-2">
+          <span className="text-xs text-primary font-medium">
             {selectedSeries.length} selected
           </span>
         )}
       </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
       {isLoading && (
-        <div className="flex items-center justify-center gap-2 py-12">
-          <span className="loading loading-spinner loading-sm text-primary" />
-          <span className="text-sm text-base-content/50">Loading series...</span>
+        <div className="flex items-center justify-center gap-2 py-6">
+          <span className="loading loading-spinner loading-xs text-primary" />
+          <span className="text-xs text-base-content/50">Loading...</span>
         </div>
       )}
 
@@ -116,16 +105,16 @@ export function SeriesTable() {
       )}
 
       {!isLoading && !error && filteredSeries.length === 0 && (
-        <div className="text-center py-8">
-          <p className="text-sm text-base-content/40">
+        <div className="text-center py-6">
+          <p className="text-xs text-base-content/40">
             {series.length === 0 ? 'No series found for this metric' : 'No series match the current filter'}
           </p>
         </div>
       )}
 
       {!isLoading && !error && filteredSeries.length > 0 && (
-        <div className="overflow-x-auto -mx-1">
-          <table className="table table-sm w-full">
+        <div>
+          <table className="table table-xs w-full">
             <thead>
               <tr className="text-xs text-base-content/50">
                 <th className="w-8 font-medium">
@@ -195,6 +184,7 @@ export function SeriesTable() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

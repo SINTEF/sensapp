@@ -3,7 +3,7 @@ import { HealthBadge } from './HealthBadge';
 
 export function Layout() {
   return (
-    <div className="min-h-screen flex flex-col bg-base-200">
+    <div className="h-screen flex flex-col bg-base-200 overflow-hidden">
       <header className="bg-base-100 border-b border-base-300 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14">
@@ -36,17 +36,9 @@ export function Layout() {
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 min-h-0 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-3">
         <Outlet />
       </main>
-
-      <footer className="border-t border-base-300 bg-base-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-          <p className="text-xs text-center text-base-content/40">
-            SensApp &mdash; Sensor Data Platform by SINTEF
-          </p>
-        </div>
-      </footer>
     </div>
   );
 }

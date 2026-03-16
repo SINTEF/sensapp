@@ -28,8 +28,9 @@
   --font-sans: Roboto, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
-html {
-  overflow-y: scroll;
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
 }
 
 /* Smooth transitions for interactive elements */

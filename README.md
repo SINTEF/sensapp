@@ -14,6 +14,72 @@ But you don't have to chose, both InfluxDB and Prometheus can replicate their da
 
 Of course you can also use Sensapp as a standalone time-series database.
 
+## Quickstart
+
+The quickest way to run SensApp is with SQLite so no external database is required.
+
+By default, SensApp listens on `127.0.0.1:3000`.
+
+### Local run
+
+Start SensApp with SQLite:
+
+```bash
+SENSAPP_STORAGE_CONNECTION_STRING=sqlite://sensapp.db \
+cargo run --no-default-features --features sqlite
+```
+
+Check that the server is ready:
+
+```bash
+curl http://127.0.0.1:3000/health/ready
+```
+
+Open the API documentation:
+
+```bash
+curl http://127.0.0.1:3000/docs
+```
+
+Ingest one sample:
+
+```bash
+curl -X POST http://127.0.0.1:3000/publish \
+  -H 'content-type: text/csv' \
+  --data-raw $'datetime,sensor_name,value,unit\n2026-03-16T12:00:00Z,temperature,21.5,C'
+```
+
+Query the stored data:
+
+```bash
+curl 'http://127.0.0.1:3000/api/v1/query?query=temperature'
+curl 'http://127.0.0.1:3000/api/v1/query?query=temperature&format=csv'
+```
+
+### Container run
+
+Build the image:
+
+```bash
+docker build -t sensapp:local .
+```
+
+Run the container with SQLite:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e SENSAPP_STORAGE_CONNECTION_STRING=sqlite:///var/lib/sensapp/sensapp.db \
+  sensapp:local
+```
+
+Check that the server is ready:
+
+```bash
+curl http://127.0.0.1:3000/health/ready
+```
+
+If you run `cargo run` with the repository defaults, SensApp will try to connect to PostgreSQL on `localhost:5432`.
+
 ## Features
 
 - **HTTP REST API**
@@ -67,6 +133,7 @@ export SENSAPP_JWT_SECRET="my-super-secret-key-at-least-32-characters-long"
 ```
 
 When enabled:
+
 - **Public endpoints** (health checks, docs, `/prometheus/metrics`) remain open.
 - **Read endpoints** (`/metrics`, `/series`, queries) require a token with `read` scope.
 - **Write endpoints** (`/publish`, InfluxDB/Prometheus write) require a token with `write` scope.
