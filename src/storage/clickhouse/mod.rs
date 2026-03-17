@@ -66,6 +66,13 @@ impl std::fmt::Debug for ClickHouseStorage {
 }
 
 impl ClickHouseStorage {
+    fn aggregated_bucket_expr(query: &AggregatedSamplesQuery) -> String {
+        format!(
+            "{} + intDiv(timestamp_us - {}, {}) * {}",
+            query.origin_us, query.origin_us, query.step_us, query.step_us
+        )
+    }
+
     pub async fn connect(connection_string: &str) -> Result<Self> {
         // Parse ClickHouse connection string
         // Format: clickhouse://user:password@host:port/database
@@ -409,6 +416,16 @@ impl ClickHouseStorage {
             covered_buckets: None,
         })
     }
+}
+
+struct AggregatedSamplesQuery {
+    sensor_id: u64,
+    start_time_us: Option<i64>,
+    end_time_us: Option<i64>,
+    step_us: i64,
+    origin_us: i64,
+    aggregation: Aggregation,
+    limit: Option<usize>,
 }
 
 #[async_trait]
@@ -809,44 +826,27 @@ impl StorageInstance for ClickHouseStorage {
             if let Some((sensor_id, mut sensor)) = self.get_sensor_metadata(sensor_uuid).await? {
                 let start_time_us = options.start_time.as_ref().map(datetime_to_micros);
                 let end_time_us = options.end_time.as_ref().map(datetime_to_micros);
-                let step_us = step_ms * 1000;
-                let origin_us = start_time_us.unwrap_or(0);
+                let aggregation_query = AggregatedSamplesQuery {
+                    sensor_id,
+                    start_time_us,
+                    end_time_us,
+                    step_us: step_ms * 1000,
+                    origin_us: start_time_us.unwrap_or(0),
+                    aggregation,
+                    limit: options.limit,
+                };
 
                 let samples = match sensor.sensor_type {
                     SensorType::Integer => {
-                        self.query_integer_samples_aggregated(
-                            sensor_id,
-                            start_time_us,
-                            end_time_us,
-                            step_us,
-                            origin_us,
-                            aggregation,
-                            options.limit,
-                        )
+                        self.query_integer_samples_aggregated(&aggregation_query)
                         .await?
                     }
                     SensorType::Numeric => {
-                        self.query_numeric_samples_aggregated(
-                            sensor_id,
-                            start_time_us,
-                            end_time_us,
-                            step_us,
-                            origin_us,
-                            aggregation,
-                            options.limit,
-                        )
+                        self.query_numeric_samples_aggregated(&aggregation_query)
                         .await?
                     }
                     SensorType::Float => {
-                        self.query_float_samples_aggregated(
-                            sensor_id,
-                            start_time_us,
-                            end_time_us,
-                            step_us,
-                            origin_us,
-                            aggregation,
-                            options.limit,
-                        )
+                        self.query_float_samples_aggregated(&aggregation_query)
                         .await?
                     }
                     _ => {
@@ -1025,22 +1025,13 @@ impl StorageInstance for ClickHouseStorage {
 impl ClickHouseStorage {
     async fn query_integer_samples_aggregated(
         &self,
-        sensor_id: u64,
-        start_time_us: Option<i64>,
-        end_time_us: Option<i64>,
-        step_us: i64,
-        origin_us: i64,
-        aggregation: Aggregation,
-        limit: Option<usize>,
+        query: &AggregatedSamplesQuery,
     ) -> Result<TypedSamples> {
-        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT);
-        let bucket_expr = format!(
-            "{} + intDiv(timestamp_us - {}, {}) * {}",
-            origin_us, origin_us, step_us, step_us
-        );
-        let where_clause = clickhouse_time_where(start_time_us, end_time_us);
+        let limit = query.limit.unwrap_or(DEFAULT_QUERY_LIMIT);
+        let bucket_expr = Self::aggregated_bucket_expr(query);
+        let where_clause = clickhouse_time_where(query.start_time_us, query.end_time_us);
 
-        match aggregation {
+        match query.aggregation {
             Aggregation::Avg => {
                 #[derive(clickhouse::Row, serde::Deserialize)]
                 struct Row {
@@ -1048,14 +1039,14 @@ impl ClickHouseStorage {
                     value: f64,
                 }
 
-                let query = format!(
+                let sql = format!(
                     "SELECT {bucket_expr} AS timestamp_us, avg(value) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
                 );
-                let mut cursor = self.client.query(&query).bind(sensor_id);
-                if let Some(start_time_us) = start_time_us {
+                let mut cursor = self.client.query(&sql).bind(query.sensor_id);
+                if let Some(start_time_us) = query.start_time_us {
                     cursor = cursor.bind(start_time_us);
                 }
-                if let Some(end_time_us) = end_time_us {
+                if let Some(end_time_us) = query.end_time_us {
                     cursor = cursor.bind(end_time_us);
                 }
                 let mut rows_cursor = cursor
@@ -1077,14 +1068,14 @@ impl ClickHouseStorage {
                     value: i64,
                 }
 
-                let query = format!(
+                let sql = format!(
                     "SELECT {bucket_expr} AS timestamp_us, toInt64(count()) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
                 );
-                let mut cursor = self.client.query(&query).bind(sensor_id);
-                if let Some(start_time_us) = start_time_us {
+                let mut cursor = self.client.query(&sql).bind(query.sensor_id);
+                if let Some(start_time_us) = query.start_time_us {
                     cursor = cursor.bind(start_time_us);
                 }
-                if let Some(end_time_us) = end_time_us {
+                if let Some(end_time_us) = query.end_time_us {
                     cursor = cursor.bind(end_time_us);
                 }
                 let mut rows_cursor = cursor
@@ -1106,15 +1097,15 @@ impl ClickHouseStorage {
                     value: i64,
                 }
 
-                let expression = clickhouse_integer_expression(aggregation);
-                let query = format!(
+                let expression = clickhouse_integer_expression(query.aggregation);
+                let sql = format!(
                     "SELECT {bucket_expr} AS timestamp_us, {expression} AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
                 );
-                let mut cursor = self.client.query(&query).bind(sensor_id);
-                if let Some(start_time_us) = start_time_us {
+                let mut cursor = self.client.query(&sql).bind(query.sensor_id);
+                if let Some(start_time_us) = query.start_time_us {
                     cursor = cursor.bind(start_time_us);
                 }
-                if let Some(end_time_us) = end_time_us {
+                if let Some(end_time_us) = query.end_time_us {
                     cursor = cursor.bind(end_time_us);
                 }
                 let mut rows_cursor = cursor
@@ -1134,22 +1125,13 @@ impl ClickHouseStorage {
 
     async fn query_float_samples_aggregated(
         &self,
-        sensor_id: u64,
-        start_time_us: Option<i64>,
-        end_time_us: Option<i64>,
-        step_us: i64,
-        origin_us: i64,
-        aggregation: Aggregation,
-        limit: Option<usize>,
+        query: &AggregatedSamplesQuery,
     ) -> Result<TypedSamples> {
-        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT);
-        let bucket_expr = format!(
-            "{} + intDiv(timestamp_us - {}, {}) * {}",
-            origin_us, origin_us, step_us, step_us
-        );
-        let where_clause = clickhouse_time_where(start_time_us, end_time_us);
+        let limit = query.limit.unwrap_or(DEFAULT_QUERY_LIMIT);
+        let bucket_expr = Self::aggregated_bucket_expr(query);
+        let where_clause = clickhouse_time_where(query.start_time_us, query.end_time_us);
 
-        match aggregation {
+        match query.aggregation {
             Aggregation::Count => {
                 #[derive(clickhouse::Row, serde::Deserialize)]
                 struct Row {
@@ -1157,14 +1139,14 @@ impl ClickHouseStorage {
                     value: i64,
                 }
 
-                let query = format!(
+                let sql = format!(
                     "SELECT {bucket_expr} AS timestamp_us, toInt64(count()) AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
                 );
-                let mut cursor = self.client.query(&query).bind(sensor_id);
-                if let Some(start_time_us) = start_time_us {
+                let mut cursor = self.client.query(&sql).bind(query.sensor_id);
+                if let Some(start_time_us) = query.start_time_us {
                     cursor = cursor.bind(start_time_us);
                 }
-                if let Some(end_time_us) = end_time_us {
+                if let Some(end_time_us) = query.end_time_us {
                     cursor = cursor.bind(end_time_us);
                 }
                 let mut rows_cursor = cursor
@@ -1186,15 +1168,15 @@ impl ClickHouseStorage {
                     value: f64,
                 }
 
-                let expression = clickhouse_float_expression(aggregation);
-                let query = format!(
+                let expression = clickhouse_float_expression(query.aggregation);
+                let sql = format!(
                     "SELECT {bucket_expr} AS timestamp_us, {expression} AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
                 );
-                let mut cursor = self.client.query(&query).bind(sensor_id);
-                if let Some(start_time_us) = start_time_us {
+                let mut cursor = self.client.query(&sql).bind(query.sensor_id);
+                if let Some(start_time_us) = query.start_time_us {
                     cursor = cursor.bind(start_time_us);
                 }
-                if let Some(end_time_us) = end_time_us {
+                if let Some(end_time_us) = query.end_time_us {
                     cursor = cursor.bind(end_time_us);
                 }
                 let mut rows_cursor = cursor
@@ -1214,22 +1196,13 @@ impl ClickHouseStorage {
 
     async fn query_numeric_samples_aggregated(
         &self,
-        sensor_id: u64,
-        start_time_us: Option<i64>,
-        end_time_us: Option<i64>,
-        step_us: i64,
-        origin_us: i64,
-        aggregation: Aggregation,
-        limit: Option<usize>,
+        query: &AggregatedSamplesQuery,
     ) -> Result<TypedSamples> {
-        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT);
-        let bucket_expr = format!(
-            "{} + intDiv(timestamp_us - {}, {}) * {}",
-            origin_us, origin_us, step_us, step_us
-        );
-        let where_clause = clickhouse_time_where(start_time_us, end_time_us);
+        let limit = query.limit.unwrap_or(DEFAULT_QUERY_LIMIT);
+        let bucket_expr = Self::aggregated_bucket_expr(query);
+        let where_clause = clickhouse_time_where(query.start_time_us, query.end_time_us);
 
-        match aggregation {
+        match query.aggregation {
             Aggregation::Count => {
                 #[derive(clickhouse::Row, serde::Deserialize)]
                 struct Row {
@@ -1237,14 +1210,14 @@ impl ClickHouseStorage {
                     value: i64,
                 }
 
-                let query = format!(
+                let sql = format!(
                     "SELECT {bucket_expr} AS timestamp_us, toInt64(count()) AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
                 );
-                let mut cursor = self.client.query(&query).bind(sensor_id);
-                if let Some(start_time_us) = start_time_us {
+                let mut cursor = self.client.query(&sql).bind(query.sensor_id);
+                if let Some(start_time_us) = query.start_time_us {
                     cursor = cursor.bind(start_time_us);
                 }
-                if let Some(end_time_us) = end_time_us {
+                if let Some(end_time_us) = query.end_time_us {
                     cursor = cursor.bind(end_time_us);
                 }
                 let mut rows_cursor = cursor
@@ -1266,15 +1239,15 @@ impl ClickHouseStorage {
                     value: i128,
                 }
 
-                let expression = clickhouse_numeric_expression(aggregation);
-                let query = format!(
+                let expression = clickhouse_numeric_expression(query.aggregation);
+                let sql = format!(
                     "SELECT {bucket_expr} AS timestamp_us, {expression} AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
                 );
-                let mut cursor = self.client.query(&query).bind(sensor_id);
-                if let Some(start_time_us) = start_time_us {
+                let mut cursor = self.client.query(&sql).bind(query.sensor_id);
+                if let Some(start_time_us) = query.start_time_us {
                     cursor = cursor.bind(start_time_us);
                 }
-                if let Some(end_time_us) = end_time_us {
+                if let Some(end_time_us) = query.end_time_us {
                     cursor = cursor.bind(end_time_us);
                 }
                 let mut rows_cursor = cursor

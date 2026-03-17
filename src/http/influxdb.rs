@@ -552,7 +552,7 @@ mod tests {
         // With wrong precision
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: bucket,
+            bucket,
             org: Some("test".to_string()),
             org_id: None,
             precision: Some("wrong".to_string()),

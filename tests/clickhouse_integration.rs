@@ -85,6 +85,37 @@ mod clickhouse_tests {
         Ok(())
     }
 
+    /// Test repeated migrations are safe and idempotent
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_create_or_migrate_is_idempotent() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new_with_type(DatabaseType::ClickHouse).await?;
+        let storage = test_db.storage();
+
+        storage.create_or_migrate().await?;
+        storage.create_or_migrate().await?;
+
+        let result = storage.list_series(None, None, None).await?;
+        assert!(result.series.is_empty());
+
+        Ok(())
+    }
+
+    /// Test ClickHouse storage health check against a real service
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_health_check() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new_with_type(DatabaseType::ClickHouse).await?;
+        let storage = test_db.storage();
+
+        storage.create_or_migrate().await?;
+        storage.health_check().await?;
+
+        Ok(())
+    }
+
     /// Test metrics listing functionality
     #[tokio::test]
     #[serial]
