@@ -90,7 +90,7 @@ jobs:
         os: [ubuntu-latest]
         rust: [stable]
         #rust: [stable, beta]
-        feature: [sqlite, postgres, clickhouse, duckdb, timescaledb]
+        feature: [sqlite, postgres, clickhouse, duckdb, timescaledb, rrdcached]
         include:
           - feature: sqlite
             test-env: "TEST_DATABASE_URL_SQLITE=sqlite://test.db"
@@ -102,6 +102,8 @@ jobs:
             test-env: "TEST_DATABASE_URL_DUCKDB=duckdb://test.duckdb"
           - feature: timescaledb
             test-env: "TEST_DATABASE_URL_TIMESCALEDB=timescaledb://postgres:postgres@localhost:5433/sensapp-test"
+          - feature: rrdcached
+            test-env: "TEST_DATABASE_URL_RRDCACHED=rrdcached://127.0.0.1:42217?preset=hoarder"
 
     services:
       postgres:
@@ -144,7 +146,6 @@ jobs:
           --health-retries 10
         ports:
           - 5433:5432
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -170,6 +171,23 @@ jobs:
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres,sqlite
 
+      - name: Start RRDCached test service
+        if: matrix.feature == 'rrdcached'
+        run: |
+          docker build -f docker/rrdcached/Dockerfile -t sensapp-rrdcached-test .
+          docker run -d --name sensapp-rrdcached -p 42217:42217 sensapp-rrdcached-test
+
+          for attempt in $(seq 1 30); do
+            if nc -z 127.0.0.1 42217; then
+              exit 0
+            fi
+
+            sleep 1
+          done
+
+          docker logs sensapp-rrdcached
+          exit 1
+
       - name: Set up test environment
         run: |
           ${{ matrix.test-env }}
@@ -188,7 +206,18 @@ jobs:
         run: cargo make migrate-timescaledb
 
       - name: Run tests
+        if: matrix.feature != 'rrdcached'
         run: cargo make check-${{ matrix.feature }}
+
+      - name: Run RRDCached checks
+        if: matrix.feature == 'rrdcached'
+        run: |
+          export TEST_DATABASE_URL='rrdcached://127.0.0.1:42217?preset=hoarder'
+          cargo build --features rrdcached --no-default-features
+          cargo test --features rrdcached --no-default-features storage::rrdcached --lib
+          cargo test --features rrdcached --no-default-features http::influxdb::tests::test_publish_influxdb -- --exact
+          cargo test --features rrdcached --no-default-features http::influxdb::tests::test_publish_influxdb_with_numeric_enabled -- --exact
+          cargo test --features rrdcached --no-default-features --test rrdcached_integration
 
   helm-validation:
     name: Helm Validation

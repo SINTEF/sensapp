@@ -310,10 +310,15 @@ mod tests {
     use influxdb_line_protocol::EscapedStr;
     use serial_test::serial;
     use std::io::Write;
+    use uuid::Uuid;
 
     /// Helper to get test database URL - uses the centralized constant from test_utils
     fn get_test_database_url() -> String {
         sensapp::test_utils::get_test_database_url()
+    }
+
+    fn unique_test_bucket(prefix: &str) -> String {
+        format!("{}-{}", prefix, Uuid::new_v4())
     }
 
     #[test]
@@ -355,6 +360,12 @@ mod tests {
         _ = load_configuration_for_tests();
 
         let connection_string = get_test_database_url();
+        let bucket = unique_test_bucket("test");
+        let no_tag_measurement = format!("cpu_without_tags_{}", Uuid::new_v4().simple());
+        let current_seconds = SensAppDateTime::now().unwrap().to_unix_seconds().floor() as i64;
+        let current_nanoseconds = current_seconds * 1_000_000_000;
+        let current_microseconds = current_seconds * 1_000_000;
+        let current_milliseconds = current_seconds * 1_000;
         let storage = create_storage_from_connection_string(&connection_string)
             .await
             .unwrap();
@@ -370,12 +381,15 @@ mod tests {
         });
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: Some("test".to_string()),
             org_id: None,
             precision: None,
         });
-        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773254420000");
+        let bytes = Bytes::from(format!(
+            "cpu_first,host=A,region=west usage_system=64i {}",
+            current_nanoseconds
+        ));
         let result = publish_influxdb(state.clone(), headers, query, bytes)
             .await
             .unwrap();
@@ -385,7 +399,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("content-encoding", "gzip".parse().unwrap());
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: None,
             org_id: Some("test".to_string()),
             precision: None,
@@ -399,7 +413,7 @@ mod tests {
         // With wrong line protocol
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: Some("test".to_string()),
             org_id: Some("test2".to_string()),
             precision: None,
@@ -413,12 +427,15 @@ mod tests {
         // With no org or org_id
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: None,
             org_id: None,
             precision: None,
         });
-        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773254420000");
+        let bytes = Bytes::from(format!(
+            "cpu,host=A,region=west usage_system=64i {}",
+            current_nanoseconds
+        ));
         let result = publish_influxdb(state.clone(), headers, query, bytes).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(AppError::BadRequest(_))));
@@ -426,12 +443,15 @@ mod tests {
         // Without tags
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: Some("test".to_string()),
             org_id: None,
             precision: None,
         });
-        let bytes = Bytes::from("cpu usage_system=64i 1590488773254420000");
+        let bytes = Bytes::from(format!(
+            "{} usage_system=64i {}",
+            no_tag_measurement, current_nanoseconds
+        ));
         let result = publish_influxdb(state.clone(), headers, query, bytes)
             .await
             .unwrap();
@@ -440,12 +460,12 @@ mod tests {
         // Without datetime
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: Some("test".to_string()),
             org_id: None,
             precision: None,
         });
-        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i");
+        let bytes = Bytes::from("cpu_without_datetime,host=A,region=west usage_system=64i");
         let result = publish_influxdb(state.clone(), headers, query, bytes)
             .await
             .unwrap();
@@ -454,7 +474,7 @@ mod tests {
         // Too high u64 value
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: Some("test".to_string()),
             org_id: None,
             precision: None,
@@ -467,12 +487,15 @@ mod tests {
         // With various precisions
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: Some("test".to_string()),
             org_id: None,
             precision: Some("ns".to_string()),
         });
-        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773254420000");
+        let bytes = Bytes::from(format!(
+            "cpu_ns,host=A,region=west usage_system=64i {}",
+            current_nanoseconds
+        ));
         let result = publish_influxdb(state.clone(), headers, query, bytes)
             .await
             .unwrap();
@@ -480,12 +503,15 @@ mod tests {
 
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: Some("test".to_string()),
             org_id: None,
             precision: Some("us".to_string()),
         });
-        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773254420");
+        let bytes = Bytes::from(format!(
+            "cpu_us,host=A,region=west usage_system=64i {}",
+            current_microseconds
+        ));
         let result = publish_influxdb(state.clone(), headers, query, bytes)
             .await
             .unwrap();
@@ -493,12 +519,15 @@ mod tests {
 
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: Some("test".to_string()),
             org_id: None,
             precision: Some("ms".to_string()),
         });
-        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773254");
+        let bytes = Bytes::from(format!(
+            "cpu_ms,host=A,region=west usage_system=64i {}",
+            current_milliseconds
+        ));
         let result = publish_influxdb(state.clone(), headers, query, bytes)
             .await
             .unwrap();
@@ -506,12 +535,15 @@ mod tests {
 
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket.clone(),
             org: Some("test".to_string()),
             org_id: None,
             precision: Some("s".to_string()),
         });
-        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773");
+        let bytes = Bytes::from(format!(
+            "cpu_s,host=A,region=west usage_system=64i {}",
+            current_seconds
+        ));
         let result = publish_influxdb(state.clone(), headers, query, bytes)
             .await
             .unwrap();
@@ -520,12 +552,12 @@ mod tests {
         // With wrong precision
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test".to_string(),
+            bucket: bucket,
             org: Some("test".to_string()),
             org_id: None,
             precision: Some("wrong".to_string()),
         });
-        let bytes = Bytes::from("cpu,host=A,region=west usage_system=64i 1590488773");
+        let bytes = Bytes::from(format!("cpu,host=A,region=west usage_system=64i {}", current_seconds));
         let result = publish_influxdb(state.clone(), headers, query, bytes).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(AppError::BadRequest(_))));
@@ -640,6 +672,10 @@ mod tests {
         _ = load_configuration_for_tests();
 
         let connection_string = get_test_database_url();
+        let bucket = unique_test_bucket("test-numeric");
+        let no_tag_measurement = format!("memory_no_tags_{}", Uuid::new_v4().simple());
+        let current_nanoseconds =
+            (SensAppDateTime::now().unwrap().to_unix_seconds().floor() as i64) * 1_000_000_000;
         let storage = create_storage_from_connection_string(&connection_string)
             .await
             .unwrap();
@@ -658,12 +694,15 @@ mod tests {
         // Test with integer value
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test_numeric".to_string(),
-            org: Some("test_numeric".to_string()),
+            bucket: bucket.clone(),
+            org: Some(bucket.clone()),
             org_id: None,
             precision: None,
         });
-        let bytes = Bytes::from("memory,host=B usage_int=42i,usage_float=3.14 1590488773254420000");
+        let bytes = Bytes::from(format!(
+            "memory,host=B usage_int=42i,usage_float=3.14 {}",
+            current_nanoseconds
+        ));
         let result = publish_influxdb(state.clone(), headers, query, bytes)
             .await
             .unwrap();
@@ -672,12 +711,15 @@ mod tests {
         // Test with high u64 value that exceeds i64::MAX - should succeed with numeric enabled
         let headers = HeaderMap::new();
         let query = Query(InfluxDBQueryParams {
-            bucket: "test_numeric".to_string(),
-            org: Some("test_numeric".to_string()),
+            bucket: bucket.clone(),
+            org: Some(bucket),
             org_id: None,
             precision: None,
         });
-        let bytes = Bytes::from("memory usage_big=9223372036854775808u 1590488773254420000");
+        let bytes = Bytes::from(format!(
+            "{} usage_big=9223372036854775808u {}",
+            no_tag_measurement, current_nanoseconds
+        ));
         let result = publish_influxdb(state.clone(), headers, query, bytes)
             .await
             .unwrap();

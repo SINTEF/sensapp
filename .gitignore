@@ -37,3 +37,4 @@ integrations/
 __pycache__/
 .venv/
 dist/
+python/demo-dashboard/
