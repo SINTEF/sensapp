@@ -161,6 +161,8 @@ See [docs/JWT_AUTH.md](docs/JWT_AUTH.md) for full details on claims, time valida
 
 SensApp now ships with a container build and a Helm chart in `charts/sensapp`.
 
+For ClickHouse-backed deployments, see [docs/CLICKHOUSE.md](docs/CLICKHOUSE.md).
+
 ## Python SDK
 
 There is now an in-repo Python SDK under `python/sensapp-sdk`.

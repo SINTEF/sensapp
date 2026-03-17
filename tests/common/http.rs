@@ -11,6 +11,7 @@ use sensapp::http::health::{liveness, readiness};
 use sensapp::http::influxdb::publish_influxdb;
 use sensapp::http::metrics::{HttpMetrics, prometheus_metrics, track_http_metrics};
 use sensapp::http::server::publish_senml_data;
+use sensapp::http::simple_promql::simple_promql_query;
 use sensapp::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
 use std::sync::Arc;
@@ -42,6 +43,7 @@ impl TestApp {
             .route("/metrics", get(list_metrics))
             .route("/prometheus/metrics", get(prometheus_metrics))
             .route("/series", get(list_series))
+            .route("/api/v1/query", get(simple_promql_query))
             .route("/series/{series_uuid}", get(get_series_data))
             .route("/series/{series_uuid}/last", get(get_series_last_sample))
             .route(

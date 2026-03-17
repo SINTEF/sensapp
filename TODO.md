@@ -20,7 +20,6 @@ The next phase is not to add more features. It is to make the existing system so
 
 - [ ] Keep PostgreSQL, SQLite, TimescaleDB, DuckDB, RRDCached, and ClickHouse aligned with the current `StorageInstance` trait
 - [ ] Add cross-backend consistency tests for the core workflows: publish, list metrics, list series, query by UUID, query by labels, export formats
-- [ ] Make feature-gated backend tests run explicitly in CI instead of relying on the default test path
 - [ ] Decide which backends are actively maintained versus experimental
 
 ### 3. Codebase cleanup
