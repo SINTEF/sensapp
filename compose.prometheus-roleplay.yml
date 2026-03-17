@@ -1,0 +1,30 @@
+services:
+  sensapp:
+    build:
+      context: .
+      args:
+        FEATURES: duckdb
+        NO_DEFAULT_FEATURES: "true"
+    container_name: sensapp-roleplay
+    environment:
+      SENSAPP_ENDPOINT: 0.0.0.0
+      SENSAPP_PORT: 3017
+      SENSAPP_STORAGE_CONNECTION_STRING: duckdb:///workspaces/sensapp/python/roleplay-datascience/roleplay-session.duckdb
+      RUST_LOG: info
+    ports:
+      - "3017:3017"
+    volumes:
+      - .:/workspaces/sensapp
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: sensapp-roleplay-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
+    depends_on:
+      - sensapp
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus-roleplay/prometheus.yml:/etc/prometheus/prometheus.yml:ro

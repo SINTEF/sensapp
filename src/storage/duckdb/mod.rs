@@ -967,23 +967,18 @@ impl StorageInstance for DuckDBStorage {
         use cached::Cached;
         duckdb_utilities::GET_LABEL_NAME_ID_OR_CREATE
             .lock()
-            .expect("duckdb label-name cache poisoned")
             .cache_clear();
         duckdb_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
             .lock()
-            .expect("duckdb label-description cache poisoned")
             .cache_clear();
         duckdb_utilities::GET_UNIT_ID_OR_CREATE
             .lock()
-            .expect("duckdb unit cache poisoned")
             .cache_clear();
         duckdb_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
             .lock()
-            .expect("duckdb sensor cache poisoned")
             .cache_clear();
         duckdb_utilities::GET_STRING_VALUE_ID_OR_CREATE
             .lock()
-            .expect("duckdb string-value cache poisoned")
             .cache_clear();
 
         Ok(())
@@ -1257,6 +1252,7 @@ fn duckdb_first_last_query(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn duckdb_query_integer_samples_aggregated(
     connection: &Connection,
     sensor_id: i64,
@@ -1384,6 +1380,7 @@ fn duckdb_query_integer_samples_aggregated(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn duckdb_query_float_samples_aggregated(
     connection: &Connection,
     sensor_id: i64,
@@ -1485,6 +1482,7 @@ fn duckdb_query_float_samples_aggregated(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn duckdb_query_numeric_samples_aggregated(
     connection: &Connection,
     sensor_id: i64,

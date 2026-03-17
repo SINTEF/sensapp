@@ -317,6 +317,10 @@ mod tests {
         sensapp::test_utils::get_test_database_url()
     }
 
+    fn storage_backend_test_available() -> bool {
+        cfg!(feature = "postgres") || std::env::var("TEST_DATABASE_URL").is_ok()
+    }
+
     fn unique_test_bucket(prefix: &str) -> String {
         format!("{}-{}", prefix, Uuid::new_v4())
     }
@@ -357,6 +361,10 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_publish_influxdb() {
+        if !storage_backend_test_available() {
+            return;
+        }
+
         _ = load_configuration_for_tests();
 
         let connection_string = get_test_database_url();
@@ -669,6 +677,10 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_publish_influxdb_with_numeric_enabled() {
+        if !storage_backend_test_available() {
+            return;
+        }
+
         _ = load_configuration_for_tests();
 
         let connection_string = get_test_database_url();

@@ -303,10 +303,11 @@ description = "Build with BigQuery feature"
 env = { "CARGO_MAKE_TASK_FEATURE" = "bigquery" }
 
 [tasks.test-bigquery]
-extend = "template-test"
 private = false
 description = "Test with BigQuery feature"
 env = { "CARGO_MAKE_TASK_FEATURE" = "bigquery" }
+command = "cargo"
+args = ["test", "--features", "bigquery", "--no-default-features", "--lib", "--bins"]
 
 [tasks.clippy-bigquery]
 extend = "template-clippy"
@@ -337,10 +338,20 @@ description = "Build with RRDCached feature"
 env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached" }
 
 [tasks.test-rrdcached]
-extend = "template-test"
 private = false
-description = "Test with RRDCached feature"
-env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached", "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_RRDCACHED}" }
+description = "Test RRDCached with unit/bin tests plus the dedicated RRDCached integration suite"
+command = "cargo"
+args = [
+  "test",
+  "--features",
+  "rrdcached",
+  "--no-default-features",
+  "--lib",
+  "--bins",
+  "--test",
+  "rrdcached_integration",
+]
+env = { "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_RRDCACHED}" }
 
 [tasks.clippy-rrdcached]
 extend = "template-clippy"

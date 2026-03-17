@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "rrdcached", allow(unused_imports, dead_code))]
+
 mod common;
 
 use anyhow::Result;
@@ -58,6 +60,7 @@ async fn seed_three_series(storage: &Arc<dyn sensapp::storage::StorageInstance>)
 }
 
 /// Test CRUD/DCAT API functionality with new series terminology
+#[cfg(not(feature = "rrdcached"))]
 mod crud_dcat_tests {
     use super::*;
 

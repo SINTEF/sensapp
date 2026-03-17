@@ -1,8 +1,9 @@
 use crate::storage::StorageError;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
     query_parameter_value::QueryParameterValue, query_request::QueryRequest,
+    query_response::ResultSet,
 };
 use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
@@ -139,13 +140,14 @@ async fn get_existing_sensors_ids_from_uuids(
 
     query_request.query_parameters = Some(vec![query_parameter]);
 
-    let mut result = bqs
+    let result = bqs
         .client()
         .read()
         .await
         .job()
         .query(bqs.project_id(), query_request)
         .await?;
+    let mut result = ResultSet::new_from_query_response(result);
 
     let mut results_map = HybridMap::with_capacity(result.row_count());
 
@@ -209,15 +211,15 @@ async fn create_sensors(
                 .unit
                 .as_ref()
                 .and_then(|unit| units_map.get(&unit.name).copied());
-            ProstSensor {
+            Ok(ProstSensor {
                 sensor_id: *sensor_id,
                 uuid: sensor.uuid.to_string(),
                 name: sensor.name.clone(),
                 r#type: sensor.sensor_type.to_string(),
                 unit,
-            }
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
 
     publish_rows(bqs, "sensors", &SENSORS_DESCRIPTOR, rows).await?;
 

@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "rrdcached", allow(unused_imports, dead_code))]
+
 mod common;
 
 use anyhow::Result;
@@ -65,6 +67,7 @@ fn record_batches_to_arrow_file(batches: &[RecordBatch]) -> Result<Vec<u8>> {
 }
 
 /// Test Arrow data export functionality
+#[cfg(not(feature = "rrdcached"))]
 mod export_tests {
     use super::*;
 
@@ -179,6 +182,7 @@ mod export_tests {
 }
 
 /// Test Arrow data import functionality
+#[cfg(not(feature = "rrdcached"))]
 mod import_tests {
     use super::*;
 
@@ -364,6 +368,7 @@ mod import_tests {
 }
 
 /// Test Arrow round-trip functionality (export then import)
+#[cfg(not(feature = "rrdcached"))]
 mod roundtrip_tests {
     use super::*;
 

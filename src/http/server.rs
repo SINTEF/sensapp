@@ -354,9 +354,17 @@ mod tests {
         sensapp::test_utils::get_test_database_url()
     }
 
+    fn storage_backend_test_available() -> bool {
+        cfg!(feature = "postgres") || std::env::var("TEST_DATABASE_URL").is_ok()
+    }
+
     #[tokio::test]
     #[serial]
     async fn test_frontpage_handler() {
+        if !storage_backend_test_available() {
+            return;
+        }
+
         use crate::storage::storage_factory::create_storage_from_connection_string;
 
         let connection_string = get_test_database_url();

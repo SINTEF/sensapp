@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - prometheus:9090
+
+  - job_name: sensapp
+    metrics_path: /prometheus/metrics
+    static_configs:
+      - targets:
+          - sensapp:3017
+
+remote_read:
+  - url: http://sensapp:3017/api/v1/prometheus_remote_read
+    read_recent: true
+    remote_timeout: 1m

@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use gcp_bigquery_client::{
-    google::cloud::bigquery::storage::v1::AppendRowsResponse, storage::TableDescriptor,
+    google::cloud::bigquery::storage::v1::AppendRowsResponse,
+    storage::{StorageApi, TableDescriptor},
 };
 use tokio_stream::StreamExt;
 use tonic::Streaming;
@@ -23,13 +24,14 @@ pub async fn publish_rows(
 
     let stream_name = bqs.new_stream_name(table_name.to_string());
     let trace_id = create_trace_id(table_name);
+    let (rows, _) = StorageApi::create_rows(table_descriptor, &rows, 9 * 1024 * 1024);
 
     let streaming = bqs
         .client()
         .write()
         .await
         .storage_mut()
-        .append_rows(&stream_name, table_descriptor, &rows, trace_id)
+        .append_rows(&stream_name, rows, trace_id)
         .await?;
 
     check_streaming(streaming).await?;

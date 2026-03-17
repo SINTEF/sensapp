@@ -1402,6 +1402,7 @@ impl TimeScaleDBStorage {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn query_integer_samples_aggregated(
         &self,
         sensor_id: i64,
@@ -1511,6 +1512,7 @@ impl TimeScaleDBStorage {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn query_float_samples_aggregated(
         &self,
         sensor_id: i64,
@@ -1590,6 +1592,7 @@ impl TimeScaleDBStorage {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn query_numeric_samples_aggregated(
         &self,
         sensor_id: i64,

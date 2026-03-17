@@ -12,6 +12,7 @@ pub mod data_query;
 pub mod query;
 
 pub use data_query::{Aggregation, SensorDataQueryOptions, SimplifyOptions};
+#[allow(unused_imports)]
 pub use query::{LabelMatcher, MatcherType};
 
 /// Default limit for timeseries queries when no limit is specified

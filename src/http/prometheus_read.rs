@@ -20,7 +20,7 @@ use axum::{
     response::Response,
 };
 use tokio_util::bytes::Bytes;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
     // Check that we have the right content encoding, that must be snappy
@@ -310,7 +310,15 @@ async fn handle_streamed_response(
             // Encode as XOR chunks
             let chunked_series = match ChunkEncoder::encode_series(labels, samples) {
                 Ok(cs) => cs,
-                Err(_) => continue, // Skip on encoding error
+                Err(error) => {
+                    warn!(
+                        sensor = %sd.sensor.name,
+                        query_index,
+                        error = %error,
+                        "Failed to encode Prometheus remote read chunks"
+                    );
+                    continue;
+                }
             };
 
             // Create ONE response per series (this is what Prometheus expects!)

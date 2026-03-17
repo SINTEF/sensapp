@@ -2,6 +2,9 @@ FROM rust:1.89-slim-bookworm AS builder
 
 ARG FEATURES="postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached"
 ARG NO_DEFAULT_FEATURES="true"
+ARG DUCKDB_DOWNLOAD_LIB="1"
+
+ENV DUCKDB_DOWNLOAD_LIB=${DUCKDB_DOWNLOAD_LIB}
 
 WORKDIR /app
 

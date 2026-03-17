@@ -1,3 +1,5 @@
+#![cfg(not(feature = "rrdcached"))]
+
 mod common;
 
 use anyhow::Result;

@@ -1196,6 +1196,7 @@ impl SqliteStorage {
         Ok(TypedSamples::Integer(samples))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn query_integer_samples_aggregated(
         &self,
         sensor_id: i64,
@@ -1333,6 +1334,7 @@ impl SqliteStorage {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn query_float_samples_aggregated(
         &self,
         sensor_id: i64,
@@ -1440,6 +1442,7 @@ impl SqliteStorage {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn query_numeric_samples_aggregated(
         &self,
         sensor_id: i64,
