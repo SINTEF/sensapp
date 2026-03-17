@@ -106,10 +106,12 @@ mod query_tests {
         assert_eq!(payload["sensor_name"], sensor_name);
         assert_eq!(payload["sensor_type"], "float");
         assert_eq!(payload["value"], 20.8);
-        assert!(payload["timestamp"]
-            .as_str()
-            .expect("timestamp should be a string")
-            .contains("2024-01-01T00:04:00"));
+        assert!(
+            payload["timestamp"]
+                .as_str()
+                .expect("timestamp should be a string")
+                .contains("2024-01-01T00:04:00")
+        );
 
         Ok(())
     }
@@ -139,10 +141,12 @@ mod query_tests {
 
         let payload: serde_json::Value = response.json()?;
         assert_eq!(payload["value"], 22.0);
-        assert!(payload["timestamp"]
-            .as_str()
-            .expect("timestamp should be a string")
-            .contains("2024-01-01T00:03:00"));
+        assert!(
+            payload["timestamp"]
+                .as_str()
+                .expect("timestamp should be a string")
+                .contains("2024-01-01T00:03:00")
+        );
 
         Ok(())
     }
@@ -178,14 +182,18 @@ mod query_tests {
         assert_eq!(payload["covered_buckets"], 3);
         assert_eq!(payload["total_buckets"], 3);
         assert_eq!(payload["coverage_ratio"], 1.0);
-        assert!(payload["first_sample_at"]
-            .as_str()
-            .expect("first_sample_at should be a string")
-            .contains("2024-01-01T00:00:00"));
-        assert!(payload["last_sample_at"]
-            .as_str()
-            .expect("last_sample_at should be a string")
-            .contains("2024-01-01T00:04:00"));
+        assert!(
+            payload["first_sample_at"]
+                .as_str()
+                .expect("first_sample_at should be a string")
+                .contains("2024-01-01T00:00:00")
+        );
+        assert!(
+            payload["last_sample_at"]
+                .as_str()
+                .expect("last_sample_at should be a string")
+                .contains("2024-01-01T00:04:00")
+        );
 
         Ok(())
     }
@@ -778,10 +786,7 @@ mod advanced_series_query_tests {
             let value = 20.0 + (minute as f64 * 0.2) + if minute % 5 == 0 { 0.01 } else { 0.0 };
             csv_data.push_str(&format!(
                 "2024-01-01T00:{:02}:00Z,{},{}{},°C\n",
-                minute,
-                sensor_name,
-                value,
-                ""
+                minute, sensor_name, value, ""
             ));
         }
         app.post_csv("/sensors/publish", &csv_data).await?;
@@ -808,11 +813,13 @@ mod advanced_series_query_tests {
         assert!(simplified_lines.len() < raw_line_count);
         assert_eq!(simplified_lines.first().copied(), Some("timestamp,value"));
         assert!(simplified_lines[1].starts_with("2024-01-01T00:00:00+00:00,"));
-        assert!(simplified_lines
-            .last()
-            .copied()
-            .unwrap_or_default()
-            .starts_with("2024-01-01T00:19:00+00:00,"));
+        assert!(
+            simplified_lines
+                .last()
+                .copied()
+                .unwrap_or_default()
+                .starts_with("2024-01-01T00:19:00+00:00,")
+        );
 
         Ok(())
     }

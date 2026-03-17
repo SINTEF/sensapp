@@ -79,6 +79,21 @@ struct ParsedQuery {
     end_time: Option<SensAppDateTime>,
 }
 
+fn binary_operation_error_message(query: &str) -> String {
+    let trimmed = query.trim();
+    let looks_like_hyphenated_metric = trimmed.contains('-')
+        && !trimmed.contains(" + ")
+        && !trimmed.contains(" - ")
+        && !trimmed.contains(" * ")
+        && !trimmed.contains(" / ");
+
+    if looks_like_hyphenated_metric {
+        return "Binary operations (like +, -, *, /) are not supported. If you intended to query a sensor named like 'demo-temperature', PromQL parses '-' as subtraction. Query it as '{__name__=\"demo-temperature\"}[5m]' or use an underscore-friendly metric name for bare selectors.".to_string();
+    }
+
+    "Binary operations (like +, -, *, /) are not supported. Only simple selectors like 'metric_name{label=\"value\"}' or 'metric_name[5m]' are supported.".to_string()
+}
+
 /// Parse and validate a PromQL query, returning the extracted information
 fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
     // Parse the query
@@ -154,7 +169,7 @@ fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
             "Function calls (like rate(), increase(), histogram_quantile()) are not supported. Only simple selectors like 'metric_name{{label=\"value\"}}' or 'metric_name[5m]' are supported."
         ))),
         Expr::Binary(_) => Err(AppError::bad_request(anyhow::anyhow!(
-            "Binary operations (like +, -, *, /) are not supported. Only simple selectors like 'metric_name{{label=\"value\"}}' or 'metric_name[5m]' are supported."
+            binary_operation_error_message(query)
         ))),
         Expr::Unary(_) => Err(AppError::bad_request(anyhow::anyhow!(
             "Unary operations are not supported. Only simple selectors like 'metric_name{{label=\"value\"}}' or 'metric_name[5m]' are supported."

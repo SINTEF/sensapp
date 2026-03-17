@@ -20,7 +20,10 @@ use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use smallvec::smallvec;
-use sqlx::{PgPool, postgres::{PgConnectOptions, PgPoolOptions}};
+use sqlx::{
+    PgPool,
+    postgres::{PgConnectOptions, PgPoolOptions},
+};
 use std::collections::HashMap;
 use std::{str::FromStr, sync::Arc};
 use uuid::Uuid;
@@ -218,9 +221,7 @@ impl PostgresStorage {
         }
 
         let row: Row = if let Some(step_ms) = step_ms {
-            let step_us = step_ms
-                .checked_mul(1000)
-                .context("step is too large")?;
+            let step_us = step_ms.checked_mul(1000).context("step is too large")?;
             let sql = format!(
                 r#"
                 SELECT
@@ -569,8 +570,8 @@ impl StorageInstance for PostgresStorage {
                 let origin_us = start_time_us.unwrap_or(0);
 
                 let samples = match sensor.sensor_type {
-                    SensorType::Integer => self
-                        .query_integer_samples_aggregated(
+                    SensorType::Integer => {
+                        self.query_integer_samples_aggregated(
                             sensor_id,
                             start_time_us,
                             end_time_us,
@@ -579,9 +580,10 @@ impl StorageInstance for PostgresStorage {
                             aggregation,
                             options.limit,
                         )
-                        .await?,
-                    SensorType::Numeric => self
-                        .query_numeric_samples_aggregated(
+                        .await?
+                    }
+                    SensorType::Numeric => {
+                        self.query_numeric_samples_aggregated(
                             sensor_id,
                             start_time_us,
                             end_time_us,
@@ -590,9 +592,10 @@ impl StorageInstance for PostgresStorage {
                             aggregation,
                             options.limit,
                         )
-                        .await?,
-                    SensorType::Float => self
-                        .query_float_samples_aggregated(
+                        .await?
+                    }
+                    SensorType::Float => {
+                        self.query_float_samples_aggregated(
                             sensor_id,
                             start_time_us,
                             end_time_us,
@@ -601,7 +604,8 @@ impl StorageInstance for PostgresStorage {
                             aggregation,
                             options.limit,
                         )
-                        .await?,
+                        .await?
+                    }
                     _ => {
                         let raw = self
                             .query_sensor_data(
@@ -682,28 +686,76 @@ impl StorageInstance for PostgresStorage {
 
         let samples = match sensor.sensor_type {
             SensorType::Integer => {
-                self.query_integer_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_integer_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Numeric => {
-                self.query_numeric_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_numeric_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Float => {
-                self.query_float_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_float_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::String => {
-                self.query_string_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_string_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Boolean => {
-                self.query_boolean_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_boolean_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Location => {
-                self.query_location_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_location_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Json => {
-                self.query_json_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_json_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Blob => {
-                self.query_blob_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_blob_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
         };
 

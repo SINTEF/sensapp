@@ -1,6 +1,8 @@
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{Sample, SensAppDateTime, SensorData, SensorType, TypedSamples};
-use crate::storage::{Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, SimplifyOptions};
+use crate::storage::{
+    Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, SimplifyOptions,
+};
 use anyhow::{Result, anyhow};
 use hifitime::Unit;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
@@ -60,13 +62,23 @@ pub fn summarize_sensor_data_availability(
         })
         .transpose()?;
 
-    let (sample_count, first_sample_at, last_sample_at, covered_buckets) = match &sensor_data.samples {
-        TypedSamples::Integer(samples) => availability_stats_for_samples(samples, start_us, step_us),
-        TypedSamples::Numeric(samples) => availability_stats_for_samples(samples, start_us, step_us),
+    let (sample_count, first_sample_at, last_sample_at, covered_buckets) = match &sensor_data
+        .samples
+    {
+        TypedSamples::Integer(samples) => {
+            availability_stats_for_samples(samples, start_us, step_us)
+        }
+        TypedSamples::Numeric(samples) => {
+            availability_stats_for_samples(samples, start_us, step_us)
+        }
         TypedSamples::Float(samples) => availability_stats_for_samples(samples, start_us, step_us),
         TypedSamples::String(samples) => availability_stats_for_samples(samples, start_us, step_us),
-        TypedSamples::Boolean(samples) => availability_stats_for_samples(samples, start_us, step_us),
-        TypedSamples::Location(samples) => availability_stats_for_samples(samples, start_us, step_us),
+        TypedSamples::Boolean(samples) => {
+            availability_stats_for_samples(samples, start_us, step_us)
+        }
+        TypedSamples::Location(samples) => {
+            availability_stats_for_samples(samples, start_us, step_us)
+        }
         TypedSamples::Blob(samples) => availability_stats_for_samples(samples, start_us, step_us),
         TypedSamples::Json(samples) => availability_stats_for_samples(samples, start_us, step_us),
     };
@@ -84,7 +96,12 @@ fn availability_stats_for_samples<V>(
     samples: &[Sample<V>],
     start_us: i64,
     step_us: Option<i64>,
-) -> (usize, Option<SensAppDateTime>, Option<SensAppDateTime>, Option<usize>) {
+) -> (
+    usize,
+    Option<SensAppDateTime>,
+    Option<SensAppDateTime>,
+    Option<usize>,
+) {
     let covered_buckets = step_us.map(|step_us| {
         samples
             .iter()
@@ -123,9 +140,7 @@ fn aggregate_sensor_data(
             aggregate_numeric_samples(samples.as_slice(), origin_us, step_us, aggregation)?
         }
         _ => {
-            return Err(anyhow!(
-                "aggregation is only supported for numeric series"
-            ));
+            return Err(anyhow!("aggregation is only supported for numeric series"));
         }
     };
 
@@ -177,9 +192,7 @@ fn simplify_sensor_data(
             TypedSamples::Numeric(filter_samples_by_indices(samples, keep_indices))
         }
         _ => {
-            return Err(anyhow!(
-                "simplify is only supported for numeric series"
-            ));
+            return Err(anyhow!("simplify is only supported for numeric series"));
         }
     };
 
@@ -231,11 +244,11 @@ where
 
     let points: Vec<Point<2, f64>> = samples
         .iter()
-        .map(|sample| {
-            Point { vec: [
+        .map(|sample| Point {
+            vec: [
                 (datetime_to_micros(&sample.datetime) - min_ts) as f64 / ts_span,
                 (value_fn(sample) - min_val) / value_span,
-            ] }
+            ],
         })
         .collect();
 
@@ -275,7 +288,11 @@ fn aggregate_float_samples(
     let mut index = 0usize;
 
     while index < samples.len() {
-        let bucket_us = bucket_start(datetime_to_micros(&samples[index].datetime), origin_us, step_us);
+        let bucket_us = bucket_start(
+            datetime_to_micros(&samples[index].datetime),
+            origin_us,
+            step_us,
+        );
         let mut end = index;
         let mut sum = 0.0;
         let mut min = samples[index].value;
@@ -285,7 +302,11 @@ fn aggregate_float_samples(
         let mut count = 0i64;
 
         while end < samples.len()
-            && bucket_start(datetime_to_micros(&samples[end].datetime), origin_us, step_us) == bucket_us
+            && bucket_start(
+                datetime_to_micros(&samples[end].datetime),
+                origin_us,
+                step_us,
+            ) == bucket_us
         {
             let value = samples[end].value;
             sum += value;
@@ -298,13 +319,34 @@ fn aggregate_float_samples(
 
         let datetime = SensAppDateTime::from_unix_microseconds_i64(bucket_us);
         match aggregation {
-            Aggregation::Avg => output_float.push(Sample { datetime, value: sum / count as f64 }),
-            Aggregation::Min => output_float.push(Sample { datetime, value: min }),
-            Aggregation::Max => output_float.push(Sample { datetime, value: max }),
-            Aggregation::Sum => output_float.push(Sample { datetime, value: sum }),
-            Aggregation::First => output_float.push(Sample { datetime, value: first }),
-            Aggregation::Last => output_float.push(Sample { datetime, value: last }),
-            Aggregation::Count => output_int.push(Sample { datetime, value: count }),
+            Aggregation::Avg => output_float.push(Sample {
+                datetime,
+                value: sum / count as f64,
+            }),
+            Aggregation::Min => output_float.push(Sample {
+                datetime,
+                value: min,
+            }),
+            Aggregation::Max => output_float.push(Sample {
+                datetime,
+                value: max,
+            }),
+            Aggregation::Sum => output_float.push(Sample {
+                datetime,
+                value: sum,
+            }),
+            Aggregation::First => output_float.push(Sample {
+                datetime,
+                value: first,
+            }),
+            Aggregation::Last => output_float.push(Sample {
+                datetime,
+                value: last,
+            }),
+            Aggregation::Count => output_int.push(Sample {
+                datetime,
+                value: count,
+            }),
         }
 
         index = end;
@@ -332,7 +374,11 @@ fn aggregate_integer_samples(
     let mut index = 0usize;
 
     while index < samples.len() {
-        let bucket_us = bucket_start(datetime_to_micros(&samples[index].datetime), origin_us, step_us);
+        let bucket_us = bucket_start(
+            datetime_to_micros(&samples[index].datetime),
+            origin_us,
+            step_us,
+        );
         let mut end = index;
         let mut sum: i128 = 0;
         let mut min = samples[index].value;
@@ -342,7 +388,11 @@ fn aggregate_integer_samples(
         let mut count = 0i64;
 
         while end < samples.len()
-            && bucket_start(datetime_to_micros(&samples[end].datetime), origin_us, step_us) == bucket_us
+            && bucket_start(
+                datetime_to_micros(&samples[end].datetime),
+                origin_us,
+                step_us,
+            ) == bucket_us
         {
             let value = samples[end].value;
             sum += value as i128;
@@ -359,15 +409,30 @@ fn aggregate_integer_samples(
                 datetime,
                 value: sum as f64 / count as f64,
             }),
-            Aggregation::Min => output_int.push(Sample { datetime, value: min }),
-            Aggregation::Max => output_int.push(Sample { datetime, value: max }),
+            Aggregation::Min => output_int.push(Sample {
+                datetime,
+                value: min,
+            }),
+            Aggregation::Max => output_int.push(Sample {
+                datetime,
+                value: max,
+            }),
             Aggregation::Sum => output_int.push(Sample {
                 datetime,
                 value: i64::try_from(sum).map_err(|_| anyhow!("integer aggregation overflowed"))?,
             }),
-            Aggregation::First => output_int.push(Sample { datetime, value: first }),
-            Aggregation::Last => output_int.push(Sample { datetime, value: last }),
-            Aggregation::Count => output_int.push(Sample { datetime, value: count }),
+            Aggregation::First => output_int.push(Sample {
+                datetime,
+                value: first,
+            }),
+            Aggregation::Last => output_int.push(Sample {
+                datetime,
+                value: last,
+            }),
+            Aggregation::Count => output_int.push(Sample {
+                datetime,
+                value: count,
+            }),
         }
 
         index = end;
@@ -395,7 +460,11 @@ fn aggregate_numeric_samples(
     let mut index = 0usize;
 
     while index < samples.len() {
-        let bucket_us = bucket_start(datetime_to_micros(&samples[index].datetime), origin_us, step_us);
+        let bucket_us = bucket_start(
+            datetime_to_micros(&samples[index].datetime),
+            origin_us,
+            step_us,
+        );
         let mut end = index;
         let mut sum = Decimal::ZERO;
         let mut min = samples[index].value;
@@ -405,7 +474,11 @@ fn aggregate_numeric_samples(
         let mut count = 0i64;
 
         while end < samples.len()
-            && bucket_start(datetime_to_micros(&samples[end].datetime), origin_us, step_us) == bucket_us
+            && bucket_start(
+                datetime_to_micros(&samples[end].datetime),
+                origin_us,
+                step_us,
+            ) == bucket_us
         {
             let value = samples[end].value;
             sum += value;
@@ -422,12 +495,30 @@ fn aggregate_numeric_samples(
                 datetime,
                 value: sum / Decimal::from(count),
             }),
-            Aggregation::Min => output_numeric.push(Sample { datetime, value: min }),
-            Aggregation::Max => output_numeric.push(Sample { datetime, value: max }),
-            Aggregation::Sum => output_numeric.push(Sample { datetime, value: sum }),
-            Aggregation::First => output_numeric.push(Sample { datetime, value: first }),
-            Aggregation::Last => output_numeric.push(Sample { datetime, value: last }),
-            Aggregation::Count => output_int.push(Sample { datetime, value: count }),
+            Aggregation::Min => output_numeric.push(Sample {
+                datetime,
+                value: min,
+            }),
+            Aggregation::Max => output_numeric.push(Sample {
+                datetime,
+                value: max,
+            }),
+            Aggregation::Sum => output_numeric.push(Sample {
+                datetime,
+                value: sum,
+            }),
+            Aggregation::First => output_numeric.push(Sample {
+                datetime,
+                value: first,
+            }),
+            Aggregation::Last => output_numeric.push(Sample {
+                datetime,
+                value: last,
+            }),
+            Aggregation::Count => output_int.push(Sample {
+                datetime,
+                value: count,
+            }),
         }
 
         index = end;

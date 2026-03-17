@@ -4,9 +4,9 @@
 //! used when querying samples for a single sensor by ID.
 
 use super::{DEFAULT_QUERY_LIMIT, PostgresStorage};
-use crate::storage::Aggregation;
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{Sample, SensAppDateTime, TypedSamples};
+use crate::storage::Aggregation;
 use anyhow::Result;
 use geo::Point;
 use serde_json::Value as JsonValue;

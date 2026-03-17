@@ -28,7 +28,9 @@ use sqlx::types::time::OffsetDateTime;
 #[allow(dead_code)]
 pub fn sensapp_datetime_to_offset_datetime(datetime: &SensAppDateTime) -> Result<OffsetDateTime> {
     let unix_timestamp_us = datetime.to_unix(Unit::Microsecond).floor() as i128;
-    Ok(OffsetDateTime::from_unix_timestamp_nanos(unix_timestamp_us * 1_000_i128)?)
+    Ok(OffsetDateTime::from_unix_timestamp_nanos(
+        unix_timestamp_us * 1_000_i128,
+    )?)
 }
 
 #[cfg(test)]

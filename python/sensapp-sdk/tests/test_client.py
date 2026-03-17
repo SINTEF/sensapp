@@ -90,6 +90,49 @@ def test_query_arrow_returns_table(client_factory: ClientFactory) -> None:
     assert result.to_pylist() == table.to_pylist()
 
 
+def test_query_sensor_rows_uses_name_matcher_for_hyphenated_sensor(
+    client_factory: ClientFactory,
+) -> None:
+    table = pa.table(
+        {
+            "timestamp": pa.array(
+                [datetime(2026, 3, 16, 12, 0, tzinfo=timezone.utc)],
+                type=pa.timestamp("us", tz="UTC"),
+            ),
+            "sensor_id": ["sensor-1"],
+            "sensor_name": ["demo-temperature"],
+            "value": ["21.5"],
+            "type": ["float"],
+            "labels": ['{"room":"lab"}'],
+        }
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/query"
+        assert request.url.params["query"] == '{__name__="demo-temperature"}[5m]'
+        assert request.url.params["format"] == "arrow"
+        return httpx.Response(200, content=serialize_arrow_table(table))
+
+    client = client_factory(handler)
+
+    assert client.query_sensor_rows("demo-temperature", window="5m") == table.to_pylist()
+
+
+def test_query_sensor_csv_includes_label_matchers(client_factory: ClientFactory) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["query"] == '{__name__="temperature",room="lab",site="north"}[1h]'
+        assert request.url.params["format"] == "csv"
+        return httpx.Response(200, text="timestamp,value\n2026-03-16T12:00:00Z,21.5\n")
+
+    client = client_factory(handler)
+
+    assert "timestamp,value" in client.query_sensor_csv(
+        "temperature",
+        window="1h",
+        labels={"room": "lab", "site": "north"},
+    )
+
+
 def test_publish_samples_sends_arrow_with_auth_header(
     client_factory: ClientFactory,
 ) -> None:

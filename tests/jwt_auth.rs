@@ -10,10 +10,10 @@
 
 mod common;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::routing::{get, post};
-use axum::Router;
 use common::TestDb;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use sensapp::http::auth::AuthConfig;
@@ -162,11 +162,17 @@ fn build_test_router(storage: Arc<dyn StorageInstance>, auth: Option<AuthConfig>
         .route("/metrics", get(list_metrics))
         .route("/series", get(list_series))
         .route("/series/{series_uuid}", get(get_series_data))
-        .route_layer(axum::middleware::from_fn_with_state(auth.clone(), require_read_auth));
+        .route_layer(axum::middleware::from_fn_with_state(
+            auth.clone(),
+            require_read_auth,
+        ));
 
     let write_routes = Router::new()
         .route("/publish", post(test_publish_handler))
-        .route_layer(axum::middleware::from_fn_with_state(auth, require_write_auth));
+        .route_layer(axum::middleware::from_fn_with_state(
+            auth,
+            require_write_auth,
+        ));
 
     public
         .merge(read_routes)

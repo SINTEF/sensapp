@@ -1,5 +1,10 @@
 #![cfg_attr(
-    not(any(feature = "sqlite", feature = "duckdb", feature = "timescaledb", feature = "clickhouse")),
+    not(any(
+        feature = "sqlite",
+        feature = "duckdb",
+        feature = "timescaledb",
+        feature = "clickhouse"
+    )),
     allow(dead_code, unused_imports)
 )]
 
@@ -87,11 +92,20 @@ async fn assert_bucketed_average_for_backend(db_type: DatabaseType) -> Result<()
     match sensor_data.samples {
         sensapp::datamodel::TypedSamples::Float(samples) => {
             assert_eq!(samples.len(), 3, "expected 3 aggregated rows");
-            assert_eq!(samples[0].datetime.to_unix_milliseconds().floor() as i64, 1_704_067_200_000);
+            assert_eq!(
+                samples[0].datetime.to_unix_milliseconds().floor() as i64,
+                1_704_067_200_000
+            );
             assert_eq!(samples[0].value, 20.75);
-            assert_eq!(samples[1].datetime.to_unix_milliseconds().floor() as i64, 1_704_067_320_000);
+            assert_eq!(
+                samples[1].datetime.to_unix_milliseconds().floor() as i64,
+                1_704_067_320_000
+            );
             assert_eq!(samples[1].value, 21.75);
-            assert_eq!(samples[2].datetime.to_unix_milliseconds().floor() as i64, 1_704_067_440_000);
+            assert_eq!(
+                samples[2].datetime.to_unix_milliseconds().floor() as i64,
+                1_704_067_440_000
+            );
             assert_eq!(samples[2].value, 20.8);
         }
         other => panic!("expected float samples, got {other:?}"),
@@ -154,7 +168,10 @@ async fn assert_latest_and_availability_for_backend(db_type: DatabaseType) -> Re
     match latest.samples {
         sensapp::datamodel::TypedSamples::Float(samples) => {
             assert_eq!(samples.len(), 1, "expected a single latest sample");
-            assert_eq!(samples[0].datetime.to_unix_milliseconds().floor() as i64, 1_704_067_440_000);
+            assert_eq!(
+                samples[0].datetime.to_unix_milliseconds().floor() as i64,
+                1_704_067_440_000
+            );
             assert_eq!(samples[0].value, 20.8);
         }
         other => panic!("expected float samples, got {other:?}"),

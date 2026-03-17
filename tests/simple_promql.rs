@@ -320,6 +320,67 @@ async fn test_simple_promql_reject_binary() -> Result<()> {
     Ok(())
 }
 
+/// Test binary-operation error includes guidance for hyphenated metric names
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_hyphenated_metric_name_hint() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let sensor = create_sensor_with_labels("demo-temperature", SensorType::Float, vec![]);
+    publish_test_sensors(&storage, vec![(sensor, create_float_samples(3))]).await?;
+
+    let app = create_test_app(storage).await;
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/query?query=demo-temperature%5B5m%5D")
+        .body(Body::empty())?;
+
+    let response = app.oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(body_str.contains("demo-temperature"));
+    assert!(body_str.contains("__name__"));
+
+    Ok(())
+}
+
+/// Test quoted-name workaround for hyphenated metric names
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_hyphenated_metric_name_via_name_matcher() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let sensor = create_sensor_with_labels("demo-temperature", SensorType::Float, vec![]);
+    publish_test_sensors(&storage, vec![(sensor, create_float_samples(3))]).await?;
+
+    let app = create_test_app(storage).await;
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/query?query=%7B__name__%3D%22demo-temperature%22%7D%5B5m%5D")
+        .body(Body::empty())?;
+
+    let response = app.oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+    let json: Value = serde_json::from_slice(&body)?;
+    let records = json.as_array().expect("SenML response should be an array");
+    assert!(
+        !records.is_empty(),
+        "Should have records for the hyphenated sensor"
+    );
+
+    Ok(())
+}
+
 /// Test query with regex matcher
 #[tokio::test]
 #[serial]

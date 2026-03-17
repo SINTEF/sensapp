@@ -119,12 +119,8 @@ pub trait StorageInstance: Send + Sync + Debug {
             return Ok(None);
         };
 
-        crate::storage::common::summarize_sensor_data_availability(
-            sensor_data,
-            start_time,
-            step_ms,
-        )
-        .map(Some)
+        crate::storage::common::summarize_sensor_data_availability(sensor_data, start_time, step_ms)
+            .map(Some)
     }
 
     /// Query sensors and their data by label matchers.

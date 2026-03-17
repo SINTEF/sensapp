@@ -4,7 +4,9 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
-use sensapp::http::crud::{get_series_availability, get_series_data, get_series_last_sample, list_metrics, list_series};
+use sensapp::http::crud::{
+    get_series_availability, get_series_data, get_series_last_sample, list_metrics, list_series,
+};
 use sensapp::http::health::{liveness, readiness};
 use sensapp::http::influxdb::publish_influxdb;
 use sensapp::http::metrics::{HttpMetrics, prometheus_metrics, track_http_metrics};
@@ -42,7 +44,10 @@ impl TestApp {
             .route("/series", get(list_series))
             .route("/series/{series_uuid}", get(get_series_data))
             .route("/series/{series_uuid}/last", get(get_series_last_sample))
-            .route("/series/{series_uuid}/availability", get(get_series_availability))
+            .route(
+                "/series/{series_uuid}/availability",
+                get(get_series_availability),
+            )
             .route("/health/live", get(liveness))
             .route("/health/ready", get(readiness))
             .layer(axum::middleware::from_fn_with_state(

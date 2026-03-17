@@ -63,3 +63,24 @@ def test_live_query_csv_and_jsonl_formats(live_server_url: str) -> None:
     assert csv_payload.startswith("timestamp,sensor_id,sensor_name,value,type")
     assert len(jsonl_rows) == 1
     assert jsonl_rows[0]["sensor_name"] == "pressure"
+
+
+@pytest.mark.integration
+def test_live_query_sensor_rows_supports_hyphenated_sensor_names(
+    live_server_url: str,
+) -> None:
+    now = datetime.now(timezone.utc)
+
+    with SensAppClient(live_server_url) as client:
+        client.publish_samples(
+            sensor_name="demo-temperature",
+            samples=[
+                SamplePoint(now - timedelta(seconds=1), 20.5),
+                SamplePoint(now, 20.7),
+            ],
+        )
+
+        rows = client.query_sensor_rows("demo-temperature", window="1h")
+
+    assert len(rows) == 2
+    assert all(row["sensor_name"] == "demo-temperature" for row in rows)

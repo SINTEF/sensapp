@@ -7,6 +7,20 @@ use serde_json::json;
 use tracing::error;
 use utoipa::ToSchema;
 
+fn storage_error_is_unavailable(storage_error: &StorageError) -> bool {
+    let details = storage_error.to_string().to_ascii_lowercase();
+
+    details.contains("connection refused")
+        || details.contains("failed to connect")
+        || details.contains("pool timed out")
+        || details.contains("timed out")
+        || details.contains("connection closed")
+        || details.contains("connection reset")
+        || details.contains("broken pipe")
+        || details.contains("no such file or directory")
+        || details.contains("database is unavailable")
+}
+
 // Anyhow error handling with axum
 // https://github.com/tokio-rs/axum/blob/d3112a40d55f123bc5e65f995e2068e245f12055/examples/anyhow-error-response/src/main.rs
 #[derive(Debug, ToSchema)]
@@ -65,11 +79,19 @@ impl IntoResponse for AppError {
                     )
                 }
                 StorageError::Database(_) | StorageError::OperationFailed { .. } => {
-                    error!("Storage operation failed: {}", storage_error);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Storage operation failed".to_string(),
-                    )
+                    if storage_error_is_unavailable(&storage_error) {
+                        error!("Storage backend unavailable: {}", storage_error);
+                        (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "Database unavailable".to_string(),
+                        )
+                    } else {
+                        error!("Storage operation failed: {}", storage_error);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Storage operation failed".to_string(),
+                        )
+                    }
                 }
             },
         };
@@ -87,7 +109,10 @@ impl From<StorageError> for AppError {
 // Generic conversion for anyhow::Error specifically
 impl From<anyhow::Error> for AppError {
     fn from(err: anyhow::Error) -> Self {
-        Self::InternalServerError(err)
+        match err.downcast::<StorageError>() {
+            Ok(storage_error) => Self::Storage(storage_error),
+            Err(err) => Self::InternalServerError(err),
+        }
     }
 }
 
@@ -97,10 +122,34 @@ impl AppError {
     }
 
     pub fn internal_server_error(err: impl Into<anyhow::Error>) -> Self {
-        Self::InternalServerError(err.into())
+        Self::from(err.into())
     }
 
     pub fn not_found(err: impl Into<anyhow::Error>) -> Self {
         Self::NotFound(err.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    #[tokio::test]
+    async fn test_internal_server_error_preserves_storage_error_category() {
+        let response =
+            AppError::internal_server_error(anyhow::Error::new(StorageError::OperationFailed {
+                operation: "publish batch".to_string(),
+                details: "connection refused".to_string(),
+            }))
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            json!({ "error": "Database unavailable" })
+        );
     }
 }

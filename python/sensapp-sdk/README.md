@@ -41,8 +41,8 @@ with SensAppClient("http://127.0.0.1:3000") as client:
         ],
     )
 
-    table = client.query_arrow("temperature[1h]")
-    print(table.to_pylist())
+    rows = client.query_sensor_rows("temperature", window="1h")
+    print(rows)
 ```
 
 ## Arrow model
@@ -75,6 +75,10 @@ Main methods:
 - `query_rows()`
 - `query_csv()`
 - `query_senml()`
+- `query_sensor_arrow()`
+- `query_sensor_rows()`
+- `query_sensor_csv()`
+- `query_sensor_senml()`
 - `get_series_arrow()`
 - `get_series_rows()`
 
@@ -111,6 +115,7 @@ The package ships typed APIs and includes a `py.typed` marker so editors and dow
 
 ## Caveats
 
+- PromQL-style queries use Prometheus metric syntax. Sensor names containing `-` can still be ingested, but bare selectors such as `demo-temperature[5m]` are parsed as subtraction. Query those sensors with `{"__name__"="demo-temperature"}` style selectors, or prefer `_` in names you want to use as bare metric selectors.
 - Arrow upload currently does not preserve units or labels because the backend importer ignores them.
 - JSON catalog endpoints are returned as plain dictionaries because the DCAT payloads are flexible and still evolving.
 - The SDK is sync-first on purpose. An async variant can be added later if the current API settles.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
@@ -184,14 +185,49 @@ class SensAppClient:
         )
         return read_arrow_table(response.content)
 
+    def query_sensor_arrow(
+        self,
+        sensor_name: str,
+        *,
+        window: str | None = None,
+        labels: Mapping[str, str] | None = None,
+    ) -> pa.Table:
+        return self.query_arrow(
+            self._build_sensor_query(sensor_name, window=window, labels=labels)
+        )
+
     def query_rows(self, query: str) -> list[dict[str, Any]]:
         return self.query_arrow(query).to_pylist()
+
+    def query_sensor_rows(
+        self,
+        sensor_name: str,
+        *,
+        window: str | None = None,
+        labels: Mapping[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.query_sensor_arrow(
+            sensor_name,
+            window=window,
+            labels=labels,
+        ).to_pylist()
 
     def query_csv(self, query: str) -> str:
         return self._request_text(
             "GET",
             "/api/v1/query",
             params={"query": query, "format": "csv"},
+        )
+
+    def query_sensor_csv(
+        self,
+        sensor_name: str,
+        *,
+        window: str | None = None,
+        labels: Mapping[str, str] | None = None,
+    ) -> str:
+        return self.query_csv(
+            self._build_sensor_query(sensor_name, window=window, labels=labels)
         )
 
     def query_senml(self, query: str) -> JsonValue:
@@ -201,6 +237,17 @@ class SensAppClient:
             params={"query": query, "format": "senml"},
         )
 
+    def query_sensor_senml(
+        self,
+        sensor_name: str,
+        *,
+        window: str | None = None,
+        labels: Mapping[str, str] | None = None,
+    ) -> JsonValue:
+        return self.query_senml(
+            self._build_sensor_query(sensor_name, window=window, labels=labels)
+        )
+
     def query_jsonl(self, query: str) -> list[dict[str, Any]]:
         return self._parse_jsonl(
             self._request_text(
@@ -208,6 +255,17 @@ class SensAppClient:
                 "/api/v1/query",
                 params={"query": query, "format": "jsonl"},
             )
+        )
+
+    def query_sensor_jsonl(
+        self,
+        sensor_name: str,
+        *,
+        window: str | None = None,
+        labels: Mapping[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.query_jsonl(
+            self._build_sensor_query(sensor_name, window=window, labels=labels)
         )
 
     def get_series_arrow(
@@ -295,6 +353,30 @@ class SensAppClient:
             "simplify_tolerance": request.simplify_tolerance,
             "simplify_high_quality": request.simplify_high_quality,
         }
+
+    def _build_sensor_query(
+        self,
+        sensor_name: str,
+        *,
+        window: str | None,
+        labels: Mapping[str, str] | None,
+    ) -> str:
+        matcher_parts = [
+            f'__name__="{self._escape_matcher_value(sensor_name)}"',
+        ]
+        if labels is not None:
+            matcher_parts.extend(
+                f'{label_name}="{self._escape_matcher_value(label_value)}"'
+                for label_name, label_value in labels.items()
+            )
+
+        selector = "{" + ",".join(matcher_parts) + "}"
+        if window is None:
+            return selector
+        return f"{selector}[{window}]"
+
+    def _escape_matcher_value(self, value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
 
     def _request_json(
         self,

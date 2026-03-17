@@ -1,9 +1,9 @@
 use super::sqlite_publishers::*;
-use super::storage_query_helpers::{
-    sqlite_bucketed_cte, sqlite_first_last_query, sqlite_float_expression,
-    sqlite_group_by_clause, sqlite_integer_expression, sqlite_numeric_expression,
-};
 use super::sqlite_utilities::get_sensor_id_or_create_sensor;
+use super::storage_query_helpers::{
+    sqlite_bucketed_cte, sqlite_first_last_query, sqlite_float_expression, sqlite_group_by_clause,
+    sqlite_integer_expression, sqlite_numeric_expression,
+};
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::unit::Unit;
@@ -12,9 +12,9 @@ use crate::datamodel::{
     sensapp_vec::SensAppLabels,
 };
 use crate::storage::{
-    DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT, StorageError,
-    StorageInstance, common::datetime_to_micros, Aggregation, SensorAvailabilitySummary,
-    SensorDataQueryOptions,
+    Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT,
+    SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
+    common::datetime_to_micros,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -598,28 +598,76 @@ impl StorageInstance for SqliteStorage {
 
         let samples = match sensor.sensor_type {
             SensorType::Integer => {
-                self.query_integer_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_integer_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Numeric => {
-                self.query_numeric_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_numeric_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Float => {
-                self.query_float_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_float_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::String => {
-                self.query_string_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_string_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Boolean => {
-                self.query_boolean_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_boolean_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Location => {
-                self.query_location_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_location_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Json => {
-                self.query_json_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_json_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Blob => {
-                self.query_blob_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_blob_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
         };
 
@@ -976,9 +1024,7 @@ impl SqliteStorage {
         }
 
         let row: Row = if let Some(step_ms) = step_ms {
-            let step_us = step_ms
-                .checked_mul(1000)
-                .context("step is too large")?;
+            let step_us = step_ms.checked_mul(1000).context("step is too large")?;
             let sql = format!(
                 r#"
                 SELECT

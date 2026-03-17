@@ -145,10 +145,7 @@ impl AccessContext {
 // ---------------------------------------------------------------------------
 
 /// Extract and validate a JWT from the `Authorization: Bearer <token>` header.
-pub fn validate_token(
-    headers: &HeaderMap,
-    config: &AuthConfig,
-) -> Result<AccessContext, AppError> {
+pub fn validate_token(headers: &HeaderMap, config: &AuthConfig) -> Result<AccessContext, AppError> {
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -193,9 +190,7 @@ pub async fn require_read_auth(
     if let Some(config) = &auth {
         let access = validate_token(request.headers(), config)?;
         if !access.can_read {
-            return Err(AppError::Forbidden(
-                "Read access required".into(),
-            ));
+            return Err(AppError::Forbidden("Read access required".into()));
         }
     }
     Ok(next.run(request).await)
@@ -212,9 +207,7 @@ pub async fn require_write_auth(
     if let Some(config) = &auth {
         let access = validate_token(request.headers(), config)?;
         if !access.can_write {
-            return Err(AppError::Forbidden(
-                "Write access required".into(),
-            ));
+            return Err(AppError::Forbidden("Write access required".into()));
         }
     }
     Ok(next.run(request).await)
@@ -276,8 +269,8 @@ mod tests {
             sensors: None,
         });
 
-        let access = validate_token(&bearer_headers(&token), &make_config())
-            .expect("token should be valid");
+        let access =
+            validate_token(&bearer_headers(&token), &make_config()).expect("token should be valid");
 
         assert_eq!(access.subject, "test-user");
         assert!(access.can_read);

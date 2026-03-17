@@ -16,7 +16,10 @@ use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use smallvec::smallvec;
-use sqlx::{PgPool, postgres::{PgConnectOptions, PgPoolOptions}};
+use sqlx::{
+    PgPool,
+    postgres::{PgConnectOptions, PgPoolOptions},
+};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use uuid::Uuid;
 
@@ -1086,28 +1089,76 @@ impl StorageInstance for TimeScaleDBStorage {
 
         let samples = match sensor.sensor_type {
             SensorType::Integer => {
-                self.query_integer_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_integer_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Numeric => {
-                self.query_numeric_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_numeric_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Float => {
-                self.query_float_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_float_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::String => {
-                self.query_string_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_string_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Boolean => {
-                self.query_boolean_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_boolean_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Location => {
-                self.query_location_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_location_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Json => {
-                self.query_json_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_json_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
             SensorType::Blob => {
-                self.query_blob_samples(sensor_id, Some(latest_timestamp_us), Some(latest_timestamp_us), Some(1)).await?
+                self.query_blob_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
             }
         };
 
@@ -1151,8 +1202,9 @@ impl StorageInstance for TimeScaleDBStorage {
             return Ok(Vec::new());
         }
 
-        let (name_matchers, label_matchers): (Vec<_>, Vec<_>) =
-            matchers.iter().partition(|matcher| matcher.is_name_matcher());
+        let (name_matchers, label_matchers): (Vec<_>, Vec<_>) = matchers
+            .iter()
+            .partition(|matcher| matcher.is_name_matcher());
 
         let sensors = self
             .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)

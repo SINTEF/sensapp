@@ -3,8 +3,8 @@ use crate::datamodel::SensorType;
 use crate::exporters::{ArrowConverter, CsvConverter, JsonlConverter, SenMLConverter};
 use crate::http::app_error::AppError;
 use crate::http::state::HttpServerState;
-use crate::storage::{Aggregation, SensorDataQueryOptions, SimplifyOptions};
 use crate::storage::query::{LabelMatcher, MatcherType};
+use crate::storage::{Aggregation, SensorDataQueryOptions, SimplifyOptions};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use regex::Regex;
@@ -302,12 +302,13 @@ fn parse_optional_time_bounds(
         None => None,
     };
 
-    let end_time = match end {
-        Some(value) => Some(parse_datetime_string(value).map_err(|e| {
-            AppError::bad_request(anyhow::anyhow!("Invalid end datetime: {}", e))
-        })?),
-        None => None,
-    };
+    let end_time =
+        match end {
+            Some(value) => Some(parse_datetime_string(value).map_err(|e| {
+                AppError::bad_request(anyhow::anyhow!("Invalid end datetime: {}", e))
+            })?),
+            None => None,
+        };
 
     if let (Some(start_time), Some(end_time)) = (start_time, end_time)
         && start_time > end_time
@@ -325,9 +326,12 @@ fn last_sample_json(samples: &crate::datamodel::TypedSamples) -> Option<(String,
         crate::datamodel::TypedSamples::Integer(samples) => samples
             .last()
             .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),
-        crate::datamodel::TypedSamples::Numeric(samples) => samples
-            .last()
-            .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value.to_string()))),
+        crate::datamodel::TypedSamples::Numeric(samples) => samples.last().map(|sample| {
+            (
+                sample.datetime.to_rfc3339(),
+                json!(sample.value.to_string()),
+            )
+        }),
         crate::datamodel::TypedSamples::Float(samples) => samples
             .last()
             .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),
@@ -763,15 +767,20 @@ pub async fn get_series_data(
             None => None,
         };
 
-    let step_ms = match query.step.as_deref() {
-        Some(step) => Some(promql_duration::parse_duration_millis(step).map_err(|e| {
-            AppError::bad_request(anyhow::anyhow!("Invalid step duration: {}", e))
-        })?),
-        None => None,
-    };
+    let step_ms =
+        match query.step.as_deref() {
+            Some(step) => Some(promql_duration::parse_duration_millis(step).map_err(|e| {
+                AppError::bad_request(anyhow::anyhow!("Invalid step duration: {}", e))
+            })?),
+            None => None,
+        };
 
     let aggregation = match query.aggregation.as_deref() {
-        Some(value) => Some(value.parse::<Aggregation>().map_err(AppError::bad_request)?),
+        Some(value) => Some(
+            value
+                .parse::<Aggregation>()
+                .map_err(AppError::bad_request)?,
+        ),
         None => None,
     };
 
@@ -884,7 +893,8 @@ pub async fn get_series_last_sample(
         AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
     })?;
 
-    let (start_time, end_time) = parse_optional_time_bounds(query.start.as_ref(), query.end.as_ref())?;
+    let (start_time, end_time) =
+        parse_optional_time_bounds(query.start.as_ref(), query.end.as_ref())?;
 
     let sensor_data = state
         .storage
@@ -943,40 +953,45 @@ pub async fn get_series_availability(
     let (start_time, end_time) = parse_optional_time_bounds(Some(&query.start), Some(&query.end))?;
     let start_time = start_time.expect("validated required start time");
     let end_time = end_time.expect("validated required end time");
-    let parsed_step_ms = match query.step.as_deref() {
-        Some(step) => Some(promql_duration::parse_duration_millis(step).map_err(|e| {
-            AppError::bad_request(anyhow::anyhow!("Invalid step duration: {}", e))
-        })?),
-        None => None,
-    };
+    let parsed_step_ms =
+        match query.step.as_deref() {
+            Some(step) => Some(promql_duration::parse_duration_millis(step).map_err(|e| {
+                AppError::bad_request(anyhow::anyhow!("Invalid step duration: {}", e))
+            })?),
+            None => None,
+        };
 
     let summary = state
         .storage
         .query_sensor_data_availability(&series_uuid, start_time, end_time, parsed_step_ms)
         .await?
         .ok_or_else(|| {
-            AppError::not_found(anyhow::anyhow!("Series with UUID '{}' not found", series_uuid))
+            AppError::not_found(anyhow::anyhow!(
+                "Series with UUID '{}' not found",
+                series_uuid
+            ))
         })?;
 
-    let (step_value, covered_buckets, total_buckets, coverage_ratio) = if let (Some(step), Some(step_ms)) = (query.step.as_deref(), parsed_step_ms) {
-        let step_us = step_ms.checked_mul(1000).ok_or_else(|| {
-            AppError::bad_request(anyhow::anyhow!("step is too large"))
-        })?;
+    let (step_value, covered_buckets, total_buckets, coverage_ratio) =
+        if let (Some(step), Some(step_ms)) = (query.step.as_deref(), parsed_step_ms) {
+            let step_us = step_ms
+                .checked_mul(1000)
+                .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("step is too large")))?;
 
-        let start_us = crate::storage::common::datetime_to_micros(&start_time);
-        let end_us = crate::storage::common::datetime_to_micros(&end_time);
-        let total = ((end_us - start_us).div_euclid(step_us) + 1).max(1) as usize;
-        let covered = summary.covered_buckets.unwrap_or(0);
+            let start_us = crate::storage::common::datetime_to_micros(&start_time);
+            let end_us = crate::storage::common::datetime_to_micros(&end_time);
+            let total = ((end_us - start_us).div_euclid(step_us) + 1).max(1) as usize;
+            let covered = summary.covered_buckets.unwrap_or(0);
 
-        (
-            Some(step.to_string()),
-            Some(covered),
-            Some(total),
-            Some(covered as f64 / total as f64),
-        )
-    } else {
-        (None, None, None, None)
-    };
+            (
+                Some(step.to_string()),
+                Some(covered),
+                Some(total),
+                Some(covered as f64 / total as f64),
+            )
+        } else {
+            (None, None, None, None)
+        };
 
     Ok(Json(json!({
         "series_uuid": summary.sensor.uuid,
@@ -1123,9 +1138,18 @@ mod tests {
 
     #[test]
     fn test_parse_duration_millis() {
-        assert_eq!(promql_duration::parse_duration_millis("5m").unwrap(), 300_000);
-        assert_eq!(promql_duration::parse_duration_millis("1h30m").unwrap(), 5_400_000);
-        assert_eq!(promql_duration::parse_duration_millis("250ms").unwrap(), 250);
+        assert_eq!(
+            promql_duration::parse_duration_millis("5m").unwrap(),
+            300_000
+        );
+        assert_eq!(
+            promql_duration::parse_duration_millis("1h30m").unwrap(),
+            5_400_000
+        );
+        assert_eq!(
+            promql_duration::parse_duration_millis("250ms").unwrap(),
+            250
+        );
         assert!(promql_duration::parse_duration_millis("bad").is_err());
     }
 

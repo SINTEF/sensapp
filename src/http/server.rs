@@ -1,6 +1,8 @@
 use super::app_error::AppError;
 use super::auth::{require_read_auth, require_write_auth};
-use super::crud::{get_series_availability, get_series_data, get_series_last_sample, list_metrics, list_series};
+use super::crud::{
+    get_series_availability, get_series_data, get_series_last_sample, list_metrics, list_series,
+};
 use super::influxdb::publish_influxdb;
 use super::metrics::{prometheus_metrics, track_http_metrics};
 use super::prometheus_read::prometheus_remote_read;
@@ -8,7 +10,10 @@ use super::prometheus_write::publish_prometheus;
 use super::simple_promql::simple_promql_query;
 use super::state::HttpServerState;
 use crate::config;
-use crate::http::crud::{__path_get_series_availability, __path_get_series_data, __path_get_series_last_sample, __path_list_metrics, __path_list_series};
+use crate::http::crud::{
+    __path_get_series_availability, __path_get_series_data, __path_get_series_last_sample,
+    __path_list_metrics, __path_list_series,
+};
 use crate::http::health::{__path_liveness, __path_readiness, liveness, readiness};
 use crate::http::influxdb::__path_publish_influxdb;
 use crate::http::metrics::__path_prometheus_metrics;
@@ -96,7 +101,10 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .route("/series", get(list_series))
         .route("/series/{series_uuid}", get(get_series_data))
         .route("/series/{series_uuid}/last", get(get_series_last_sample))
-        .route("/series/{series_uuid}/availability", get(get_series_availability))
+        .route(
+            "/series/{series_uuid}/availability",
+            get(get_series_availability),
+        )
         .route("/api/v1/query", get(simple_promql_query))
         .route(
             "/api/v1/prometheus_remote_read",

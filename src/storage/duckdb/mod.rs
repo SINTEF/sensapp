@@ -2,7 +2,9 @@ use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::unit::Unit;
-use crate::datamodel::{Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples};
+use crate::datamodel::{
+    Metric, Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples,
+};
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use duckdb::Connection;
@@ -19,7 +21,9 @@ use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 use uuid::Uuid;
 
-use super::{Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance};
+use super::{
+    Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
+};
 
 mod duckdb_publishers;
 mod duckdb_utilities;
@@ -705,8 +709,11 @@ impl StorageInstance for DuckDBStorage {
                     simplify: options.simplify,
                 };
 
-                return crate::storage::common::apply_query_options(sensor_data, &post_query_options)
-                    .map(Some);
+                return crate::storage::common::apply_query_options(
+                    sensor_data,
+                    &post_query_options,
+                )
+                .map(Some);
             }
         }
 
@@ -736,7 +743,9 @@ impl StorageInstance for DuckDBStorage {
 
         let latest_timestamp_ms = spawn_blocking(move || -> Result<Option<i64>> {
             let connection = connection.blocking_lock();
-            let Some((sensor_id, sensor)) = duckdb_get_sensor_metadata(&connection, &sensor_uuid_owned)? else {
+            let Some((sensor_id, sensor)) =
+                duckdb_get_sensor_metadata(&connection, &sensor_uuid_owned)?
+            else {
                 return Ok(None);
             };
 
@@ -756,8 +765,12 @@ impl StorageInstance for DuckDBStorage {
 
         self.query_sensor_data(
             sensor_uuid,
-            Some(SensAppDateTime::from_unix_milliseconds_i64(latest_timestamp_ms)),
-            Some(SensAppDateTime::from_unix_milliseconds_i64(latest_timestamp_ms)),
+            Some(SensAppDateTime::from_unix_milliseconds_i64(
+                latest_timestamp_ms,
+            )),
+            Some(SensAppDateTime::from_unix_milliseconds_i64(
+                latest_timestamp_ms,
+            )),
             Some(1),
         )
         .await
@@ -777,7 +790,9 @@ impl StorageInstance for DuckDBStorage {
 
         spawn_blocking(move || -> Result<Option<SensorAvailabilitySummary>> {
             let connection = connection.blocking_lock();
-            let Some((sensor_id, sensor)) = duckdb_get_sensor_metadata(&connection, &sensor_uuid_owned)? else {
+            let Some((sensor_id, sensor)) =
+                duckdb_get_sensor_metadata(&connection, &sensor_uuid_owned)?
+            else {
                 return Ok(None);
             };
 
@@ -1012,7 +1027,10 @@ fn publish_single_sensor_batch(
     Ok(())
 }
 
-fn duckdb_get_sensor_metadata(connection: &Connection, sensor_uuid: &str) -> Result<Option<(i64, Sensor)>> {
+fn duckdb_get_sensor_metadata(
+    connection: &Connection,
+    sensor_uuid: &str,
+) -> Result<Option<(i64, Sensor)>> {
     let mut sensor_statement = connection.prepare(
         r#"
         SELECT s.sensor_id, CAST(s.uuid AS TEXT) AS uuid, s.name, s.type, u.name, u.description
@@ -1259,13 +1277,21 @@ fn duckdb_query_integer_samples_aggregated(
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![sensor_id, start_time_ms, end_time_ms, origin_ms, limit])?;
+            let mut rows = statement.query(duckdb::params![
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+                origin_ms,
+                limit
+            ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_ms: i64 = row.get(0)?;
                 let value: f64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
+                        timestamp_ms,
+                    ),
                     value,
                 });
             }
@@ -1278,13 +1304,21 @@ fn duckdb_query_integer_samples_aggregated(
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![sensor_id, start_time_ms, end_time_ms, origin_ms, limit])?;
+            let mut rows = statement.query(duckdb::params![
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+                origin_ms,
+                limit
+            ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_ms: i64 = row.get(0)?;
                 let value: i64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
+                        timestamp_ms,
+                    ),
                     value,
                 });
             }
@@ -1293,13 +1327,21 @@ fn duckdb_query_integer_samples_aggregated(
         Aggregation::First | Aggregation::Last => {
             let sql = duckdb_first_last_query("integer_values", step_ms, aggregation, "value");
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![sensor_id, start_time_ms, end_time_ms, origin_ms, limit])?;
+            let mut rows = statement.query(duckdb::params![
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+                origin_ms,
+                limit
+            ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_ms: i64 = row.get(0)?;
                 let value: i64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
+                        timestamp_ms,
+                    ),
                     value,
                 });
             }
@@ -1319,13 +1361,21 @@ fn duckdb_query_integer_samples_aggregated(
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![sensor_id, start_time_ms, end_time_ms, origin_ms, limit])?;
+            let mut rows = statement.query(duckdb::params![
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+                origin_ms,
+                limit
+            ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_ms: i64 = row.get(0)?;
                 let value: i64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
+                        timestamp_ms,
+                    ),
                     value,
                 });
             }
@@ -1354,13 +1404,21 @@ fn duckdb_query_float_samples_aggregated(
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![sensor_id, start_time_ms, end_time_ms, origin_ms, limit])?;
+            let mut rows = statement.query(duckdb::params![
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+                origin_ms,
+                limit
+            ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_ms: i64 = row.get(0)?;
                 let value: i64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
+                        timestamp_ms,
+                    ),
                     value,
                 });
             }
@@ -1369,13 +1427,21 @@ fn duckdb_query_float_samples_aggregated(
         Aggregation::First | Aggregation::Last => {
             let sql = duckdb_first_last_query("float_values", step_ms, aggregation, "value");
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![sensor_id, start_time_ms, end_time_ms, origin_ms, limit])?;
+            let mut rows = statement.query(duckdb::params![
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+                origin_ms,
+                limit
+            ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_ms: i64 = row.get(0)?;
                 let value: f64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
+                        timestamp_ms,
+                    ),
                     value,
                 });
             }
@@ -1396,13 +1462,21 @@ fn duckdb_query_float_samples_aggregated(
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![sensor_id, start_time_ms, end_time_ms, origin_ms, limit])?;
+            let mut rows = statement.query(duckdb::params![
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+                origin_ms,
+                limit
+            ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_ms: i64 = row.get(0)?;
                 let value: f64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
+                        timestamp_ms,
+                    ),
                     value,
                 });
             }
@@ -1431,13 +1505,21 @@ fn duckdb_query_numeric_samples_aggregated(
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![sensor_id, start_time_ms, end_time_ms, origin_ms, limit])?;
+            let mut rows = statement.query(duckdb::params![
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+                origin_ms,
+                limit
+            ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_ms: i64 = row.get(0)?;
                 let value: i64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
+                        timestamp_ms,
+                    ),
                     value,
                 });
             }
@@ -1451,13 +1533,22 @@ fn duckdb_query_numeric_samples_aggregated(
                 "CAST(value AS VARCHAR)",
             );
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![sensor_id, start_time_ms, end_time_ms, step_ms, origin_ms, limit])?;
+            let mut rows = statement.query(duckdb::params![
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+                step_ms,
+                origin_ms,
+                limit
+            ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_ms: i64 = row.get(0)?;
                 let value: String = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
+                        timestamp_ms,
+                    ),
                     value: Decimal::from_str(&value)
                         .context("Failed to parse DuckDB aggregated numeric value")?,
                 });
@@ -1479,13 +1570,22 @@ fn duckdb_query_numeric_samples_aggregated(
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![sensor_id, start_time_ms, end_time_ms, step_ms, origin_ms, limit])?;
+            let mut rows = statement.query(duckdb::params![
+                sensor_id,
+                start_time_ms,
+                end_time_ms,
+                step_ms,
+                origin_ms,
+                limit
+            ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_ms: i64 = row.get(0)?;
                 let value: String = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
+                        timestamp_ms,
+                    ),
                     value: Decimal::from_str(&value)
                         .context("Failed to parse DuckDB aggregated numeric value")?,
                 });

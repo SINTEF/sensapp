@@ -343,7 +343,8 @@ impl ClickHouseStorage {
                 "#
             );
 
-            let mut rows = self.client
+            let mut rows = self
+                .client
                 .query(&query)
                 .bind(start_time_us)
                 .bind(step_us)
@@ -353,12 +354,15 @@ impl ClickHouseStorage {
                 .fetch::<AvailabilitySummaryWithStepRow>()
                 .map_err(|e| map_clickhouse_error(e, Some(sensor.uuid), Some(&sensor.name)))?;
 
-            let row = rows.next().await?.unwrap_or(AvailabilitySummaryWithStepRow {
-                sample_count: 0,
-                first_sample_at: None,
-                last_sample_at: None,
-                covered_buckets: 0,
-            });
+            let row = rows
+                .next()
+                .await?
+                .unwrap_or(AvailabilitySummaryWithStepRow {
+                    sample_count: 0,
+                    first_sample_at: None,
+                    last_sample_at: None,
+                    covered_buckets: 0,
+                });
 
             return Ok(SensorAvailabilitySummary {
                 sensor,
@@ -382,7 +386,8 @@ impl ClickHouseStorage {
             "#
         );
 
-        let mut rows = self.client
+        let mut rows = self
+            .client
             .query(&query)
             .bind(sensor_id)
             .bind(start_time_us)
@@ -1058,7 +1063,10 @@ impl ClickHouseStorage {
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
-                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                    samples.push(Sample {
+                        datetime: micros_to_datetime(row.timestamp_us),
+                        value: row.value,
+                    });
                 }
                 Ok(TypedSamples::Float(samples))
             }
@@ -1084,7 +1092,10 @@ impl ClickHouseStorage {
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
-                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                    samples.push(Sample {
+                        datetime: micros_to_datetime(row.timestamp_us),
+                        value: row.value,
+                    });
                 }
                 Ok(TypedSamples::Integer(samples))
             }
@@ -1111,7 +1122,10 @@ impl ClickHouseStorage {
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
-                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                    samples.push(Sample {
+                        datetime: micros_to_datetime(row.timestamp_us),
+                        value: row.value,
+                    });
                 }
                 Ok(TypedSamples::Integer(samples))
             }
@@ -1158,7 +1172,10 @@ impl ClickHouseStorage {
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
-                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                    samples.push(Sample {
+                        datetime: micros_to_datetime(row.timestamp_us),
+                        value: row.value,
+                    });
                 }
                 Ok(TypedSamples::Integer(samples))
             }
@@ -1185,7 +1202,10 @@ impl ClickHouseStorage {
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
-                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                    samples.push(Sample {
+                        datetime: micros_to_datetime(row.timestamp_us),
+                        value: row.value,
+                    });
                 }
                 Ok(TypedSamples::Float(samples))
             }
@@ -1232,7 +1252,10 @@ impl ClickHouseStorage {
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
-                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: row.value });
+                    samples.push(Sample {
+                        datetime: micros_to_datetime(row.timestamp_us),
+                        value: row.value,
+                    });
                 }
                 Ok(TypedSamples::Integer(samples))
             }
@@ -1259,7 +1282,10 @@ impl ClickHouseStorage {
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
-                    samples.push(Sample { datetime: micros_to_datetime(row.timestamp_us), value: decimal_from_clickhouse_raw(row.value) });
+                    samples.push(Sample {
+                        datetime: micros_to_datetime(row.timestamp_us),
+                        value: decimal_from_clickhouse_raw(row.value),
+                    });
                 }
                 Ok(TypedSamples::Numeric(samples))
             }
