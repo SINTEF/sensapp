@@ -4,12 +4,12 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - "python/sensapp-sdk/**"
+      - "python/sensapp/**"
       - ".github/workflows/python-sdk-check.yaml"
       - "docs/PYTHON_SDK.md"
   pull_request:
     paths:
-      - "python/sensapp-sdk/**"
+      - "python/sensapp/**"
       - ".github/workflows/python-sdk-check.yaml"
       - "docs/PYTHON_SDK.md"
 
@@ -20,10 +20,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     defaults:
       run:
-        working-directory: python/sensapp-sdk
+        working-directory: python/sensapp
     steps:
       - uses: actions/checkout@v6
 
@@ -42,28 +42,25 @@ jobs:
 
       - name: Run Ruff check
         if: matrix.python-version == '3.12'
-        uses: astral-sh/ruff-action@v3
-        with:
-          src: python/sensapp-sdk
-          args: check .
+        run: uv run ruff check .
 
       - name: Run Ruff format check
         if: matrix.python-version == '3.12'
-        run: python -m ruff format --check .
+        run: uv run ruff format --check .
 
       - name: Run unit tests
         run: python -m pytest -m 'not integration'
 
       - name: Build distributions
         if: matrix.python-version == '3.12'
-        run: python -m build
+        run: uv build
 
       - name: Smoke test wheel install
         if: matrix.python-version == '3.12'
         run: |
-          python -m venv /tmp/sensapp-sdk-wheel
-          /tmp/sensapp-sdk-wheel/bin/python -m pip install dist/*.whl
-          /tmp/sensapp-sdk-wheel/bin/python -c "import sensapp_sdk; print(sensapp_sdk.__all__[0])"
+          python -m venv /tmp/sensapp-wheel
+          /tmp/sensapp-wheel/bin/python -m pip install dist/*.whl
+          /tmp/sensapp-wheel/bin/python -c "import sensapp; print(sensapp.__all__[0])"
 
   python-sdk-integration:
     name: Python SDK Integration
@@ -71,7 +68,7 @@ jobs:
     needs: python-sdk-unit
     defaults:
       run:
-        working-directory: python/sensapp-sdk
+        working-directory: python/sensapp
     steps:
       - uses: actions/checkout@v6
 
