@@ -3,7 +3,7 @@ use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::parsing::prometheus::chunk_encoder::ChunkEncoder;
 use crate::parsing::prometheus::converter::{build_prometheus_labels, sensor_data_to_timeseries};
 use crate::parsing::prometheus::remote_read_models::{
-    QueryResult, ReadResponse, read_request::ResponseType,
+    Query, QueryResult, ReadHints, ReadResponse, read_request::ResponseType,
 };
 use crate::parsing::prometheus::remote_read_parser::{
     parse_remote_read_request, serialize_read_response,
@@ -11,6 +11,7 @@ use crate::parsing::prometheus::remote_read_parser::{
 use crate::parsing::prometheus::remote_write_models::Sample as PromSample;
 use crate::parsing::prometheus::stream_writer::StreamWriter;
 use crate::storage::query::LabelMatcher;
+use crate::storage::{Aggregation, SensorDataQueryOptions};
 
 use super::{app_error::AppError, state::HttpServerState};
 use axum::{
@@ -21,6 +22,101 @@ use axum::{
 };
 use tokio_util::bytes::Bytes;
 use tracing::{debug, info, warn};
+
+fn aggregation_from_read_hints(hints: &ReadHints) -> Option<Aggregation> {
+    match hints.func.trim().to_ascii_lowercase().as_str() {
+        "avg_over_time" | "avg" => Some(Aggregation::Avg),
+        "min_over_time" | "min" => Some(Aggregation::Min),
+        "max_over_time" | "max" => Some(Aggregation::Max),
+        "sum_over_time" | "sum" => Some(Aggregation::Sum),
+        "count_over_time" | "count" => Some(Aggregation::Count),
+        "first_over_time" | "first" => Some(Aggregation::First),
+        "last_over_time" | "last" => Some(Aggregation::Last),
+        _ => None,
+    }
+}
+
+fn query_options_from_read_hints(query: &Query) -> Option<SensorDataQueryOptions> {
+    let hints = query.hints.as_ref()?;
+    let aggregation = aggregation_from_read_hints(hints)?;
+
+    if hints.step_ms <= 0 {
+        return None;
+    }
+
+    Some(SensorDataQueryOptions {
+        start_time: Some(SensAppDateTime::from_unix_milliseconds_i64(
+            query.start_timestamp_ms,
+        )),
+        end_time: Some(SensAppDateTime::from_unix_milliseconds_i64(
+            query.end_timestamp_ms,
+        )),
+        limit: None,
+        step_ms: Some(hints.step_ms),
+        aggregation: Some(aggregation),
+        simplify: None,
+    })
+}
+
+async fn query_sensor_data_for_prometheus(
+    state: &HttpServerState,
+    query: &Query,
+) -> Result<Vec<crate::datamodel::SensorData>, AppError> {
+    let matchers: Vec<LabelMatcher> = query.matchers.iter().map(LabelMatcher::from).collect();
+    let start_time = SensAppDateTime::from_unix_milliseconds_i64(query.start_timestamp_ms);
+    let end_time = SensAppDateTime::from_unix_milliseconds_i64(query.end_timestamp_ms);
+
+    if let Some(options) = query_options_from_read_hints(query) {
+        let discovered = state
+            .storage
+            .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), Some(1), true)
+            .await
+            .map_err(|e| {
+                AppError::internal_server_error(anyhow::anyhow!(
+                    "Storage query failed during discovery: {}",
+                    e
+                ))
+            })?;
+
+        if let Some(hints) = &query.hints {
+            info!(
+                "Prometheus remote read: applying hints func='{}' step={}ms to {} discovered series",
+                hints.func,
+                hints.step_ms,
+                discovered.len()
+            );
+        }
+
+        let mut aggregated = Vec::with_capacity(discovered.len());
+        for sensor_data in discovered {
+            let sensor_uuid = sensor_data.sensor.uuid.to_string();
+            if let Some(sensor_data) = state
+                .storage
+                .query_sensor_data_advanced(&sensor_uuid, &options)
+                .await
+                .map_err(|e| {
+                    AppError::internal_server_error(anyhow::anyhow!(
+                        "Advanced storage query failed: {}",
+                        e
+                    ))
+                })?
+                && !sensor_data.samples.is_empty()
+            {
+                aggregated.push(sensor_data);
+            }
+        }
+
+        return Ok(aggregated);
+    }
+
+    state
+        .storage
+        .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), None, true)
+        .await
+        .map_err(|e| {
+            AppError::internal_server_error(anyhow::anyhow!("Storage query failed: {}", e))
+        })
+}
 
 fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
     // Check that we have the right content encoding, that must be snappy
@@ -182,21 +278,7 @@ async fn handle_samples_response(
     let mut results = Vec::with_capacity(read_request.queries.len());
 
     for query in &read_request.queries {
-        // Convert Prometheus matchers to SensApp matchers
-        let matchers: Vec<LabelMatcher> = query.matchers.iter().map(LabelMatcher::from).collect();
-
-        // Convert timestamps from milliseconds to SensAppDateTime
-        let start_time = SensAppDateTime::from_unix_milliseconds_i64(query.start_timestamp_ms);
-        let end_time = SensAppDateTime::from_unix_milliseconds_i64(query.end_timestamp_ms);
-
-        // Query storage (numeric_only=true for Prometheus compatibility)
-        let sensor_data = state
-            .storage
-            .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), None, true)
-            .await
-            .map_err(|e| {
-                AppError::internal_server_error(anyhow::anyhow!("Storage query failed: {}", e))
-            })?;
+        let sensor_data = query_sensor_data_for_prometheus(state, query).await?;
 
         debug!("Query returned {} sensors", sensor_data.len());
 
@@ -242,21 +324,7 @@ async fn handle_streamed_response(
     let mut chunked_responses = Vec::new();
 
     for (query_index, query) in read_request.queries.iter().enumerate() {
-        // Convert Prometheus matchers to SensApp matchers
-        let matchers: Vec<LabelMatcher> = query.matchers.iter().map(LabelMatcher::from).collect();
-
-        // Convert timestamps from milliseconds to SensAppDateTime
-        let start_time = SensAppDateTime::from_unix_milliseconds_i64(query.start_timestamp_ms);
-        let end_time = SensAppDateTime::from_unix_milliseconds_i64(query.end_timestamp_ms);
-
-        // Query storage (numeric_only=true for Prometheus compatibility)
-        let sensor_data = state
-            .storage
-            .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), None, true)
-            .await
-            .map_err(|e| {
-                AppError::internal_server_error(anyhow::anyhow!("Storage query failed: {}", e))
-            })?;
+        let sensor_data = query_sensor_data_for_prometheus(state, query).await?;
 
         println!(
             "[DEBUG PROM READ] Query {} returned {} sensors from storage",
@@ -419,6 +487,7 @@ fn extract_prom_samples_for_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsing::prometheus::remote_read_models::ReadHints;
     use axum::http::HeaderValue;
 
     fn create_test_headers() -> HeaderMap {
@@ -470,5 +539,62 @@ mod tests {
             HeaderValue::from_static("2.0.0"),
         );
         assert!(verify_read_headers(&headers).is_err());
+    }
+
+    #[test]
+    fn test_aggregation_from_read_hints() {
+        let hints = ReadHints {
+            step_ms: 60_000,
+            func: "avg_over_time".to_string(),
+            start_ms: 0,
+            end_ms: 0,
+            grouping: vec![],
+            by: false,
+            range_ms: 60_000,
+        };
+
+        assert_eq!(aggregation_from_read_hints(&hints), Some(Aggregation::Avg));
+
+        let unknown = ReadHints {
+            func: "rate".to_string(),
+            ..hints
+        };
+        assert_eq!(aggregation_from_read_hints(&unknown), None);
+    }
+
+    #[test]
+    fn test_query_options_from_read_hints_requires_supported_func() {
+        let query = Query {
+            start_timestamp_ms: 1_000,
+            end_timestamp_ms: 5_000,
+            matchers: vec![],
+            hints: Some(ReadHints {
+                step_ms: 2_000,
+                func: "max_over_time".to_string(),
+                start_ms: 1_000,
+                end_ms: 5_000,
+                grouping: vec![],
+                by: false,
+                range_ms: 2_000,
+            }),
+        };
+
+        let options = query_options_from_read_hints(&query).unwrap();
+        assert_eq!(options.step_ms, Some(2_000));
+        assert_eq!(options.aggregation, Some(Aggregation::Max));
+
+        let unsupported = Query {
+            hints: Some(ReadHints {
+                step_ms: 2_000,
+                func: "rate".to_string(),
+                start_ms: 1_000,
+                end_ms: 5_000,
+                grouping: vec![],
+                by: false,
+                range_ms: 2_000,
+            }),
+            ..query
+        };
+        assert!(query_options_from_read_hints(&unsupported).is_none());
     }
 }

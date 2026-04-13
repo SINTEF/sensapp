@@ -4,7 +4,7 @@ mod common;
 
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use arrow_ipc::writer::FileWriter;
+use arrow_ipc::reader::StreamReader;
 use axum::http::StatusCode;
 use common::db::DbHelpers;
 use common::http::TestApp;
@@ -14,6 +14,7 @@ use sensapp::datamodel::{Sample, SensAppDateTime, Sensor, SensorData, SensorType
 use sensapp::exporters::ArrowConverter;
 use serial_test::serial;
 use smallvec::smallvec;
+use std::io::Cursor;
 use uuid::Uuid;
 
 // Ensure configuration is loaded once for all tests in this module
@@ -24,46 +25,12 @@ fn ensure_config() {
     });
 }
 
-/// Convert multiple SensorData to Arrow format with multiple RecordBatches
-///
-/// This is primarily intended for testing scenarios where you need to combine
-/// data from multiple sensors into a single Arrow file.
-fn sensor_data_list_to_arrow_file(sensor_data_list: &[SensorData]) -> Result<Vec<u8>> {
-    if sensor_data_list.is_empty() {
-        return Err(anyhow::anyhow!(
-            "Cannot create Arrow file from empty sensor data list"
-        ));
-    }
-
-    let batches: Result<Vec<RecordBatch>> = sensor_data_list
-        .iter()
-        .map(ArrowConverter::to_record_batch)
-        .collect();
-    let batches = batches?;
-
-    record_batches_to_arrow_file(&batches)
-}
-
-/// Convert multiple RecordBatches to Arrow file format
-///
-/// This is a utility function primarily used by `sensor_data_list_to_arrow_file`
-/// for combining multiple record batches into a single Arrow file.
-fn record_batches_to_arrow_file(batches: &[RecordBatch]) -> Result<Vec<u8>> {
-    if batches.is_empty() {
-        return Err(anyhow::anyhow!(
-            "Cannot create Arrow file from empty batch list"
-        ));
-    }
-
-    let mut buffer = Vec::new();
-    {
-        let mut writer = FileWriter::try_new(&mut buffer, &batches[0].schema())?;
-        for batch in batches {
-            writer.write(batch)?;
-        }
-        writer.finish()?;
-    }
-    Ok(buffer)
+fn read_arrow_stream_batches(bytes: &[u8]) -> Result<Vec<RecordBatch>> {
+    let reader = StreamReader::try_new(Cursor::new(bytes), None)?;
+    reader
+        .into_iter()
+        .map(|batch| batch.map_err(Into::into))
+        .collect()
 }
 
 /// Test Arrow data export functionality
@@ -95,12 +62,21 @@ mod export_tests {
         // Verify response
         response
             .assert_status(StatusCode::OK)
-            .assert_content_type("application/vnd.apache.arrow.file");
+            .assert_content_type("application/vnd.apache.arrow.stream");
 
-        // Verify Arrow file format
+        // Verify Arrow stream payload and schema metadata
         let body_bytes = response.body_bytes();
-        assert!(!body_bytes.is_empty());
-        assert_eq!(&body_bytes[0..6], b"ARROW1"); // Arrow magic number
+        let batches = read_arrow_stream_batches(body_bytes)?;
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].num_columns(), 2);
+        assert_eq!(
+            batches[0]
+                .schema()
+                .metadata()
+                .get("sensapp.sensor.name")
+                .map(String::as_str),
+            Some(sensor_name.as_str())
+        );
 
         Ok(())
     }
@@ -127,8 +103,8 @@ mod export_tests {
 
         response.assert_status(StatusCode::OK);
         let body_bytes = response.body_bytes();
-        assert!(!body_bytes.is_empty());
-        assert_eq!(&body_bytes[0..6], b"ARROW1");
+        let batches = read_arrow_stream_batches(body_bytes)?;
+        assert_eq!(batches.len(), 1);
 
         // Export humidity sensor as Arrow
         let humidity_sensor = DbHelpers::get_sensor_by_name(&storage, &humidity_name)
@@ -140,8 +116,8 @@ mod export_tests {
 
         response.assert_status(StatusCode::OK);
         let body_bytes = response.body_bytes();
-        assert!(!body_bytes.is_empty());
-        assert_eq!(&body_bytes[0..6], b"ARROW1");
+        let batches = read_arrow_stream_batches(body_bytes)?;
+        assert_eq!(batches.len(), 1);
 
         Ok(())
     }
@@ -174,8 +150,8 @@ mod export_tests {
 
         response.assert_status(StatusCode::OK);
         let body_bytes = response.body_bytes();
-        assert!(!body_bytes.is_empty());
-        assert_eq!(&body_bytes[0..6], b"ARROW1");
+        let batches = read_arrow_stream_batches(body_bytes)?;
+        assert_eq!(batches.len(), 1);
 
         Ok(())
     }
@@ -223,13 +199,13 @@ mod import_tests {
         ]);
 
         let sensor_data = SensorData::new(sensor, samples);
-        let arrow_bytes = ArrowConverter::to_arrow_file(&sensor_data)?;
+        let arrow_bytes = ArrowConverter::to_arrow_stream(&sensor_data)?;
 
         // Upload Arrow data
         let response = app
             .post_binary(
                 "/sensors/publish",
-                "application/vnd.apache.arrow.file",
+                "application/vnd.apache.arrow.stream",
                 &arrow_bytes,
             )
             .await?;
@@ -272,13 +248,13 @@ mod import_tests {
         ]);
 
         let sensor_data = SensorData::new(sensor, samples);
-        let arrow_bytes = ArrowConverter::to_arrow_file(&sensor_data)?;
+        let arrow_bytes = ArrowConverter::to_arrow_stream(&sensor_data)?;
 
         // Upload Arrow data
         let response = app
             .post_binary(
                 "/sensors/publish",
-                "application/vnd.apache.arrow.file",
+                "application/vnd.apache.arrow.stream",
                 &arrow_bytes,
             )
             .await?;
@@ -321,13 +297,13 @@ mod import_tests {
         ]);
 
         let sensor_data = SensorData::new(sensor, samples);
-        let arrow_bytes = ArrowConverter::to_arrow_file(&sensor_data)?;
+        let arrow_bytes = ArrowConverter::to_arrow_stream(&sensor_data)?;
 
         // Upload Arrow data
         let response = app
             .post_binary(
                 "/sensors/publish",
-                "application/vnd.apache.arrow.file",
+                "application/vnd.apache.arrow.stream",
                 &arrow_bytes,
             )
             .await?;
@@ -353,7 +329,7 @@ mod import_tests {
         let response = app
             .post_binary(
                 "/sensors/publish",
-                "application/vnd.apache.arrow.file",
+                "application/vnd.apache.arrow.stream",
                 invalid_data,
             )
             .await?;
@@ -403,7 +379,7 @@ mod roundtrip_tests {
         let import_response = app
             .post_binary(
                 "/sensors/publish",
-                "application/vnd.apache.arrow.file",
+                "application/vnd.apache.arrow.stream",
                 arrow_bytes,
             )
             .await?;
@@ -455,7 +431,7 @@ mod roundtrip_tests {
         let temp_import_response = app
             .post_binary(
                 "/sensors/publish",
-                "application/vnd.apache.arrow.file",
+                "application/vnd.apache.arrow.stream",
                 temp_arrow_bytes,
             )
             .await?;
@@ -463,7 +439,7 @@ mod roundtrip_tests {
         let humidity_import_response = app
             .post_binary(
                 "/sensors/publish",
-                "application/vnd.apache.arrow.file",
+                "application/vnd.apache.arrow.stream",
                 humidity_arrow_bytes,
             )
             .await?;
@@ -508,13 +484,16 @@ mod converter_tests {
         let batch = ArrowConverter::to_record_batch(&sensor_data).unwrap();
 
         assert_eq!(batch.num_rows(), 2);
-        assert_eq!(batch.num_columns(), 4); // timestamp, value, sensor_id, sensor_name
+        assert_eq!(batch.num_columns(), 2);
 
         // Verify schema
         let schema = batch.schema();
         assert_eq!(schema.field(0).name(), "timestamp");
         assert_eq!(schema.field(1).name(), "value");
-        assert_eq!(schema.field(2).name(), "sensor_id");
+        assert_eq!(
+            schema.metadata().get("sensapp.sensor.name").map(String::as_str),
+            Some("test_sensor")
+        );
     }
 
     #[test]
@@ -570,12 +549,12 @@ mod converter_tests {
 
             let batch = result.unwrap();
             assert_eq!(batch.num_rows(), 1);
-            assert!(batch.num_columns() >= 3); // At least timestamp, value, sensor_id
+            assert_eq!(batch.num_columns(), 2);
         }
     }
 
     #[test]
-    fn test_arrow_file_format_validation() {
+    fn test_arrow_stream_format_validation() {
         let sensor = Sensor {
             uuid: Uuid::new_v4(),
             name: "test_sensor".to_string(),
@@ -590,11 +569,11 @@ mod converter_tests {
         }]);
 
         let sensor_data = SensorData::new(sensor, samples);
-        let arrow_bytes = ArrowConverter::to_arrow_file(&sensor_data).unwrap();
+        let arrow_bytes = ArrowConverter::to_arrow_stream(&sensor_data).unwrap();
 
-        // Verify Arrow file format
-        assert!(!arrow_bytes.is_empty());
-        assert_eq!(&arrow_bytes[0..6], b"ARROW1"); // Arrow magic number
+        let batches = read_arrow_stream_batches(&arrow_bytes).unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].num_rows(), 1);
     }
 
     #[test]
@@ -629,9 +608,11 @@ mod converter_tests {
         let sensor_data2 = SensorData::new(sensor2, samples2);
 
         let sensor_list = vec![sensor_data1, sensor_data2];
-        let arrow_bytes = sensor_data_list_to_arrow_file(&sensor_list).unwrap();
+        let arrow_bytes = ArrowConverter::to_arrow_stream_multi(&sensor_list).unwrap();
 
-        assert!(!arrow_bytes.is_empty());
-        assert_eq!(&arrow_bytes[0..6], b"ARROW1");
+        let batches = read_arrow_stream_batches(&arrow_bytes).unwrap();
+        assert_eq!(batches.len(), 1);
+        assert!(batches[0].schema().fields().iter().any(|field| field.name() == "integer_value"));
+        assert!(batches[0].schema().fields().iter().any(|field| field.name() == "float_value"));
     }
 }

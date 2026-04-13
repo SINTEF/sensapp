@@ -2,16 +2,16 @@ mod common;
 
 #[cfg(feature = "clickhouse")]
 mod clickhouse_http_lifecycle_tests {
-    use super::common::{DatabaseType, TestDb};
     use super::common::db::DbHelpers;
     use super::common::http::TestApp;
+    use super::common::{DatabaseType, TestDb};
     use anyhow::Result;
     use axum::http::StatusCode;
     use hifitime::Epoch;
     use sensapp::config::load_configuration_for_tests;
     use sensapp::storage::StorageInstance;
-    use serial_test::serial;
     use serde_json::Value;
+    use serial_test::serial;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use uuid::Uuid;

@@ -971,9 +971,7 @@ impl StorageInstance for DuckDBStorage {
         duckdb_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
             .lock()
             .cache_clear();
-        duckdb_utilities::GET_UNIT_ID_OR_CREATE
-            .lock()
-            .cache_clear();
+        duckdb_utilities::GET_UNIT_ID_OR_CREATE.lock().cache_clear();
         duckdb_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
             .lock()
             .cache_clear();

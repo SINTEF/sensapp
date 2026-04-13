@@ -295,7 +295,9 @@ async fn test_publish_handler(
             })?;
 
         Ok("ok".to_string())
-    } else if content_type.contains("application/vnd.apache.arrow.file") {
+    } else if content_type.contains("application/vnd.apache.arrow.stream")
+        || content_type.contains("application/vnd.apache.arrow.file")
+    {
         // Handle Arrow data
         use sensapp::importers::arrow::publish_arrow_async;
 
@@ -308,9 +310,9 @@ async fn test_publish_handler(
             .map_err(|e| {
                 // Arrow parsing errors should be bad requests, not internal server errors
                 if e.to_string().contains("Failed to create Arrow file reader")
-                    || e.to_string()
-                        .contains("Arrow file contains no data batches")
                     || e.to_string().contains("Failed to read Arrow batch")
+                    || e.to_string().contains("Failed to read Arrow batch from stream")
+                    || e.to_string().contains("Arrow IPC payload contains no data batches")
                 {
                     (
                         StatusCode::BAD_REQUEST,

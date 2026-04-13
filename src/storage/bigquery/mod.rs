@@ -165,7 +165,10 @@ impl StorageInstance for BigQueryStorage {
             .query(&self.project_id, QueryRequest::new(parametrized_init_sql))
             .await?;
 
-        if let Some(total_rows) = rs.total_rows.as_deref().and_then(|value| value.parse::<u64>().ok())
+        if let Some(total_rows) = rs
+            .total_rows
+            .as_deref()
+            .and_then(|value| value.parse::<u64>().ok())
             && total_rows > 0
         {
             bail!("BigQuery should not return any rows on the schema creation query");
@@ -264,7 +267,9 @@ impl StorageInstance for BigQueryStorage {
         let mut sensors = Vec::new();
 
         while rs.next_row() {
-            let sensor_id = rs.get_i64_by_name("sensor_id")?.context("BigQuery row missing sensor_id")?;
+            let sensor_id = rs
+                .get_i64_by_name("sensor_id")?
+                .context("BigQuery row missing sensor_id")?;
             let sensor_uuid = Uuid::from_str(
                 &rs.get_string_by_name("sensor_uuid")?
                     .context("BigQuery row missing sensor_uuid")?,
@@ -368,7 +373,13 @@ impl StorageInstance for BigQueryStorage {
                 .get_i64_by_name("series_count")?
                 .context("BigQuery row missing series_count")?;
 
-            metrics.push(Metric::new(metric_name, sensor_type, unit, series_count, Vec::new()));
+            metrics.push(Metric::new(
+                metric_name,
+                sensor_type,
+                unit,
+                series_count,
+                Vec::new(),
+            ));
         }
 
         Ok(metrics)

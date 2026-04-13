@@ -324,7 +324,7 @@ pub async fn simple_promql_query(
                 .body(jsonl_content.into())
         }
         ExportFormat::Arrow => {
-            let arrow_bytes = ArrowConverter::to_arrow_file_multi(&results)
+            let arrow_bytes = ArrowConverter::to_arrow_stream_multi(&results)
                 .map_err(AppError::internal_server_error)?;
             axum::response::Response::builder()
                 .header("content-type", format.content_type())

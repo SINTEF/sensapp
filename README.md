@@ -8,89 +8,82 @@ It handles time-series data ingestion, storage, and retrieval. From small edge d
 
 SensApp is compatible with Prometheus and InfluxDB, but with an alternative architecture that prioritise data analysis and long-term storage over ingestion performance and real-time monitoring.
 
-Handling CPU stats for the last 24 hours? InfluxDB or Prometheus are excellent choices. Fetching average bathroom temperature over the last 10 years grouped by day? SensApp will compute that instantly while InfluxDB or Prometheus will take a while as they must read many chunks of data.
+Dealing with system statistics for the last 24 hours? InfluxDB or Prometheus are excellent choices. Fetching average bathroom temperatures over the last 10 years grouped by day? SensApp will compute that instantly while InfluxDB or Prometheus will take a little while.
 
-But you don't have to chose, both InfluxDB and Prometheus can replicate their data to SensApp for long-term storage and analysis.
+But you don't have to chose, both InfluxDB and Prometheus can replicate their data to SensApp for long-term storage and analysis. So you get the best of both worlds.
 
-Of course you can also use Sensapp as a standalone time-series database.
+You can also use Sensapp as a standalone time-series database.
 
 ## Quickstart
 
 The quickest way to run SensApp is with SQLite so no external database is required.
 
-By default, SensApp listens on `127.0.0.1:3000`.
-
-### Local run
-
 Start SensApp with SQLite:
 
 ```bash
 SENSAPP_STORAGE_CONNECTION_STRING=sqlite://sensapp.db \
-cargo run --no-default-features --features sqlite
+cargo run
 ```
 
-Check that the server is ready:
-
-```bash
-curl http://127.0.0.1:3000/health/ready
-```
-
-Open the API documentation:
-
-```bash
-curl http://127.0.0.1:3000/docs
-```
+By default, SensApp listens on [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
 Ingest one sample:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/publish \
-  -H 'content-type: text/csv' \
-  --data-raw $'datetime,sensor_name,value,unit\n2026-03-16T12:00:00Z,temperature,21.5,C'
+curl --json '[{"n": "temperature", "v": 21.5}]' \
+  http://127.0.0.1:3000/publish
 ```
 
 Query the stored data:
 
 ```bash
 curl 'http://127.0.0.1:3000/api/v1/query?query=temperature'
+# or
 curl 'http://127.0.0.1:3000/api/v1/query?query=temperature&format=csv'
 ```
 
-### Container run
+## Python Quickstart
 
-Build the image:
+Check the [python/sensapp](./python/sensapp) documentation for more details.
 
-```bash
-docker build -t sensapp:local .
+```python
+import asyncio
+from sensapp import SensAppClient
+
+async def main():
+    async with SensAppClient() as client:
+        await client.publish("temperature", 21.5)
+  [series] = await client.query("temperature[1h]")
+  print(series.frame)
+
+asyncio.run(main())
 ```
 
-Run the container with SQLite:
+### Using Containers
 
 ```bash
-docker run --rm -p 3000:3000 \
-  -e SENSAPP_STORAGE_CONNECTION_STRING=sqlite:///var/lib/sensapp/sensapp.db \
-  sensapp:local
+docker compose up
 ```
 
-Check that the server is ready:
+You can deploy SensApp on Kubernetes using [the included Helm chart](./charts/sensapp).
 
 ```bash
-curl http://127.0.0.1:3000/health/ready
+helm install sensapp ./charts/sensapp
 ```
-
-If you run `cargo run` with the repository defaults, SensApp will try to connect to PostgreSQL on `localhost:5432`.
 
 ## Features
 
 - **HTTP REST API**
-- **Compatible with existing sensor data pipelines**:
+- **Prometheus Compatibility**
   - **Prometheus Remote Write**: Prometheus can push data to SensApp.
   - **Prometheus Remote Read**: Prometheus can also read data from SensApp.
   - **Prometheus Scrape Endpoint**: SensApp exposes internal service metrics on `/prometheus/metrics`.
-  - **InfluxDB Line Protocol**: InfluxDB can push data to SensApp, or you can use SensApp instead of InfluxDB, with [Telegraf](https://github.com/influxdata/telegraf) for example.
+- **InfluxDB Compatibility**:
+  - **InfluxDB Line Protocol**: You can use SensApp instead of InfluxDB, with [Telegraf](https://github.com/influxdata/telegraf) for example.
+  - **InfluxDB Data Replication**: InfluxDB [can replicate its data to SensApp](https://docs.influxdata.com/influxdb/cloud/write-data/replication/replicate-data/).
 - **Data formats**:
   - **JSON**: Simple and widely used format for data interchange.
-  - **CSV**: Many users *love* CSV.
+  - **CSV**: The classic.
   - **SenML**: Standardized format for sensor data representation, that is almost unheard of but actually pretty good.
   - **Apache Arrow IPC Support**: Efficient IPC format for high-performance data interchange.
 - **Flexible Time Series DataBase Storage**:
@@ -115,137 +108,9 @@ SensApp storage is based on the findings of the paper [TSM-Bench: Benchmarking T
 
 Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 
-## HTTP Endpoints
-
-- `/metrics`: DCAT metrics catalog endpoint for querying the available measurement series metadata.
-- `/prometheus/metrics`: Prometheus-compatible scrape endpoint for SensApp service metrics such as HTTP request totals, request duration, in-flight requests, uptime, and storage readiness.
-- `/series`: DCAT series catalog endpoint.
-- `/api/v1/prometheus_remote_write`: Prometheus Remote Write ingestion endpoint.
-- `/api/v1/prometheus_remote_read`: Prometheus Remote Read endpoint.
-- `/api/v1/query`: Simple PromQL-compatible query endpoint.
-
 ## Authentication
 
-SensApp supports **optional JWT authentication**. By default, all endpoints are open — just like Prometheus. Set `SENSAPP_JWT_SECRET` (≥ 32 characters) to enable it.
-
-```bash
-export SENSAPP_JWT_SECRET="my-super-secret-key-at-least-32-characters-long"
-```
-
-When enabled:
-
-- **Public endpoints** (health checks, docs, `/prometheus/metrics`) remain open.
-- **Read endpoints** (`/metrics`, `/series`, queries) require a token with `read` scope.
-- **Write endpoints** (`/publish`, InfluxDB/Prometheus write) require a token with `write` scope.
-
-Generate tokens with the built-in CLI:
-
-```bash
-sensapp generate-token my-service                           # read+write, 1h
-sensapp generate-token scraper --scope read --duration 86400  # read-only, 24h
-sensapp generate-token device --scope write --sensors "temp,humidity"  # write, restricted sensors
-```
-
-Use in requests: `Authorization: Bearer <token>`
-
-For Helm deployments, set `auth.jwtSecret` in your values:
-
-```yaml
-auth:
-  jwtSecret: "my-super-secret-key-at-least-32-characters-long"
-```
-
-See [docs/JWT_AUTH.md](docs/JWT_AUTH.md) for full details on claims, time validation, and route protection.
-
-## Deployment
-
-SensApp now ships with a container build and a Helm chart in `charts/sensapp`.
-
-For ClickHouse-backed deployments, see [docs/CLICKHOUSE.md](docs/CLICKHOUSE.md).
-
-## Python SDK
-
-There is now an in-repo Python SDK under `python/sensapp-sdk`.
-
-- Arrow-first reads and writes using `pyarrow`
-- sync client built on `httpx`
-- simple examples and mocked tests included
-
-For local development:
-
-```bash
-cd python/sensapp-sdk
-python -m pip install -e '.[dev]'
-python -m pytest
-```
-
-See [docs/PYTHON_SDK.md](docs/PYTHON_SDK.md) for a short walkthrough.
-
-The default container image target is a practical self-hosted runtime feature set:
-
-- PostgreSQL
-- SQLite
-- TimeScaleDB
-- DuckDB
-- ClickHouse
-- RRDCached
-
-BigQuery is intentionally left out of the primary published image to keep image size, build time, and dependency surface under control. It is still suitable as a separate CI-built variant when needed.
-
-Example Docker build:
-
-```bash
-docker build -t sensapp:local .
-```
-
-Example Helm install using PostgreSQL:
-
-```bash
-helm install sensapp ./charts/sensapp \
-  --set storage.connectionString=postgres://postgres:postgres@postgres:5432/sensapp
-```
-
-By default, the Helm chart uses a local SQLite database under `/var/lib/sensapp/sensapp.db`, which is useful for single-replica or evaluation deployments. For multi-replica Kubernetes deployments, use an external shared backend such as PostgreSQL or ClickHouse.
-
-## Development
-
-```bash
-# Build
-cargo build
-
-# Test
-cargo test
-cargo make test-all         # all storage backends
-cargo make test-local-matrix # all local backends via Docker Compose (no BigQuery)
-
-# Lint (format + clippy)
-cargo make lint
-cargo make lint-all         # all storage backends
-
-# Full validation
-cargo make check-all        # working features (postgres + sqlite)
-cargo make check-all-storage # all storage backends
-cargo make check-local-matrix # all local backends via Docker Compose (no BigQuery)
-
-# Setup (runs migrations)
-cargo make setup-dev
-```
-
-Override environment variables as needed: `DATABASE_URL`, `POSTGRES_USER`, etc.
-
-If `cargo make` is not installed in your environment, install it once with:
-
-```bash
-cargo install cargo-make
-```
-
-For the full local backend matrix in a Codespace or dev container, the project now ships a Docker Compose stack in [compose.test-services.yml](compose.test-services.yml). The intended workflow is:
-
-```bash
-cargo make test-local-matrix
-```
-
-That command starts local PostgreSQL, TimescaleDB, ClickHouse, and RRDCached services, then runs the local backend suites. BigQuery is intentionally excluded from the local matrix because it requires external GCP credentials.
+SensApp supports **optional JWT authentication**. By default, all endpoints are open. Visit [docs/JWT_AUTH.md](./docs/JWT_AUTH.md) for the authentication documentation.
 
 ## Built With Rust™️
 
@@ -269,7 +134,7 @@ The SensApp software is provided "as is," with no warranties, and the creators o
 
 ## You may not want to use it in production (yet)
 
-SensApp is currently under development. It is not yet ready for production.
+SensApp is currently under development. It is not ready for production.
 
 ## Acknowledgments
 

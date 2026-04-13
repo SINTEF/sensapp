@@ -10,11 +10,10 @@ repos:
       - id: check-yaml
       - id: check-xml
       - id: check-ast
-      - id: end-of-file-fixer
       - id: check-merge-conflict
       - id: no-commit-to-branch # no commits to main
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.30.0
+    rev: v8.30.1
     hooks:
       - id: gitleaks
   - repo: https://github.com/jorisroovers/gitlint

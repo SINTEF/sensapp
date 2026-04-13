@@ -565,7 +565,10 @@ mod tests {
             org_id: None,
             precision: Some("wrong".to_string()),
         });
-        let bytes = Bytes::from(format!("cpu,host=A,region=west usage_system=64i {}", current_seconds));
+        let bytes = Bytes::from(format!(
+            "cpu,host=A,region=west usage_system=64i {}",
+            current_seconds
+        ));
         let result = publish_influxdb(state.clone(), headers, query, bytes).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(AppError::BadRequest(_))));

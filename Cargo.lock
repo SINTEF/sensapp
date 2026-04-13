@@ -488,6 +488,8 @@ dependencies = [
  "arrow-schema 58.0.0",
  "arrow-select 58.0.0",
  "flatbuffers",
+ "lz4_flex 0.12.1",
+ "zstd",
 ]
 
 [[package]]
@@ -1143,7 +1145,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "lz4_flex",
+ "lz4_flex 0.11.6",
  "polonius-the-crab",
  "quanta",
  "serde",
@@ -3046,6 +3048,15 @@ name = "lz4_flex"
 version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
+
+[[package]]
+name = "lz4_flex"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98c23545df7ecf1b16c303910a69b079e8e251d60f7dd2cc9b4177f2afaf1746"
+dependencies = [
+ "twox-hash",
+]
 
 [[package]]
 name = "macro_rules_attribute"
@@ -5941,6 +5952,12 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "twox-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
 name = "typenum"

@@ -187,7 +187,7 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
 /// Accepts sensor data in one of the following formats:
 /// - **SenML JSON** (RFC 8428): `Content-Type: application/json`
 /// - **CSV**: `Content-Type: text/csv` or `application/csv`
-/// - **Apache Arrow IPC**: `Content-Type: application/vnd.apache.arrow.file`
+/// - **Apache Arrow IPC**: `Content-Type: application/vnd.apache.arrow.stream`
 ///
 /// If no Content-Type header is provided, defaults to CSV format.
 #[utoipa::path(
@@ -218,7 +218,9 @@ async fn publish_sensors_data(
         ct if ct.contains("application/json") => {
             publish_json_format(body, state.storage.clone()).await?;
         }
-        ct if ct.contains("application/vnd.apache.arrow.file") => {
+        ct if ct.contains("application/vnd.apache.arrow.stream")
+            || ct.contains("application/vnd.apache.arrow.file") =>
+        {
             publish_arrow_format(body, state.storage.clone()).await?;
         }
         ct if ct.contains("text/csv") || ct.contains("application/csv") => {

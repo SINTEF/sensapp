@@ -839,15 +839,15 @@ impl StorageInstance for ClickHouseStorage {
                 let samples = match sensor.sensor_type {
                     SensorType::Integer => {
                         self.query_integer_samples_aggregated(&aggregation_query)
-                        .await?
+                            .await?
                     }
                     SensorType::Numeric => {
                         self.query_numeric_samples_aggregated(&aggregation_query)
-                        .await?
+                            .await?
                     }
                     SensorType::Float => {
                         self.query_float_samples_aggregated(&aggregation_query)
-                        .await?
+                            .await?
                     }
                     _ => {
                         let raw = self

@@ -169,7 +169,10 @@ mod tests {
 
         let first_chunk = &series.chunks[0];
         let (_, decoded_first_chunk) = read_xor_chunk_data(&first_chunk.data).unwrap();
-        assert_eq!(decoded_first_chunk.samples().len(), MAX_SAMPLES_PER_XOR_CHUNK);
+        assert_eq!(
+            decoded_first_chunk.samples().len(),
+            MAX_SAMPLES_PER_XOR_CHUNK
+        );
         assert_eq!(first_chunk.min_time_ms, 0);
         assert_eq!(
             first_chunk.max_time_ms,
@@ -183,10 +186,7 @@ mod tests {
             second_chunk.min_time_ms,
             MAX_SAMPLES_PER_XOR_CHUNK as i64 * 1000
         );
-        assert_eq!(
-            second_chunk.max_time_ms,
-            (total_samples as i64 - 1) * 1000
-        );
+        assert_eq!(second_chunk.max_time_ms, (total_samples as i64 - 1) * 1000);
     }
 
     #[test]

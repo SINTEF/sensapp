@@ -22,8 +22,8 @@ use sensapp::http::metrics::HttpMetrics;
 use sensapp::http::prometheus_read::prometheus_remote_read;
 use sensapp::http::state::HttpServerState;
 use sensapp::parsing::prometheus::remote_read_models::{
-    ChunkedReadResponse, LabelMatcher as PromLabelMatcher, Query, ReadRequest, ReadResponse,
-    label_matcher, read_request,
+    ChunkedReadResponse, LabelMatcher as PromLabelMatcher, Query, ReadHints, ReadRequest,
+    ReadResponse, label_matcher, read_request,
 };
 use serial_test::serial;
 use std::io::Cursor;
@@ -896,12 +896,77 @@ async fn test_remote_read_streamed_xor_chunks_large_series() -> Result<()> {
 
     let (status, body_bytes) = send_remote_read_request(&app, body).await?;
     assert_eq!(status, StatusCode::OK);
-    assert!(!body_bytes.is_empty(), "Large streamed response should have body");
+    assert!(
+        !body_bytes.is_empty(),
+        "Large streamed response should have body"
+    );
 
     let responses = parse_streamed_chunked_response(&body_bytes)?;
     assert_eq!(responses.len(), 1);
     assert_eq!(responses[0].chunked_series.len(), 1);
     assert_eq!(responses[0].chunked_series[0].chunks.len(), 2);
+
+    Ok(())
+}
+
+/// Test remote read uses common Prometheus hints to return aggregated samples.
+#[tokio::test]
+#[serial]
+async fn test_remote_read_samples_with_avg_over_time_hints() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let sensor = create_sensor_with_labels("hinted_metric", SensorType::Float, vec![]);
+    let times_ms = vec![
+        BASE_TS_MS,
+        BASE_TS_MS + 1000,
+        BASE_TS_MS + 2000,
+        BASE_TS_MS + 3000,
+        BASE_TS_MS + 4000,
+    ];
+    let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+
+    publish_test_sensors(
+        &storage,
+        vec![(sensor, create_float_samples_at_times(&times_ms, &values))],
+    )
+    .await?;
+
+    let app = create_test_app(storage);
+    let query = Query {
+        start_timestamp_ms: BASE_TS_MS,
+        end_timestamp_ms: BASE_TS_MS + 5000,
+        matchers: vec![PromLabelMatcher {
+            r#type: label_matcher::Type::Eq as i32,
+            name: "__name__".to_string(),
+            value: "hinted_metric".to_string(),
+        }],
+        hints: Some(ReadHints {
+            step_ms: 2000,
+            func: "avg_over_time".to_string(),
+            start_ms: BASE_TS_MS,
+            end_ms: BASE_TS_MS + 5000,
+            grouping: vec![],
+            by: false,
+            range_ms: 2000,
+        }),
+    };
+
+    let body = build_remote_read_request(vec![query], vec![])?;
+    let (status, response_body) = send_remote_read_request(&app, body).await?;
+
+    assert_eq!(status, StatusCode::OK);
+
+    let response = parse_remote_read_response(&response_body)?;
+    let timeseries = &response.results[0].timeseries[0];
+    assert_eq!(timeseries.samples.len(), 3);
+    assert_eq!(timeseries.samples[0].timestamp, BASE_TS_MS);
+    assert_eq!(timeseries.samples[1].timestamp, BASE_TS_MS + 2000);
+    assert_eq!(timeseries.samples[2].timestamp, BASE_TS_MS + 4000);
+    assert!((timeseries.samples[0].value - 1.5).abs() < f64::EPSILON);
+    assert!((timeseries.samples[1].value - 3.5).abs() < f64::EPSILON);
+    assert!((timeseries.samples[2].value - 5.0).abs() < f64::EPSILON);
 
     Ok(())
 }

@@ -94,7 +94,7 @@ pub enum ExportFormat {
     Senml, // SenML JSON format (RFC 8428) - also accessible as "json"
     Csv,   // Comma-separated values
     Jsonl, // JSON Lines (one JSON object per line)
-    Arrow, // Apache Arrow IPC file format (.arrow)
+    Arrow, // Apache Arrow IPC stream format (.arrow)
 }
 
 impl ExportFormat {
@@ -104,7 +104,7 @@ impl ExportFormat {
             "json" | "senml" => Some(ExportFormat::Senml), // Both json and senml map to SenML
             "csv" => Some(ExportFormat::Csv),
             "jsonl" | "ndjson" => Some(ExportFormat::Jsonl), // Support both extensions
-            "arrow" | "ipc" => Some(ExportFormat::Arrow),    // Apache Arrow file format
+            "arrow" | "ipc" => Some(ExportFormat::Arrow),    // Apache Arrow IPC stream format
             _ => None,
         }
     }
@@ -115,7 +115,7 @@ impl ExportFormat {
             ExportFormat::Senml => "application/json", // SenML is JSON
             ExportFormat::Csv => "text/csv",
             ExportFormat::Jsonl => "application/x-ndjson",
-            ExportFormat::Arrow => "application/vnd.apache.arrow.file",
+            ExportFormat::Arrow => "application/vnd.apache.arrow.stream",
         }
     }
 }
@@ -193,7 +193,7 @@ fn convert_label_match_op(op: rusty_promql_parser::LabelMatchOp) -> MatcherType 
 /// Accepts formats like:
 /// - `{env="prod"}` - label matchers only
 /// - `my_metric{env="prod"}` - metric name with labels (metric name is ignored for series filtering)
-fn parse_selector_to_matchers(selector: &str) -> Result<Vec<LabelMatcher>, AppError> {
+pub(crate) fn parse_selector_to_matchers(selector: &str) -> Result<Vec<LabelMatcher>, AppError> {
     // If the selector is just braces with labels, wrap it in a dummy metric name
     let query_str = if selector.trim().starts_with('{') {
         format!("dummy{}", selector)
@@ -239,7 +239,10 @@ fn parse_selector_to_matchers(selector: &str) -> Result<Vec<LabelMatcher>, AppEr
 }
 
 /// Check if a sensor matches a set of label matchers
-fn sensor_matches_matchers(sensor: &crate::datamodel::Sensor, matchers: &[LabelMatcher]) -> bool {
+pub(crate) fn sensor_matches_matchers(
+    sensor: &crate::datamodel::Sensor,
+    matchers: &[LabelMatcher],
+) -> bool {
     for matcher in matchers {
         // Find the label value in the sensor
         let label_value = sensor
@@ -854,7 +857,7 @@ pub async fn get_series_data(
                 .body(jsonl_content.into())
         }
         ExportFormat::Arrow => {
-            let arrow_bytes = ArrowConverter::to_arrow_file(&series_data)
+            let arrow_bytes = ArrowConverter::to_arrow_stream(&series_data)
                 .map_err(AppError::internal_server_error)?;
             axum::response::Response::builder()
                 .header("content-type", format.content_type())
@@ -1050,7 +1053,7 @@ mod tests {
         assert_eq!(ExportFormat::Jsonl.content_type(), "application/x-ndjson");
         assert_eq!(
             ExportFormat::Arrow.content_type(),
-            "application/vnd.apache.arrow.file"
+            "application/vnd.apache.arrow.stream"
         );
     }
 

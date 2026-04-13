@@ -6,6 +6,7 @@
 mod common;
 
 use anyhow::Result;
+use arrow_ipc::reader::StreamReader;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -21,6 +22,7 @@ use sensapp::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
 use serde_json::Value;
 use serial_test::serial;
+use std::io::Cursor;
 use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -653,10 +655,19 @@ async fn test_simple_promql_arrow_format() -> Result<()> {
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
 
-    // Arrow files start with magic bytes "ARROW1"
-    assert!(body.len() > 6, "Arrow file should have content");
-    // Arrow IPC file format magic number
-    assert_eq!(&body[0..6], b"ARROW1", "Should be valid Arrow IPC file");
+    assert!(body.len() > 6, "Arrow stream should have content");
+
+    let mut reader = StreamReader::try_new(Cursor::new(body), None)?;
+    let first_batch = reader
+        .next()
+        .transpose()?
+        .expect("Arrow stream should contain at least one record batch");
+
+    assert!(first_batch.num_rows() > 0, "Arrow batch should contain rows");
+    assert!(
+        first_batch.schema().fields().iter().any(|field| field.name() == "timestamp"),
+        "Arrow batch should contain a timestamp column"
+    );
 
     Ok(())
 }
