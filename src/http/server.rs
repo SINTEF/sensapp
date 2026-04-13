@@ -370,6 +370,9 @@ mod tests {
         use crate::storage::storage_factory::create_storage_from_connection_string;
 
         let connection_string = get_test_database_url();
+        sensapp::test_utils::ensure_test_database_exists(&connection_string)
+            .await
+            .expect("Failed to create test database");
         let storage = create_storage_from_connection_string(&connection_string)
             .await
             .expect("Failed to create storage");

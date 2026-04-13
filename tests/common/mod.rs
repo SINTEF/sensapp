@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use sensapp::storage::{StorageInstance, storage_factory::create_storage_from_connection_string};
-use sensapp::test_utils::get_test_database_url;
+use sensapp::test_utils::{ensure_test_database_exists, get_test_database_url};
 use std::sync::Arc;
 
 pub mod db;
@@ -65,7 +65,9 @@ impl DatabaseType {
 
 /// Test database manager that creates isolated test databases
 pub struct TestDb {
+    #[allow(dead_code)] // Kept for diagnostics and per-test context
     pub db_name: String,
+    #[allow(dead_code)] // Kept for diagnostics and per-test context
     pub db_type: DatabaseType,
     #[allow(dead_code)] // Used by some tests
     pub storage: Arc<dyn StorageInstance>,
@@ -95,6 +97,10 @@ impl TestDb {
         };
 
         let connection_string = db_type.default_connection_string();
+
+        if db_type == DatabaseType::PostgreSQL {
+            ensure_test_database_exists(&connection_string).await?;
+        }
 
         // Connect to the database
         let storage = create_storage_from_connection_string(&connection_string)
@@ -146,16 +152,6 @@ impl TestDb {
     #[allow(dead_code)] // Used by some tests
     pub fn storage(&self) -> Arc<dyn StorageInstance> {
         self.storage.clone()
-    }
-}
-
-impl Drop for TestDb {
-    fn drop(&mut self) {
-        // Async cleanup would be better, but this ensures cleanup happens
-        println!(
-            "Test database {} ({:?}) cleaned up",
-            self.db_name, self.db_type
-        );
     }
 }
 

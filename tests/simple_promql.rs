@@ -663,9 +663,16 @@ async fn test_simple_promql_arrow_format() -> Result<()> {
         .transpose()?
         .expect("Arrow stream should contain at least one record batch");
 
-    assert!(first_batch.num_rows() > 0, "Arrow batch should contain rows");
     assert!(
-        first_batch.schema().fields().iter().any(|field| field.name() == "timestamp"),
+        first_batch.num_rows() > 0,
+        "Arrow batch should contain rows"
+    );
+    assert!(
+        first_batch
+            .schema()
+            .fields()
+            .iter()
+            .any(|field| field.name() == "timestamp"),
         "Arrow batch should contain a timestamp column"
     );
 

@@ -368,6 +368,9 @@ mod tests {
         _ = load_configuration_for_tests();
 
         let connection_string = get_test_database_url();
+        sensapp::test_utils::ensure_test_database_exists(&connection_string)
+            .await
+            .unwrap();
         let bucket = unique_test_bucket("test");
         let no_tag_measurement = format!("cpu_without_tags_{}", Uuid::new_v4().simple());
         let current_seconds = SensAppDateTime::now().unwrap().to_unix_seconds().floor() as i64;
@@ -687,6 +690,9 @@ mod tests {
         _ = load_configuration_for_tests();
 
         let connection_string = get_test_database_url();
+        sensapp::test_utils::ensure_test_database_exists(&connection_string)
+            .await
+            .unwrap();
         let bucket = unique_test_bucket("test-numeric");
         let no_tag_measurement = format!("memory_no_tags_{}", Uuid::new_v4().simple());
         let current_nanoseconds =

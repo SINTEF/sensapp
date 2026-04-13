@@ -491,7 +491,10 @@ mod converter_tests {
         assert_eq!(schema.field(0).name(), "timestamp");
         assert_eq!(schema.field(1).name(), "value");
         assert_eq!(
-            schema.metadata().get("sensapp.sensor.name").map(String::as_str),
+            schema
+                .metadata()
+                .get("sensapp.sensor.name")
+                .map(String::as_str),
             Some("test_sensor")
         );
     }
@@ -612,7 +615,19 @@ mod converter_tests {
 
         let batches = read_arrow_stream_batches(&arrow_bytes).unwrap();
         assert_eq!(batches.len(), 1);
-        assert!(batches[0].schema().fields().iter().any(|field| field.name() == "integer_value"));
-        assert!(batches[0].schema().fields().iter().any(|field| field.name() == "float_value"));
+        assert!(
+            batches[0]
+                .schema()
+                .fields()
+                .iter()
+                .any(|field| field.name() == "integer_value")
+        );
+        assert!(
+            batches[0]
+                .schema()
+                .fields()
+                .iter()
+                .any(|field| field.name() == "float_value")
+        );
     }
 }

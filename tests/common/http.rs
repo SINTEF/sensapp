@@ -311,8 +311,10 @@ async fn test_publish_handler(
                 // Arrow parsing errors should be bad requests, not internal server errors
                 if e.to_string().contains("Failed to create Arrow file reader")
                     || e.to_string().contains("Failed to read Arrow batch")
-                    || e.to_string().contains("Failed to read Arrow batch from stream")
-                    || e.to_string().contains("Arrow IPC payload contains no data batches")
+                    || e.to_string()
+                        .contains("Failed to read Arrow batch from stream")
+                    || e.to_string()
+                        .contains("Arrow IPC payload contains no data batches")
                 {
                     (
                         StatusCode::BAD_REQUEST,

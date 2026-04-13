@@ -95,7 +95,7 @@ async fn async_main() -> Result<()> {
     let port = config.port;
     let address = SocketAddr::from((endpoint, port));
 
-    println!("📡 Starting HTTP server on {}...", address);
+    println!("📡 Starting HTTP server on http://{}...", address);
     // Build optional JWT authentication config
     let auth = match &config.jwt_secret {
         Some(secret) => {

@@ -393,15 +393,19 @@ fn extract_sensor_labels(batch: &RecordBatch) -> Result<SmallVec<[(String, Strin
         return Ok(SmallVec::new());
     };
 
-    let labels_map = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(labels_json)
-        .map_err(|e| anyhow!("Invalid sensapp.sensor.labels metadata: {}", e))?;
+    let labels_map =
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(labels_json)
+            .map_err(|e| anyhow!("Invalid sensapp.sensor.labels metadata: {}", e))?;
 
     let mut labels: Vec<(String, String)> = labels_map
         .into_iter()
         .map(|(key, value)| {
-            let value = value
-                .as_str()
-                .ok_or_else(|| anyhow!("Invalid sensapp.sensor.labels metadata value for key '{}'", key))?;
+            let value = value.as_str().ok_or_else(|| {
+                anyhow!(
+                    "Invalid sensapp.sensor.labels metadata value for key '{}'",
+                    key
+                )
+            })?;
             Ok((key, value.to_string()))
         })
         .collect::<Result<_>>()?;
@@ -426,9 +430,9 @@ fn microseconds_to_sensapp_datetime(micros: i64) -> Option<SensAppDateTime> {
 #[cfg(test)]
 pub mod test_utils {
     use super::*;
+    use crate::datamodel::unit::Unit;
     use crate::datamodel::*;
     use crate::exporters::arrow::ArrowConverter;
-    use crate::datamodel::unit::Unit;
     use smallvec::smallvec;
     use uuid::Uuid;
 
@@ -486,7 +490,10 @@ mod tests {
         let (sensor, sample_entries) = sensor_map.values().next().unwrap();
         assert_eq!(sensor.name, "test_sensor");
         assert_eq!(sensor.sensor_type, SensorType::Integer);
-        assert_eq!(sensor.unit.as_ref().map(|unit| unit.name.as_str()), Some("Celsius"));
+        assert_eq!(
+            sensor.unit.as_ref().map(|unit| unit.name.as_str()),
+            Some("Celsius")
+        );
         assert_eq!(sensor.labels.len(), 1);
         assert_eq!(sensor.labels[0], ("room".to_string(), "lab".to_string()));
         assert_eq!(sample_entries.len(), 1);
