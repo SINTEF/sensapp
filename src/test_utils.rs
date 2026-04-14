@@ -48,7 +48,7 @@ pub fn get_test_database_url() -> String {
     let connection_string = std::env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| default_test_database_url().to_string());
 
-    isolate_file_backed_test_database(&connection_string)
+    isolate_test_database_url(&connection_string)
 }
 
 pub async fn ensure_test_database_exists(connection_string: &str) -> Result<()> {
@@ -82,7 +82,7 @@ fn default_test_database_url() -> &'static str {
     }
 }
 
-fn isolate_file_backed_test_database(connection_string: &str) -> String {
+pub fn isolate_test_database_url(connection_string: &str) -> String {
     if connection_string.starts_with("postgres://")
         || connection_string.starts_with("postgresql://")
         || connection_string.starts_with("timescaledb://")

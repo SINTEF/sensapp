@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use sensapp::storage::{StorageInstance, storage_factory::create_storage_from_connection_string};
-use sensapp::test_utils::{ensure_test_database_exists, get_test_database_url};
+use sensapp::test_utils::{ensure_test_database_exists, get_test_database_url, isolate_test_database_url};
 use std::sync::Arc;
 
 pub mod db;
@@ -28,9 +28,12 @@ impl DatabaseType {
             DatabaseType::ClickHouse => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
                 "clickhouse://default:password@localhost:8123/sensapp_test".to_string()
             }),
-            DatabaseType::TimescaleDB => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-                "timescaledb://postgres:postgres@localhost:5433/sensapp-test".to_string()
-            }),
+            DatabaseType::TimescaleDB => {
+                let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+                    "timescaledb://postgres:postgres@localhost:5433/sensapp-test".to_string()
+                });
+                isolate_test_database_url(&url)
+            }
             DatabaseType::DuckDB => std::env::var("TEST_DATABASE_URL")
                 .unwrap_or_else(|_| "duckdb://test.duckdb".to_string()),
             DatabaseType::RRDcached => std::env::var("TEST_DATABASE_URL")
