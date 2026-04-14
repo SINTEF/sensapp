@@ -20,6 +20,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::Response,
 };
+use std::time::Instant;
 use tokio_util::bytes::Bytes;
 use tracing::{debug, info, warn};
 
@@ -203,90 +204,110 @@ pub async fn prometheus_remote_read(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Result<Response<axum::body::Body>, AppError> {
-    debug!("Prometheus remote read: received {} bytes", bytes.len());
+    let metrics = state.metrics.clone();
+    let started = Instant::now();
 
-    // Verify headers
-    verify_read_headers(&headers)?;
+    let result = async move {
+        debug!("Prometheus remote read: received {} bytes", bytes.len());
 
-    // Parse the read request
-    let read_request = parse_remote_read_request(&bytes).map_err(|e| {
-        AppError::bad_request(anyhow::anyhow!("Failed to parse read request: {}", e))
-    })?;
+        verify_read_headers(&headers)?;
 
-    info!(
-        "Prometheus remote read: Processing {} queries",
-        read_request.queries.len()
-    );
+        let read_request = parse_remote_read_request(&bytes).map_err(|e| {
+            AppError::bad_request(anyhow::anyhow!("Failed to parse read request: {}", e))
+        })?;
 
-    // Log detailed information about each query for debugging
-    for (i, query) in read_request.queries.iter().enumerate() {
-        println!(
-            "[DEBUG PROM READ] Query {}: time range {}ms - {}ms ({} matchers)",
-            i,
-            query.start_timestamp_ms,
-            query.end_timestamp_ms,
-            query.matchers.len()
-        );
         info!(
-            "Query {}: time range {}ms - {}ms ({} matchers)",
-            i,
-            query.start_timestamp_ms,
-            query.end_timestamp_ms,
-            query.matchers.len()
+            "Prometheus remote read: Processing {} queries",
+            read_request.queries.len()
         );
 
-        for matcher in &query.matchers {
+        for (i, query) in read_request.queries.iter().enumerate() {
             println!(
-                "[DEBUG PROM READ]   Matcher: {}={} (type={})",
-                matcher.name, matcher.value, matcher.r#type
+                "[DEBUG PROM READ] Query {}: time range {}ms - {}ms ({} matchers)",
+                i,
+                query.start_timestamp_ms,
+                query.end_timestamp_ms,
+                query.matchers.len()
             );
-            debug!(
-                "  Matcher: {}={} (type={})",
-                matcher.name, matcher.value, matcher.r#type
+            info!(
+                "Query {}: time range {}ms - {}ms ({} matchers)",
+                i,
+                query.start_timestamp_ms,
+                query.end_timestamp_ms,
+                query.matchers.len()
             );
+
+            for matcher in &query.matchers {
+                println!(
+                    "[DEBUG PROM READ]   Matcher: {}={} (type={})",
+                    matcher.name, matcher.value, matcher.r#type
+                );
+                debug!(
+                    "  Matcher: {}={} (type={})",
+                    matcher.name, matcher.value, matcher.r#type
+                );
+            }
+
+            if let Some(hints) = &query.hints {
+                debug!("  Hints: step={}ms, func='{}'", hints.step_ms, hints.func);
+            }
         }
 
-        if let Some(hints) = &query.hints {
-            debug!("  Hints: step={}ms, func='{}'", hints.step_ms, hints.func);
+        debug!(
+            "Accepted response types: {:?}",
+            read_request.accepted_response_types
+        );
+
+        let use_streaming = read_request
+            .accepted_response_types
+            .contains(&(ResponseType::StreamedXorChunks as i32));
+
+        if use_streaming {
+            handle_streamed_response(&state, &read_request).await
+        } else {
+            handle_samples_response(&state, &read_request).await
         }
     }
+    .await;
 
-    debug!(
-        "Accepted response types: {:?}",
-        read_request.accepted_response_types
+    metrics.observe_operation_result(
+        "read",
+        "prometheus_remote_read",
+        started.elapsed(),
+        result.is_ok(),
     );
-
-    // Check if client accepts streamed XOR chunks
-    let use_streaming = read_request
-        .accepted_response_types
-        .contains(&(ResponseType::StreamedXorChunks as i32));
-
-    if use_streaming {
-        // Return streamed chunked response
-        handle_streamed_response(&state, &read_request).await
-    } else {
-        // Return standard SAMPLES response
-        handle_samples_response(&state, &read_request).await
+    if let Ok((_, series, samples)) = &result {
+        metrics.observe_series("read", "prometheus_remote_read", *series);
+        metrics.observe_samples("read", "prometheus_remote_read", *samples);
     }
+
+    result.map(|(response, _, _)| response)
 }
 
 /// Handle standard SAMPLES response type
 async fn handle_samples_response(
     state: &HttpServerState,
     read_request: &crate::parsing::prometheus::remote_read_models::ReadRequest,
-) -> Result<Response<axum::body::Body>, AppError> {
+) -> Result<(Response<axum::body::Body>, usize, usize), AppError> {
     let mut results = Vec::with_capacity(read_request.queries.len());
+    let mut series_count = 0usize;
+    let mut sample_count = 0usize;
 
     for query in &read_request.queries {
         let sensor_data = query_sensor_data_for_prometheus(state, query).await?;
+        sample_count += sensor_data
+            .iter()
+            .map(|series| series.samples.len())
+            .sum::<usize>();
 
         debug!("Query returned {} sensors", sensor_data.len());
 
         // Convert to Prometheus TimeSeries
-        let timeseries = sensor_data
+        let timeseries: Vec<_> = sensor_data
             .iter()
             .filter_map(sensor_data_to_timeseries)
             .collect();
+        series_count += timeseries.len();
 
         results.push(QueryResult { timeseries });
     }
@@ -304,24 +325,28 @@ async fn handle_samples_response(
     );
 
     // Build HTTP response with appropriate headers
-    Response::builder()
+    let response = Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/x-protobuf")
         .header("content-encoding", "snappy")
         .body(axum::body::Body::from(response_bytes))
         .map_err(|e| {
             AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
-        })
+        })?;
+
+    Ok((response, series_count, sample_count))
 }
 
 /// Handle STREAMED_XOR_CHUNKS response type
 async fn handle_streamed_response(
     state: &HttpServerState,
     read_request: &crate::parsing::prometheus::remote_read_models::ReadRequest,
-) -> Result<Response<axum::body::Body>, AppError> {
+) -> Result<(Response<axum::body::Body>, usize, usize), AppError> {
     // Prometheus expects ONE ChunkedReadResponse per series, not one per query
     // Each message contains exactly one series
     let mut chunked_responses = Vec::new();
+    let mut series_count = 0usize;
+    let mut sample_count = 0usize;
 
     for (query_index, query) in read_request.queries.iter().enumerate() {
         let sensor_data = query_sensor_data_for_prometheus(state, query).await?;
@@ -366,6 +391,7 @@ async fn handle_streamed_response(
                 Some(s) => s,
                 None => continue, // Skip non-numeric types
             };
+            sample_count += samples.len();
 
             println!(
                 "[DEBUG PROM READ]   Encoding {} samples for sensor {} (first ts: {}, last ts: {})",
@@ -393,6 +419,7 @@ async fn handle_streamed_response(
             let chunked_response =
                 ChunkEncoder::create_response(query_index as i64, vec![chunked_series]);
             chunked_responses.push(chunked_response);
+            series_count += 1;
         }
 
         println!(
@@ -422,7 +449,7 @@ async fn handle_streamed_response(
     );
 
     // Build HTTP response with appropriate headers for streaming
-    Response::builder()
+    let response = Response::builder()
         .status(StatusCode::OK)
         .header(
             "content-type",
@@ -431,7 +458,9 @@ async fn handle_streamed_response(
         .body(axum::body::Body::from(body))
         .map_err(|e| {
             AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
-        })
+        })?;
+
+    Ok((response, series_count, sample_count))
 }
 
 /// Extract Prometheus samples from SensorData for chunk encoding.

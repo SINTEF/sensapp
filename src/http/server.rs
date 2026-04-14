@@ -36,7 +36,7 @@ use futures::TryStreamExt;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
 use tower_http::trace;
 use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
@@ -209,28 +209,39 @@ async fn publish_sensors_data(
     headers: HeaderMap,
     body: axum::body::Body,
 ) -> Result<String, AppError> {
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("text/csv");
+    let metrics = state.metrics.clone();
+    let started = Instant::now();
 
-    match content_type {
-        ct if ct.contains("application/json") => {
-            publish_json_format(body, state.storage.clone()).await?;
-        }
-        ct if ct.contains("application/vnd.apache.arrow.stream")
-            || ct.contains("application/vnd.apache.arrow.file") =>
-        {
-            publish_arrow_format(body, state.storage.clone()).await?;
-        }
-        ct if ct.contains("text/csv") || ct.contains("application/csv") => {
-            publish_csv_format(body, state.storage.clone()).await?;
-        }
-        _ => {
-            publish_csv_format(body, state.storage.clone()).await?;
+    let result = async move {
+        let content_type = headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("text/csv");
+
+        match content_type {
+            ct if ct.contains("application/json") => {
+                publish_json_format(body, state.storage.clone()).await
+            }
+            ct if ct.contains("application/vnd.apache.arrow.stream")
+                || ct.contains("application/vnd.apache.arrow.file") =>
+            {
+                publish_arrow_format(body, state.storage.clone()).await
+            }
+            ct if ct.contains("text/csv") || ct.contains("application/csv") => {
+                publish_csv_format(body, state.storage.clone()).await
+            }
+            _ => publish_csv_format(body, state.storage.clone()).await,
         }
     }
+    .await;
 
+    metrics.observe_operation_result("write", "native_publish", started.elapsed(), result.is_ok());
+    if let Ok(stats) = &result {
+        metrics.observe_series("write", "native_publish", stats.series);
+        metrics.observe_samples("write", "native_publish", stats.samples);
+    }
+
+    result?;
     Ok("ok".to_string())
 }
 
@@ -238,7 +249,7 @@ async fn publish_sensors_data(
 async fn publish_json_format(
     body: axum::body::Body,
     storage: Arc<dyn StorageInstance>,
-) -> Result<(), AppError> {
+) -> Result<crate::importers::IngestionStats, AppError> {
     let body_bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .map_err(|e| AppError::bad_request(anyhow::anyhow!("Failed to read JSON body: {}", e)))?;
@@ -253,7 +264,7 @@ async fn publish_json_format(
 async fn publish_arrow_format(
     body: axum::body::Body,
     storage: Arc<dyn StorageInstance>,
-) -> Result<(), AppError> {
+) -> Result<crate::importers::IngestionStats, AppError> {
     let stream = body.into_data_stream();
     let stream = stream.map_err(io::Error::other);
     let reader = stream.into_async_read();
@@ -267,7 +278,7 @@ async fn publish_arrow_format(
 async fn publish_csv_format(
     body: axum::body::Body,
     storage: Arc<dyn StorageInstance>,
-) -> Result<(), AppError> {
+) -> Result<crate::importers::IngestionStats, AppError> {
     let stream = body.into_data_stream();
     let stream = stream.map_err(io::Error::other);
     let reader = stream.into_async_read();
@@ -287,7 +298,7 @@ async fn publish_csv_format(
 pub async fn publish_senml_data(
     json_str: &str,
     storage: Arc<dyn StorageInstance>,
-) -> Result<(), AppError> {
+) -> Result<crate::importers::IngestionStats, AppError> {
     use crate::datamodel::batch_builder::BatchBuilder;
     use crate::importers::senml::SenMLImporter;
 
@@ -303,8 +314,12 @@ pub async fn publish_senml_data(
 
     // Convert to SensApp format and publish
     let mut batch_builder = BatchBuilder::new().map_err(AppError::internal_server_error)?;
+    let mut series = 0usize;
+    let mut samples = 0usize;
 
     for (_sensor_name, sensor_data) in sensor_data_list {
+        series += 1;
+        samples += sensor_data.samples.len();
         let sensor = std::sync::Arc::new(sensor_data.sensor);
 
         batch_builder
@@ -318,7 +333,7 @@ pub async fn publish_senml_data(
         .await
         .map_err(AppError::internal_server_error)?;
 
-    Ok(())
+    Ok(crate::importers::IngestionStats::new(series, samples))
 }
 
 /// Database Vacuuming

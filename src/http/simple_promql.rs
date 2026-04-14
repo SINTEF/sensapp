@@ -20,6 +20,7 @@ use axum::extract::{Query, State};
 use axum::response::Response;
 use rusty_promql_parser::{Expr, expr};
 use serde::Deserialize;
+use std::time::Instant;
 
 /// Default time range for instant queries (1 hour in milliseconds)
 const DEFAULT_LOOKBACK_MS: i64 = 3600 * 1000;
@@ -274,68 +275,89 @@ pub async fn simple_promql_query(
     State(state): State<HttpServerState>,
     Query(query): Query<PromQLQuery>,
 ) -> Result<Response, AppError> {
-    // Parse and validate the query
-    let parsed = parse_promql_query(&query.query)?;
+    let metrics = state.metrics.clone();
+    let started = Instant::now();
 
-    // Execute the query (numeric_only=false since we support all types in export formats)
-    let results = state
-        .storage
-        .query_sensors_by_labels(
-            &parsed.matchers,
-            parsed.start_time,
-            parsed.end_time,
-            None,
-            false,
-        )
-        .await?;
+    let result = async move {
+        let parsed = parse_promql_query(&query.query)?;
 
-    // Parse format from query parameter, default to SenML/JSON
-    let format = match query.format.as_deref() {
-        Some(format_str) => ExportFormat::from_extension(format_str).ok_or_else(|| {
-            AppError::bad_request(anyhow::anyhow!(
-                "Unsupported export format '{}'. Supported formats: senml, csv, jsonl, arrow",
-                format_str
-            ))
-        })?,
-        None => ExportFormat::Senml, // Default to SenML/JSON format
-    };
+        let results = state
+            .storage
+            .query_sensors_by_labels(
+                &parsed.matchers,
+                parsed.start_time,
+                parsed.end_time,
+                None,
+                false,
+            )
+            .await?;
 
-    // Convert based on requested format
-    let response = match format {
-        ExportFormat::Senml => {
-            let json_value = SenMLConverter::to_senml_json_multi(&results)
-                .map_err(AppError::internal_server_error)?;
-            axum::response::Response::builder()
-                .header("content-type", format.content_type())
-                .body(json_value.to_string().into())
+        let series = results.len();
+        let samples = results
+            .iter()
+            .map(|sensor_data| sensor_data.samples.len())
+            .sum();
+
+        let format = match query.format.as_deref() {
+            Some(format_str) => ExportFormat::from_extension(format_str).ok_or_else(|| {
+                AppError::bad_request(anyhow::anyhow!(
+                    "Unsupported export format '{}'. Supported formats: senml, csv, jsonl, arrow",
+                    format_str
+                ))
+            })?,
+            None => ExportFormat::Senml,
+        };
+
+        let response = match format {
+            ExportFormat::Senml => {
+                let json_value = SenMLConverter::to_senml_json_multi(&results)
+                    .map_err(AppError::internal_server_error)?;
+                axum::response::Response::builder()
+                    .header("content-type", format.content_type())
+                    .body(json_value.to_string().into())
+            }
+            ExportFormat::Csv => {
+                let csv_content = CsvConverter::to_csv_multi(&results)
+                    .map_err(AppError::internal_server_error)?;
+                axum::response::Response::builder()
+                    .header("content-type", format.content_type())
+                    .body(csv_content.into())
+            }
+            ExportFormat::Jsonl => {
+                let jsonl_content = JsonlConverter::to_jsonl_multi(&results)
+                    .map_err(AppError::internal_server_error)?;
+                axum::response::Response::builder()
+                    .header("content-type", format.content_type())
+                    .body(jsonl_content.into())
+            }
+            ExportFormat::Arrow => {
+                let arrow_bytes = ArrowConverter::to_arrow_stream_multi(&results)
+                    .map_err(AppError::internal_server_error)?;
+                axum::response::Response::builder()
+                    .header("content-type", format.content_type())
+                    .body(arrow_bytes.into())
+            }
         }
-        ExportFormat::Csv => {
-            let csv_content =
-                CsvConverter::to_csv_multi(&results).map_err(AppError::internal_server_error)?;
-            axum::response::Response::builder()
-                .header("content-type", format.content_type())
-                .body(csv_content.into())
-        }
-        ExportFormat::Jsonl => {
-            let jsonl_content = JsonlConverter::to_jsonl_multi(&results)
-                .map_err(AppError::internal_server_error)?;
-            axum::response::Response::builder()
-                .header("content-type", format.content_type())
-                .body(jsonl_content.into())
-        }
-        ExportFormat::Arrow => {
-            let arrow_bytes = ArrowConverter::to_arrow_stream_multi(&results)
-                .map_err(AppError::internal_server_error)?;
-            axum::response::Response::builder()
-                .header("content-type", format.content_type())
-                .body(arrow_bytes.into())
-        }
+        .map_err(|e| {
+            AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
+        })?;
+
+        Ok::<_, AppError>((response, series, samples))
     }
-    .map_err(|e| {
-        AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
-    })?;
+    .await;
 
-    Ok(response)
+    metrics.observe_operation_result(
+        "read",
+        "simple_promql_query",
+        started.elapsed(),
+        result.is_ok(),
+    );
+    if let Ok((_, series, samples)) = &result {
+        metrics.observe_series("read", "simple_promql_query", *series);
+        metrics.observe_samples("read", "simple_promql_query", *samples);
+    }
+
+    result.map(|(response, _, _)| response)
 }
 
 #[cfg(test)]

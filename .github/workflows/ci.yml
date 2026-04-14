@@ -12,6 +12,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  DUCKDB_DOWNLOAD_LIB: "1"
+  DUCKDB_CMAKE_BUILD_TYPE: Release
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 

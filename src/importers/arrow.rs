@@ -3,6 +3,7 @@ use crate::{
         Sample, SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
         unit::Unit,
     },
+    importers::IngestionStats,
     storage::StorageInstance,
 };
 use anyhow::{Result, anyhow};
@@ -27,29 +28,32 @@ use uuid::Uuid;
 pub async fn publish_arrow_async<R: AsyncRead + Unpin + Send>(
     mut arrow_reader: R,
     storage: Arc<dyn StorageInstance>,
-) -> Result<()> {
+) -> Result<IngestionStats> {
     // Read all data into a buffer first
     let mut buffer = Vec::new();
     arrow_reader.read_to_end(&mut buffer).await?;
 
     // Parse the Arrow data
     let record_batches = parse_arrow_file(&buffer)?;
+    let mut stats = IngestionStats::default();
 
     // Convert Arrow data to SensApp format and publish
     let mut batch_builder = BatchBuilder::new()?;
 
     for record_batch in record_batches {
         let sensor_data_map = convert_record_batch_to_sensors(&record_batch)?;
+        stats.series += sensor_data_map.len();
 
         for (_sensor_key, (sensor, sample_entries)) in sensor_data_map {
             for (_datetime, typed_samples) in sample_entries {
+                stats.samples += typed_samples.len();
                 batch_builder.add(sensor.clone(), typed_samples).await?;
             }
         }
     }
 
     batch_builder.send_what_is_left(storage).await?;
-    Ok(())
+    Ok(stats)
 }
 
 /// Parse Arrow IPC stream or file format from bytes.

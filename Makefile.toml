@@ -421,7 +421,9 @@ dependencies = ["fmt-check", "clippy-all"]
 [tasks.security-audit]
 description = "Run security audit"
 command = "cargo"
-args = ["audit"]
+# Ignore the unfixed RSA Marvin advisory for now: this codebase uses HS256 JWTs,
+# and the remaining `rsa` edge is currently transitive via `jsonwebtoken`/`sqlx-mysql`.
+args = ["audit", "--ignore", "RUSTSEC-2023-0071"]
 
 [tasks.clippy-all]
 description = "Run clippy on all storage backend features"

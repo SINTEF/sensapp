@@ -4,6 +4,7 @@ use anyhow::Result;
 use axum::http::StatusCode;
 use common::TestDb;
 use common::http::TestApp;
+use hifitime::Unit;
 use sensapp::config::load_configuration_for_tests;
 use sensapp::datamodel::batch_builder::BatchBuilder;
 use sensapp::datamodel::sensapp_vec::SensAppLabels;
@@ -184,6 +185,78 @@ async fn test_prometheus_metrics_latest_samples_honors_selector() -> Result<()> 
     response.assert_status(StatusCode::OK);
     response.assert_body_contains("room_temperature_celsius{site=\"alpha\"} 21 1704067210000");
     assert!(!response.body().contains("site=\"beta\""));
+
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_prometheus_metrics_exposes_write_and_read_operation_metrics() -> Result<()> {
+    ensure_config();
+
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let app = TestApp::new(storage.clone()).await;
+    let now = sensapp::datamodel::SensAppDateTime::now().expect("current time should be available");
+
+    let response = app
+        .post_influxdb(
+            "/api/v2/write?bucket=sensapp&org=test",
+            &format!(
+                "cpu,host=web1 usage_system=64.2,usage_user=12.3 {}",
+                now.to_unix(Unit::Nanosecond).floor() as i64
+            ),
+        )
+        .await?;
+    response.assert_status(StatusCode::NO_CONTENT);
+
+    publish_test_sensors(
+        &storage,
+        vec![(
+            create_sensor(
+                "room_temperature_celsius",
+                SensorType::Float,
+                vec![("room", "lab")],
+            ),
+            TypedSamples::Float(smallvec::smallvec![
+                Sample {
+                    datetime: now - hifitime::Duration::from_seconds(30.0),
+                    value: 20.5,
+                },
+                Sample {
+                    datetime: now - hifitime::Duration::from_seconds(15.0),
+                    value: 21.0,
+                },
+            ]),
+        )],
+    )
+    .await?;
+
+    let response = app
+        .get("/api/v1/query?query=room_temperature_celsius")
+        .await?;
+    response.assert_status(StatusCode::OK);
+
+    let metrics = app.get("/prometheus/metrics").await?;
+    metrics.assert_status(StatusCode::OK);
+    metrics.assert_body_contains(
+        "sensapp_operations_total{kind=\"write\",operation=\"influxdb_write\",status=\"success\"} 1",
+    );
+    metrics.assert_body_contains(
+        "sensapp_series_processed_total{kind=\"write\",operation=\"influxdb_write\"} 2",
+    );
+    metrics.assert_body_contains(
+        "sensapp_samples_processed_total{kind=\"write\",operation=\"influxdb_write\"} 2",
+    );
+    metrics.assert_body_contains(
+        "sensapp_operations_total{kind=\"read\",operation=\"simple_promql_query\",status=\"success\"} 1",
+    );
+    metrics.assert_body_contains(
+        "sensapp_series_processed_total{kind=\"read\",operation=\"simple_promql_query\"} 1",
+    );
+    metrics.assert_body_contains(
+        "sensapp_samples_processed_total{kind=\"read\",operation=\"simple_promql_query\"} 2",
+    );
 
     Ok(())
 }

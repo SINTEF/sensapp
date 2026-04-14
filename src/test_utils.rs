@@ -3,8 +3,10 @@
 //! This module provides centralized test configuration and utilities,
 //! particularly for database connection management.
 
-use anyhow::{Result, anyhow};
-#[cfg(feature = "postgres")]
+use anyhow::Result;
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+use anyhow::anyhow;
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
 use sqlx::postgres::PgPoolOptions;
 use std::path::{Path, PathBuf};
 use url::Url;
@@ -13,11 +15,19 @@ use url::Url;
 const DEFAULT_POSTGRES_CONNECTION_STRING: &str =
     "postgres://postgres:postgres@localhost:5432/sensapp-test";
 
+/// Default TimeScaleDB connection string for tests
+const DEFAULT_TIMESCALEDB_CONNECTION_STRING: &str =
+    "timescaledb://postgres:postgres@localhost:5433/sensapp-test";
+
 /// Default SQLite connection string for tests
 const DEFAULT_SQLITE_CONNECTION_STRING: &str = "sqlite://test.db";
 
 /// Default DuckDB connection string for tests
 const DEFAULT_DUCKDB_CONNECTION_STRING: &str = "duckdb://test.duckdb";
+
+/// Default ClickHouse connection string for tests
+const DEFAULT_CLICKHOUSE_CONNECTION_STRING: &str =
+    "clickhouse://default:password@localhost:8123/sensapp_test";
 
 /// Get the test database connection string from environment or use the default
 /// connection string for an enabled storage backend.
@@ -42,12 +52,16 @@ pub fn get_test_database_url() -> String {
 }
 
 pub async fn ensure_test_database_exists(connection_string: &str) -> Result<()> {
-    #[cfg(feature = "postgres")]
+    #[cfg(any(feature = "postgres", feature = "timescaledb"))]
     if connection_string.starts_with("postgres://")
         || connection_string.starts_with("postgresql://")
+        || connection_string.starts_with("timescaledb://")
     {
         return ensure_postgres_test_database(connection_string).await;
     }
+
+    #[cfg(not(any(feature = "postgres", feature = "timescaledb")))]
+    let _ = connection_string;
 
     Ok(())
 }
@@ -55,10 +69,14 @@ pub async fn ensure_test_database_exists(connection_string: &str) -> Result<()> 
 fn default_test_database_url() -> &'static str {
     if cfg!(feature = "postgres") {
         DEFAULT_POSTGRES_CONNECTION_STRING
+    } else if cfg!(feature = "timescaledb") {
+        DEFAULT_TIMESCALEDB_CONNECTION_STRING
     } else if cfg!(feature = "sqlite") {
         DEFAULT_SQLITE_CONNECTION_STRING
     } else if cfg!(feature = "duckdb") {
         DEFAULT_DUCKDB_CONNECTION_STRING
+    } else if cfg!(feature = "clickhouse") {
+        DEFAULT_CLICKHOUSE_CONNECTION_STRING
     } else {
         DEFAULT_POSTGRES_CONNECTION_STRING
     }
@@ -67,6 +85,7 @@ fn default_test_database_url() -> &'static str {
 fn isolate_file_backed_test_database(connection_string: &str) -> String {
     if connection_string.starts_with("postgres://")
         || connection_string.starts_with("postgresql://")
+        || connection_string.starts_with("timescaledb://")
     {
         return isolate_postgres_test_database(connection_string);
     }
@@ -100,8 +119,10 @@ fn isolate_postgres_test_database(connection_string: &str) -> String {
     url.to_string()
 }
 
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
 async fn ensure_postgres_test_database(connection_string: &str) -> Result<()> {
+    let sqlx_connection_string = normalize_postgres_like_url(connection_string);
+
     let url = Url::parse(connection_string).map_err(|e| {
         anyhow!(
             "Failed to parse PostgreSQL test URL '{}': {}",
@@ -122,7 +143,13 @@ async fn ensure_postgres_test_database(connection_string: &str) -> Result<()> {
         })?
         .to_string();
 
-    let mut admin_url = url.clone();
+    let mut admin_url = Url::parse(&sqlx_connection_string).map_err(|e| {
+        anyhow!(
+            "Failed to normalize PostgreSQL-compatible test URL '{}': {}",
+            connection_string,
+            e
+        )
+    })?;
     admin_url.set_path("/postgres");
 
     let pool = PgPoolOptions::new()
@@ -147,6 +174,15 @@ async fn ensure_postgres_test_database(connection_string: &str) -> Result<()> {
             database_name,
             e
         )),
+    }
+}
+
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+fn normalize_postgres_like_url(connection_string: &str) -> String {
+    if connection_string.starts_with("timescaledb://") {
+        connection_string.replacen("timescaledb://", "postgres://", 1)
+    } else {
+        connection_string.to_string()
     }
 }
 
@@ -200,10 +236,14 @@ mod tests {
     fn feature_aware_default_matches_enabled_backends() {
         let expected = if cfg!(feature = "postgres") {
             DEFAULT_POSTGRES_CONNECTION_STRING
+        } else if cfg!(feature = "timescaledb") {
+            DEFAULT_TIMESCALEDB_CONNECTION_STRING
         } else if cfg!(feature = "sqlite") {
             DEFAULT_SQLITE_CONNECTION_STRING
         } else if cfg!(feature = "duckdb") {
             DEFAULT_DUCKDB_CONNECTION_STRING
+        } else if cfg!(feature = "clickhouse") {
+            DEFAULT_CLICKHOUSE_CONNECTION_STRING
         } else {
             DEFAULT_POSTGRES_CONNECTION_STRING
         };
@@ -211,6 +251,7 @@ mod tests {
         assert_eq!(default_test_database_url(), expected);
     }
 
+    #[cfg(any(feature = "postgres", feature = "timescaledb"))]
     #[test]
     fn isolates_postgres_database_name_per_process() {
         temp_env::with_var(
@@ -226,6 +267,36 @@ mod tests {
                     )
                 );
             },
+        );
+    }
+
+    #[cfg(any(feature = "postgres", feature = "timescaledb"))]
+    #[test]
+    fn isolates_timescaledb_database_name_per_process() {
+        temp_env::with_var(
+            "TEST_DATABASE_URL",
+            Some("timescaledb://postgres:postgres@localhost:5433/sensapp-test"),
+            || {
+                let process_id = std::process::id();
+                assert_eq!(
+                    get_test_database_url(),
+                    format!(
+                        "timescaledb://postgres:postgres@localhost:5433/sensapp-test-{}",
+                        process_id
+                    )
+                );
+            },
+        );
+    }
+
+    #[cfg(any(feature = "postgres", feature = "timescaledb"))]
+    #[test]
+    fn normalizes_timescaledb_url_for_sqlx() {
+        assert_eq!(
+            normalize_postgres_like_url(
+                "timescaledb://postgres:postgres@localhost:5433/sensapp-test"
+            ),
+            "postgres://postgres:postgres@localhost:5433/sensapp-test"
         );
     }
 }

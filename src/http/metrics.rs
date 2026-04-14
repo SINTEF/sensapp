@@ -44,10 +44,33 @@ struct HttpRequestDurationLabels {
     path: String,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct OperationLabels {
+    kind: String,
+    operation: String,
+    status: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct OperationDurationLabels {
+    kind: String,
+    operation: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct DataVolumeLabels {
+    kind: String,
+    operation: String,
+}
+
 pub struct HttpMetrics {
     registry: Registry,
     http_requests_total: Family<HttpRequestLabels, Counter>,
     http_request_duration_seconds: Family<HttpRequestDurationLabels, Histogram>,
+    operations_total: Family<OperationLabels, Counter>,
+    operation_duration_seconds: Family<OperationDurationLabels, Histogram>,
+    samples_processed_total: Family<DataVolumeLabels, Counter>,
+    series_processed_total: Family<DataVolumeLabels, Counter>,
     http_requests_in_flight: Gauge,
     uptime_seconds: Gauge,
     storage_ready: Gauge,
@@ -89,6 +112,37 @@ impl HttpMetrics {
             http_request_duration_seconds.clone(),
         );
 
+        let operations_total = Family::<OperationLabels, Counter>::default();
+        registry.register(
+            "sensapp_operations",
+            "Total number of application read/write operations",
+            operations_total.clone(),
+        );
+
+        let operation_duration_seconds =
+            Family::<OperationDurationLabels, Histogram>::new_with_constructor(|| {
+                Histogram::new(exponential_buckets(0.001, 2.0, 16))
+            });
+        registry.register(
+            "sensapp_operation_duration_seconds",
+            "Application read/write operation duration in seconds",
+            operation_duration_seconds.clone(),
+        );
+
+        let samples_processed_total = Family::<DataVolumeLabels, Counter>::default();
+        registry.register(
+            "sensapp_samples_processed",
+            "Total number of samples processed by read/write operations",
+            samples_processed_total.clone(),
+        );
+
+        let series_processed_total = Family::<DataVolumeLabels, Counter>::default();
+        registry.register(
+            "sensapp_series_processed",
+            "Total number of series processed by read/write operations",
+            series_processed_total.clone(),
+        );
+
         let http_requests_in_flight = Gauge::default();
         registry.register(
             "sensapp_http_requests_in_flight",
@@ -114,6 +168,10 @@ impl HttpMetrics {
             registry,
             http_requests_total,
             http_request_duration_seconds,
+            operations_total,
+            operation_duration_seconds,
+            samples_processed_total,
+            series_processed_total,
             http_requests_in_flight,
             uptime_seconds,
             storage_ready,
@@ -142,6 +200,59 @@ impl HttpMetrics {
                 path: path.to_string(),
             })
             .observe(duration.as_secs_f64());
+    }
+
+    pub fn observe_operation_result(
+        &self,
+        kind: &str,
+        operation: &str,
+        duration: Duration,
+        success: bool,
+    ) {
+        self.operations_total
+            .get_or_create(&OperationLabels {
+                kind: kind.to_string(),
+                operation: operation.to_string(),
+                status: if success {
+                    "success".to_string()
+                } else {
+                    "error".to_string()
+                },
+            })
+            .inc();
+
+        self.operation_duration_seconds
+            .get_or_create(&OperationDurationLabels {
+                kind: kind.to_string(),
+                operation: operation.to_string(),
+            })
+            .observe(duration.as_secs_f64());
+    }
+
+    pub fn observe_samples(&self, kind: &str, operation: &str, samples: usize) {
+        let Ok(samples) = u64::try_from(samples) else {
+            return;
+        };
+
+        self.samples_processed_total
+            .get_or_create(&DataVolumeLabels {
+                kind: kind.to_string(),
+                operation: operation.to_string(),
+            })
+            .inc_by(samples);
+    }
+
+    pub fn observe_series(&self, kind: &str, operation: &str, series: usize) {
+        let Ok(series) = u64::try_from(series) else {
+            return;
+        };
+
+        self.series_processed_total
+            .get_or_create(&DataVolumeLabels {
+                kind: kind.to_string(),
+                operation: operation.to_string(),
+            })
+            .inc_by(series);
     }
 
     pub fn increment_in_flight(&self) {
@@ -439,9 +550,14 @@ mod tests {
             StatusCode::OK,
             Duration::from_millis(5),
         );
+        metrics.observe_operation_result("read", "list_metrics", Duration::from_millis(2), true);
+        metrics.observe_series("read", "list_metrics", 3);
+        metrics.observe_samples("read", "list_metrics", 7);
         let body = metrics.render(true).unwrap();
 
         assert!(body.contains("sensapp_http_requests_total"));
+        assert!(body.contains("sensapp_operations_total"));
+        assert!(body.contains("sensapp_samples_processed_total"));
         assert!(body.contains("sensapp_uptime_seconds"));
         assert!(body.contains("sensapp_storage_ready 1"));
     }

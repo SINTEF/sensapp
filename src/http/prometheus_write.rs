@@ -15,6 +15,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
 };
+use std::time::Instant;
 use tokio_util::bytes::Bytes;
 use tracing::{debug, info};
 
@@ -109,78 +110,94 @@ pub async fn publish_prometheus(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
-    debug!("Prometheus remote write: received {} bytes", bytes.len());
+    let metrics = state.metrics.clone();
+    let started = Instant::now();
 
-    // Verify headers
-    verify_headers(&headers)?;
+    let result = async move {
+        debug!("Prometheus remote write: received {} bytes", bytes.len());
 
-    // Parse the content
-    let write_request = parse_remote_write_request(&bytes)?;
+        verify_headers(&headers)?;
 
-    // Regularly, prometheus sends metadata on the undocumented reserved field,
-    // so we stop immediately when it happens.
-    if write_request.timeseries.is_empty() {
-        return Ok(StatusCode::NO_CONTENT);
-    }
+        let write_request = parse_remote_write_request(&bytes)?;
 
-    debug!("Processing {} timeseries", write_request.timeseries.len());
+        if write_request.timeseries.is_empty() {
+            return Ok::<_, AppError>((StatusCode::NO_CONTENT, 0usize, 0usize));
+        }
 
-    let mut batch_builder = BatchBuilder::new()?;
-    for time_serie in write_request.timeseries {
-        let mut labels = SensAppLabels::with_capacity(time_serie.labels.len());
-        let mut name: Option<String> = None;
-        let mut unit: Option<Unit> = None;
-        for label in time_serie.labels {
-            match label.name.as_str() {
-                "__name__" => {
-                    name = Some(label.value.clone());
+        debug!("Processing {} timeseries", write_request.timeseries.len());
+
+        let mut batch_builder = BatchBuilder::new()?;
+        let mut series = 0usize;
+        let mut sample_count = 0usize;
+        for time_serie in write_request.timeseries {
+            let mut labels = SensAppLabels::with_capacity(time_serie.labels.len());
+            let mut name: Option<String> = None;
+            let mut unit: Option<Unit> = None;
+            for label in time_serie.labels {
+                match label.name.as_str() {
+                    "__name__" => {
+                        name = Some(label.value.clone());
+                    }
+                    "unit" => {
+                        unit = Some(Unit::new(label.value.clone(), None));
+                    }
+                    _ => {}
                 }
-                "unit" => {
-                    unit = Some(Unit::new(label.value.clone(), None));
+                labels.push((label.name, label.value));
+            }
+            let name = match name {
+                Some(name) => name,
+                None => {
+                    return Err(AppError::bad_request(anyhow::anyhow!(
+                        "A time serie is missing its __name__ label"
+                    )));
                 }
-                _ => {}
-            }
-            labels.push((label.name, label.value));
+            };
+
+            let sensor = Sensor::new_without_uuid(name, SensorType::Float, unit, Some(labels))?;
+
+            let samples = TypedSamples::Float(
+                time_serie
+                    .samples
+                    .into_iter()
+                    .map(|sample| Sample {
+                        datetime: SensAppDateTime::from_unix_milliseconds_i64(sample.timestamp),
+                        value: sample.value,
+                    })
+                    .collect(),
+            );
+
+            series += 1;
+            sample_count += samples.len();
+            batch_builder.add(Arc::new(sensor), samples).await?;
         }
-        let name = match name {
-            Some(name) => name,
-            None => {
-                return Err(AppError::bad_request(anyhow::anyhow!(
-                    "A time serie is missing its __name__ label"
-                )));
+
+        match batch_builder.send_what_is_left(state.storage.clone()).await {
+            Ok(true) => {
+                info!("Prometheus: Batch sent successfully");
             }
-        };
+            Ok(false) => {
+                debug!("Prometheus: No data to send");
+            }
+            Err(error) => {
+                return Err(AppError::internal_server_error(error));
+            }
+        }
 
-        // Prometheus has a very simple model, it's always a float.
-        let sensor = Sensor::new_without_uuid(name, SensorType::Float, unit, Some(labels))?;
+        Ok((StatusCode::NO_CONTENT, series, sample_count))
+    }
+    .await;
 
-        // We can now add the samples
-        let samples = TypedSamples::Float(
-            time_serie
-                .samples
-                .into_iter()
-                .map(|sample| Sample {
-                    datetime: SensAppDateTime::from_unix_milliseconds_i64(sample.timestamp),
-                    value: sample.value,
-                })
-                .collect(),
-        );
-
-        batch_builder.add(Arc::new(sensor), samples).await?;
+    metrics.observe_operation_result(
+        "write",
+        "prometheus_remote_write",
+        started.elapsed(),
+        result.is_ok(),
+    );
+    if let Ok((_, series, samples)) = &result {
+        metrics.observe_series("write", "prometheus_remote_write", *series);
+        metrics.observe_samples("write", "prometheus_remote_write", *samples);
     }
 
-    match batch_builder.send_what_is_left(state.storage.clone()).await {
-        Ok(true) => {
-            info!("Prometheus: Batch sent successfully");
-        }
-        Ok(false) => {
-            debug!("Prometheus: No data to send");
-        }
-        Err(error) => {
-            return Err(AppError::internal_server_error(error));
-        }
-    }
-
-    // OK no content
-    Ok(StatusCode::NO_CONTENT)
+    result.map(|(status, _, _)| status)
 }

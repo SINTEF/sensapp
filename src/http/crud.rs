@@ -12,6 +12,7 @@ use rusty_promql_parser::{Expr, expr};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::str::FromStr;
+use std::time::Instant;
 
 mod promql_duration {
     use anyhow::{Result, anyhow};
@@ -380,67 +381,64 @@ pub async fn list_metrics(
     State(state): State<HttpServerState>,
     Query(query): Query<MetricsQuery>,
 ) -> Result<Json<Value>, AppError> {
-    let metrics = state.storage.list_metrics().await?;
+    let metrics_registry = state.metrics.clone();
+    let started = Instant::now();
 
-    // Compile regex if provided
-    let name_regex = match &query.name_regex {
-        Some(pattern) => Some(Regex::new(pattern).map_err(|e| {
-            AppError::bad_request(anyhow::anyhow!(
-                "Invalid regex pattern '{}': {}",
-                pattern,
-                e
-            ))
-        })?),
-        None => None,
-    };
+    let result = async move {
+        let metrics = state.storage.list_metrics().await?;
 
-    // Parse type filter if provided
-    let type_filter = match &query.r#type {
-        Some(type_str) => Some(SensorType::from_str(type_str).map_err(|e| {
-            AppError::bad_request(anyhow::anyhow!(
-                "Invalid sensor type '{}': {}. Valid types: float, integer, string, boolean, location, json, blob, numeric",
-                type_str, e
-            ))
-        })?),
-        None => None,
-    };
+        let name_regex = match &query.name_regex {
+            Some(pattern) => Some(Regex::new(pattern).map_err(|e| {
+                AppError::bad_request(anyhow::anyhow!(
+                    "Invalid regex pattern '{}': {}",
+                    pattern,
+                    e
+                ))
+            })?),
+            None => None,
+        };
 
-    // Filter metrics based on query parameters
-    let filtered_metrics: Vec<_> = metrics
-        .into_iter()
-        .filter(|metric| {
-            // Filter by name substring
-            if let Some(name_filter) = &query.name
-                && !metric
-                    .name
-                    .to_lowercase()
-                    .contains(&name_filter.to_lowercase())
-            {
-                return false;
-            }
+        let type_filter = match &query.r#type {
+            Some(type_str) => Some(SensorType::from_str(type_str).map_err(|e| {
+                AppError::bad_request(anyhow::anyhow!(
+                    "Invalid sensor type '{}': {}. Valid types: float, integer, string, boolean, location, json, blob, numeric",
+                    type_str, e
+                ))
+            })?),
+            None => None,
+        };
 
-            // Filter by name regex
-            if let Some(regex) = &name_regex
-                && !regex.is_match(&metric.name)
-            {
-                return false;
-            }
+        let filtered_metrics: Vec<_> = metrics
+            .into_iter()
+            .filter(|metric| {
+                if let Some(name_filter) = &query.name
+                    && !metric
+                        .name
+                        .to_lowercase()
+                        .contains(&name_filter.to_lowercase())
+                {
+                    return false;
+                }
 
-            // Filter by type
-            if let Some(type_filter) = &type_filter
-                && &metric.sensor_type != type_filter
-            {
-                return false;
-            }
+                if let Some(regex) = &name_regex
+                    && !regex.is_match(&metric.name)
+                {
+                    return false;
+                }
 
-            true
-        })
-        .collect();
+                if let Some(type_filter) = &type_filter
+                    && &metric.sensor_type != type_filter
+                {
+                    return false;
+                }
 
-    // Create DCAT catalog structure for metrics
-    let datasets: Vec<Value> = filtered_metrics
-        .iter()
-        .map(|metric| {
+                true
+            })
+            .collect();
+
+        let datasets: Vec<Value> = filtered_metrics
+            .iter()
+            .map(|metric| {
             // Create keywords from metric type and label dimensions
             let mut keywords = vec!["metric", "aggregated", "time-series"];
             keywords.push(match metric.sensor_type {
@@ -498,29 +496,43 @@ pub async fn list_metrics(
                 dataset["sensor:unit"] = json!(unit.name);
             }
 
-            dataset
-        })
-        .collect();
+                dataset
+            })
+            .collect();
 
-    let catalog = json!({
-        "@context": {
-            "dcat": "http://www.w3.org/ns/dcat#",
-            "dct": "http://purl.org/dc/terms/",
-            "foaf": "http://xmlns.com/foaf/0.1/",
-            "sensor": "http://sensapp.io/ns/sensor#"
-        },
-        "@type": "dcat:Catalog",
-        "@id": "sensapp_metrics_catalog",
-        "dct:title": "SensApp Metrics Catalog",
-        "dct:description": "Catalog of aggregated metrics available in SensApp platform",
-        "dct:publisher": {
-            "@type": "foaf:Organization",
-            "foaf:name": "SensApp"
-        },
-        "dcat:dataset": datasets
-    });
+        let catalog = json!({
+            "@context": {
+                "dcat": "http://www.w3.org/ns/dcat#",
+                "dct": "http://purl.org/dc/terms/",
+                "foaf": "http://xmlns.com/foaf/0.1/",
+                "sensor": "http://sensapp.io/ns/sensor#"
+            },
+            "@type": "dcat:Catalog",
+            "@id": "sensapp_metrics_catalog",
+            "dct:title": "SensApp Metrics Catalog",
+            "dct:description": "Catalog of aggregated metrics available in SensApp platform",
+            "dct:publisher": {
+                "@type": "foaf:Organization",
+                "foaf:name": "SensApp"
+            },
+            "dcat:dataset": datasets
+        });
 
-    Ok(Json(catalog))
+        Ok::<_, AppError>((Json(catalog), filtered_metrics.len()))
+    }
+    .await;
+
+    metrics_registry.observe_operation_result(
+        "read",
+        "list_metrics",
+        started.elapsed(),
+        result.is_ok(),
+    );
+    if let Ok((_, items)) = &result {
+        metrics_registry.observe_series("read", "list_metrics", *items);
+    }
+
+    result.map(|(catalog, _)| catalog)
 }
 
 /// List all series (time series) in DCAT catalog format.
@@ -540,38 +552,37 @@ pub async fn list_series(
     State(state): State<HttpServerState>,
     Query(query): Query<SeriesQuery>,
 ) -> Result<axum::response::Response, AppError> {
-    // Validate and cap the limit
-    let limit = query
-        .limit
-        .map(|l| l.min(crate::storage::MAX_LIST_SERIES_LIMIT));
+    let metrics_registry = state.metrics.clone();
+    let started = Instant::now();
 
-    // Get the series metadata including labels and UUIDs, optionally filtered by metric
-    let result = state
-        .storage
-        .list_series(query.metric.as_deref(), limit, query.bookmark.as_deref())
-        .await?;
+    let result = async move {
+        let limit = query
+            .limit
+            .map(|l| l.min(crate::storage::MAX_LIST_SERIES_LIMIT));
 
-    // Parse the selector if provided
-    let label_matchers = match &query.selector {
-        Some(selector) => Some(parse_selector_to_matchers(selector)?),
-        None => None,
-    };
+        let result = state
+            .storage
+            .list_series(query.metric.as_deref(), limit, query.bookmark.as_deref())
+            .await?;
 
-    // Filter sensors by label matchers if provided
-    let filtered_sensors: Vec<_> = if let Some(matchers) = &label_matchers {
-        result
-            .series
-            .into_iter()
-            .filter(|sensor| sensor_matches_matchers(sensor, matchers))
-            .collect()
-    } else {
-        result.series
-    };
+        let label_matchers = match &query.selector {
+            Some(selector) => Some(parse_selector_to_matchers(selector)?),
+            None => None,
+        };
 
-    // Create DCAT catalog structure
-    let datasets: Vec<Value> = filtered_sensors
-        .iter()
-        .map(|sensor| {
+        let filtered_sensors: Vec<_> = if let Some(matchers) = &label_matchers {
+            result
+                .series
+                .into_iter()
+                .filter(|sensor| sensor_matches_matchers(sensor, matchers))
+                .collect()
+        } else {
+            result.series
+        };
+
+        let datasets: Vec<Value> = filtered_sensors
+            .iter()
+            .map(|sensor| {
             // Create keywords from sensor type, unit, and labels
             let mut keywords = vec!["sensor", "IoT", "time-series"];
             keywords.push(match sensor.sensor_type {
@@ -644,12 +655,11 @@ pub async fn list_series(
                 dataset["sensor:unit"] = json!(unit.name);
             }
 
-            dataset
-        })
-        .collect();
+                dataset
+            })
+            .collect();
 
-    // Build catalog with Hydra pagination metadata if there's a next page
-    let mut catalog = json!({
+        let mut catalog = json!({
         "@context": {
             "dcat": "http://www.w3.org/ns/dcat#",
             "dct": "http://purl.org/dc/terms/",
@@ -667,8 +677,7 @@ pub async fn list_series(
         "dcat:dataset": datasets
     });
 
-    // Add Hydra pagination metadata if there's a next page
-    let link_header = if let Some(bookmark) = &result.bookmark {
+        let link_header = if let Some(bookmark) = &result.bookmark {
         // Build the next page URL
         let mut next_url = format!(
             "/series?limit={}&bookmark={}",
@@ -688,26 +697,41 @@ pub async fn list_series(
 
         // Return Link header value
         Some(format!("<{}>; rel=\"next\"", next_url))
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
-    // Build response with optional Link header
-    let mut response = axum::response::Response::builder()
-        .status(200)
-        .header("Content-Type", "application/json");
+        let mut response = axum::response::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json");
 
-    if let Some(link) = link_header {
-        response = response.header("Link", link);
+        if let Some(link) = link_header {
+            response = response.header("Link", link);
+        }
+
+        let body = serde_json::to_string(&catalog).map_err(|e| {
+            AppError::internal_server_error(anyhow::anyhow!("Failed to serialize catalog: {}", e))
+        })?;
+
+        let response = response.body(axum::body::Body::from(body)).map_err(|e| {
+            AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
+        })?;
+
+        Ok::<_, AppError>((response, filtered_sensors.len()))
+    }
+    .await;
+
+    metrics_registry.observe_operation_result(
+        "read",
+        "list_series",
+        started.elapsed(),
+        result.is_ok(),
+    );
+    if let Ok((_, series)) = &result {
+        metrics_registry.observe_series("read", "list_series", *series);
     }
 
-    let body = serde_json::to_string(&catalog).map_err(|e| {
-        AppError::internal_server_error(anyhow::anyhow!("Failed to serialize catalog: {}", e))
-    })?;
-
-    response.body(axum::body::Body::from(body)).map_err(|e| {
-        AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
-    })
+    result.map(|(response, _)| response)
 }
 
 /// Get series data in various formats based on query parameter.
@@ -738,137 +762,151 @@ pub async fn get_series_data(
     Path(series_uuid): Path<String>,
     Query(query): Query<SensorDataQuery>,
 ) -> Result<axum::response::Response, AppError> {
-    // Parse format from query parameter, default to SenML/JSON
-    let format = match query.format.as_deref() {
-        Some(format_str) => ExportFormat::from_extension(format_str).ok_or_else(|| {
-            AppError::bad_request(anyhow::anyhow!(
-                "Unsupported export format '{}'. Supported formats: senml, csv, jsonl, arrow",
-                format_str
-            ))
-        })?,
-        None => ExportFormat::Senml, // Default to SenML/JSON format
-    };
+    let metrics_registry = state.metrics.clone();
+    let started = Instant::now();
 
-    // Validate UUID format
-    let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
-        AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
-    })?;
+    let result = async move {
+        let format = match query.format.as_deref() {
+            Some(format_str) => ExportFormat::from_extension(format_str).ok_or_else(|| {
+                AppError::bad_request(anyhow::anyhow!(
+                    "Unsupported export format '{}'. Supported formats: senml, csv, jsonl, arrow",
+                    format_str
+                ))
+            })?,
+            None => ExportFormat::Senml,
+        };
 
-    // Parse datetime parameters
-    let start_time = match query.start.as_ref() {
-        Some(start_str) => Some(parse_datetime_string(start_str).map_err(|e| {
-            AppError::bad_request(anyhow::anyhow!("Invalid start datetime: {}", e))
-        })?),
-        None => None,
-    };
+        let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
+            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+        })?;
 
-    let end_time =
-        match query.end.as_ref() {
+        let start_time = match query.start.as_ref() {
+            Some(start_str) => Some(parse_datetime_string(start_str).map_err(|e| {
+                AppError::bad_request(anyhow::anyhow!("Invalid start datetime: {}", e))
+            })?),
+            None => None,
+        };
+
+        let end_time = match query.end.as_ref() {
             Some(end_str) => Some(parse_datetime_string(end_str).map_err(|e| {
                 AppError::bad_request(anyhow::anyhow!("Invalid end datetime: {}", e))
             })?),
             None => None,
         };
 
-    let step_ms =
-        match query.step.as_deref() {
+        let step_ms = match query.step.as_deref() {
             Some(step) => Some(promql_duration::parse_duration_millis(step).map_err(|e| {
                 AppError::bad_request(anyhow::anyhow!("Invalid step duration: {}", e))
             })?),
             None => None,
         };
 
-    let aggregation = match query.aggregation.as_deref() {
-        Some(value) => Some(
-            value
-                .parse::<Aggregation>()
-                .map_err(AppError::bad_request)?,
-        ),
-        None => None,
-    };
+        let aggregation = match query.aggregation.as_deref() {
+            Some(value) => Some(
+                value
+                    .parse::<Aggregation>()
+                    .map_err(AppError::bad_request)?,
+            ),
+            None => None,
+        };
 
-    let simplify = if query.simplify.unwrap_or(false) {
-        let tolerance = query.simplify_tolerance.ok_or_else(|| {
-            AppError::bad_request(anyhow::anyhow!(
-                "'simplify_tolerance' is required when simplify=true"
-            ))
+        let simplify = if query.simplify.unwrap_or(false) {
+            let tolerance = query.simplify_tolerance.ok_or_else(|| {
+                AppError::bad_request(anyhow::anyhow!(
+                    "'simplify_tolerance' is required when simplify=true"
+                ))
+            })?;
+            Some(SimplifyOptions {
+                tolerance,
+                high_quality: query.simplify_high_quality.unwrap_or(false),
+            })
+        } else {
+            if query.simplify_tolerance.is_some() || query.simplify_high_quality.is_some() {
+                return Err(AppError::bad_request(anyhow::anyhow!(
+                    "'simplify=true' is required when simplify options are provided"
+                )));
+            }
+            None
+        };
+
+        let query_options = SensorDataQueryOptions {
+            start_time,
+            end_time,
+            limit: query.limit,
+            step_ms,
+            aggregation,
+            simplify,
+        };
+
+        query_options.validate().map_err(AppError::bad_request)?;
+
+        let series_data = state
+            .storage
+            .query_sensor_data_advanced(&series_uuid, &query_options)
+            .await?;
+
+        let series_data = match series_data {
+            Some(data) => data,
+            None => {
+                return Err(AppError::not_found(anyhow::anyhow!(
+                    "Series with UUID '{}' not found",
+                    series_uuid
+                )));
+            }
+        };
+
+        let sample_count = series_data.samples.len();
+
+        let response = match format {
+            ExportFormat::Senml => {
+                let json_value = SenMLConverter::to_senml_json(&series_data)
+                    .map_err(AppError::internal_server_error)?;
+                axum::response::Response::builder()
+                    .header("content-type", format.content_type())
+                    .body(json_value.to_string().into())
+            }
+            ExportFormat::Csv => {
+                let csv_content =
+                    CsvConverter::to_csv(&series_data).map_err(AppError::internal_server_error)?;
+                axum::response::Response::builder()
+                    .header("content-type", format.content_type())
+                    .body(csv_content.into())
+            }
+            ExportFormat::Jsonl => {
+                let jsonl_content = JsonlConverter::to_jsonl(&series_data)
+                    .map_err(AppError::internal_server_error)?;
+                axum::response::Response::builder()
+                    .header("content-type", format.content_type())
+                    .body(jsonl_content.into())
+            }
+            ExportFormat::Arrow => {
+                let arrow_bytes = ArrowConverter::to_arrow_stream(&series_data)
+                    .map_err(AppError::internal_server_error)?;
+                axum::response::Response::builder()
+                    .header("content-type", format.content_type())
+                    .body(arrow_bytes.into())
+            }
+        }
+        .map_err(|e| {
+            AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
         })?;
-        Some(SimplifyOptions {
-            tolerance,
-            high_quality: query.simplify_high_quality.unwrap_or(false),
-        })
-    } else {
-        if query.simplify_tolerance.is_some() || query.simplify_high_quality.is_some() {
-            return Err(AppError::bad_request(anyhow::anyhow!(
-                "'simplify=true' is required when simplify options are provided"
-            )));
-        }
-        None
-    };
 
-    let query_options = SensorDataQueryOptions {
-        start_time,
-        end_time,
-        limit: query.limit,
-        step_ms,
-        aggregation,
-        simplify,
-    };
-
-    query_options.validate().map_err(AppError::bad_request)?;
-
-    // Query series data from storage by UUID
-    let series_data = state
-        .storage
-        .query_sensor_data_advanced(&series_uuid, &query_options)
-        .await?;
-
-    let series_data = match series_data {
-        Some(data) => data,
-        None => {
-            return Err(AppError::not_found(anyhow::anyhow!(
-                "Series with UUID '{}' not found",
-                series_uuid
-            )));
-        }
-    };
-
-    // Convert based on requested format
-    let response = match format {
-        ExportFormat::Senml => {
-            let json_value = SenMLConverter::to_senml_json(&series_data)
-                .map_err(AppError::internal_server_error)?;
-            axum::response::Response::builder()
-                .header("content-type", format.content_type())
-                .body(json_value.to_string().into())
-        }
-        ExportFormat::Csv => {
-            let csv_content =
-                CsvConverter::to_csv(&series_data).map_err(AppError::internal_server_error)?;
-            axum::response::Response::builder()
-                .header("content-type", format.content_type())
-                .body(csv_content.into())
-        }
-        ExportFormat::Jsonl => {
-            let jsonl_content =
-                JsonlConverter::to_jsonl(&series_data).map_err(AppError::internal_server_error)?;
-            axum::response::Response::builder()
-                .header("content-type", format.content_type())
-                .body(jsonl_content.into())
-        }
-        ExportFormat::Arrow => {
-            let arrow_bytes = ArrowConverter::to_arrow_stream(&series_data)
-                .map_err(AppError::internal_server_error)?;
-            axum::response::Response::builder()
-                .header("content-type", format.content_type())
-                .body(arrow_bytes.into())
-        }
+        Ok::<_, AppError>((response, sample_count))
     }
-    .map_err(|e| {
-        AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
-    })?;
+    .await;
 
-    Ok(response)
+    metrics_registry.observe_operation_result(
+        "read",
+        "get_series_data",
+        started.elapsed(),
+        result.is_ok(),
+    );
+    if let Ok((_, sample_count)) = &result {
+        metrics_registry.observe_series("read", "get_series_data", 1);
+        metrics_registry.observe_samples("read", "get_series_data", *sample_count);
+    }
+
+    result.map(|(response, _)| response)
 }
 
 /// Get the most recent sample for a series, optionally within a bounded time window.
@@ -892,39 +930,58 @@ pub async fn get_series_last_sample(
     Path(series_uuid): Path<String>,
     Query(query): Query<LastSampleQuery>,
 ) -> Result<Json<Value>, AppError> {
-    let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
-        AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
-    })?;
+    let metrics_registry = state.metrics.clone();
+    let started = Instant::now();
 
-    let (start_time, end_time) =
-        parse_optional_time_bounds(query.start.as_ref(), query.end.as_ref())?;
+    let result = async move {
+        let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
+            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+        })?;
 
-    let sensor_data = state
-        .storage
-        .query_sensor_data_latest(&series_uuid, start_time, end_time)
-        .await?
-        .ok_or_else(|| {
+        let (start_time, end_time) =
+            parse_optional_time_bounds(query.start.as_ref(), query.end.as_ref())?;
+
+        let sensor_data = state
+            .storage
+            .query_sensor_data_latest(&series_uuid, start_time, end_time)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found(anyhow::anyhow!(
+                    "Series with UUID '{}' has no sample in the requested window",
+                    series_uuid
+                ))
+            })?;
+
+        let (timestamp, value) = last_sample_json(&sensor_data.samples).ok_or_else(|| {
             AppError::not_found(anyhow::anyhow!(
                 "Series with UUID '{}' has no sample in the requested window",
                 series_uuid
             ))
         })?;
 
-    let (timestamp, value) = last_sample_json(&sensor_data.samples).ok_or_else(|| {
-        AppError::not_found(anyhow::anyhow!(
-            "Series with UUID '{}' has no sample in the requested window",
-            series_uuid
-        ))
-    })?;
+        Ok::<_, AppError>(Json(json!({
+            "series_uuid": sensor_data.sensor.uuid,
+            "sensor_name": sensor_data.sensor.name,
+            "sensor_type": sensor_type_name(sensor_data.sensor.sensor_type),
+            "unit": sensor_data.sensor.unit.as_ref().map(|unit| unit.name.clone()),
+            "timestamp": timestamp,
+            "value": value,
+        })))
+    }
+    .await;
 
-    Ok(Json(json!({
-        "series_uuid": sensor_data.sensor.uuid,
-        "sensor_name": sensor_data.sensor.name,
-        "sensor_type": sensor_type_name(sensor_data.sensor.sensor_type),
-        "unit": sensor_data.sensor.unit.as_ref().map(|unit| unit.name.clone()),
-        "timestamp": timestamp,
-        "value": value,
-    })))
+    metrics_registry.observe_operation_result(
+        "read",
+        "get_series_last_sample",
+        started.elapsed(),
+        result.is_ok(),
+    );
+    if result.is_ok() {
+        metrics_registry.observe_series("read", "get_series_last_sample", 1);
+        metrics_registry.observe_samples("read", "get_series_last_sample", 1);
+    }
+
+    result
 }
 
 /// Get presence and optional bucket coverage for a series over a time window.
@@ -949,67 +1006,91 @@ pub async fn get_series_availability(
     Path(series_uuid): Path<String>,
     Query(query): Query<AvailabilityQuery>,
 ) -> Result<Json<Value>, AppError> {
-    let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
-        AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
-    })?;
+    let metrics_registry = state.metrics.clone();
+    let started = Instant::now();
 
-    let (start_time, end_time) = parse_optional_time_bounds(Some(&query.start), Some(&query.end))?;
-    let start_time = start_time.expect("validated required start time");
-    let end_time = end_time.expect("validated required end time");
-    let parsed_step_ms =
-        match query.step.as_deref() {
+    let result = async move {
+        let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
+            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+        })?;
+
+        let (start_time, end_time) =
+            parse_optional_time_bounds(Some(&query.start), Some(&query.end))?;
+        let start_time = start_time.expect("validated required start time");
+        let end_time = end_time.expect("validated required end time");
+        let parsed_step_ms = match query.step.as_deref() {
             Some(step) => Some(promql_duration::parse_duration_millis(step).map_err(|e| {
                 AppError::bad_request(anyhow::anyhow!("Invalid step duration: {}", e))
             })?),
             None => None,
         };
 
-    let summary = state
-        .storage
-        .query_sensor_data_availability(&series_uuid, start_time, end_time, parsed_step_ms)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found(anyhow::anyhow!(
-                "Series with UUID '{}' not found",
-                series_uuid
-            ))
-        })?;
+        let summary = state
+            .storage
+            .query_sensor_data_availability(&series_uuid, start_time, end_time, parsed_step_ms)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found(anyhow::anyhow!(
+                    "Series with UUID '{}' not found",
+                    series_uuid
+                ))
+            })?;
 
-    let (step_value, covered_buckets, total_buckets, coverage_ratio) =
-        if let (Some(step), Some(step_ms)) = (query.step.as_deref(), parsed_step_ms) {
-            let step_us = step_ms
-                .checked_mul(1000)
-                .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("step is too large")))?;
+        let sample_count = summary.sample_count;
 
-            let start_us = crate::storage::common::datetime_to_micros(&start_time);
-            let end_us = crate::storage::common::datetime_to_micros(&end_time);
-            let total = ((end_us - start_us).div_euclid(step_us) + 1).max(1) as usize;
-            let covered = summary.covered_buckets.unwrap_or(0);
+        let (step_value, covered_buckets, total_buckets, coverage_ratio) =
+            if let (Some(step), Some(step_ms)) = (query.step.as_deref(), parsed_step_ms) {
+                let step_us = step_ms
+                    .checked_mul(1000)
+                    .ok_or_else(|| AppError::bad_request(anyhow::anyhow!("step is too large")))?;
 
-            (
-                Some(step.to_string()),
-                Some(covered),
-                Some(total),
-                Some(covered as f64 / total as f64),
-            )
-        } else {
-            (None, None, None, None)
-        };
+                let start_us = crate::storage::common::datetime_to_micros(&start_time);
+                let end_us = crate::storage::common::datetime_to_micros(&end_time);
+                let total = ((end_us - start_us).div_euclid(step_us) + 1).max(1) as usize;
+                let covered = summary.covered_buckets.unwrap_or(0);
 
-    Ok(Json(json!({
-        "series_uuid": summary.sensor.uuid,
-        "sensor_name": summary.sensor.name,
-        "start": start_time.to_rfc3339(),
-        "end": end_time.to_rfc3339(),
-        "present": summary.sample_count > 0,
-        "sample_count": summary.sample_count,
-        "first_sample_at": summary.first_sample_at.map(|value| value.to_rfc3339()),
-        "last_sample_at": summary.last_sample_at.map(|value| value.to_rfc3339()),
-        "step": step_value,
-        "covered_buckets": covered_buckets,
-        "total_buckets": total_buckets,
-        "coverage_ratio": coverage_ratio,
-    })))
+                (
+                    Some(step.to_string()),
+                    Some(covered),
+                    Some(total),
+                    Some(covered as f64 / total as f64),
+                )
+            } else {
+                (None, None, None, None)
+            };
+
+        Ok::<_, AppError>((
+            Json(json!({
+                "series_uuid": summary.sensor.uuid,
+                "sensor_name": summary.sensor.name,
+                "start": start_time.to_rfc3339(),
+                "end": end_time.to_rfc3339(),
+                "present": summary.sample_count > 0,
+                "sample_count": summary.sample_count,
+                "first_sample_at": summary.first_sample_at.map(|value| value.to_rfc3339()),
+                "last_sample_at": summary.last_sample_at.map(|value| value.to_rfc3339()),
+                "step": step_value,
+                "covered_buckets": covered_buckets,
+                "total_buckets": total_buckets,
+                "coverage_ratio": coverage_ratio,
+            })),
+            sample_count,
+        ))
+    }
+    .await;
+
+    metrics_registry.observe_operation_result(
+        "read",
+        "get_series_availability",
+        started.elapsed(),
+        result.is_ok(),
+    );
+    if let Ok((_, sample_count)) = &result {
+        metrics_registry.observe_series("read", "get_series_availability", 1);
+        metrics_registry.observe_samples("read", "get_series_availability", *sample_count);
+    }
+
+    result.map(|(response, _)| response)
 }
 
 #[cfg(test)]

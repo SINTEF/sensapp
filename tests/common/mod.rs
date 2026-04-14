@@ -58,8 +58,23 @@ impl DatabaseType {
 
     /// Get the database type from environment variables or use default
     pub fn from_env() -> Self {
-        let connection_string = get_test_database_url();
-        Self::from_connection_string(&connection_string)
+        if let Ok(connection_string) = std::env::var("TEST_DATABASE_URL") {
+            return Self::from_connection_string(&connection_string);
+        }
+
+        if cfg!(feature = "timescaledb") {
+            DatabaseType::TimescaleDB
+        } else if cfg!(feature = "clickhouse") {
+            DatabaseType::ClickHouse
+        } else if cfg!(feature = "duckdb") {
+            DatabaseType::DuckDB
+        } else if cfg!(feature = "sqlite") {
+            DatabaseType::SQLite
+        } else if cfg!(feature = "rrdcached") {
+            DatabaseType::RRDcached
+        } else {
+            DatabaseType::PostgreSQL
+        }
     }
 }
 
@@ -98,7 +113,10 @@ impl TestDb {
 
         let connection_string = db_type.default_connection_string();
 
-        if db_type == DatabaseType::PostgreSQL {
+        if matches!(
+            db_type,
+            DatabaseType::PostgreSQL | DatabaseType::TimescaleDB
+        ) {
             ensure_test_database_exists(&connection_string).await?;
         }
 

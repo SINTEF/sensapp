@@ -14,6 +14,7 @@ use influxdb_line_protocol::{FieldValue, parse_lines};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::str::FromStr;
+use std::time::Instant;
 use std::{io::Read, str::from_utf8};
 use std::{str, sync::Arc};
 use tokio_util::bytes::Bytes;
@@ -180,123 +181,138 @@ pub async fn publish_influxdb(
     }): Query<InfluxDBQueryParams>,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
-    debug!(
-        "InfluxDB publish: bucket={}, org={:?}, org_id={:?}, precision={:?}",
-        bucket, org, org_id, precision
-    );
+    let metrics = state.metrics.clone();
+    let started = Instant::now();
 
-    // Requires org or org_id
-    if org.is_none() && org_id.is_none() {
-        return Err(AppError::bad_request(anyhow::anyhow!(
-            "org or org_id must be specified"
-        )));
-    }
+    let result = async move {
+        debug!(
+            "InfluxDB publish: bucket={}, org={:?}, org_id={:?}, precision={:?}",
+            bucket, org, org_id, precision
+        );
 
-    // Org or org_id, this is the same for SensApp.
-    let common_org_name = match org {
-        Some(org) => org,
-        None => org_id.unwrap_or_default(),
-    };
+        if org.is_none() && org_id.is_none() {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "org or org_id must be specified"
+            )));
+        }
 
-    // Convert the precision string to a Precision enum
-    let precision_enum = match precision {
-        Some(precision) => match precision.parse() {
-            Ok(precision) => precision,
-            Err(_) => {
-                return Err(AppError::bad_request(anyhow::anyhow!(
-                    "Invalid precision: {}",
-                    precision
-                )));
-            }
-        },
-        None => Precision::default(),
-    };
+        let common_org_name = match org {
+            Some(org) => org,
+            None => org_id.unwrap_or_default(),
+        };
 
-    let bytes_string = bytes_to_string(&headers, &bytes)?;
-    let parser = parse_lines(&bytes_string);
+        let precision_enum = match precision {
+            Some(precision) => match precision.parse() {
+                Ok(precision) => precision,
+                Err(_) => {
+                    return Err(AppError::bad_request(anyhow::anyhow!(
+                        "Invalid precision: {}",
+                        precision
+                    )));
+                }
+            },
+            None => Precision::default(),
+        };
 
-    let mut batch_builder = BatchBuilder::new()?;
+        let bytes_string = bytes_to_string(&headers, &bytes)?;
+        let parser = parse_lines(&bytes_string);
 
-    for line in parser {
-        match line {
-            Ok(line) => {
-                let measurement = line.series.measurement;
+        let mut batch_builder = BatchBuilder::new()?;
+        let mut series = 0usize;
+        let mut samples = 0usize;
 
-                let tags = match &line.series.tag_set {
-                    None => None,
-                    Some(tags) => {
-                        let mut tags_vec = SensAppLabels::new();
-                        tags_vec.push(("influxdb_bucket".to_string(), bucket.clone()));
-                        tags_vec.push(("influxdb_org".to_string(), common_org_name.clone()));
+        for line in parser {
+            match line {
+                Ok(line) => {
+                    let measurement = line.series.measurement;
 
-                        for (key, value) in tags.iter() {
-                            tags_vec.push((key.to_string(), value.to_string()));
-                        }
-                        Some(tags_vec)
-                    }
-                };
+                    let tags = match &line.series.tag_set {
+                        None => None,
+                        Some(tags) => {
+                            let mut tags_vec = SensAppLabels::new();
+                            tags_vec.push(("influxdb_bucket".to_string(), bucket.clone()));
+                            tags_vec.push(("influxdb_org".to_string(), common_org_name.clone()));
 
-                let datetime = match line.timestamp {
-                    Some(timestamp) => match precision_enum {
-                        Precision::Nanoseconds => {
-                            SensAppDateTime::from_unix_nanoseconds_i64(timestamp)
-                        }
-                        Precision::Microseconds => {
-                            SensAppDateTime::from_unix_microseconds_i64(timestamp)
-                        }
-                        Precision::Milliseconds => {
-                            SensAppDateTime::from_unix_milliseconds_i64(timestamp)
-                        }
-                        Precision::Seconds => SensAppDateTime::from_unix_seconds_i64(timestamp),
-                    },
-                    None => match SensAppDateTime::now() {
-                        Ok(datetime) => datetime,
-                        Err(error) => {
-                            return Err(AppError::internal_server_error(error));
-                        }
-                    },
-                };
-
-                let url_encoded_field_name = urlencoding::encode(&measurement).to_string();
-
-                for (field_key, field_value) in line.field_set {
-                    let unit = None;
-                    let (sensor_type, value) = match influxdb_field_to_sensapp(
-                        field_value,
-                        datetime,
-                        state.influxdb_with_numeric,
-                    ) {
-                        Ok((sensor_type, value)) => (sensor_type, value),
-                        Err(error) => {
-                            return Err(AppError::bad_request(error));
+                            for (key, value) in tags.iter() {
+                                tags_vec.push((key.to_string(), value.to_string()));
+                            }
+                            Some(tags_vec)
                         }
                     };
-                    let name = compute_field_name(&url_encoded_field_name, &field_key);
-                    let sensor = Sensor::new_without_uuid(name, sensor_type, unit, tags.clone())?;
-                    batch_builder.add(Arc::new(sensor), value).await?;
+
+                    let datetime = match line.timestamp {
+                        Some(timestamp) => match precision_enum {
+                            Precision::Nanoseconds => {
+                                SensAppDateTime::from_unix_nanoseconds_i64(timestamp)
+                            }
+                            Precision::Microseconds => {
+                                SensAppDateTime::from_unix_microseconds_i64(timestamp)
+                            }
+                            Precision::Milliseconds => {
+                                SensAppDateTime::from_unix_milliseconds_i64(timestamp)
+                            }
+                            Precision::Seconds => SensAppDateTime::from_unix_seconds_i64(timestamp),
+                        },
+                        None => match SensAppDateTime::now() {
+                            Ok(datetime) => datetime,
+                            Err(error) => {
+                                return Err(AppError::internal_server_error(error));
+                            }
+                        },
+                    };
+
+                    let url_encoded_field_name = urlencoding::encode(&measurement).to_string();
+
+                    for (field_key, field_value) in line.field_set {
+                        let unit = None;
+                        let (sensor_type, value) = match influxdb_field_to_sensapp(
+                            field_value,
+                            datetime,
+                            state.influxdb_with_numeric,
+                        ) {
+                            Ok((sensor_type, value)) => (sensor_type, value),
+                            Err(error) => {
+                                return Err(AppError::bad_request(error));
+                            }
+                        };
+                        let name = compute_field_name(&url_encoded_field_name, &field_key);
+                        let sensor =
+                            Sensor::new_without_uuid(name, sensor_type, unit, tags.clone())?;
+                        series += 1;
+                        samples += value.len();
+                        batch_builder.add(Arc::new(sensor), value).await?;
+                    }
+                }
+                Err(error) => {
+                    return Err(AppError::bad_request(error));
                 }
             }
+        }
+
+        match batch_builder.send_what_is_left(state.storage.clone()).await {
+            Ok(true) => {
+                info!("InfluxDB: Batch sent successfully");
+            }
+            Ok(false) => {
+                debug!("InfluxDB: No data to send");
+            }
             Err(error) => {
-                return Err(AppError::bad_request(error));
+                error!("InfluxDB: Error sending batch: {:?}", error);
+                return Err(AppError::internal_server_error(error));
             }
         }
+
+        Ok::<_, AppError>((StatusCode::NO_CONTENT, series, samples))
+    }
+    .await;
+
+    metrics.observe_operation_result("write", "influxdb_write", started.elapsed(), result.is_ok());
+    if let Ok((_, series, samples)) = &result {
+        metrics.observe_series("write", "influxdb_write", *series);
+        metrics.observe_samples("write", "influxdb_write", *samples);
     }
 
-    match batch_builder.send_what_is_left(state.storage.clone()).await {
-        Ok(true) => {
-            info!("InfluxDB: Batch sent successfully");
-        }
-        Ok(false) => {
-            debug!("InfluxDB: No data to send");
-        }
-        Err(error) => {
-            error!("InfluxDB: Error sending batch: {:?}", error);
-            return Err(AppError::internal_server_error(error));
-        }
-    }
-
-    // OK no content
-    Ok(StatusCode::NO_CONTENT)
+    result.map(|(status, _, _)| status)
 }
 
 #[cfg(test)]
