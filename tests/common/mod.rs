@@ -1,6 +1,8 @@
 use anyhow::{Result, anyhow};
 use sensapp::storage::{StorageInstance, storage_factory::create_storage_from_connection_string};
-use sensapp::test_utils::{ensure_test_database_exists, get_test_database_url, isolate_test_database_url};
+use sensapp::test_utils::{
+    ensure_test_database_exists, get_test_database_url, isolate_test_database_url,
+};
 use std::sync::Arc;
 
 pub mod db;
