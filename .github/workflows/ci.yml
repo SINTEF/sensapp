@@ -30,7 +30,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo-make
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-make
           key: cargo-make-${{ runner.os }}
@@ -44,9 +44,33 @@ jobs:
       - name: Format check
         run: cargo make fmt-check
 
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        uses: moonrepo/setup-rust@v1
+        with:
+          channel: stable
+
+      - name: Cache cargo-make
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-make
+          key: cargo-make-${{ runner.os }}
+
+      - name: Install cargo-make
+        run: |
+          if ! command -v cargo-make &> /dev/null; then
+            cargo install cargo-make
+          fi
+
       - name: Security audit
         run: cargo make security-audit
-        continue-on-error: true
 
   frontend:
     name: Frontend Quality
@@ -157,7 +181,7 @@ jobs:
           components: clippy
 
       - name: Cache cargo-make
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-make
           key: cargo-make-${{ runner.os }}
@@ -309,7 +333,7 @@ jobs:
   #       uses: taiki-e/install-action@cargo-llvm-cov
 
   #     - name: Cache cargo-make
-  #       uses: actions/cache@v4
+  #       uses: actions/cache@v5
   #       with:
   #         path: ~/.cargo/bin/cargo-make
   #         key: cargo-make-${{ runner.os }}
@@ -430,7 +454,7 @@ jobs:
           channel: stable
 
       - name: Cache cargo-make
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-make
           key: cargo-make-${{ runner.os }}
