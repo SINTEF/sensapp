@@ -21,6 +21,7 @@ pub struct Metric {
 }
 
 impl Metric {
+    #[allow(dead_code)]
     pub fn new(
         name: String,
         sensor_type: SensorType,

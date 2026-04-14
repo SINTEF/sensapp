@@ -22,9 +22,22 @@ coverage/
 
 pki
 
-test.db*
+*.db
+*.db-shm
+*.db-wal
+*.duckdb
 
 # Claude
 .claude/settings.local.json
 
 reference/
+integrations/
+
+# Python
+__pycache__/
+.venv/
+dist/
+python/demo-dashboard/
+
+bin/
+target

@@ -44,11 +44,13 @@ SETTINGS index_granularity_bytes = 10485760;
 CREATE TABLE IF NOT EXISTS numeric_values (
     sensor_id UInt64,
     timestamp_us Int64 CODEC(DoubleDelta, LZ4),
-    value Decimal128(38) CODEC(ZSTD(1))
+    value Decimal(38, 8) CODEC(ZSTD(1))
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)
 SETTINGS index_granularity_bytes = 10485760;
+
+ALTER TABLE numeric_values MODIFY COLUMN value Decimal(38, 8);
 
 -- Create the 'float_values' table
 CREATE TABLE IF NOT EXISTS float_values (
@@ -95,7 +97,7 @@ SETTINGS index_granularity_bytes = 10485760;
 CREATE TABLE IF NOT EXISTS json_values (
     sensor_id UInt64,
     timestamp_us Int64 CODEC(DoubleDelta, LZ4),
-    value JSON  -- Native JSON type (ClickHouse 24.8+) for better performance and compression
+    value String CODEC(ZSTD(3))
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime64(timestamp_us / 1000000, 6))
 ORDER BY (sensor_id, timestamp_us)

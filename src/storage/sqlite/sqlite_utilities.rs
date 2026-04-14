@@ -3,7 +3,6 @@ use crate::datamodel::unit::Unit;
 use anyhow::Result;
 use cached::proc_macro::cached;
 use sqlx::{Sqlite, Transaction, prelude::*};
-use std::time::Duration;
 use uuid::Uuid;
 
 #[cached(

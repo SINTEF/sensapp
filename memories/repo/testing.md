@@ -1,0 +1,3 @@
+- ClickHouse integration tests and the ClickHouse Rust client use the HTTP endpoint on port 8123; using port 9000 in `TEST_DATABASE_URL` causes migrations/tests to fail.
+- This workspace currently has a broken `target` symlink; use `CARGO_TARGET_DIR=/tmp/sensapp-target` for local Cargo validation unless the symlink is fixed.
+- RRDCached cannot run the full generic backend test matrix because cleanup and metadata assumptions in shared tests do not hold; use backend-specific RRDCached build/tests instead.

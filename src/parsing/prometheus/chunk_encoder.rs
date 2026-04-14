@@ -4,6 +4,8 @@ use anyhow::Result;
 use rusty_chunkenc::xor::{XORChunk, XORSample};
 use tracing::debug;
 
+const MAX_SAMPLES_PER_XOR_CHUNK: usize = u16::MAX as usize;
+
 /// Encodes time series samples into XOR-compressed chunks for Prometheus remote read.
 pub struct ChunkEncoder;
 
@@ -30,7 +32,16 @@ impl ChunkEncoder {
             labels.len()
         );
 
-        // Convert samples to XORSample format for rusty-chunkenc
+        Ok(ChunkedSeries {
+            labels,
+            chunks: samples
+                .chunks(MAX_SAMPLES_PER_XOR_CHUNK)
+                .map(Self::encode_chunk)
+                .collect::<Result<Vec<_>>>()?,
+        })
+    }
+
+    fn encode_chunk(samples: &[Sample]) -> Result<ProtoChunk> {
         let xor_samples: Vec<XORSample> = samples
             .iter()
             .map(|sample| XORSample {
@@ -39,15 +50,12 @@ impl ChunkEncoder {
             })
             .collect();
 
-        // Track min/max timestamps for the chunk metadata
         let min_time_ms = samples.first().map(|s| s.timestamp).unwrap_or(0);
         let max_time_ms = samples.last().map(|s| s.timestamp).unwrap_or(0);
 
-        // Create the XOR chunk
         let xor_chunk = XORChunk::new(xor_samples);
 
-        // Encode just the raw XOR chunk data (NOT the full chunk format with length/type/crc)
-        // Prometheus remote read expects raw XOR data starting with 2-byte BE sample count
+        // Prometheus remote read expects raw XOR data starting with the 2-byte BE sample count.
         let mut encoded_data = Vec::new();
         xor_chunk.write(&mut encoded_data)?;
 
@@ -59,17 +67,11 @@ impl ChunkEncoder {
             max_time_ms
         );
 
-        // Create the protobuf chunk
-        let proto_chunk = ProtoChunk {
+        Ok(ProtoChunk {
             min_time_ms,
             max_time_ms,
             r#type: chunk::Encoding::Xor as i32,
             data: encoded_data,
-        };
-
-        Ok(ChunkedSeries {
-            labels,
-            chunks: vec![proto_chunk],
         })
     }
 
@@ -98,6 +100,7 @@ impl ChunkEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusty_chunkenc::xor::read_xor_chunk_data;
 
     #[test]
     fn test_encode_empty_series() {
@@ -143,6 +146,47 @@ mod tests {
         assert_eq!(chunk.max_time_ms, 3000);
         assert_eq!(chunk.r#type, chunk::Encoding::Xor as i32);
         assert!(!chunk.data.is_empty());
+    }
+
+    #[test]
+    fn test_encode_series_splits_large_sample_sets() {
+        let labels = vec![Label {
+            name: "__name__".to_string(),
+            value: "large_metric".to_string(),
+        }];
+
+        let total_samples = MAX_SAMPLES_PER_XOR_CHUNK + 123;
+        let samples: Vec<Sample> = (0..total_samples)
+            .map(|index| Sample {
+                timestamp: index as i64 * 1000,
+                value: index as f64,
+            })
+            .collect();
+
+        let series = ChunkEncoder::encode_series(labels, samples).unwrap();
+
+        assert_eq!(series.chunks.len(), 2);
+
+        let first_chunk = &series.chunks[0];
+        let (_, decoded_first_chunk) = read_xor_chunk_data(&first_chunk.data).unwrap();
+        assert_eq!(
+            decoded_first_chunk.samples().len(),
+            MAX_SAMPLES_PER_XOR_CHUNK
+        );
+        assert_eq!(first_chunk.min_time_ms, 0);
+        assert_eq!(
+            first_chunk.max_time_ms,
+            (MAX_SAMPLES_PER_XOR_CHUNK as i64 - 1) * 1000
+        );
+
+        let second_chunk = &series.chunks[1];
+        let (_, decoded_second_chunk) = read_xor_chunk_data(&second_chunk.data).unwrap();
+        assert_eq!(decoded_second_chunk.samples().len(), 123);
+        assert_eq!(
+            second_chunk.min_time_ms,
+            MAX_SAMPLES_PER_XOR_CHUNK as i64 * 1000
+        );
+        assert_eq!(second_chunk.max_time_ms, (total_samples as i64 - 1) * 1000);
     }
 
     #[test]

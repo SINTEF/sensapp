@@ -1,0 +1,3 @@
+[env]
+DUCKDB_DOWNLOAD_LIB = { value = "1", force = false }
+DUCKDB_CMAKE_BUILD_TYPE = { value = "Release", force = false }

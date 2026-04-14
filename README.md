@@ -8,22 +8,82 @@ It handles time-series data ingestion, storage, and retrieval. From small edge d
 
 SensApp is compatible with Prometheus and InfluxDB, but with an alternative architecture that prioritise data analysis and long-term storage over ingestion performance and real-time monitoring.
 
-Handling CPU stats for the last 24 hours? InfluxDB or Prometheus are excellent choices. Fetching average bathroom temperature over the last 10 years grouped by day? SensApp will compute that instantly while InfluxDB or Prometheus will take a while as they must read many chunks of data.
+Dealing with system statistics for the last 24 hours? InfluxDB or Prometheus are excellent choices. Fetching average bathroom temperatures over the last 10 years grouped by day? SensApp will compute that instantly while InfluxDB or Prometheus will take a little while.
 
-But you don't have to chose, both InfluxDB and Prometheus can replicate their data to SensApp for long-term storage and analysis.
+But you don't have to chose, both InfluxDB and Prometheus can replicate their data to SensApp for long-term storage and analysis. So you get the best of both worlds.
 
-Of course you can also use Sensapp as a standalone time-series database.
+You can also use Sensapp as a standalone time-series database.
+
+## Quickstart
+
+The quickest way to run SensApp is with SQLite so no external database is required.
+
+Start SensApp with SQLite:
+
+```bash
+SENSAPP_STORAGE_CONNECTION_STRING=sqlite://sensapp.db \
+cargo run
+```
+
+By default, SensApp listens on [http://127.0.0.1:3000](http://127.0.0.1:3000).
+
+Ingest one sample:
+
+```bash
+curl --json '[{"n": "temperature", "v": 21.5}]' \
+  http://127.0.0.1:3000/publish
+```
+
+Query the stored data:
+
+```bash
+curl 'http://127.0.0.1:3000/api/v1/query?query=temperature'
+# or
+curl 'http://127.0.0.1:3000/api/v1/query?query=temperature&format=csv'
+```
+
+## Python Quickstart
+
+Check the [python/sensapp](./python/sensapp) documentation for more details.
+
+```python
+import asyncio
+from sensapp import SensAppClient
+
+async def main():
+    async with SensAppClient() as client:
+        await client.publish("temperature", 21.5)
+  [series] = await client.query("temperature[1h]")
+  print(series.frame)
+
+asyncio.run(main())
+```
+
+### Using Containers
+
+```bash
+docker compose up
+```
+
+You can deploy SensApp on Kubernetes using [the included Helm chart](./charts/sensapp).
+
+```bash
+helm install sensapp ./charts/sensapp
+```
 
 ## Features
 
 - **HTTP REST API**
-- **Compatible with existing sensor data pipelines**:
+- **Prometheus Compatibility**
   - **Prometheus Remote Write**: Prometheus can push data to SensApp.
   - **Prometheus Remote Read**: Prometheus can also read data from SensApp.
-  - **InfluxDB Line Protocol**: InfluxDB can push data to SensApp, or you can use SensApp instead of InfluxDB, with [Telegraf](https://github.com/influxdata/telegraf) for example.
+  - **Prometheus Scrape Endpoint**: SensApp exposes internal service metrics on `/prometheus/metrics`.
+- **InfluxDB Compatibility**:
+  - **InfluxDB Line Protocol**: You can use SensApp instead of InfluxDB, with [Telegraf](https://github.com/influxdata/telegraf) for example.
+  - **InfluxDB Data Replication**: InfluxDB [can replicate its data to SensApp](https://docs.influxdata.com/influxdb/cloud/write-data/replication/replicate-data/).
 - **Data formats**:
   - **JSON**: Simple and widely used format for data interchange.
-  - **CSV**: Many users *love* CSV.
+  - **CSV**: The classic.
   - **SenML**: Standardized format for sensor data representation, that is almost unheard of but actually pretty good.
   - **Apache Arrow IPC Support**: Efficient IPC format for high-performance data interchange.
 - **Flexible Time Series DataBase Storage**:
@@ -48,29 +108,9 @@ SensApp storage is based on the findings of the paper [TSM-Bench: Benchmarking T
 
 Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 
-## Development
+## Authentication
 
-```bash
-# Build
-cargo build
-
-# Test
-cargo test
-cargo make test-all         # all storage backends
-
-# Lint (format + clippy)
-cargo make lint
-cargo make lint-all         # all storage backends
-
-# Full validation
-cargo make check-all        # working features (postgres + sqlite)
-cargo make check-all-storage # all storage backends
-
-# Setup (runs migrations)
-cargo make setup-dev
-```
-
-Override environment variables as needed: `DATABASE_URL`, `POSTGRES_USER`, etc.
+SensApp supports **optional JWT authentication**. By default, all endpoints are open. Visit [docs/JWT_AUTH.md](./docs/JWT_AUTH.md) for the authentication documentation.
 
 ## Built With Rust™️
 
@@ -94,7 +134,7 @@ The SensApp software is provided "as is," with no warranties, and the creators o
 
 ## You may not want to use it in production (yet)
 
-SensApp is currently under development. It is not yet ready for production.
+SensApp is currently under development. It is not ready for production.
 
 ## Acknowledgments
 

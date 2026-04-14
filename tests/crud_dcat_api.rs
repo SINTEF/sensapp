@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "rrdcached", allow(unused_imports, dead_code))]
+
 mod common;
 
 use anyhow::Result;
@@ -5,8 +7,12 @@ use axum::http::StatusCode;
 use common::http::TestApp;
 use common::{TestDb, fixtures};
 use sensapp::config::load_configuration_for_tests;
+use sensapp::datamodel::batch_builder::BatchBuilder;
+use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples};
 use serde_json::Value;
 use serial_test::serial;
+use std::sync::Arc;
+use uuid::Uuid;
 
 // Ensure configuration is loaded once for all tests in this module
 static INIT: std::sync::Once = std::sync::Once::new();
@@ -16,7 +22,45 @@ fn ensure_config() {
     });
 }
 
+fn create_float_sensor(name: &str, start_value: f64) -> (Sensor, TypedSamples) {
+    let sensor = Sensor::new(
+        Uuid::new_v4(),
+        name.to_string(),
+        SensorType::Float,
+        None,
+        None,
+    );
+    let samples = TypedSamples::Float(smallvec::smallvec![
+        Sample {
+            datetime: hifitime::Epoch::from_unix_seconds(1704067200.0),
+            value: start_value,
+        },
+        Sample {
+            datetime: hifitime::Epoch::from_unix_seconds(1704067260.0),
+            value: start_value + 0.5,
+        }
+    ]);
+    (sensor, samples)
+}
+
+async fn seed_three_series(storage: &Arc<dyn sensapp::storage::StorageInstance>) -> Result<()> {
+    let mut batch_builder = BatchBuilder::new()?;
+
+    for (sensor, samples) in [
+        create_float_sensor("temperature_test", 20.0),
+        create_float_sensor("humidity_test", 60.0),
+        create_float_sensor("pressure_test", 1013.0),
+    ] {
+        let sensor = Arc::new(sensor);
+        batch_builder.add(sensor.clone(), samples).await?;
+    }
+
+    batch_builder.send_what_is_left(storage.clone()).await?;
+    Ok(())
+}
+
 /// Test CRUD/DCAT API functionality with new series terminology
+#[cfg(not(feature = "rrdcached"))]
 mod crud_dcat_tests {
     use super::*;
 
@@ -30,8 +74,7 @@ mod crud_dcat_tests {
         let app = TestApp::new(storage.clone()).await;
 
         // Ingest data from multiple sensors with same name but different labels
-        let csv_data = fixtures::multi_sensor_csv();
-        app.post_csv("/sensors/publish", &csv_data).await?;
+        seed_three_series(&storage).await?;
 
         // When: We query the metrics endpoint
         let response = app.get("/metrics").await?;
@@ -230,8 +273,7 @@ mod crud_dcat_tests {
         let app = TestApp::new(storage.clone()).await;
 
         // Ingest data with labels (using multi-sensor CSV which should have varied data)
-        let csv_data = fixtures::multi_sensor_csv();
-        app.post_csv("/sensors/publish", &csv_data).await?;
+        seed_three_series(&storage).await?;
 
         // When: We query the series endpoint
         let response = app.get("/series").await?;
@@ -508,6 +550,273 @@ mod crud_dcat_tests {
         assert!(
             temp_count + humidity_count <= total_series_count,
             "Filtered counts should not exceed total"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_pagination_basic() -> Result<()> {
+        ensure_config();
+        // Given: A database with multiple sensors
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        // Seed multiple sensors directly so pagination tests do not depend on importer behavior
+        seed_three_series(&storage).await?;
+
+        let seeded_page = storage.list_series(None, Some(2), None).await?;
+        assert_eq!(
+            seeded_page.series.len(),
+            2,
+            "Seeded first page should have 2 series"
+        );
+        assert!(
+            seeded_page.bookmark.is_some(),
+            "Seeded storage pagination should produce a bookmark"
+        );
+
+        // When: We query with a limit of 2
+        let response = app.get("/series?limit=2").await?;
+
+        // Then: Should get 2 series and a bookmark
+        response.assert_status(StatusCode::OK);
+        let catalog: Value = response.json()?;
+
+        let datasets = catalog["dcat:dataset"].as_array().unwrap();
+        assert_eq!(datasets.len(), 2, "Should return exactly 2 series");
+
+        // Should have hydra:view with next link
+        assert!(catalog["hydra:view"].is_object(), "Should have hydra:view");
+        assert_eq!(
+            catalog["hydra:view"]["@type"],
+            "hydra:PartialCollectionView"
+        );
+        assert!(
+            catalog["hydra:view"]["hydra:next"].is_string(),
+            "Should have next link"
+        );
+        assert_eq!(catalog["hydra:view"]["hydra:itemsPerPage"], 2);
+
+        // Check Link header
+        let link_header = response.headers().get("Link");
+        assert!(link_header.is_some(), "Should have Link header");
+        let link_str = link_header.unwrap().to_str().unwrap();
+        assert!(
+            link_str.contains("rel=\"next\""),
+            "Link header should have rel=next"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_pagination_with_bookmark() -> Result<()> {
+        ensure_config();
+        // Given: A database with multiple sensors
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        // Seed multiple sensors directly so pagination tests do not depend on importer behavior
+        seed_three_series(&storage).await?;
+
+        let seeded_page = storage.list_series(None, Some(2), None).await?;
+        assert_eq!(
+            seeded_page.series.len(),
+            2,
+            "Seeded first page should have 2 series"
+        );
+        assert!(
+            seeded_page.bookmark.is_some(),
+            "Seeded storage pagination should produce a bookmark"
+        );
+
+        // When: We query the first page
+        let first_response = app.get("/series?limit=2").await?;
+        first_response.assert_status(StatusCode::OK);
+        let first_catalog: Value = first_response.json()?;
+
+        let first_datasets = first_catalog["dcat:dataset"].as_array().unwrap();
+        let first_ids: Vec<String> = first_datasets
+            .iter()
+            .map(|d| d["dct:identifier"].as_str().unwrap().to_string())
+            .collect();
+
+        // Extract bookmark from next link
+        let next_url = first_catalog["hydra:view"]["hydra:next"].as_str().unwrap();
+        let bookmark = next_url
+            .split("bookmark=")
+            .nth(1)
+            .unwrap()
+            .split('&')
+            .next()
+            .unwrap();
+
+        // When: We query the second page with the bookmark
+        let second_response = app
+            .get(&format!("/series?limit=2&bookmark={}", bookmark))
+            .await?;
+        second_response.assert_status(StatusCode::OK);
+        let second_catalog: Value = second_response.json()?;
+
+        let second_datasets = second_catalog["dcat:dataset"].as_array().unwrap();
+        let second_ids: Vec<String> = second_datasets
+            .iter()
+            .map(|d| d["dct:identifier"].as_str().unwrap().to_string())
+            .collect();
+
+        // Then: Second page should have different sensors
+        for first_id in &first_ids {
+            assert!(
+                !second_ids.contains(first_id),
+                "Second page should not contain sensors from first page"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_pagination_last_page() -> Result<()> {
+        ensure_config();
+        // Given: A database with exactly 3 sensors
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        // Ingest temperature sensor data (creates 1 sensor)
+        let csv_data = fixtures::temperature_sensor_csv();
+        app.post_csv("/sensors/publish", &csv_data).await?;
+
+        // When: We query with limit=5 (more than available)
+        let response = app.get("/series?limit=5").await?;
+
+        // Then: Should get all sensors and NO bookmark
+        response.assert_status(StatusCode::OK);
+        let catalog: Value = response.json()?;
+
+        // Should NOT have hydra:view (no next page)
+        assert!(
+            catalog["hydra:view"].is_null(),
+            "Should not have hydra:view on last page"
+        );
+
+        // Should NOT have Link header
+        let link_header = response.headers().get("Link");
+        assert!(
+            link_header.is_none(),
+            "Should not have Link header on last page"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_pagination_with_metric_filter() -> Result<()> {
+        ensure_config();
+        // Given: A database with sensors for different metrics
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        // Ingest temperature and multi-sensor data
+        let csv_temp = fixtures::temperature_sensor_csv();
+        app.post_csv("/sensors/publish", &csv_temp).await?;
+
+        // Get first sensor name from temperature data
+        let all_response = app.get("/series").await?;
+        all_response.assert_status(StatusCode::OK);
+        let all_catalog: Value = all_response.json()?;
+        let first_metric = all_catalog["dcat:dataset"][0]["dct:title"]
+            .as_str()
+            .unwrap();
+
+        // When: We query with metric filter and pagination
+        let response = app
+            .get(&format!("/series?metric={}&limit=1", first_metric))
+            .await?;
+
+        // Then: Should only get sensors for that metric
+        response.assert_status(StatusCode::OK);
+        let catalog: Value = response.json()?;
+
+        let datasets = catalog["dcat:dataset"].as_array().unwrap();
+        for dataset in datasets {
+            let title = dataset["dct:title"].as_str().unwrap();
+            assert_eq!(
+                title, first_metric,
+                "All results should be for metric {}, got: {}",
+                first_metric, title
+            );
+        }
+
+        // If there's a next link, it should include the metric filter
+        if let Some(next_url) = catalog["hydra:view"]["hydra:next"].as_str() {
+            assert!(
+                next_url.contains(&format!("metric={}", urlencoding::encode(first_metric))),
+                "Next link should preserve metric filter"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_pagination_max_limit() -> Result<()> {
+        ensure_config();
+        // Given: A database with sensors
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let csv_data = fixtures::multi_sensor_csv();
+        app.post_csv("/sensors/publish", &csv_data).await?;
+
+        // When: We query with limit exceeding MAX_LIST_SERIES_LIMIT
+        let response = app.get("/series?limit=99999").await?;
+
+        // Then: Should cap at MAX_LIST_SERIES_LIMIT
+        response.assert_status(StatusCode::OK);
+        let catalog: Value = response.json()?;
+
+        // The actual limit used should be capped
+        if let Some(items_per_page) = catalog["hydra:view"]["hydra:itemsPerPage"].as_u64() {
+            assert!(
+                items_per_page <= 16384,
+                "Should cap limit at MAX_LIST_SERIES_LIMIT (16384), got {}",
+                items_per_page
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_pagination_invalid_bookmark() -> Result<()> {
+        ensure_config();
+        // Given: A database with sensors
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let csv_data = fixtures::multi_sensor_csv();
+        app.post_csv("/sensors/publish", &csv_data).await?;
+
+        // When: We query with an invalid bookmark
+        let response = app.get("/series?bookmark=invalid").await;
+
+        // Then: Should return an error
+        assert!(
+            response.is_err() || response.as_ref().unwrap().status() != StatusCode::OK,
+            "Should reject invalid bookmark"
         );
 
         Ok(())

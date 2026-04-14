@@ -1,5 +1,5 @@
 // Core storage traits and factory - always available
-use crate::datamodel::SensAppDateTime;
+use crate::datamodel::{SensAppDateTime, Sensor};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::fmt::Debug;
@@ -8,13 +8,42 @@ pub mod error;
 pub use error::StorageError;
 
 pub mod common;
+pub mod data_query;
 pub mod query;
 
+pub use data_query::{Aggregation, SensorDataQueryOptions, SimplifyOptions};
+#[allow(unused_imports)]
 pub use query::{LabelMatcher, MatcherType};
 
 /// Default limit for timeseries queries when no limit is specified
 /// Set to 10 million records - appropriate for timeseries data
+#[allow(dead_code)]
 pub const DEFAULT_QUERY_LIMIT: usize = 10_000_000;
+
+/// Default limit for list_series when no limit is specified
+pub const DEFAULT_LIST_SERIES_LIMIT: usize = 256;
+
+/// Maximum limit for list_series to prevent excessive memory usage
+pub const MAX_LIST_SERIES_LIMIT: usize = 16384;
+
+/// Result type for list_series with pagination support
+#[derive(Debug)]
+pub struct ListSeriesResult {
+    /// The series matching the query
+    pub series: Vec<crate::datamodel::Sensor>,
+    /// Bookmark for the next page (sensor_id as string)
+    /// None if this is the last page
+    pub bookmark: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct SensorAvailabilitySummary {
+    pub sensor: Sensor,
+    pub sample_count: usize,
+    pub first_sample_at: Option<SensAppDateTime>,
+    pub last_sample_at: Option<SensAppDateTime>,
+    pub covered_buckets: Option<usize>,
+}
 
 #[async_trait]
 pub trait StorageInstance: Send + Sync + Debug {
@@ -26,7 +55,9 @@ pub trait StorageInstance: Send + Sync + Debug {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>>;
+        limit: Option<usize>,
+        bookmark: Option<&str>,
+    ) -> Result<ListSeriesResult>;
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>>;
 
@@ -38,6 +69,60 @@ pub trait StorageInstance: Send + Sync + Debug {
         end_time: Option<SensAppDateTime>,
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>>;
+
+    async fn query_sensor_data_advanced(
+        &self,
+        sensor_uuid: &str,
+        options: &crate::storage::SensorDataQueryOptions,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        options.validate()?;
+
+        let raw = self
+            .query_sensor_data(
+                sensor_uuid,
+                options.start_time,
+                options.end_time,
+                options.limit,
+            )
+            .await?;
+
+        raw.map(|sensor_data| crate::storage::common::apply_query_options(sensor_data, options))
+            .transpose()
+    }
+
+    async fn query_sensor_data_latest(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<Option<crate::datamodel::SensorData>> {
+        let Some(sensor_data) = self
+            .query_sensor_data(sensor_uuid, start_time, end_time, None)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        Ok(crate::storage::common::keep_only_last_sample(sensor_data))
+    }
+
+    async fn query_sensor_data_availability(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<Option<SensorAvailabilitySummary>> {
+        let Some(sensor_data) = self
+            .query_sensor_data(sensor_uuid, Some(start_time), Some(end_time), None)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        crate::storage::common::summarize_sensor_data_availability(sensor_data, start_time, step_ms)
+            .map(Some)
+    }
 
     /// Query sensors and their data by label matchers.
     ///

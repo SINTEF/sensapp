@@ -1,5 +1,9 @@
 use super::sqlite_publishers::*;
 use super::sqlite_utilities::get_sensor_id_or_create_sensor;
+use super::storage_query_helpers::{
+    sqlite_bucketed_cte, sqlite_first_last_query, sqlite_float_expression, sqlite_group_by_clause,
+    sqlite_integer_expression, sqlite_numeric_expression,
+};
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::unit::Unit;
@@ -8,7 +12,9 @@ use crate::datamodel::{
     sensapp_vec::SensAppLabels,
 };
 use crate::storage::{
-    DEFAULT_QUERY_LIMIT, StorageError, StorageInstance, common::datetime_to_micros,
+    Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT,
+    SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
+    common::datetime_to_micros,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -88,7 +94,26 @@ impl StorageInstance for SqliteStorage {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>> {
+        limit: Option<usize>,
+        bookmark: Option<&str>,
+    ) -> Result<crate::storage::ListSeriesResult> {
+        let bookmark_id = if let Some(bookmark_str) = bookmark {
+            Some(bookmark_str.parse::<i64>().map_err(|e| {
+                anyhow::Error::from(StorageError::invalid_data_format(
+                    &format!("Invalid bookmark format: {}", e),
+                    None,
+                    None,
+                ))
+            })?)
+        } else {
+            None
+        };
+
+        let effective_limit = limit
+            .unwrap_or(DEFAULT_LIST_SERIES_LIMIT)
+            .min(MAX_LIST_SERIES_LIMIT);
+        let fetch_limit = effective_limit.saturating_add(1) as i64;
+
         #[derive(sqlx::FromRow)]
         struct SensorRow {
             sensor_id: Option<i64>,
@@ -99,22 +124,28 @@ impl StorageInstance for SqliteStorage {
             unit_description: Option<String>,
         }
 
-        // Query sensors with their metadata using the catalog view, optionally filtered by metric name
+        // Query sensors with cursor pagination based on sensor_id.
         let sensor_rows: Vec<SensorRow> = sqlx::query_as(
             r#"
             SELECT sensor_id, uuid, name, type, unit_name, unit_description
             FROM sensor_catalog_view
             WHERE (?1 IS NULL OR name = ?1)
-            ORDER BY uuid ASC
+              AND (?2 IS NULL OR sensor_id > ?2)
+            ORDER BY sensor_id ASC
+            LIMIT ?3
             "#,
         )
         .bind(metric_filter)
+        .bind(bookmark_id)
+        .bind(fetch_limit)
         .fetch_all(&self.pool)
         .await?;
 
+        let has_more = sensor_rows.len() > effective_limit;
         let mut sensors = Vec::new();
+        let mut last_sensor_id = None;
 
-        for sensor_row in sensor_rows {
+        for sensor_row in sensor_rows.into_iter().take(effective_limit) {
             // Parse sensor metadata with improved error handling
             let sensor_uuid = Uuid::parse_str(&sensor_row.uuid).map_err(|e| {
                 anyhow::Error::from(StorageError::invalid_data_format(
@@ -150,6 +181,7 @@ impl StorageInstance for SqliteStorage {
                     Some(sensor_name),
                 ))
             })?;
+            last_sensor_id = Some(sensor_id);
 
             #[derive(sqlx::FromRow)]
             struct LabelRow {
@@ -192,7 +224,14 @@ impl StorageInstance for SqliteStorage {
             sensors.push(sensor);
         }
 
-        Ok(sensors)
+        Ok(crate::storage::ListSeriesResult {
+            series: sensors,
+            bookmark: if has_more {
+                last_sensor_id.map(|sensor_id| sensor_id.to_string())
+            } else {
+                None
+            },
+        })
     }
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {
@@ -426,6 +465,240 @@ impl StorageInstance for SqliteStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    async fn query_sensor_data_advanced(
+        &self,
+        sensor_uuid: &str,
+        options: &SensorDataQueryOptions,
+    ) -> Result<Option<SensorData>> {
+        options.validate()?;
+
+        if let (Some(step_ms), Some(aggregation)) = (options.step_ms, options.aggregation) {
+            if let Some((sensor_id, mut sensor)) = self.get_sensor_metadata(sensor_uuid).await? {
+                let start_time_us = options.start_time.as_ref().map(datetime_to_micros);
+                let end_time_us = options.end_time.as_ref().map(datetime_to_micros);
+                let step_us = step_ms * 1000;
+                let origin_us = start_time_us.unwrap_or(0);
+
+                let samples = match sensor.sensor_type {
+                    SensorType::Integer => {
+                        self.query_integer_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_us,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    SensorType::Numeric => {
+                        self.query_numeric_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_us,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    SensorType::Float => {
+                        self.query_float_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_us,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    _ => {
+                        let raw = self
+                            .query_sensor_data(
+                                sensor_uuid,
+                                options.start_time,
+                                options.end_time,
+                                options.limit,
+                            )
+                            .await?;
+                        return raw
+                            .map(|sensor_data| {
+                                crate::storage::common::apply_query_options(sensor_data, options)
+                            })
+                            .transpose();
+                    }
+                };
+
+                sensor.sensor_type = match &samples {
+                    TypedSamples::Integer(_) => SensorType::Integer,
+                    TypedSamples::Numeric(_) => SensorType::Numeric,
+                    TypedSamples::Float(_) => SensorType::Float,
+                    _ => sensor.sensor_type,
+                };
+                if aggregation.output_is_count() {
+                    sensor.unit = None;
+                }
+
+                let post_query_options = SensorDataQueryOptions {
+                    start_time: options.start_time,
+                    end_time: options.end_time,
+                    limit: options.limit,
+                    step_ms: None,
+                    aggregation: None,
+                    simplify: options.simplify,
+                };
+
+                return crate::storage::common::apply_query_options(
+                    SensorData::new(sensor, samples),
+                    &post_query_options,
+                )
+                .map(Some);
+            }
+
+            return Ok(None);
+        }
+
+        let raw = self
+            .query_sensor_data(
+                sensor_uuid,
+                options.start_time,
+                options.end_time,
+                options.limit,
+            )
+            .await?;
+
+        raw.map(|sensor_data| crate::storage::common::apply_query_options(sensor_data, options))
+            .transpose()
+    }
+
+    async fn query_sensor_data_latest(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<Option<SensorData>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+        let table_name = Self::sensor_table_name(sensor.sensor_type);
+
+        let Some(latest_timestamp_us) = self
+            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let samples = match sensor.sensor_type {
+            SensorType::Integer => {
+                self.query_integer_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Numeric => {
+                self.query_numeric_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Float => {
+                self.query_float_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::String => {
+                self.query_string_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Boolean => {
+                self.query_boolean_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Location => {
+                self.query_location_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Json => {
+                self.query_json_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Blob => {
+                self.query_blob_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+        };
+
+        Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    async fn query_sensor_data_availability(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<Option<SensorAvailabilitySummary>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let summary = self
+            .query_availability_summary_native(
+                Self::sensor_table_name(sensor.sensor_type),
+                sensor_id,
+                sensor,
+                datetime_to_micros(&start_time),
+                datetime_to_micros(&end_time),
+                step_ms,
+            )
+            .await?;
+
+        Ok(Some(summary))
+    }
+
     async fn query_sensors_by_labels(
         &self,
         matchers: &[crate::storage::LabelMatcher],
@@ -590,6 +863,226 @@ impl StorageInstance for SqliteStorage {
 }
 
 impl SqliteStorage {
+    async fn get_sensor_metadata(&self, sensor_uuid: &str) -> Result<Option<(i64, Sensor)>> {
+        let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
+        let uuid_string = parsed_uuid.to_string();
+
+        #[derive(sqlx::FromRow)]
+        struct SensorMetadataRow {
+            sensor_id: Option<i64>,
+            uuid: String,
+            name: String,
+            r#type: String,
+            unit_name: Option<String>,
+            unit_description: Option<String>,
+        }
+
+        let sensor_row: Option<SensorMetadataRow> = sqlx::query_as(
+            r#"
+            SELECT s.sensor_id, s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
+            FROM sensors s
+            LEFT JOIN units u ON s.unit = u.id
+            WHERE s.uuid = ?
+            "#,
+        )
+        .bind(&uuid_string)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(sensor_row) = sensor_row else {
+            return Ok(None);
+        };
+
+        let sensor_uuid = Uuid::parse_str(&sensor_row.uuid).map_err(|e| {
+            anyhow::Error::from(StorageError::invalid_data_format(
+                &format!("Failed to parse sensor UUID '{}': {}", sensor_row.uuid, e),
+                None,
+                Some(&sensor_row.name),
+            ))
+        })?;
+
+        let sensor_type = SensorType::from_str(&sensor_row.r#type).map_err(|e| {
+            anyhow::Error::from(StorageError::invalid_data_format(
+                &format!("Failed to parse sensor type '{}': {}", sensor_row.r#type, e),
+                Some(sensor_uuid),
+                Some(&sensor_row.name),
+            ))
+        })?;
+
+        let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
+            (Some(name), description) if !name.is_empty() => Some(Unit::new(name, description)),
+            _ => None,
+        };
+
+        let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "sensor_id",
+                Some(sensor_uuid),
+                Some(&sensor_row.name),
+            ))
+        })?;
+
+        #[derive(sqlx::FromRow)]
+        struct LabelRow {
+            label_name: String,
+            label_value: String,
+        }
+
+        let labels_rows: Vec<LabelRow> = sqlx::query_as(
+            r#"
+            SELECT lnd.name as label_name, ldd.description as label_value
+            FROM labels l
+            JOIN labels_name_dictionary lnd ON l.name = lnd.id
+            JOIN labels_description_dictionary ldd ON l.description = ldd.id
+            WHERE l.sensor_id = ?
+            "#,
+        )
+        .bind(sensor_id)
+        .fetch_all(&self.pool)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to query labels for sensor UUID={} name='{}'",
+                sensor_uuid, sensor_row.name
+            )
+        })?;
+
+        let mut labels: SensAppLabels = smallvec![];
+        for label_row in labels_rows {
+            labels.push((label_row.label_name, label_row.label_value));
+        }
+
+        Ok(Some((
+            sensor_id,
+            Sensor::new(
+                sensor_uuid,
+                sensor_row.name,
+                sensor_type,
+                unit,
+                Some(labels),
+            ),
+        )))
+    }
+
+    fn sensor_table_name(sensor_type: SensorType) -> &'static str {
+        match sensor_type {
+            SensorType::Integer => "integer_values",
+            SensorType::Numeric => "numeric_values",
+            SensorType::Float => "float_values",
+            SensorType::String => "string_values",
+            SensorType::Boolean => "boolean_values",
+            SensorType::Location => "location_values",
+            SensorType::Json => "json_values",
+            SensorType::Blob => "blob_values",
+        }
+    }
+
+    async fn query_latest_timestamp_us(
+        &self,
+        table_name: &str,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+    ) -> Result<Option<i64>> {
+        let sql = format!(
+            r#"
+            SELECT MAX(timestamp_us) AS timestamp_us
+            FROM {table_name}
+            WHERE sensor_id = ?
+            AND (? IS NULL OR timestamp_us >= ?)
+            AND (? IS NULL OR timestamp_us <= ?)
+            "#
+        );
+
+        let timestamp_us: Option<i64> = sqlx::query_scalar(&sql)
+            .bind(sensor_id)
+            .bind(start_time)
+            .bind(start_time)
+            .bind(end_time)
+            .bind(end_time)
+            .fetch_one(&self.pool)
+            .await?;
+
+        Ok(timestamp_us)
+    }
+
+    async fn query_availability_summary_native(
+        &self,
+        table_name: &str,
+        sensor_id: i64,
+        sensor: Sensor,
+        start_time: i64,
+        end_time: i64,
+        step_ms: Option<i64>,
+    ) -> Result<SensorAvailabilitySummary> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            sample_count: i64,
+            first_sample_at: Option<i64>,
+            last_sample_at: Option<i64>,
+            covered_buckets: Option<i64>,
+        }
+
+        let row: Row = if let Some(step_ms) = step_ms {
+            let step_us = step_ms.checked_mul(1000).context("step is too large")?;
+            let sql = format!(
+                r#"
+                SELECT
+                    COUNT(*) AS sample_count,
+                    MIN(timestamp_us) AS first_sample_at,
+                    MAX(timestamp_us) AS last_sample_at,
+                    COUNT(DISTINCT ((timestamp_us - ?) / ?)) AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = ?
+                AND timestamp_us >= ?
+                AND timestamp_us <= ?
+                "#
+            );
+
+            sqlx::query_as(&sql)
+                .bind(start_time)
+                .bind(step_us)
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .fetch_one(&self.pool)
+                .await?
+        } else {
+            let sql = format!(
+                r#"
+                SELECT
+                    COUNT(*) AS sample_count,
+                    MIN(timestamp_us) AS first_sample_at,
+                    MAX(timestamp_us) AS last_sample_at,
+                    NULL AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = ?
+                AND timestamp_us >= ?
+                AND timestamp_us <= ?
+                "#
+            );
+
+            sqlx::query_as(&sql)
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .fetch_one(&self.pool)
+                .await?
+        };
+
+        Ok(SensorAvailabilitySummary {
+            sensor,
+            sample_count: row.sample_count.max(0) as usize,
+            first_sample_at: row
+                .first_sample_at
+                .map(SensAppDateTime::from_unix_microseconds_i64),
+            last_sample_at: row
+                .last_sample_at
+                .map(SensAppDateTime::from_unix_microseconds_i64),
+            covered_buckets: row.covered_buckets.map(|value| value.max(0) as usize),
+        })
+    }
+
     async fn publish_single_sensor_batch(
         &self,
         transaction: &mut Transaction<'_, Sqlite>,
@@ -701,6 +1194,362 @@ impl SqliteStorage {
         }
 
         Ok(TypedSamples::Integer(samples))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn query_integer_samples_aggregated(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        step_us: i64,
+        origin_us: i64,
+        aggregation: Aggregation,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
+
+        match aggregation {
+            Aggregation::Avg => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: f64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_us AS timestamp_us, AVG(value) AS value {}",
+                    sqlite_bucketed_cte("integer_values"),
+                    sqlite_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .bind(step_us)
+                .bind(origin_us)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Float(samples))
+            }
+            Aggregation::Count => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: i64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_us AS timestamp_us, COUNT(*) AS value {}",
+                    sqlite_bucketed_cte("integer_values"),
+                    sqlite_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .bind(step_us)
+                .bind(origin_us)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+            Aggregation::First | Aggregation::Last => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: i64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&sqlite_first_last_query(
+                    "integer_values",
+                    aggregation,
+                    "value",
+                ))
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .bind(step_us)
+                .bind(origin_us)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+            _ => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: i64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_us AS timestamp_us, {} AS value {}",
+                    sqlite_bucketed_cte("integer_values"),
+                    sqlite_integer_expression(aggregation),
+                    sqlite_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .bind(step_us)
+                .bind(origin_us)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn query_float_samples_aggregated(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        step_us: i64,
+        origin_us: i64,
+        aggregation: Aggregation,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
+
+        match aggregation {
+            Aggregation::Count => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: i64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_us AS timestamp_us, COUNT(*) AS value {}",
+                    sqlite_bucketed_cte("float_values"),
+                    sqlite_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .bind(step_us)
+                .bind(origin_us)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+            Aggregation::First | Aggregation::Last => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: f64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&sqlite_first_last_query(
+                    "float_values",
+                    aggregation,
+                    "value",
+                ))
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .bind(step_us)
+                .bind(origin_us)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Float(samples))
+            }
+            _ => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: f64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_us AS timestamp_us, {} AS value {}",
+                    sqlite_bucketed_cte("float_values"),
+                    sqlite_float_expression(aggregation),
+                    sqlite_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .bind(step_us)
+                .bind(origin_us)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Float(samples))
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn query_numeric_samples_aggregated(
+        &self,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        step_us: i64,
+        origin_us: i64,
+        aggregation: Aggregation,
+        limit: Option<usize>,
+    ) -> Result<TypedSamples> {
+        let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT) as i64;
+
+        match aggregation {
+            Aggregation::Count => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: i64,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_us AS timestamp_us, COUNT(*) AS value {}",
+                    sqlite_bucketed_cte("numeric_values"),
+                    sqlite_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .bind(step_us)
+                .bind(origin_us)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                        value: row.value,
+                    });
+                }
+                Ok(TypedSamples::Integer(samples))
+            }
+            Aggregation::First | Aggregation::Last => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: String,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&sqlite_first_last_query(
+                    "numeric_values",
+                    aggregation,
+                    "CAST(value AS TEXT)",
+                ))
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .bind(step_us)
+                .bind(origin_us)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                        value: Decimal::from_str(&row.value)
+                            .context("Failed to parse aggregated SQLite numeric value")?,
+                    });
+                }
+                Ok(TypedSamples::Numeric(samples))
+            }
+            _ => {
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    timestamp_us: i64,
+                    value: String,
+                }
+
+                let rows: Vec<Row> = sqlx::query_as(&format!(
+                    "{} SELECT bucket_us AS timestamp_us, CAST({} AS TEXT) AS value {}",
+                    sqlite_bucketed_cte("numeric_values"),
+                    sqlite_numeric_expression(aggregation),
+                    sqlite_group_by_clause()
+                ))
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .bind(step_us)
+                .bind(origin_us)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut samples = smallvec![];
+                for row in rows {
+                    samples.push(Sample {
+                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                        value: Decimal::from_str(&row.value)
+                            .context("Failed to parse aggregated SQLite numeric value")?,
+                    });
+                }
+                Ok(TypedSamples::Numeric(samples))
+            }
+        }
     }
 
     async fn query_numeric_samples(

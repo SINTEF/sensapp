@@ -1,6 +1,8 @@
 use anyhow::{Result, anyhow};
 use sensapp::storage::{StorageInstance, storage_factory::create_storage_from_connection_string};
-use sensapp::test_utils::get_test_database_url;
+use sensapp::test_utils::{
+    ensure_test_database_exists, get_test_database_url, isolate_test_database_url,
+};
 use std::sync::Arc;
 
 pub mod db;
@@ -13,6 +15,9 @@ pub enum DatabaseType {
     PostgreSQL,
     SQLite,
     ClickHouse,
+    TimescaleDB,
+    DuckDB,
+    RRDcached,
 }
 
 impl DatabaseType {
@@ -23,8 +28,18 @@ impl DatabaseType {
             DatabaseType::SQLite => std::env::var("TEST_DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite://test.db".to_string()),
             DatabaseType::ClickHouse => std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-                "clickhouse://default:password@localhost:9000/sensapp_test".to_string()
+                "clickhouse://default:password@localhost:8123/sensapp_test".to_string()
             }),
+            DatabaseType::TimescaleDB => {
+                let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+                    "timescaledb://postgres:postgres@localhost:5433/sensapp-test".to_string()
+                });
+                isolate_test_database_url(&url)
+            }
+            DatabaseType::DuckDB => std::env::var("TEST_DATABASE_URL")
+                .unwrap_or_else(|_| "duckdb://test.duckdb".to_string()),
+            DatabaseType::RRDcached => std::env::var("TEST_DATABASE_URL")
+                .unwrap_or_else(|_| "rrdcached://127.0.0.1:42217?preset=hoarder".to_string()),
         }
     }
 
@@ -34,6 +49,12 @@ impl DatabaseType {
             DatabaseType::SQLite
         } else if connection_string.starts_with("clickhouse://") {
             DatabaseType::ClickHouse
+        } else if connection_string.starts_with("timescaledb://") {
+            DatabaseType::TimescaleDB
+        } else if connection_string.starts_with("duckdb://") {
+            DatabaseType::DuckDB
+        } else if connection_string.starts_with("rrdcached://") {
+            DatabaseType::RRDcached
         } else {
             // Default to PostgreSQL for postgres://, postgresql://, or any other prefix
             DatabaseType::PostgreSQL
@@ -42,14 +63,31 @@ impl DatabaseType {
 
     /// Get the database type from environment variables or use default
     pub fn from_env() -> Self {
-        let connection_string = get_test_database_url();
-        Self::from_connection_string(&connection_string)
+        if let Ok(connection_string) = std::env::var("TEST_DATABASE_URL") {
+            return Self::from_connection_string(&connection_string);
+        }
+
+        if cfg!(feature = "timescaledb") {
+            DatabaseType::TimescaleDB
+        } else if cfg!(feature = "clickhouse") {
+            DatabaseType::ClickHouse
+        } else if cfg!(feature = "duckdb") {
+            DatabaseType::DuckDB
+        } else if cfg!(feature = "sqlite") {
+            DatabaseType::SQLite
+        } else if cfg!(feature = "rrdcached") {
+            DatabaseType::RRDcached
+        } else {
+            DatabaseType::PostgreSQL
+        }
     }
 }
 
 /// Test database manager that creates isolated test databases
 pub struct TestDb {
+    #[allow(dead_code)] // Kept for diagnostics and per-test context
     pub db_name: String,
+    #[allow(dead_code)] // Kept for diagnostics and per-test context
     pub db_type: DatabaseType,
     #[allow(dead_code)] // Used by some tests
     pub storage: Arc<dyn StorageInstance>,
@@ -73,9 +111,19 @@ impl TestDb {
             DatabaseType::PostgreSQL => "sensapp".to_string(),
             DatabaseType::SQLite => "test.db".to_string(),
             DatabaseType::ClickHouse => "sensapp_test".to_string(),
+            DatabaseType::TimescaleDB => "sensapp-test".to_string(),
+            DatabaseType::DuckDB => "test.duckdb".to_string(),
+            DatabaseType::RRDcached => "rrdcached".to_string(),
         };
 
         let connection_string = db_type.default_connection_string();
+
+        if matches!(
+            db_type,
+            DatabaseType::PostgreSQL | DatabaseType::TimescaleDB
+        ) {
+            ensure_test_database_exists(&connection_string).await?;
+        }
 
         // Connect to the database
         let storage = create_storage_from_connection_string(&connection_string)
@@ -130,16 +178,6 @@ impl TestDb {
     }
 }
 
-impl Drop for TestDb {
-    fn drop(&mut self) {
-        // Async cleanup would be better, but this ensures cleanup happens
-        println!(
-            "Test database {} ({:?}) cleaned up",
-            self.db_name, self.db_type
-        );
-    }
-}
-
 /// Helper trait for easier testing
 pub trait TestHelpers {
     #[allow(dead_code)] // Test helper method
@@ -151,13 +189,13 @@ pub trait TestHelpers {
 
 impl TestHelpers for Arc<dyn StorageInstance> {
     async fn expect_sensor_count(&self, expected: usize) -> Result<()> {
-        let sensors = self.list_series(None).await?;
-        if sensors.len() != expected {
+        let result = self.list_series(None, None, None).await?;
+        if result.series.len() != expected {
             return Err(anyhow!(
                 "Expected {} sensors, found {}. Sensors: {:#?}",
                 expected,
-                sensors.len(),
-                sensors
+                result.series.len(),
+                result.series
             ));
         }
         Ok(())

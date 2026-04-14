@@ -4,13 +4,18 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
-use sensapp::ingestors::http::crud::{get_series_data, list_metrics, list_series};
-use sensapp::ingestors::http::health::{liveness, readiness};
-use sensapp::ingestors::http::server::publish_senml_data;
-use sensapp::ingestors::http::state::HttpServerState;
+use sensapp::http::crud::{
+    get_series_availability, get_series_data, get_series_last_sample, list_metrics, list_series,
+};
+use sensapp::http::health::{liveness, readiness};
+use sensapp::http::influxdb::publish_influxdb;
+use sensapp::http::metrics::{HttpMetrics, prometheus_metrics, track_http_metrics};
+use sensapp::http::server::publish_senml_data;
+use sensapp::http::simple_promql::simple_promql_query;
+use sensapp::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
 use std::sync::Arc;
-use tower::ServiceExt; // for `oneshot` and `ready`
+use tower::ServiceExt;
 
 /// HTTP test client for making requests to our app
 #[allow(dead_code)] // Test helper struct
@@ -25,18 +30,32 @@ impl TestApp {
         let state = HttpServerState {
             name: Arc::new("SensApp Test".to_string()),
             storage,
+            metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
+            auth: None,
         };
 
         // Create a minimal router for testing (without middleware that might interfere)
         // We'll define simple test handlers that delegate to the import functions
         let app = Router::new()
             .route("/sensors/publish", post(test_publish_handler))
+            .route("/api/v2/write", post(publish_influxdb))
             .route("/metrics", get(list_metrics))
+            .route("/prometheus/metrics", get(prometheus_metrics))
             .route("/series", get(list_series))
+            .route("/api/v1/query", get(simple_promql_query))
             .route("/series/{series_uuid}", get(get_series_data))
+            .route("/series/{series_uuid}/last", get(get_series_last_sample))
+            .route(
+                "/series/{series_uuid}/availability",
+                get(get_series_availability),
+            )
             .route("/health/live", get(liveness))
             .route("/health/ready", get(readiness))
+            .layer(axum::middleware::from_fn_with_state(
+                state.metrics.clone(),
+                track_http_metrics,
+            ))
             .with_state(state);
 
         Self { app }
@@ -120,6 +139,13 @@ impl TestApp {
             .header("content-type", "text/plain")
             .body(Body::from(influx_data.to_string()))?;
 
+        let response = self.app.clone().oneshot(request).await?;
+        Ok(TestResponse::new(response).await)
+    }
+
+    /// Send a raw request (for custom headers, compression, etc.)
+    #[allow(dead_code)] // Test helper method
+    pub async fn raw_request(&self, request: Request<Body>) -> Result<TestResponse> {
         let response = self.app.clone().oneshot(request).await?;
         Ok(TestResponse::new(response).await)
     }
@@ -269,7 +295,9 @@ async fn test_publish_handler(
             })?;
 
         Ok("ok".to_string())
-    } else if content_type.contains("application/vnd.apache.arrow.file") {
+    } else if content_type.contains("application/vnd.apache.arrow.stream")
+        || content_type.contains("application/vnd.apache.arrow.file")
+    {
         // Handle Arrow data
         use sensapp::importers::arrow::publish_arrow_async;
 
@@ -282,9 +310,11 @@ async fn test_publish_handler(
             .map_err(|e| {
                 // Arrow parsing errors should be bad requests, not internal server errors
                 if e.to_string().contains("Failed to create Arrow file reader")
-                    || e.to_string()
-                        .contains("Arrow file contains no data batches")
                     || e.to_string().contains("Failed to read Arrow batch")
+                    || e.to_string()
+                        .contains("Failed to read Arrow batch from stream")
+                    || e.to_string()
+                        .contains("Arrow IPC payload contains no data batches")
                 {
                     (
                         StatusCode::BAD_REQUEST,

@@ -3,10 +3,13 @@ use crate::datamodel::{SensorType, sensapp_datetime::SensAppDateTimeExt, unit::U
 use crate::storage::StorageError;
 use anyhow::Result;
 use clickhouse::Row;
+use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
+
+pub const CLICKHOUSE_NUMERIC_SCALE: u32 = 8;
 
 /// Convert UUID to UInt64 using a deterministic hash function
 /// We use the standard library's DefaultHasher which is typically xxHash64
@@ -22,6 +25,23 @@ pub use crate::storage::common::datetime_to_micros;
 /// Convert microseconds timestamp to SensAppDateTime
 pub fn micros_to_datetime(micros: i64) -> SensAppDateTime {
     SensAppDateTime::from_unix_microseconds_i64(micros)
+}
+
+pub fn decimal_to_clickhouse_raw(value: &Decimal) -> Result<i128> {
+    let mut normalized = if value.scale() > CLICKHOUSE_NUMERIC_SCALE {
+        value.round_dp_with_strategy(
+            CLICKHOUSE_NUMERIC_SCALE,
+            RoundingStrategy::MidpointNearestEven,
+        )
+    } else {
+        *value
+    };
+    normalized.rescale(CLICKHOUSE_NUMERIC_SCALE);
+    Ok(normalized.mantissa())
+}
+
+pub fn decimal_from_clickhouse_raw(raw: i128) -> Decimal {
+    Decimal::from_i128_with_scale(raw, CLICKHOUSE_NUMERIC_SCALE)
 }
 
 /// Get sensor_id for a given UUID, creating the sensor if it doesn't exist
@@ -74,7 +94,8 @@ pub async fn get_sensor_id_or_create_sensor(
     };
 
     let mut insert = client
-        .insert("sensors")
+        .insert::<SensorRow>("sensors")
+        .await
         .map_err(|e| StorageError::invalid_data_format(&e.to_string(), Some(*uuid), Some(name)))?;
 
     insert
@@ -127,7 +148,8 @@ async fn get_or_create_unit(client: &clickhouse::Client, unit: &Unit) -> Result<
 
     // Unit doesn't exist, create it
     let mut insert = client
-        .insert("units")
+        .insert::<UnitRow>("units")
+        .await
         .map_err(|e| StorageError::invalid_data_format(&e.to_string(), None, None))?;
 
     insert

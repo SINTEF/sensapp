@@ -20,6 +20,7 @@ pub enum StorageError {
 
     /// Invalid data format in database
     #[error("Invalid data format: {message} for sensor {sensor_context}")]
+    #[allow(dead_code)] // Part of the shared storage error API across backend feature sets
     InvalidDataFormat {
         message: String,
         sensor_context: String,
@@ -73,6 +74,7 @@ impl StorageError {
     }
 
     /// Create an invalid data format error with sensor context
+    #[allow(dead_code)] // Part of the shared storage error API across backend feature sets
     pub fn invalid_data_format(
         message: &str,
         sensor_uuid: Option<Uuid>,

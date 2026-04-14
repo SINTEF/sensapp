@@ -136,6 +136,7 @@ impl LabelMatcher {
 
     /// Returns true if this matcher targets the metric name (`__name__`).
     #[inline]
+    #[allow(dead_code)] // Used by tests and feature-dependent call sites
     pub fn is_name_matcher(&self) -> bool {
         self.name == "__name__"
     }

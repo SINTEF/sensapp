@@ -73,3 +73,27 @@ Examples:
 fix: 🐛 prevent infinite loop when it rains
 docs(architecture): 📝 correct spelling of banana
 ```
+
+## Useful Commands
+
+```bash
+# Build
+cargo build
+
+# Test
+cargo test
+cargo make test-all         # all storage backends
+cargo make test-local-matrix # all local backends via Docker Compose (no BigQuery)
+
+# Lint (format + clippy)
+cargo make lint
+cargo make lint-all         # all storage backends
+
+# Full validation
+cargo make check-all        # working features (postgres + sqlite)
+cargo make check-all-storage # all storage backends
+cargo make check-local-matrix # all local backends via Docker Compose (no BigQuery)
+
+# Setup (runs migrations)
+cargo make setup-dev
+```

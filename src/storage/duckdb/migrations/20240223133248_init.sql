@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS integer_values (
 CREATE TABLE IF NOT EXISTS numeric_values (
     sensor_id BIGINT NOT NULL,
     timestamp_ms TIMESTAMP_MS NOT NULL,
-    value DECIMAL(18,6) NOT NULL,
+    value DECIMAL(38,9) NOT NULL,
     --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
 

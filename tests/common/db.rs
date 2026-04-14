@@ -12,10 +12,10 @@ impl DbHelpers {
     /// Count total number of sensor samples in the database
     #[allow(dead_code)] // Test helper method
     pub async fn count_total_samples(storage: &Arc<dyn StorageInstance>) -> Result<usize> {
-        let sensors = storage.list_series(None).await?;
+        let result = storage.list_series(None, None, None).await?;
         let mut total = 0;
 
-        for sensor in sensors {
+        for sensor in result.series {
             if let Some(sensor_data) = storage
                 .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
                 .await?
@@ -42,8 +42,8 @@ impl DbHelpers {
         storage: &Arc<dyn StorageInstance>,
         name: &str,
     ) -> Result<Option<Sensor>> {
-        let sensors = storage.list_series(None).await?;
-        Ok(sensors.into_iter().find(|s| s.name == name))
+        let result = storage.list_series(None, None, None).await?;
+        Ok(result.series.into_iter().find(|s| s.name == name))
     }
 
     /// Verify sensor data exists and has expected sample count
@@ -89,8 +89,8 @@ impl DbHelpers {
     /// Get all sensor names in the database
     #[allow(dead_code)] // Test helper method
     pub async fn get_sensor_names(storage: &Arc<dyn StorageInstance>) -> Result<Vec<String>> {
-        let sensors = storage.list_series(None).await?;
-        Ok(sensors.into_iter().map(|s| s.name).collect())
+        let result = storage.list_series(None, None, None).await?;
+        Ok(result.series.into_iter().map(|s| s.name).collect())
     }
 }
 

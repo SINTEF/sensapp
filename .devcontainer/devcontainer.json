@@ -1,0 +1,12 @@
+{
+  "name": "sensapp",
+  "image": "mcr.microsoft.com/devcontainers/universal:2-linux",
+  "remoteEnv": {
+    "DUCKDB_DOWNLOAD_LIB": "1",
+    "DUCKDB_CMAKE_BUILD_TYPE": "Release"
+  },
+  "containerEnv": {
+    "DUCKDB_DOWNLOAD_LIB": "1",
+    "DUCKDB_CMAKE_BUILD_TYPE": "Release"
+  }
+}

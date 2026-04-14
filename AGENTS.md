@@ -18,3 +18,18 @@ Moreover, you can run the linters on the tests with `cargo clippy --tests`.
 - We follow a KISS (Keep It Simple, Stupid) approach. Avoid unnecessary abstractions and complexity.
 - During development, we focus on PostGreSQL as a main storage backend. Thus, you must only write tests in a generic way and not cut corners.
 - unit tests and integrations tests are very helpful and appreciated. Consider doing them even when not actively requested. Testing is important.
+
+## Task tracking
+
+We use a folder-based task tracking system to maintain visibility into ongoing work, future ideas, and completed tasks:
+
+- **`current_tasks/`** — Active tasks currently being worked on. Each task should be a separate markdown file describing the goal, context, and progress. When starting a major task, create a file here.
+- **`ideas/`** — Ideas for future work, improvements, or features. Add a markdown file for each idea, even if it's rough or speculative.
+- **`done/`** — Completed tasks. When a task from `current_tasks/` is finished, move it here. This provides a historical record of what has been accomplished.
+
+**Rules:**
+- Always check `current_tasks/` before starting work to understand what's in progress.
+- When completing a major task, move its file from `current_tasks/` to `done/`.
+- New ideas should go in `ideas/`, not in `current_tasks/` unless actively being worked on.
+- Keep file names descriptive (e.g., `mqtt-ingestor-integration.md`, `rrdcached-fetch-support.md`).
+- Maintain these folders — they are the project's source of truth for work status.

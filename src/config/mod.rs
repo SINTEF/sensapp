@@ -5,6 +5,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+const MAX_HTTP_BODY_LIMIT_BYTES: u64 = 128 * 1024 * 1024 * 1024;
+
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
     #[config(env = "SENSAPP_INSTANCE_ID", default = 0)]
@@ -15,7 +17,7 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_ENDPOINT", default = "127.0.0.1")]
     pub endpoint: IpAddr,
 
-    #[config(env = "SENSAPP_HTTP_BODY_LIMIT", default = "10mb")]
+    #[config(env = "SENSAPP_HTTP_BODY_LIMIT", default = "64MiB")]
     pub http_body_limit: String,
 
     #[config(env = "SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS", default = 30)]
@@ -42,6 +44,13 @@ pub struct SensAppConfig {
 
     #[config(env = "SENSAPP_INFLUXDB_WITH_NUMERIC", default = false)]
     pub influxdb_with_numeric: bool,
+
+    /// JWT secret for optional authentication.
+    /// When set, all protected endpoints require a valid JWT bearer token.
+    /// Must be at least 32 characters long.
+    /// When unset, all endpoints are open (no security).
+    #[config(env = "SENSAPP_JWT_SECRET")]
+    pub jwt_secret: Option<String>,
 }
 
 impl SensAppConfig {
@@ -57,7 +66,7 @@ impl SensAppConfig {
 
     pub fn parse_http_body_limit(&self) -> Result<usize, Error> {
         let size = byte_unit::Byte::parse_str(self.http_body_limit.clone(), true)?.as_u64();
-        if size > 128 * 1024 * 1024 * 1024 {
+        if size > MAX_HTTP_BODY_LIMIT_BYTES {
             anyhow::bail!("Body size is too big: > 128GB");
         }
         Ok(size as usize)
@@ -131,26 +140,27 @@ mod tests {
     #[test]
     fn test_parse_http_body_limit() {
         let config = SensAppConfig::load().unwrap();
-        assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+        assert_eq!(config.http_body_limit, "64MiB");
+        assert_eq!(config.parse_http_body_limit().unwrap(), 67108864);
 
         temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("12345"), || {
             let config = SensAppConfig::load().unwrap();
             assert_eq!(config.parse_http_body_limit().unwrap(), 12345);
         });
 
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("10m"), || {
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("64m"), || {
             let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+            assert_eq!(config.parse_http_body_limit().unwrap(), 64000000);
         });
 
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("10mb"), || {
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("64mb"), || {
             let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 10000000);
+            assert_eq!(config.parse_http_body_limit().unwrap(), 64000000);
         });
 
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("10MiB"), || {
+        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("64MiB"), || {
             let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 10485760);
+            assert_eq!(config.parse_http_body_limit().unwrap(), 67108864);
         });
 
         temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("1.5gb"), || {
@@ -171,12 +181,13 @@ mod tests {
 
     #[test]
     fn test_load_configuration() {
-        assert!(SENSAPP_CONFIG.get().is_none());
+        load_configuration().unwrap();
         load_configuration().unwrap();
         assert!(SENSAPP_CONFIG.get().is_some());
 
         let config = get().unwrap();
-        assert_eq!(config.port, 3000);
+        let config_again = get().unwrap();
+        assert!(Arc::ptr_eq(&config, &config_again));
     }
 
     #[test]

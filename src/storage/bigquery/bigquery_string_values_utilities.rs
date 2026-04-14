@@ -1,11 +1,12 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
 use crate::storage::StorageError;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use clru::CLruCache;
 use gcp_bigquery_client::model::{
     query_parameter::QueryParameter, query_parameter_type::QueryParameterType,
     query_parameter_value::QueryParameterValue, query_request::QueryRequest,
+    query_response::ResultSet,
 };
 use hybridmap::HybridMap;
 use once_cell::sync::Lazy;
@@ -136,13 +137,14 @@ async fn get_existing_string_values_ids(
     };
     query_request.query_parameters = Some(vec![query_parameter]);
 
-    let mut result = bqs
+    let result = bqs
         .client()
         .read()
         .await
         .job()
         .query(bqs.project_id(), query_request)
         .await?;
+    let mut result = ResultSet::new_from_query_response(result);
 
     let mut results_map = HybridMap::with_capacity(result.row_count());
 

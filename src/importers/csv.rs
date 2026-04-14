@@ -3,6 +3,7 @@ use crate::{
         Sample, SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
         unit::Unit,
     },
+    importers::IngestionStats,
     infer::{
         columns::{InferedColumn, infer_column},
         datagrid::StringDataGrid,
@@ -22,7 +23,7 @@ type SensorDataMap = HashMap<String, (Arc<Sensor>, Vec<(SensAppDateTime, Infered
 pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
     mut csv_reader: AsyncReader<R>,
     storage: Arc<dyn StorageInstance>,
-) -> Result<()> {
+) -> Result<IngestionStats> {
     // Read all CSV data into a StringDataGrid
     let headers = csv_reader.headers().await?.clone();
     let column_names = headers.iter().map(|s| s.to_string()).collect::<Vec<_>>();
@@ -40,6 +41,8 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
 
     // Parse the CSV data
     let parsed_data = parse_csv_data_grid(data_grid)?;
+    let series = parsed_data.len();
+    let samples = parsed_data.values().map(|(_, values)| values.len()).sum();
 
     // Use BatchBuilder to publish the data
     let mut batch_builder = BatchBuilder::new()?;
@@ -51,7 +54,7 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
     // Send all batches to storage
     batch_builder.send_what_is_left(storage).await?;
 
-    Ok(())
+    Ok(IngestionStats::new(series, samples))
 }
 
 /// Parse CSV data grid into sensors and their samples

@@ -8,7 +8,11 @@
 //! - `postgresql_publishers.rs`: Value publishing functions
 //! - `postgresql_utilities.rs`: Helper functions for sensor/label/unit creation
 
-use super::{DEFAULT_QUERY_LIMIT, StorageError, StorageInstance, common::datetime_to_micros};
+use super::{
+    DEFAULT_QUERY_LIMIT, SensorAvailabilitySummary, StorageError, StorageInstance,
+    common::datetime_to_micros,
+};
+use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
     Metric, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples, batch::Batch,
 };
@@ -16,7 +20,11 @@ use crate::datamodel::{sensapp_vec::SensAppLabels, unit::Unit};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use smallvec::smallvec;
-use sqlx::{PgPool, postgres::PgConnectOptions};
+use sqlx::{
+    PgPool,
+    postgres::{PgConnectOptions, PgPoolOptions},
+};
+use std::collections::HashMap;
 use std::{str::FromStr, sync::Arc};
 use uuid::Uuid;
 
@@ -41,11 +49,235 @@ impl PostgresStorage {
         let connect_options = PgConnectOptions::from_str(connection_string)
             .context("Failed to create postgres connection options")?;
 
-        let pool = PgPool::connect_with(connect_options)
+        let max_connections = std::env::var("SENSAPP_PG_POOL_MAX_CONNECTIONS")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(10);
+
+        let pool = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .connect_with(connect_options)
             .await
             .context("Failed to create postgres pool")?;
 
         Ok(Self { pool })
+    }
+
+    async fn get_sensor_metadata(&self, sensor_uuid: &str) -> Result<Option<(i64, Sensor)>> {
+        let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
+
+        #[derive(sqlx::FromRow)]
+        struct SensorRow {
+            sensor_id: Option<i64>,
+            uuid: Option<Uuid>,
+            name: Option<String>,
+            r#type: Option<String>,
+            unit_name: Option<String>,
+            unit_description: Option<String>,
+        }
+
+        let sensor_row = sqlx::query_as::<_, SensorRow>(
+            r#"
+            SELECT s.sensor_id AS sensor_id, s.uuid, s.name, s.type, u.name AS unit_name, u.description AS unit_description
+            FROM sensors s
+            LEFT JOIN units u ON s.unit = u.id
+            WHERE s.uuid = $1
+            "#,
+        )
+        .bind(parsed_uuid)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(sensor_row) = sensor_row else {
+            return Ok(None);
+        };
+
+        let sensor_uuid = sensor_row.uuid.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "UUID",
+                None,
+                sensor_row.name.as_deref(),
+            ))
+        })?;
+
+        let sensor_name = sensor_row.name.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field("name", Some(sensor_uuid), None))
+        })?;
+
+        let sensor_type_str = sensor_row.r#type.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "type",
+                Some(sensor_uuid),
+                Some(&sensor_name),
+            ))
+        })?;
+
+        let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
+            anyhow::Error::from(StorageError::invalid_data_format(
+                &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
+                Some(sensor_uuid),
+                Some(&sensor_name),
+            ))
+        })?;
+
+        let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
+            (Some(name), description) => Some(Unit::new(name, description)),
+            _ => None,
+        };
+
+        let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
+            anyhow::Error::from(StorageError::missing_field(
+                "sensor_id",
+                Some(sensor_uuid),
+                Some(&sensor_name),
+            ))
+        })?;
+
+        #[derive(sqlx::FromRow)]
+        struct LabelRow {
+            label_name: String,
+            label_value: String,
+        }
+
+        let labels_rows: Vec<LabelRow> = sqlx::query_as(
+            r#"
+            SELECT lnd.name as label_name, ldd.description as label_value
+            FROM labels l
+            JOIN labels_name_dictionary lnd ON l.name = lnd.id
+            JOIN labels_description_dictionary ldd ON l.description = ldd.id
+            WHERE l.sensor_id = $1
+            "#,
+        )
+        .bind(sensor_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut labels: SensAppLabels = smallvec![];
+        for label_row in labels_rows {
+            labels.push((label_row.label_name, label_row.label_value));
+        }
+
+        let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
+
+        Ok(Some((sensor_id, sensor)))
+    }
+
+    fn sensor_table_name(sensor_type: SensorType) -> &'static str {
+        match sensor_type {
+            SensorType::Integer => "integer_values",
+            SensorType::Numeric => "numeric_values",
+            SensorType::Float => "float_values",
+            SensorType::String => "string_values",
+            SensorType::Boolean => "boolean_values",
+            SensorType::Location => "location_values",
+            SensorType::Json => "json_values",
+            SensorType::Blob => "blob_values",
+        }
+    }
+
+    async fn query_latest_timestamp_us(
+        &self,
+        table_name: &str,
+        sensor_id: i64,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+    ) -> Result<Option<i64>> {
+        let sql = format!(
+            r#"
+            SELECT MAX(timestamp_us) AS timestamp_us
+            FROM {table_name}
+            WHERE sensor_id = $1
+            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
+            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            "#
+        );
+
+        let timestamp_us: Option<i64> = sqlx::query_scalar(&sql)
+            .bind(sensor_id)
+            .bind(start_time)
+            .bind(end_time)
+            .fetch_one(&self.pool)
+            .await?;
+
+        Ok(timestamp_us)
+    }
+
+    async fn query_availability_summary_native(
+        &self,
+        table_name: &str,
+        sensor_id: i64,
+        sensor: Sensor,
+        start_time: i64,
+        end_time: i64,
+        step_ms: Option<i64>,
+    ) -> Result<SensorAvailabilitySummary> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            sample_count: i64,
+            first_sample_at: Option<i64>,
+            last_sample_at: Option<i64>,
+            covered_buckets: Option<i64>,
+        }
+
+        let row: Row = if let Some(step_ms) = step_ms {
+            let step_us = step_ms.checked_mul(1000).context("step is too large")?;
+            let sql = format!(
+                r#"
+                SELECT
+                    COUNT(*)::bigint AS sample_count,
+                    MIN(timestamp_us) AS first_sample_at,
+                    MAX(timestamp_us) AS last_sample_at,
+                    COUNT(DISTINCT ((timestamp_us - $1) / $2))::bigint AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = $3
+                AND timestamp_us >= $4
+                AND timestamp_us <= $5
+                "#
+            );
+
+            sqlx::query_as(&sql)
+                .bind(start_time)
+                .bind(step_us)
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .fetch_one(&self.pool)
+                .await?
+        } else {
+            let sql = format!(
+                r#"
+                SELECT
+                    COUNT(*)::bigint AS sample_count,
+                    MIN(timestamp_us) AS first_sample_at,
+                    MAX(timestamp_us) AS last_sample_at,
+                    NULL::bigint AS covered_buckets
+                FROM {table_name}
+                WHERE sensor_id = $1
+                AND timestamp_us >= $2
+                AND timestamp_us <= $3
+                "#
+            );
+
+            sqlx::query_as(&sql)
+                .bind(sensor_id)
+                .bind(start_time)
+                .bind(end_time)
+                .fetch_one(&self.pool)
+                .await?
+        };
+
+        Ok(SensorAvailabilitySummary {
+            sensor,
+            sample_count: row.sample_count.max(0) as usize,
+            first_sample_at: row
+                .first_sample_at
+                .map(SensAppDateTime::from_unix_microseconds_i64),
+            last_sample_at: row
+                .last_sample_at
+                .map(SensAppDateTime::from_unix_microseconds_i64),
+            covered_buckets: row.covered_buckets.map(|value| value.max(0) as usize),
+        })
     }
 }
 
@@ -81,7 +313,9 @@ impl StorageInstance for PostgresStorage {
     async fn list_series(
         &self,
         metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>> {
+        limit: Option<usize>,
+        bookmark: Option<&str>,
+    ) -> Result<crate::storage::ListSeriesResult> {
         #[derive(sqlx::FromRow)]
         struct SensorRow {
             sensor_id: Option<i64>,
@@ -90,25 +324,54 @@ impl StorageInstance for PostgresStorage {
             r#type: Option<String>,
             unit_name: Option<String>,
             unit_description: Option<String>,
+            labels: Option<sqlx::types::Json<HashMap<String, String>>>,
         }
 
+        // Parse bookmark as sensor_id
+        let bookmark_id: Option<i64> = if let Some(bookmark_str) = bookmark {
+            Some(bookmark_str.parse::<i64>().map_err(|e| {
+                anyhow::Error::from(StorageError::invalid_data_format(
+                    &format!("Invalid bookmark format: {}", e),
+                    None,
+                    None,
+                ))
+            })?)
+        } else {
+            None
+        };
+
+        // Validate and apply limit
+        let effective_limit = limit
+            .unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT)
+            .min(crate::storage::MAX_LIST_SERIES_LIMIT);
+        let fetch_limit = effective_limit.saturating_add(1);
+
         // Query sensors with their metadata using the catalog view, optionally filtered by metric name
+        // Use bookmark for cursor-based pagination (sensor_id > bookmark)
         let sensor_rows: Vec<SensorRow> = sqlx::query_as(
             r#"
-            SELECT sensor_id, uuid, name, type, unit_name, unit_description
+            SELECT sensor_id, uuid, name, type, unit_name, unit_description, labels
             FROM sensor_catalog_view
             WHERE ($1::TEXT IS NULL OR name = $1)
-            ORDER BY uuid ASC
+              AND ($2::BIGINT IS NULL OR sensor_id > $2)
+            ORDER BY sensor_id ASC
+            LIMIT $3
             "#,
         )
         .bind(metric_filter)
+        .bind(bookmark_id)
+        .bind(fetch_limit as i64)
         .fetch_all(&self.pool)
         .await?;
 
+        let has_more = sensor_rows.len() > effective_limit;
         let mut sensors = Vec::new();
+        let mut last_sensor_id: Option<i64> = None;
 
-        for sensor_row in sensor_rows {
-            // Parse sensor metadata with improved error handling
+        for sensor_row in sensor_rows.into_iter().take(effective_limit) {
+            // Keep track of the last sensor_id for bookmark
+            last_sensor_id = sensor_row.sensor_id;
+
             let sensor_uuid = sensor_row
                 .uuid
                 .ok_or_else(|| {
@@ -141,51 +404,34 @@ impl StorageInstance for PostgresStorage {
                 _ => None,
             };
 
-            // Query labels for this sensor with proper error context
-            let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
-                anyhow::Error::from(StorageError::missing_field(
-                    "sensor_id",
-                    Some(sensor_uuid),
-                    Some(&sensor_name),
-                ))
-            })?;
+            let labels: Option<SensAppLabels> = if let Some(labels_json) = sensor_row.labels {
+                let mut labels: SensAppLabels = smallvec![];
+                for (label_name, label_value) in labels_json.0 {
+                    labels.push((label_name, label_value));
+                }
 
-            #[derive(sqlx::FromRow)]
-            struct LabelRow {
-                label_name: String,
-                label_value: String,
-            }
+                Some(labels)
+            } else {
+                None
+            };
 
-            let labels_rows: Vec<LabelRow> = sqlx::query_as(
-                r#"
-                SELECT lnd.name as label_name, ldd.description as label_value
-                FROM labels l
-                JOIN labels_name_dictionary lnd ON l.name = lnd.id
-                JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                WHERE l.sensor_id = $1
-                "#,
-            )
-            .bind(sensor_id)
-            .fetch_all(&self.pool)
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to query labels for sensor UUID={} name='{}'",
-                    sensor_uuid, sensor_name
-                )
-            })?;
-
-            let mut labels: SensAppLabels = smallvec![];
-            for label_row in labels_rows {
-                labels.push((label_row.label_name, label_row.label_value));
-            }
-
-            let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
+            let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, labels);
 
             sensors.push(sensor);
         }
 
-        Ok(sensors)
+        // Determine if there's a next page based on whether we got the full limit
+        // If we got exactly the limit, there might be more pages, so return the last sensor_id as bookmark
+        let next_bookmark = if has_more {
+            last_sensor_id.map(|id| id.to_string())
+        } else {
+            None
+        };
+
+        Ok(crate::storage::ListSeriesResult {
+            series: sensors,
+            bookmark: next_bookmark,
+        })
     }
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {
@@ -264,105 +510,10 @@ impl StorageInstance for PostgresStorage {
         end_time: Option<SensAppDateTime>,
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
-        // Parse UUID
-        let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
-
-        #[derive(sqlx::FromRow)]
-        struct SensorMetadataRow {
-            sensor_id: Option<i64>,
-            uuid: Option<Uuid>,
-            name: Option<String>,
-            r#type: Option<String>,
-            unit_name: Option<String>,
-            unit_description: Option<String>,
-        }
-
-        // Query sensor metadata by UUID using the catalog view
-        let sensor_row: Option<SensorMetadataRow> = sqlx::query_as(
-            r#"
-            SELECT sensor_id, uuid, name, type, unit_name, unit_description
-            FROM sensor_catalog_view
-            WHERE uuid = $1
-            "#,
-        )
-        .bind(parsed_uuid)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        let sensor_row = match sensor_row {
-            Some(row) => row,
-            None => return Ok(None),
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
         };
 
-        // Parse sensor metadata with improved error handling
-        let sensor_uuid = sensor_row.uuid.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field(
-                "UUID",
-                None,
-                sensor_row.name.as_deref(),
-            ))
-        })?;
-
-        let sensor_name = sensor_row.name.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field("name", Some(sensor_uuid), None))
-        })?;
-
-        let sensor_type_str = sensor_row.r#type.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field(
-                "type",
-                Some(sensor_uuid),
-                Some(&sensor_name),
-            ))
-        })?;
-
-        let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
-            anyhow::Error::from(StorageError::invalid_data_format(
-                &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
-                Some(sensor_uuid),
-                Some(&sensor_name),
-            ))
-        })?;
-
-        let unit = match (sensor_row.unit_name, sensor_row.unit_description) {
-            (Some(name), description) => Some(Unit::new(name, description)),
-            _ => None,
-        };
-
-        // Query labels for this sensor with proper context
-        let sensor_id = sensor_row.sensor_id.ok_or_else(|| {
-            anyhow::Error::from(StorageError::missing_field(
-                "sensor_id",
-                Some(sensor_uuid),
-                Some(&sensor_name),
-            ))
-        })?;
-        #[derive(sqlx::FromRow)]
-        struct LabelRow {
-            label_name: String,
-            label_value: String,
-        }
-
-        let labels_rows: Vec<LabelRow> = sqlx::query_as(
-            r#"
-            SELECT lnd.name as label_name, ldd.description as label_value
-            FROM labels l
-            JOIN labels_name_dictionary lnd ON l.name = lnd.id
-            JOIN labels_description_dictionary ldd ON l.description = ldd.id
-            WHERE l.sensor_id = $1
-            "#,
-        )
-        .bind(sensor_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut labels: SensAppLabels = smallvec![];
-        for label_row in labels_rows {
-            labels.push((label_row.label_name, label_row.label_value));
-        }
-
-        let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
-
-        // Convert SensAppDateTime to microseconds for database queries using common utility
         let start_time_us = start_time.as_ref().map(datetime_to_micros);
         let end_time_us = end_time.as_ref().map(datetime_to_micros);
 
@@ -403,6 +554,237 @@ impl StorageInstance for PostgresStorage {
         };
 
         Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    async fn query_sensor_data_advanced(
+        &self,
+        sensor_uuid: &str,
+        options: &crate::storage::SensorDataQueryOptions,
+    ) -> Result<Option<SensorData>> {
+        options.validate()?;
+
+        if let (Some(step_ms), Some(aggregation)) = (options.step_ms, options.aggregation) {
+            if let Some((sensor_id, mut sensor)) = self.get_sensor_metadata(sensor_uuid).await? {
+                let start_time_us = options.start_time.as_ref().map(datetime_to_micros);
+                let end_time_us = options.end_time.as_ref().map(datetime_to_micros);
+                let origin_us = start_time_us.unwrap_or(0);
+
+                let samples = match sensor.sensor_type {
+                    SensorType::Integer => {
+                        self.query_integer_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_ms,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    SensorType::Numeric => {
+                        self.query_numeric_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_ms,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    SensorType::Float => {
+                        self.query_float_samples_aggregated(
+                            sensor_id,
+                            start_time_us,
+                            end_time_us,
+                            step_ms,
+                            origin_us,
+                            aggregation,
+                            options.limit,
+                        )
+                        .await?
+                    }
+                    _ => {
+                        let raw = self
+                            .query_sensor_data(
+                                sensor_uuid,
+                                options.start_time,
+                                options.end_time,
+                                options.limit,
+                            )
+                            .await?;
+                        return raw
+                            .map(|sensor_data| {
+                                crate::storage::common::apply_query_options(sensor_data, options)
+                            })
+                            .transpose();
+                    }
+                };
+
+                sensor.sensor_type = match &samples {
+                    TypedSamples::Integer(_) => SensorType::Integer,
+                    TypedSamples::Numeric(_) => SensorType::Numeric,
+                    TypedSamples::Float(_) => SensorType::Float,
+                    _ => sensor.sensor_type,
+                };
+                if aggregation.output_is_count() {
+                    sensor.unit = None;
+                }
+
+                let query_options = crate::storage::SensorDataQueryOptions {
+                    start_time: options.start_time,
+                    end_time: options.end_time,
+                    limit: options.limit,
+                    step_ms: None,
+                    aggregation: None,
+                    simplify: options.simplify,
+                };
+
+                let sensor_data = SensorData::new(sensor, samples);
+                return crate::storage::common::apply_query_options(sensor_data, &query_options)
+                    .map(Some);
+            }
+
+            return Ok(None);
+        }
+
+        let raw = self
+            .query_sensor_data(
+                sensor_uuid,
+                options.start_time,
+                options.end_time,
+                options.limit,
+            )
+            .await?;
+
+        raw.map(|sensor_data| crate::storage::common::apply_query_options(sensor_data, options))
+            .transpose()
+    }
+
+    async fn query_sensor_data_latest(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<Option<SensorData>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+        let table_name = Self::sensor_table_name(sensor.sensor_type);
+
+        let Some(latest_timestamp_us) = self
+            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let samples = match sensor.sensor_type {
+            SensorType::Integer => {
+                self.query_integer_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Numeric => {
+                self.query_numeric_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Float => {
+                self.query_float_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::String => {
+                self.query_string_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Boolean => {
+                self.query_boolean_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Location => {
+                self.query_location_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Json => {
+                self.query_json_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Blob => {
+                self.query_blob_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+        };
+
+        Ok(Some(SensorData::new(sensor, samples)))
+    }
+
+    async fn query_sensor_data_availability(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<Option<SensorAvailabilitySummary>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let summary = self
+            .query_availability_summary_native(
+                Self::sensor_table_name(sensor.sensor_type),
+                sensor_id,
+                sensor,
+                datetime_to_micros(&start_time),
+                datetime_to_micros(&end_time),
+                step_ms,
+            )
+            .await?;
+
+        Ok(Some(summary))
     }
 
     async fn query_sensors_by_labels(

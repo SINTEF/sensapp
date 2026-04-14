@@ -1,0 +1,14 @@
+.git
+.github
+current_tasks
+done
+ideas
+target
+tmp
+reference
+docker
+compose.test-services.yml
+*.db
+*.duckdb
+*.sqlite
+*.log

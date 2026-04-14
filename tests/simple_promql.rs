@@ -6,6 +6,7 @@
 mod common;
 
 use anyhow::Result;
+use arrow_ipc::reader::StreamReader;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -15,11 +16,13 @@ use sensapp::config::load_configuration_for_tests;
 use sensapp::datamodel::batch_builder::BatchBuilder;
 use sensapp::datamodel::sensapp_vec::SensAppLabels;
 use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples};
-use sensapp::ingestors::http::simple_promql::simple_promql_query;
-use sensapp::ingestors::http::state::HttpServerState;
+use sensapp::http::metrics::HttpMetrics;
+use sensapp::http::simple_promql::simple_promql_query;
+use sensapp::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
 use serde_json::Value;
 use serial_test::serial;
+use std::io::Cursor;
 use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -88,7 +91,9 @@ async fn create_test_app(storage: Arc<dyn StorageInstance>) -> Router {
     let state = HttpServerState {
         name: Arc::new("SensApp Test".to_string()),
         storage,
+        metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
+        auth: None,
     };
 
     Router::new()
@@ -313,6 +318,67 @@ async fn test_simple_promql_reject_binary() -> Result<()> {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
     let body_str = String::from_utf8_lossy(&body);
     assert!(body_str.contains("Binary"));
+
+    Ok(())
+}
+
+/// Test binary-operation error includes guidance for hyphenated metric names
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_hyphenated_metric_name_hint() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let sensor = create_sensor_with_labels("demo-temperature", SensorType::Float, vec![]);
+    publish_test_sensors(&storage, vec![(sensor, create_float_samples(3))]).await?;
+
+    let app = create_test_app(storage).await;
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/query?query=demo-temperature%5B5m%5D")
+        .body(Body::empty())?;
+
+    let response = app.oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+    let body_str = String::from_utf8_lossy(&body);
+    assert!(body_str.contains("demo-temperature"));
+    assert!(body_str.contains("__name__"));
+
+    Ok(())
+}
+
+/// Test quoted-name workaround for hyphenated metric names
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_hyphenated_metric_name_via_name_matcher() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let sensor = create_sensor_with_labels("demo-temperature", SensorType::Float, vec![]);
+    publish_test_sensors(&storage, vec![(sensor, create_float_samples(3))]).await?;
+
+    let app = create_test_app(storage).await;
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/query?query=%7B__name__%3D%22demo-temperature%22%7D%5B5m%5D")
+        .body(Body::empty())?;
+
+    let response = app.oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+    let json: Value = serde_json::from_slice(&body)?;
+    let records = json.as_array().expect("SenML response should be an array");
+    assert!(
+        !records.is_empty(),
+        "Should have records for the hyphenated sensor"
+    );
 
     Ok(())
 }
@@ -589,10 +655,26 @@ async fn test_simple_promql_arrow_format() -> Result<()> {
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
 
-    // Arrow files start with magic bytes "ARROW1"
-    assert!(body.len() > 6, "Arrow file should have content");
-    // Arrow IPC file format magic number
-    assert_eq!(&body[0..6], b"ARROW1", "Should be valid Arrow IPC file");
+    assert!(body.len() > 6, "Arrow stream should have content");
+
+    let mut reader = StreamReader::try_new(Cursor::new(body), None)?;
+    let first_batch = reader
+        .next()
+        .transpose()?
+        .expect("Arrow stream should contain at least one record batch");
+
+    assert!(
+        first_batch.num_rows() > 0,
+        "Arrow batch should contain rows"
+    );
+    assert!(
+        first_batch
+            .schema()
+            .fields()
+            .iter()
+            .any(|field| field.name() == "timestamp"),
+        "Arrow batch should contain a timestamp column"
+    );
 
     Ok(())
 }

@@ -1,0 +1,16 @@
+apiVersion: v2
+name: sensapp
+description: Helm chart for deploying SensApp
+type: application
+version: 0.1.0
+appVersion: "0.3.0"
+keywords:
+  - sensapp
+  - time-series
+  - prometheus
+  - influxdb
+home: https://github.com/SINTEF/sensapp
+sources:
+  - https://github.com/SINTEF/sensapp
+maintainers:
+  - name: SINTEF

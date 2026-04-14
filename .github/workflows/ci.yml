@@ -7,10 +7,13 @@ on:
   pull_request:
   release:
     types: [published]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  DUCKDB_DOWNLOAD_LIB: "1"
+  DUCKDB_CMAKE_BUILD_TYPE: Release
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -29,7 +32,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo-make
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-make
           key: cargo-make-${{ runner.os }}
@@ -43,9 +46,65 @@ jobs:
       - name: Format check
         run: cargo make fmt-check
 
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        uses: moonrepo/setup-rust@v1
+        with:
+          channel: stable
+
+      - name: Cache cargo-make
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-make
+          key: cargo-make-${{ runner.os }}
+
+      - name: Install cargo-make
+        run: |
+          if ! command -v cargo-make &> /dev/null; then
+            cargo install cargo-make
+          fi
+
       - name: Security audit
         run: cargo make security-audit
-        continue-on-error: true
+
+  frontend:
+    name: Frontend Quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
 
   test-matrix:
     name: Test Suite
@@ -57,12 +116,20 @@ jobs:
         os: [ubuntu-latest]
         rust: [stable]
         #rust: [stable, beta]
-        feature: [sqlite, postgres]
+        feature: [sqlite, postgres, clickhouse, duckdb, timescaledb, rrdcached]
         include:
           - feature: sqlite
             test-env: "TEST_DATABASE_URL_SQLITE=sqlite://test.db"
           - feature: postgres
-            test-env: "TEST_DATABASE_URL_POSTGRES=postgres://postgres:postgres@localhost:5432/sensapp"
+            test-env: "TEST_DATABASE_URL_POSTGRES=postgres://postgres:postgres@localhost:5432/sensapp-test"
+          - feature: clickhouse
+            test-env: "TEST_DATABASE_URL_CLICKHOUSE=clickhouse://default:password@localhost:8123/sensapp_test"
+          - feature: duckdb
+            test-env: "TEST_DATABASE_URL_DUCKDB=duckdb://test.duckdb"
+          - feature: timescaledb
+            test-env: "TEST_DATABASE_URL_TIMESCALEDB=timescaledb://postgres:postgres@localhost:5433/sensapp-test"
+          - feature: rrdcached
+            test-env: "TEST_DATABASE_URL_RRDCACHED=rrdcached://127.0.0.1:42217?preset=hoarder"
 
     services:
       postgres:
@@ -70,7 +137,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
-          POSTGRES_DB: sensapp
+          POSTGRES_DB: sensapp-test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -78,7 +145,33 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_DB: sensapp_test
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: password
+        options: >-
+          --health-cmd "clickhouse-client --password password --query 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 8123:8123
+          - 9000:9000
+      timescaledb:
+        image: timescale/timescaledb:2.17.2-pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: sensapp-test
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sensapp-test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5433:5432
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -90,7 +183,7 @@ jobs:
           components: clippy
 
       - name: Cache cargo-make
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-make
           key: cargo-make-${{ runner.os }}
@@ -103,6 +196,23 @@ jobs:
 
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres,sqlite
+
+      - name: Start RRDCached test service
+        if: matrix.feature == 'rrdcached'
+        run: |
+          docker build -f docker/rrdcached/Dockerfile -t sensapp-rrdcached-test .
+          docker run -d --name sensapp-rrdcached -p 42217:42217 sensapp-rrdcached-test
+
+          for attempt in $(seq 1 30); do
+            if nc -z 127.0.0.1 42217; then
+              exit 0
+            fi
+
+            sleep 1
+          done
+
+          docker logs sensapp-rrdcached
+          exit 1
 
       - name: Set up test environment
         run: |
@@ -117,8 +227,79 @@ jobs:
         if: matrix.feature == 'sqlite'
         run: cargo make migrate-sqlite
 
+      - name: Run migrations (TimescaleDB)
+        if: matrix.feature == 'timescaledb'
+        run: cargo make migrate-timescaledb
+
       - name: Run tests
+        if: matrix.feature != 'rrdcached'
         run: cargo make check-${{ matrix.feature }}
+
+      - name: Run RRDCached checks
+        if: matrix.feature == 'rrdcached'
+        run: |
+          export TEST_DATABASE_URL='rrdcached://127.0.0.1:42217?preset=hoarder'
+          cargo build --features rrdcached --no-default-features
+          cargo test --features rrdcached --no-default-features storage::rrdcached --lib
+          cargo test --features rrdcached --no-default-features http::influxdb::tests::test_publish_influxdb -- --exact
+          cargo test --features rrdcached --no-default-features http::influxdb::tests::test_publish_influxdb_with_numeric_enabled -- --exact
+          cargo test --features rrdcached --no-default-features --test rrdcached_integration
+
+  helm-validation:
+    name: Helm Validation
+    runs-on: ubuntu-latest
+    needs: quality-checks
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint chart
+        run: helm lint charts/sensapp
+
+      - name: Render chart with SQLite defaults
+        run: helm template sensapp charts/sensapp
+
+      - name: Render chart with PostgreSQL override
+        run: >-
+          helm template sensapp charts/sensapp
+          --set storage.connectionString=postgres://postgres:postgres@postgres:5432/sensapp
+          --set persistence.enabled=false
+
+  docker-smoke:
+    name: Docker Smoke Build (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    needs: quality-checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: runtime
+            features: postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached
+          - name: runtime-bigquery
+            features: postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached,bigquery
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image variant
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          build-args: |
+            FEATURES=${{ matrix.features }}
+            NO_DEFAULT_FEATURES=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # Disabled temporarily due to timeout issues
   # coverage:
@@ -154,7 +335,7 @@ jobs:
   #       uses: taiki-e/install-action@cargo-llvm-cov
 
   #     - name: Cache cargo-make
-  #       uses: actions/cache@v4
+  #       uses: actions/cache@v5
   #       with:
   #         path: ~/.cargo/bin/cargo-make
   #         key: cargo-make-${{ runner.os }}
@@ -183,7 +364,7 @@ jobs:
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
-    needs: test-matrix
+    needs: [test-matrix, helm-validation, docker-smoke]
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.event_name == 'release')
     permissions:
       contents: read
@@ -226,9 +407,35 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
+            FEATURES=postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached
+            NO_DEFAULT_FEATURES=true
             BUILDTIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
             VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
             REVISION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
+
+  helm-package:
+    name: Helm Package
+    runs-on: ubuntu-latest
+    needs: helm-validation
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Package chart
+        run: |
+          mkdir -p dist
+          helm package charts/sensapp --destination dist
+
+      - name: Upload chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sensapp-helm-chart
+          path: dist/*.tgz
 
   release:
     name: Release
@@ -249,7 +456,7 @@ jobs:
           channel: stable
 
       - name: Cache cargo-make
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-make
           key: cargo-make-${{ runner.os }}

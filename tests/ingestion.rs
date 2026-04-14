@@ -256,3 +256,28 @@ async fn test_large_csv_ingestion() -> Result<()> {
 
     Ok(())
 }
+
+/// Test that hyphenated sensor names are accepted during ingestion
+#[tokio::test]
+#[serial]
+async fn test_csv_ingestion_hyphenated_sensor_name() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let app = TestApp::new(storage.clone()).await;
+
+    let csv_data =
+        "datetime,sensor_name,value,unit\n2024-01-01T00:00:00Z,demo-temperature,21.5,°C\n";
+    let response = app.post_csv("/sensors/publish", csv_data).await?;
+
+    response.assert_status(StatusCode::OK);
+
+    let sensor = DbHelpers::get_sensor_by_name(&storage, "demo-temperature")
+        .await?
+        .expect("Hyphenated sensor should exist");
+
+    assert_eq!(sensor.name, "demo-temperature");
+    DbHelpers::verify_sensor_data(&storage, "demo-temperature", 1).await?;
+
+    Ok(())
+}

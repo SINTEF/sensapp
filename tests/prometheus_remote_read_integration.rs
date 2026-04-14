@@ -18,10 +18,12 @@ use sensapp::config::load_configuration_for_tests;
 use sensapp::datamodel::batch_builder::BatchBuilder;
 use sensapp::datamodel::sensapp_vec::SensAppLabels;
 use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples};
-use sensapp::ingestors::http::prometheus_read::prometheus_remote_read;
-use sensapp::ingestors::http::state::HttpServerState;
+use sensapp::http::metrics::HttpMetrics;
+use sensapp::http::prometheus_read::prometheus_remote_read;
+use sensapp::http::state::HttpServerState;
 use sensapp::parsing::prometheus::remote_read_models::{
-    LabelMatcher as PromLabelMatcher, Query, ReadRequest, ReadResponse, label_matcher, read_request,
+    ChunkedReadResponse, LabelMatcher as PromLabelMatcher, Query, ReadHints, ReadRequest,
+    ReadResponse, label_matcher, read_request,
 };
 use serial_test::serial;
 use std::io::Cursor;
@@ -106,7 +108,9 @@ fn create_test_app(storage: Arc<dyn sensapp::storage::StorageInstance>) -> Route
     let state = HttpServerState {
         name: Arc::new("SensApp Test".to_string()),
         storage,
+        metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
+        auth: None,
     };
 
     Router::new()
@@ -134,6 +138,33 @@ fn parse_remote_read_response(body: &[u8]) -> Result<ReadResponse> {
     let decompressed = snap::raw::Decoder::new().decompress_vec(body)?;
     let response = ReadResponse::decode(&mut Cursor::new(decompressed))?;
     Ok(response)
+}
+
+fn parse_streamed_chunked_response(body: &[u8]) -> Result<Vec<ChunkedReadResponse>> {
+    let mut cursor = 0usize;
+    let mut responses = Vec::new();
+
+    while cursor < body.len() {
+        let mut length = 0usize;
+        let mut shift = 0usize;
+
+        loop {
+            let byte = body[cursor];
+            cursor += 1;
+            length |= ((byte & 0x7F) as usize) << shift;
+            if byte & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+        }
+
+        cursor += 4; // Skip CRC32C.
+        let message_end = cursor + length;
+        responses.push(ChunkedReadResponse::decode(&body[cursor..message_end])?);
+        cursor = message_end;
+    }
+
+    Ok(responses)
 }
 
 /// Send a remote read request and return the response
@@ -821,6 +852,121 @@ async fn test_remote_read_streamed_xor_chunks() -> Result<()> {
 
     // Note: Full parsing of the streamed response would require implementing
     // the varint + CRC32 parsing logic, which is tested in stream_writer tests
+
+    Ok(())
+}
+
+/// Test streamed XOR chunks response for a series larger than one XOR chunk.
+#[tokio::test]
+#[serial]
+async fn test_remote_read_streamed_xor_chunks_large_series() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let sensor = create_sensor_with_labels("large_chunked_metric", SensorType::Float, vec![]);
+    let sample_count = 70_000usize;
+    let times_ms: Vec<i64> = (0..sample_count)
+        .map(|index| BASE_TS_MS + index as i64 * 1000)
+        .collect();
+    let values: Vec<f64> = (0..sample_count).map(|index| index as f64).collect();
+
+    publish_test_sensors(
+        &storage,
+        vec![(sensor, create_float_samples_at_times(&times_ms, &values))],
+    )
+    .await?;
+
+    let app = create_test_app(storage);
+    let query = Query {
+        start_timestamp_ms: BASE_TS_MS - 1000,
+        end_timestamp_ms: BASE_TS_MS + sample_count as i64 * 1000,
+        matchers: vec![PromLabelMatcher {
+            r#type: label_matcher::Type::Eq as i32,
+            name: "__name__".to_string(),
+            value: "large_chunked_metric".to_string(),
+        }],
+        hints: None,
+    };
+
+    let body = build_remote_read_request(
+        vec![query],
+        vec![read_request::ResponseType::StreamedXorChunks as i32],
+    )?;
+
+    let (status, body_bytes) = send_remote_read_request(&app, body).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !body_bytes.is_empty(),
+        "Large streamed response should have body"
+    );
+
+    let responses = parse_streamed_chunked_response(&body_bytes)?;
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].chunked_series.len(), 1);
+    assert_eq!(responses[0].chunked_series[0].chunks.len(), 2);
+
+    Ok(())
+}
+
+/// Test remote read uses common Prometheus hints to return aggregated samples.
+#[tokio::test]
+#[serial]
+async fn test_remote_read_samples_with_avg_over_time_hints() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let sensor = create_sensor_with_labels("hinted_metric", SensorType::Float, vec![]);
+    let times_ms = vec![
+        BASE_TS_MS,
+        BASE_TS_MS + 1000,
+        BASE_TS_MS + 2000,
+        BASE_TS_MS + 3000,
+        BASE_TS_MS + 4000,
+    ];
+    let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+
+    publish_test_sensors(
+        &storage,
+        vec![(sensor, create_float_samples_at_times(&times_ms, &values))],
+    )
+    .await?;
+
+    let app = create_test_app(storage);
+    let query = Query {
+        start_timestamp_ms: BASE_TS_MS,
+        end_timestamp_ms: BASE_TS_MS + 5000,
+        matchers: vec![PromLabelMatcher {
+            r#type: label_matcher::Type::Eq as i32,
+            name: "__name__".to_string(),
+            value: "hinted_metric".to_string(),
+        }],
+        hints: Some(ReadHints {
+            step_ms: 2000,
+            func: "avg_over_time".to_string(),
+            start_ms: BASE_TS_MS,
+            end_ms: BASE_TS_MS + 5000,
+            grouping: vec![],
+            by: false,
+            range_ms: 2000,
+        }),
+    };
+
+    let body = build_remote_read_request(vec![query], vec![])?;
+    let (status, response_body) = send_remote_read_request(&app, body).await?;
+
+    assert_eq!(status, StatusCode::OK);
+
+    let response = parse_remote_read_response(&response_body)?;
+    let timeseries = &response.results[0].timeseries[0];
+    assert_eq!(timeseries.samples.len(), 3);
+    assert_eq!(timeseries.samples[0].timestamp, BASE_TS_MS);
+    assert_eq!(timeseries.samples[1].timestamp, BASE_TS_MS + 2000);
+    assert_eq!(timeseries.samples[2].timestamp, BASE_TS_MS + 4000);
+    assert!((timeseries.samples[0].value - 1.5).abs() < f64::EPSILON);
+    assert!((timeseries.samples[1].value - 3.5).abs() < f64::EPSILON);
+    assert!((timeseries.samples[2].value - 5.0).abs() < f64::EPSILON);
 
     Ok(())
 }

@@ -1,4 +1,7 @@
-use crate::storage::StorageInstance;
+use crate::{
+    datamodel::{SensAppDateTime, SensorData},
+    storage::StorageInstance,
+};
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use bigquery_publishers::{
@@ -9,14 +12,14 @@ use bigquery_sensors_utilities::get_sensor_ids_or_create_sensors;
 use futures::future::try_join_all;
 use gcp_bigquery_client::{
     error::BQError,
-    model::{dataset::Dataset, query_request::QueryRequest},
+    model::{dataset::Dataset, query_request::QueryRequest, query_response::ResultSet},
     storage::StreamName,
 };
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, str::FromStr, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 use url::Url;
 
 mod bigquery_labels_utilities;
@@ -116,6 +119,10 @@ impl BigQueryStorage {
     pub fn new_stream_name(&self, table: String) -> StreamName {
         StreamName::new_default(self.project_id.clone(), self.dataset_id.clone(), table)
     }
+
+    fn parse_sensor_type(sensor_type: &str) -> Result<crate::datamodel::SensorType> {
+        crate::datamodel::SensorType::from_str(sensor_type).map_err(anyhow::Error::msg)
+    }
 }
 
 #[async_trait]
@@ -158,10 +165,13 @@ impl StorageInstance for BigQueryStorage {
             .query(&self.project_id, QueryRequest::new(parametrized_init_sql))
             .await?;
 
-        if let Some(total_rows) = rs.total_rows() {
-            if total_rows > 0 {
-                bail!("BigQuery should not return any rows on the schema creation query");
-            }
+        if let Some(total_rows) = rs
+            .total_rows
+            .as_deref()
+            .and_then(|value| value.parse::<u64>().ok())
+            && total_rows > 0
+        {
+            bail!("BigQuery should not return any rows on the schema creation query");
         }
 
         Ok(())
@@ -223,8 +233,13 @@ impl StorageInstance for BigQueryStorage {
     async fn list_series(
         &self,
         _metric_filter: Option<&str>,
-    ) -> Result<Vec<crate::datamodel::Sensor>> {
-        use crate::datamodel::{Sensor, SensorType, sensapp_vec::SensAppLabels, unit::Unit};
+        _limit: Option<usize>,
+        _bookmark: Option<&str>,
+    ) -> Result<crate::storage::ListSeriesResult> {
+        // TODO: Implement pagination for BigQuery backend
+        // TODO: Implement metric_filter support for BigQuery backend
+        // For now, ignore limit, bookmark, and metric_filter parameters and return all results
+        use crate::datamodel::{Sensor, sensapp_vec::SensAppLabels, unit::Unit};
         use gcp_bigquery_client::model::query_request::QueryRequest;
         use smallvec::smallvec;
         use std::str::FromStr;
@@ -232,7 +247,7 @@ impl StorageInstance for BigQueryStorage {
 
         let query = format!(
             r#"
-            SELECT s.sensor_id, s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
+            SELECT s.sensor_id, s.uuid AS sensor_uuid, s.name AS sensor_name, s.type AS sensor_type, u.name AS unit_name, u.description AS unit_description
             FROM `{}.{}.sensors` s
             LEFT JOIN `{}.{}.units` u ON s.unit = u.id
             ORDER BY s.uuid ASC
@@ -247,22 +262,28 @@ impl StorageInstance for BigQueryStorage {
             .job()
             .query(&self.project_id, QueryRequest::new(query))
             .await?;
+        let mut rs = ResultSet::new_from_query_response(rs);
 
         let mut sensors = Vec::new();
 
-        for row in rs.rows.unwrap_or_default() {
-            let sensor_id: i64 = row.columns[0].value.as_ref().unwrap().parse().unwrap();
-            let sensor_uuid: Uuid = Uuid::from_str(row.columns[1].value.as_ref().unwrap()).unwrap();
-            let sensor_name = row.columns[2].value.as_ref().unwrap().to_string();
-            let sensor_type_str = row.columns[3].value.as_ref().unwrap();
-            let sensor_type =
-                SensorType::from_str(sensor_type_str).context("Failed to parse sensor type")?;
-            let unit = row.columns[4].value.as_ref().map(|name| {
-                Unit::new(
-                    name.to_string(),
-                    row.columns[5].value.as_ref().map(|d| d.to_string()),
-                )
-            });
+        while rs.next_row() {
+            let sensor_id = rs
+                .get_i64_by_name("sensor_id")?
+                .context("BigQuery row missing sensor_id")?;
+            let sensor_uuid = Uuid::from_str(
+                &rs.get_string_by_name("sensor_uuid")?
+                    .context("BigQuery row missing sensor_uuid")?,
+            )?;
+            let sensor_name = rs
+                .get_string_by_name("sensor_name")?
+                .context("BigQuery row missing sensor_name")?;
+            let sensor_type = Self::parse_sensor_type(
+                &rs.get_string_by_name("sensor_type")?
+                    .context("BigQuery row missing sensor_type")?,
+            )?;
+            let unit_name = rs.get_string_by_name("unit_name")?;
+            let unit_description = rs.get_string_by_name("unit_description")?;
+            let unit = unit_name.map(|name| Unit::new(name, unit_description));
 
             // Query labels for this sensor
             let labels_query = format!(
@@ -289,11 +310,16 @@ impl StorageInstance for BigQueryStorage {
                 .job()
                 .query(&self.project_id, QueryRequest::new(labels_query))
                 .await?;
+            let mut labels_rs = ResultSet::new_from_query_response(labels_rs);
 
             let mut labels: SensAppLabels = smallvec![];
-            for label_row in labels_rs.rows.unwrap_or_default() {
-                let label_name = label_row.columns[0].value.as_ref().unwrap().to_string();
-                let label_value = label_row.columns[1].value.as_ref().unwrap().to_string();
+            while labels_rs.next_row() {
+                let label_name = labels_rs
+                    .get_string_by_name("label_name")?
+                    .context("BigQuery row missing label_name")?;
+                let label_value = labels_rs
+                    .get_string_by_name("label_value")?
+                    .context("BigQuery row missing label_value")?;
                 labels.push((label_name, label_value));
             }
 
@@ -302,7 +328,61 @@ impl StorageInstance for BigQueryStorage {
             sensors.push(sensor);
         }
 
-        Ok(sensors)
+        Ok(crate::storage::ListSeriesResult {
+            series: sensors,
+            bookmark: None,
+        })
+    }
+
+    async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {
+        use crate::datamodel::{Metric, unit::Unit};
+
+        let query = format!(
+            r#"
+            SELECT s.name AS metric_name, s.type AS sensor_type, u.name AS unit_name, u.description AS unit_description, COUNT(*) AS series_count
+            FROM `{}.{}.sensors` s
+            LEFT JOIN `{}.{}.units` u ON s.unit = u.id
+            GROUP BY s.name, s.type, u.name, u.description
+            ORDER BY s.name ASC
+            "#,
+            self.project_id, self.dataset_id, self.project_id, self.dataset_id
+        );
+
+        let rs = self
+            .client
+            .read()
+            .await
+            .job()
+            .query(&self.project_id, QueryRequest::new(query))
+            .await?;
+        let mut rs = ResultSet::new_from_query_response(rs);
+        let mut metrics = Vec::new();
+
+        while rs.next_row() {
+            let metric_name = rs
+                .get_string_by_name("metric_name")?
+                .context("BigQuery row missing metric_name")?;
+            let sensor_type = Self::parse_sensor_type(
+                &rs.get_string_by_name("sensor_type")?
+                    .context("BigQuery row missing sensor_type")?,
+            )?;
+            let unit_name = rs.get_string_by_name("unit_name")?;
+            let unit_description = rs.get_string_by_name("unit_description")?;
+            let unit = unit_name.map(|name| Unit::new(name, unit_description));
+            let series_count = rs
+                .get_i64_by_name("series_count")?
+                .context("BigQuery row missing series_count")?;
+
+            metrics.push(Metric::new(
+                metric_name,
+                sensor_type,
+                unit,
+                series_count,
+                Vec::new(),
+            ));
+        }
+
+        Ok(metrics)
     }
 
     async fn query_sensor_data(
@@ -312,17 +392,14 @@ impl StorageInstance for BigQueryStorage {
         _end_time: Option<crate::datamodel::SensAppDateTime>,
         _limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
-        use crate::datamodel::{
-            Sensor, SensorData, SensorType, sensapp_vec::SensAppLabels, unit::Unit,
-        };
+        use crate::datamodel::{Sensor, SensorData, sensapp_vec::SensAppLabels, unit::Unit};
         use gcp_bigquery_client::model::query_request::QueryRequest;
         use smallvec::smallvec;
-        use std::str::FromStr;
 
         // Query sensor metadata by UUID
         let sensor_query = format!(
             r#"
-            SELECT s.sensor_id, s.uuid, s.name, s.type, u.name as unit_name, u.description as unit_description
+            SELECT s.sensor_id, s.uuid AS sensor_uuid, s.name AS sensor_name, s.type AS sensor_type, u.name AS unit_name, u.description AS unit_description
             FROM `{}.{}.sensors` s
             LEFT JOIN `{}.{}.units` u ON s.unit = u.id
             WHERE s.uuid = '{}'
@@ -337,28 +414,30 @@ impl StorageInstance for BigQueryStorage {
             .job()
             .query(&self.project_id, QueryRequest::new(sensor_query))
             .await?;
+        let mut sensor_rs = ResultSet::new_from_query_response(sensor_rs);
+        if !sensor_rs.next_row() {
+            return Ok(None);
+        }
 
-        let sensor_row = match sensor_rs.rows.and_then(|rows| rows.into_iter().next()) {
-            Some(row) => row,
-            None => return Ok(None),
-        };
-
-        let sensor_id: i64 = sensor_row.columns[0]
-            .value
-            .as_ref()
-            .unwrap()
-            .parse()
-            .unwrap();
-        let sensor_uuid =
-            uuid::Uuid::from_str(sensor_row.columns[1].value.as_ref().unwrap()).unwrap();
-        let sensor_type = SensorType::from_str(sensor_row.columns[3].value.as_ref().unwrap())
-            .context("Failed to parse sensor type")?;
-        let unit = sensor_row.columns[4].value.as_ref().map(|name| {
-            Unit::new(
-                name.to_string(),
-                sensor_row.columns[5].value.as_ref().map(|d| d.to_string()),
-            )
-        });
+        let sensor_id = sensor_rs
+            .get_i64_by_name("sensor_id")?
+            .context("BigQuery row missing sensor_id")?;
+        let sensor_uuid = uuid::Uuid::parse_str(
+            &sensor_rs
+                .get_string_by_name("sensor_uuid")?
+                .context("BigQuery row missing sensor_uuid")?,
+        )?;
+        let sensor_name = sensor_rs
+            .get_string_by_name("sensor_name")?
+            .context("BigQuery row missing sensor_name")?;
+        let sensor_type = Self::parse_sensor_type(
+            &sensor_rs
+                .get_string_by_name("sensor_type")?
+                .context("BigQuery row missing sensor_type")?,
+        )?;
+        let unit_name = sensor_rs.get_string_by_name("unit_name")?;
+        let unit_description = sensor_rs.get_string_by_name("unit_description")?;
+        let unit = unit_name.map(|name| Unit::new(name, unit_description));
 
         // Query labels
         let labels_query = format!(
@@ -385,11 +464,16 @@ impl StorageInstance for BigQueryStorage {
             .job()
             .query(&self.project_id, QueryRequest::new(labels_query))
             .await?;
+        let mut labels_rs = ResultSet::new_from_query_response(labels_rs);
 
         let mut labels: SensAppLabels = smallvec![];
-        for label_row in labels_rs.rows.unwrap_or_default() {
-            let label_name = label_row.columns[0].value.as_ref().unwrap().to_string();
-            let label_value = label_row.columns[1].value.as_ref().unwrap().to_string();
+        while labels_rs.next_row() {
+            let label_name = labels_rs
+                .get_string_by_name("label_name")?
+                .context("BigQuery row missing label_name")?;
+            let label_value = labels_rs
+                .get_string_by_name("label_value")?
+                .context("BigQuery row missing label_value")?;
             labels.push((label_name, label_value));
         }
 
