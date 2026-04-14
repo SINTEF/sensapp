@@ -28,7 +28,7 @@ export function ExplorerPage() {
             <TimeSeriesChart />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-base-content/30">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="oin">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
               </svg>
               <p className="text-sm">

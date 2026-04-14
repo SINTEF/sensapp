@@ -38,3 +38,5 @@ __pycache__/
 .venv/
 dist/
 python/demo-dashboard/
+
+bin/

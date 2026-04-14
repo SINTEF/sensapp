@@ -136,8 +136,10 @@ describe('App integration', () => {
     expect(screen.getByText(/Select a metric, then choose series to chart/)).toBeInTheDocument();
   });
 
-  it('renders footer', () => {
+  it('renders the application shell', () => {
     render(<App />, { wrapper: createWrapper() });
-    expect(screen.getByText(/SINTEF/)).toBeInTheDocument();
+
+    expect(screen.getByText('SensApp')).toBeInTheDocument();
+    expect(screen.getByText('Sensor Data Explorer')).toBeInTheDocument();
   });
 });

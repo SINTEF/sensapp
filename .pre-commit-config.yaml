@@ -7,7 +7,9 @@ repos:
       - id: mixed-line-ending
       - id: trailing-whitespace
       - id: check-json
+        exclude: ^frontend/tsconfig(\.[^.]+)?\.json$
       - id: check-yaml
+        exclude: ^charts/sensapp/templates/.*\.ya?ml$
       - id: check-xml
       - id: check-ast
       - id: check-merge-conflict
