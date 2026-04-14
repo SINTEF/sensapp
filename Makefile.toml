@@ -476,8 +476,10 @@ sqlx migrate run --source src/storage/postgresql/migrations
 
 [tasks.migrate-timescaledb]
 description = "Run TimescaleDB migrations"
-env = { "DATABASE_URL" = "${TEST_DATABASE_URL_TIMESCALEDB}" }
+script_runner = "@shell"
 script = '''
+# sqlx CLI doesn't understand timescaledb:// scheme, so convert to postgres://
+export DATABASE_URL=$(echo "$TEST_DATABASE_URL_TIMESCALEDB" | sed 's|^timescaledb://|postgres://|')
 sqlx migrate run --source src/storage/postgresql/migrations
 '''
 
