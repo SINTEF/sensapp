@@ -5,15 +5,15 @@ tags, published releases, and manual dispatch.
 
 ## What is checked
 
-- Rust formatting, a blocking `cargo audit` (with the documented RSA and unused
-  optional rkyv advisory exceptions in `Makefile.toml`), frontend
-  lint/typecheck/tests/build and a critical-severity npm audit, and Python
-  SDK unit tests, lint, and package build.
+- Rust formatting, a blocking `cargo audit` (with the documented RSA advisory
+  exception in `Makefile.toml`), frontend lint/typecheck/tests/build and a
+  high-severity npm audit, and Python 3.14 SDK unit tests, lint, and package build.
 
-The frontend lockfile has been refreshed for compatible security fixes. Four
-OpenAPI generator chain advisories remain (one high, three moderate); that
-generator needs a separate tested upgrade before a frontend-inclusive release.
-See `current_tasks/frontend-security-audit.md`.
+The OpenAPI generator has been upgraded to 0.99.0 and its client regenerated.
+The generator still depends on a vulnerable `js-yaml`, so `package.json`
+overrides that nested dependency to 4.3.2 or newer. The refreshed lockfile has
+no npm audit findings. The regenerated client also passed a live API smoke test;
+see `ideas/remove-frontend-js-yaml-override.md` for the override follow-up.
 - Separate build, test, and Clippy checks for SQLite, PostgreSQL, ClickHouse,
   DuckDB, TimescaleDB, and RRDCached. The service-backed jobs use real database
   containers. BigQuery remains an experimental compile-only Docker variant on

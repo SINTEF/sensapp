@@ -13,19 +13,18 @@ The remaining release risk is operational: running the packaged image against a
 persistent service, handling outages and restarts, and confirming that publishing
 is repeatable.
 
-The September 2026 audit found eight lockfile vulnerabilities. Compatible
-updates resolved seven. The last is an optional `rkyv` edge listed by
-`rust_decimal` but absent from every active SensApp feature graph; its precise
-exception is documented in `Makefile.toml`. The audit still reports nonblocking
-unmaintained/unsound/yanked dependency warnings, including `core2` and `spin`;
-review those before choosing the release date.
+The September 2026 audit found eight lockfile vulnerabilities. A subsequent
+compatible dependency refresh removed the optional `rkyv` edge and `core2` from
+the lockfile. The RSA advisory exception remains documented in `Makefile.toml`
+because SensApp uses HS256 JWTs while `jsonwebtoken` still brings in RSA. The
+blocking CI audit must confirm the refreshed lockfile before release; review
+remaining nonblocking unmaintained/unsound/yanked warnings, including `spin`.
 
-The frontend lockfile update reduced npm audit findings from 22 to four. The
-remaining one high and three moderate findings are in the OpenAPI generator
-dependency chain. Upgrading `@hey-api/openapi-ts` across its breaking version
-boundary needs a generator and client compatibility check. CI now blocks on
-critical npm advisories; `current_tasks/frontend-security-audit.md` tracks the
-remaining frontend security work.
+The frontend dependency refresh and OpenAPI generator upgrade reduced npm audit
+findings from 22 to zero. The generated client passes lint, typecheck, tests,
+build, and a live API compatibility check. CI now blocks on high npm
+advisories. The nested `js-yaml` override can be removed when the generator's
+parser accepts a patched version itself.
 
 ## Acceptance criteria and estimate
 

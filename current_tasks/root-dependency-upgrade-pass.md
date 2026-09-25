@@ -15,3 +15,9 @@ Update the root Rust dependencies to the newest available versions that SensApp 
 
 - Existing branch work already included a partial low-risk dependency refresh.
 - This pass should preserve unrelated in-flight changes and focus on dependency fallout only.
+- A compatible `cargo update` refreshed 265 locked packages. `hybridmap 0.1.3`
+  does not compile with `smallvec 2.0.0-beta.1`, so the lockfile retains
+  `smallvec 2.0.0-alpha.12` until that upstream mismatch is fixed.
+- `cargo check --locked`, `cargo check --locked --all-features`,
+  `cargo clippy --locked --tests -- -D warnings`, default `cargo test --locked`,
+  and `cargo-audit` with the documented RSA exception pass.

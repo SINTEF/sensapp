@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Async Python client for the SensApp HTTP API — Arrow-first data exchange"
 readme = "README.md"
 license = { text = "Apache-2.0" }
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 authors = [
   { name = "SINTEF" }
 ]
@@ -19,26 +19,24 @@ classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Internet :: WWW/HTTP",
   "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [
   "niquests>=3,<4",
   "polars>=1,<2",
-  "pyarrow>=18,<25",
+  "pyarrow>=25,<26",
 ]
 
 [project.optional-dependencies]
 pandas = [
-  "pandas>=2.2,<3",
+  "pandas>=3,<4",
 ]
 dev = [
-  "pandas>=2.2,<3",
-  "pytest>=8,<10",
-  "pytest-asyncio>=0.24,<1",
+  "pandas>=3,<4",
+  "pytest>=9,<10",
+  "pytest-asyncio>=1,<2",
   "ruff>=0.9,<1",
 ]
 
@@ -53,7 +51,7 @@ packages = ["src/sensapp"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py314"
 src = ["src", "tests"]
 
 [tool.ruff.format]

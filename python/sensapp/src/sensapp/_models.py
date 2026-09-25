@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs, urlparse
 
 import polars as pl
@@ -12,7 +12,7 @@ import pyarrow as pa
 if TYPE_CHECKING:
     import pandas as pd
 
-SensorType: TypeAlias = Literal[
+type SensorType = Literal[
     "boolean",
     "integer",
     "float",
@@ -23,7 +23,7 @@ SensorType: TypeAlias = Literal[
     "json",
 ]
 
-UploadSensorType: TypeAlias = Literal[
+type UploadSensorType = Literal[
     "boolean",
     "integer",
     "float",
@@ -33,11 +33,9 @@ UploadSensorType: TypeAlias = Literal[
     "location",
 ]
 
-UploadValue: TypeAlias = (
-    bool | int | float | Decimal | str | bytes | tuple[float, float]
-)
+type UploadValue = bool | int | float | Decimal | str | bytes | tuple[float, float]
 
-TimestampLike: TypeAlias = datetime | str | int | float
+type TimestampLike = datetime | str | int | float
 
 
 @dataclass(slots=True)

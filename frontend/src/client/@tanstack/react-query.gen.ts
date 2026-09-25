@@ -333,24 +333,27 @@ export const getSeriesDataInfiniteQueryKey = (options: Options<GetSeriesDataData
 /**
  * Get series data in various formats based on query parameter.
  */
-export const getSeriesDataInfiniteOptions = (options: Options<GetSeriesDataData>) => infiniteQueryOptions<unknown, DefaultError, InfiniteData<unknown>, QueryKey<Options<GetSeriesDataData>>, string | Pick<QueryKey<Options<GetSeriesDataData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<GetSeriesDataData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                start: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await getSeriesData({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: getSeriesDataInfiniteQueryKey(options)
-});
+export const getSeriesDataInfiniteOptions = (options: Options<GetSeriesDataData>) => {
+    const opts = infiniteQueryOptions<unknown, DefaultError, InfiniteData<unknown>, QueryKey<Options<GetSeriesDataData>>, string | Pick<QueryKey<Options<GetSeriesDataData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<GetSeriesDataData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    start: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await getSeriesData({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: getSeriesDataInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
