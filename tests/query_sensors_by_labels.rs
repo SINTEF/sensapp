@@ -111,6 +111,62 @@ async fn test_query_by_exact_name() -> Result<()> {
     Ok(())
 }
 
+/// Matcher text must stay in bound values even when it contains SQL syntax.
+#[tokio::test]
+#[serial]
+async fn test_query_matcher_sql_text_is_literal() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let quoted = create_sensor_with_labels(
+        "quoted_sensor",
+        SensorType::Float,
+        vec![("site".into(), "O'Reilly".into())],
+    );
+    let other = create_sensor_with_labels(
+        "other_sensor",
+        SensorType::Float,
+        vec![("site".into(), "other".into())],
+    );
+    publish_test_sensors(
+        &storage,
+        vec![
+            (quoted, create_float_samples(1)),
+            (other, create_float_samples(1)),
+        ],
+    )
+    .await?;
+
+    for matcher in [
+        LabelMatcher::eq("__name__", "' OR 1=1 --"),
+        LabelMatcher::eq("site", "' OR 1=1 --"),
+        LabelMatcher::eq("site' OR 1=1 --", "O'Reilly"),
+    ] {
+        let results = storage
+            .query_sensors_by_labels(&[matcher], None, None, None, false)
+            .await?;
+        assert!(
+            results.is_empty(),
+            "SQL-looking matcher text must not widen results"
+        );
+    }
+
+    let results = storage
+        .query_sensors_by_labels(
+            &[LabelMatcher::eq("site", "O'Reilly")],
+            None,
+            None,
+            None,
+            false,
+        )
+        .await?;
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].sensor.name, "quoted_sensor");
+
+    Ok(())
+}
+
 /// Test querying sensors by name with not-equal matcher
 #[tokio::test]
 #[serial]

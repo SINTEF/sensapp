@@ -38,7 +38,7 @@ impl PostgresStorage {
                     "{} {} {}",
                     integer_bucketed_cte(),
                     "SELECT bucket_us AS timestamp_us, AVG(value)::double precision AS value",
-                    integer_group_by_clause(limit, "bucket_us")
+                    integer_group_by_clause()
                 );
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
@@ -71,7 +71,7 @@ impl PostgresStorage {
                     "{} {} {}",
                     integer_bucketed_cte(),
                     "SELECT bucket_us AS timestamp_us, COUNT(*)::bigint AS value",
-                    integer_group_by_clause(limit, "bucket_us")
+                    integer_group_by_clause()
                 );
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
@@ -105,7 +105,7 @@ impl PostgresStorage {
                     "{} SELECT bucket_us AS timestamp_us, {} AS value {}",
                     integer_bucketed_cte(),
                     expression,
-                    integer_group_by_clause(limit, "bucket_us")
+                    integer_group_by_clause()
                 );
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
@@ -155,7 +155,7 @@ impl PostgresStorage {
                     "{} {} {}",
                     float_bucketed_cte(),
                     "SELECT bucket_us AS timestamp_us, COUNT(*)::bigint AS value",
-                    integer_group_by_clause(limit, "bucket_us")
+                    integer_group_by_clause()
                 );
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
@@ -189,7 +189,7 @@ impl PostgresStorage {
                     "{} SELECT bucket_us AS timestamp_us, {} AS value {}",
                     float_bucketed_cte(),
                     expression,
-                    integer_group_by_clause(limit, "bucket_us")
+                    integer_group_by_clause()
                 );
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
@@ -239,7 +239,7 @@ impl PostgresStorage {
                     "{} {} {}",
                     numeric_bucketed_cte(),
                     "SELECT bucket_us AS timestamp_us, COUNT(*)::bigint AS value",
-                    integer_group_by_clause(limit, "bucket_us")
+                    integer_group_by_clause()
                 );
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
@@ -273,7 +273,7 @@ impl PostgresStorage {
                     "{} SELECT bucket_us AS timestamp_us, {} AS value {}",
                     numeric_bucketed_cte(),
                     expression,
-                    integer_group_by_clause(limit, "bucket_us")
+                    integer_group_by_clause()
                 );
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
@@ -667,12 +667,8 @@ fn numeric_bucketed_cte() -> &'static str {
     "#
 }
 
-fn integer_group_by_clause(limit: i64, bucket_column: &str) -> String {
-    // Callers pass a fixed column name and a numeric limit, never request text.
-    format!(
-        "FROM bucketed GROUP BY {} ORDER BY {} ASC LIMIT {}",
-        bucket_column, bucket_column, limit
-    )
+fn integer_group_by_clause() -> &'static str {
+    "FROM bucketed GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT $6"
 }
 
 fn integer_aggregate_expression(aggregation: Aggregation) -> &'static str {

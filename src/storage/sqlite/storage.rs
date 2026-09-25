@@ -979,7 +979,7 @@ impl SqliteStorage {
 
     async fn query_latest_timestamp_us(
         &self,
-        table_name: &str,
+        table_name: &'static str,
         sensor_id: i64,
         start_time: Option<i64>,
         end_time: Option<i64>,
@@ -1008,7 +1008,7 @@ impl SqliteStorage {
 
     async fn query_availability_summary_native(
         &self,
-        table_name: &str,
+        table_name: &'static str,
         sensor_id: i64,
         sensor: Sensor,
         start_time: i64,

@@ -380,7 +380,7 @@ impl TimeScaleDBStorage {
 
     async fn query_latest_timestamp_us(
         &self,
-        table_name: &str,
+        table_name: &'static str,
         sensor_id: i64,
         start_time: Option<i64>,
         end_time: Option<i64>,
@@ -407,7 +407,7 @@ impl TimeScaleDBStorage {
 
     async fn query_availability_summary_native(
         &self,
-        table_name: &str,
+        table_name: &'static str,
         sensor_id: i64,
         sensor: Sensor,
         start_time: SensAppDateTime,
@@ -481,7 +481,7 @@ impl TimeScaleDBStorage {
     }
 }
 
-fn timescaledb_bucketed_cte(table_name: &str) -> String {
+fn timescaledb_bucketed_cte(table_name: &'static str) -> String {
     // Callers pass fixed sensor-type table names, never request text.
     format!(
         r#"
