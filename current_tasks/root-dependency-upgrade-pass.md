@@ -21,3 +21,5 @@ Update the root Rust dependencies to the newest available versions that SensApp 
 - `cargo check --locked`, `cargo check --locked --all-features`,
   `cargo clippy --locked --tests -- -D warnings`, default `cargo test --locked`,
   and `cargo-audit` with the documented RSA exception pass.
+- Larger root version migrations, including Arrow 60, SQLx 0.9, cached 4,
+  jsonwebtoken 11, and utoipa 6, require separate API and service test review.
