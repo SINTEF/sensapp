@@ -12,8 +12,9 @@ dependency and GitHub runner drift even when there are no code changes.
   SDK unit tests, lint, and package build.
 - Separate build, test, and Clippy checks for SQLite, PostgreSQL, ClickHouse,
   DuckDB, TimescaleDB, and RRDCached. The service-backed jobs use real database
-  containers. BigQuery remains an experimental compile-only Docker variant until
-  an isolated CI dataset and credentials are available.
+  containers. BigQuery remains an experimental compile-only Docker variant on
+  scheduled and manual runs until an isolated CI dataset and credentials are
+  available; it does not block the ClickHouse release path.
 - Helm lint/template/package and Docker builds. The normal runtime image is
   actually started with ClickHouse, then `tests/clickhouse_container_smoke.py`
   checks readiness, publish, query, and service metrics. Live Python SDK tests
