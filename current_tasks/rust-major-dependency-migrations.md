@@ -11,6 +11,7 @@ Upgrade Arrow, SQLx, cached, jsonwebtoken, and utoipa to their current major ver
 - Audit SQLx dynamic queries: matcher values remain bound parameters; generated placeholders, table names, aggregation expressions, and limits come from internal fixed choices or numeric values. The test database identifier is quoted with embedded quotes escaped.
 - Add an OpenAPI document smoke test for core routes.
 - DuckDB still brings Arrow 58 transitively; SensApp's direct Arrow APIs use 60.
+- Raise the Docker builder to Rust 1.96 so it can build SQLx 0.9 (requires Rust 1.94) and cached 4 (requires Rust 1.92).
 
 ## Validation
 

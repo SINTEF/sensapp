@@ -1,4 +1,4 @@
-FROM rust:1.89-slim-bookworm AS builder
+FROM rust:1.96-slim-bookworm AS builder
 
 ARG FEATURES="postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached"
 ARG NO_DEFAULT_FEATURES="true"
