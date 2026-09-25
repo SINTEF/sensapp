@@ -54,7 +54,15 @@ def live_server_url() -> str:
     try:
         response = niquests.get(f"{base_url}/health/ready", timeout=1)
     except Exception as exc:
+        if os.environ.get("SENSAPP_LIVE_REQUIRED") == "1":
+            pytest.fail(f"live SensApp server not available at {base_url}: {exc}")
         pytest.skip(f"live SensApp server not available at {base_url}: {exc}")
+
+    if response.status_code != 200 and os.environ.get("SENSAPP_LIVE_REQUIRED") == "1":
+        pytest.fail(
+            f"live SensApp server at {base_url} returned status "
+            f"{response.status_code} instead of 200"
+        )
 
     if response.status_code not in {200, 503}:
         pytest.skip(

@@ -216,21 +216,19 @@ impl ArrowConverter {
         sensor_data: &SensorData,
     ) -> Result<(Arc<Schema>, Vec<ArrayRef>)> {
         let mut timestamp_builder = TimestampMicrosecondBuilder::new();
-        let value_field: Field;
-        let value_column: ArrayRef;
-
-        match &sensor_data.samples {
+        let (value_field, value_column): (Field, ArrayRef) = match &sensor_data.samples {
             TypedSamples::Integer(samples) => {
-                value_field = Field::new("value", DataType::Int64, false);
                 let mut builder = Int64Builder::new();
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
                     builder.append_value(sample.value);
                 }
-                value_column = Arc::new(builder.finish());
+                (
+                    Field::new("value", DataType::Int64, false),
+                    Arc::new(builder.finish()),
+                )
             }
             TypedSamples::Numeric(samples) => {
-                value_field = Field::new("value", DataType::Decimal128(38, 18), false);
                 let mut builder = Decimal128Builder::new().with_precision_and_scale(38, 18)?;
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
@@ -238,41 +236,50 @@ impl ArrowConverter {
                         * 10_i128.pow(18_u32.saturating_sub(sample.value.scale()));
                     builder.append_value(decimal_i128);
                 }
-                value_column = Arc::new(builder.finish());
+                (
+                    Field::new("value", DataType::Decimal128(38, 18), false),
+                    Arc::new(builder.finish()),
+                )
             }
             TypedSamples::Float(samples) => {
-                value_field = Field::new("value", DataType::Float64, false);
                 let mut builder = Float64Builder::new();
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
                     builder.append_value(sample.value);
                 }
-                value_column = Arc::new(builder.finish());
+                (
+                    Field::new("value", DataType::Float64, false),
+                    Arc::new(builder.finish()),
+                )
             }
             TypedSamples::String(samples) => {
-                value_field = Field::new("value", DataType::Utf8, false);
                 let mut builder = StringBuilder::new();
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
                     builder.append_value(&sample.value);
                 }
-                value_column = Arc::new(builder.finish());
+                (
+                    Field::new("value", DataType::Utf8, false),
+                    Arc::new(builder.finish()),
+                )
             }
             TypedSamples::Boolean(samples) => {
-                value_field = Field::new("value", DataType::Boolean, false);
                 let mut builder = BooleanBuilder::new();
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
                     builder.append_value(sample.value);
                 }
-                value_column = Arc::new(builder.finish());
+                (
+                    Field::new("value", DataType::Boolean, false),
+                    Arc::new(builder.finish()),
+                )
             }
             TypedSamples::Location(samples) => {
                 let latitude_field = Arc::new(Field::new("latitude", DataType::Float64, false));
                 let longitude_field = Arc::new(Field::new("longitude", DataType::Float64, false));
                 let struct_fields = vec![latitude_field, longitude_field];
 
-                value_field = Field::new(
+                let value_field = Field::new(
                     "value",
                     DataType::Struct(struct_fields.clone().into()),
                     false,
@@ -287,7 +294,7 @@ impl ArrowConverter {
                     longitude_builder.append_value(sample.value.x());
                 }
 
-                value_column = Arc::new(
+                let value_column = Arc::new(
                     StructArray::try_new(
                         struct_fields.into(),
                         vec![
@@ -300,26 +307,31 @@ impl ArrowConverter {
                         anyhow::anyhow!("Failed to create location struct array: {}", e)
                     })?,
                 );
+                (value_field, value_column)
             }
             TypedSamples::Blob(samples) => {
-                value_field = Field::new("value", DataType::Binary, false);
                 let mut builder = BinaryBuilder::new();
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
                     builder.append_value(&sample.value);
                 }
-                value_column = Arc::new(builder.finish());
+                (
+                    Field::new("value", DataType::Binary, false),
+                    Arc::new(builder.finish()),
+                )
             }
             TypedSamples::Json(samples) => {
-                value_field = Field::new("value", DataType::Utf8, false);
                 let mut builder = StringBuilder::new();
                 for sample in samples.iter() {
                     timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
                     builder.append_value(serde_json::to_string(&sample.value)?);
                 }
-                value_column = Arc::new(builder.finish());
+                (
+                    Field::new("value", DataType::Utf8, false),
+                    Arc::new(builder.finish()),
+                )
             }
-        }
+        };
 
         let schema = Arc::new(Schema::new_with_metadata(
             vec![
@@ -681,7 +693,6 @@ impl ToMicroseconds for SensAppDateTime {
 
 #[cfg(test)]
 pub mod test_data_helpers {
-    use super::*;
     use crate::datamodel::unit::Unit;
     use crate::datamodel::*;
     use geo::Point;

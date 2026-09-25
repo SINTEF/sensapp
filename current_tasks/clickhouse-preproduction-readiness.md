@@ -27,6 +27,16 @@ Make ClickHouse the first operationally credible SensApp backend for pre-product
 - Refreshed a small set of low-risk dependencies: `cached`, `hybridmap`, `once_cell`, and `tracing-subscriber`.
 4. Define and document what "pre-production ready" means for SensApp with ClickHouse.
 
+## Remaining release work (estimate)
+
+See `docs/PREPRODUCTION_RELEASE_PLAN.md` for acceptance criteria and sequencing.
+The ClickHouse deployment path is approximately **4–8 engineer-days** after CI
+passes, for staging, recovery/backup exercises, and release preparation. A
+frontend-inclusive release adds **1–3 days** for the remaining OpenAPI generator
+security work. These are estimates, not observed durations; they assume an
+available ClickHouse environment and someone who can operate it. BigQuery and
+broad backend parity are separate follow-ups.
+
 ## Notes
 
 - Keep tests generic where practical, but accept backend-specific validation where operational behavior differs.

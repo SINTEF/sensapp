@@ -2,6 +2,11 @@
 name = "sensapp"
 version = "0.3.0"
 edition = "2024"
+description = "Sensor data ingestion, storage, and retrieval platform"
+license = "Apache-2.0"
+repository = "https://github.com/SINTEF/sensapp"
+homepage = "https://github.com/SINTEF/sensapp"
+readme = "README.md"
 
 [features]
 default = ["postgres", "sqlite"]
