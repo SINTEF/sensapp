@@ -1,8 +1,7 @@
 # CI and Release Checks
 
 The main workflow runs on pull requests, pushes to `main`/`develop`, version
-tags, manual dispatch, and every Monday at 03:17 UTC. The scheduled run catches
-dependency and GitHub runner drift even when there are no code changes.
+tags, published releases, and manual dispatch.
 
 ## What is checked
 
@@ -18,7 +17,7 @@ See `current_tasks/frontend-security-audit.md`.
 - Separate build, test, and Clippy checks for SQLite, PostgreSQL, ClickHouse,
   DuckDB, TimescaleDB, and RRDCached. The service-backed jobs use real database
   containers. BigQuery remains an experimental compile-only Docker variant on
-  scheduled and manual runs until an isolated CI dataset and credentials are
+  manual runs until an isolated CI dataset and credentials are
   available; it does not block the ClickHouse release path.
 - Helm lint/template/package and Docker builds. The normal runtime image is
   actually started with ClickHouse, then `tests/clickhouse_container_smoke.py`

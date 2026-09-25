@@ -7,7 +7,7 @@ Make the existing CI pipeline verify the current release candidate against real 
 ## Scope
 
 - Reconcile the older local checkouts against upstream `main` before carrying changes forward.
-- Run a scheduled validation pass so toolchain and dependency drift is visible.
+- Run CI for repository activity or an explicit manual dispatch.
 - Make the security audit an actual gate and validate the runtime container against ClickHouse.
 - Require the relevant checks before publishing a release.
 
