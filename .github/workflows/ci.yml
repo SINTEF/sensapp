@@ -119,6 +119,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit frontend dependencies for critical advisories
+        run: npm audit --audit-level=critical
+
       - name: Lint
         run: npm run lint
 

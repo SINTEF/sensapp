@@ -30,11 +30,12 @@ Make ClickHouse the first operationally credible SensApp backend for pre-product
 ## Remaining release work (estimate)
 
 See `docs/PREPRODUCTION_RELEASE_PLAN.md` for acceptance criteria and sequencing.
-The current estimate is **4–8 engineer-days**, after the CI run passes, for a
-staging deployment, recovery/backup exercises, and release preparation. This is
-an estimate, not an observed duration; it assumes an available ClickHouse
-environment and someone who can operate it. BigQuery and broad backend parity
-are separate follow-ups.
+The ClickHouse deployment path is approximately **4–8 engineer-days** after CI
+passes, for staging, recovery/backup exercises, and release preparation. A
+frontend-inclusive release adds **1–3 days** for the remaining OpenAPI generator
+security work. These are estimates, not observed durations; they assume an
+available ClickHouse environment and someone who can operate it. BigQuery and
+broad backend parity are separate follow-ups.
 
 ## Notes
 

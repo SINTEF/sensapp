@@ -8,8 +8,13 @@ dependency and GitHub runner drift even when there are no code changes.
 
 - Rust formatting, a blocking `cargo audit` (with the documented RSA and unused
   optional rkyv advisory exceptions in `Makefile.toml`), frontend
-  lint/typecheck/tests/build, and Python
+  lint/typecheck/tests/build and a critical-severity npm audit, and Python
   SDK unit tests, lint, and package build.
+
+The frontend lockfile has been refreshed for compatible security fixes. Four
+OpenAPI generator chain advisories remain (one high, three moderate); that
+generator needs a separate tested upgrade before a frontend-inclusive release.
+See `current_tasks/frontend-security-audit.md`.
 - Separate build, test, and Clippy checks for SQLite, PostgreSQL, ClickHouse,
   DuckDB, TimescaleDB, and RRDCached. The service-backed jobs use real database
   containers. BigQuery remains an experimental compile-only Docker variant on
