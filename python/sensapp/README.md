@@ -59,10 +59,13 @@ from datetime import UTC, datetime
 from sensapp import SensAppClient, SamplePoint
 
 async with SensAppClient() as client:
-    await client.publish("temperature", [
-        SamplePoint(datetime(2026, 4, 13, 12, 0, tzinfo=UTC), 21.5),
-        SamplePoint(datetime(2026, 4, 13, 12, 1, tzinfo=UTC), 21.7),
-    ])
+    await client.publish(
+        "temperature",
+        [
+            SamplePoint(datetime(2026, 4, 13, 12, 0, tzinfo=UTC), 21.5),
+            SamplePoint(datetime(2026, 4, 13, 12, 1, tzinfo=UTC), 21.7),
+        ],
+    )
 ```
 
 ## Publish from Polars

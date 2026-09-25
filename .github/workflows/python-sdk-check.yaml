@@ -90,5 +90,25 @@ jobs:
       - name: Install SDK dependencies
         run: uv pip install --system -e '.[dev]'
 
+      - name: Build SensApp with SQLite
+        run: cargo build --locked --no-default-features --features sqlite
+        working-directory: .
+
+      - name: Start live SensApp server
+        run: |
+          SENSAPP_STORAGE_CONNECTION_STRING=sqlite:///tmp/sensapp-sdk-ci.db \
+            ./target/debug/sensapp > /tmp/sensapp-sdk-ci.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/health/ready > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/sensapp-sdk-ci.log
+          exit 1
+        working-directory: .
+
       - name: Run live integration tests
         run: python -m pytest -m integration
+        env:
+          SENSAPP_LIVE_REQUIRED: '1'
