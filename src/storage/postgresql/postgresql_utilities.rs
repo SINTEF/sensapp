@@ -1,16 +1,15 @@
 use crate::datamodel::Sensor;
 use crate::datamodel::unit::Unit;
 use anyhow::Result;
-use cached::proc_macro::cached;
+use cached::macros::cached;
 use sqlx::{Executor, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 #[cached(
-    time = 120,
-    result = true,
+    ttl_secs = 120,
     sync_writes = "default",
     key = "String",
-    convert = r#"{ label_name.to_string() }"#
+    convert = { label_name.to_string() }
 )]
 pub async fn get_label_name_id_or_create(
     transaction: &mut Transaction<'_, Postgres>,
@@ -36,11 +35,10 @@ pub async fn get_label_name_id_or_create(
 }
 
 #[cached(
-    time = 120,
-    result = true,
+    ttl_secs = 120,
     sync_writes = "default",
     key = "String",
-    convert = r#"{ label_description.to_string() }"#
+    convert = { label_description.to_string() }
 )]
 pub async fn get_label_description_id_or_create(
     transaction: &mut Transaction<'_, Postgres>,
@@ -67,11 +65,10 @@ pub async fn get_label_description_id_or_create(
 }
 
 #[cached(
-    time = 120,
-    result = true,
+    ttl_secs = 120,
     sync_writes = "default",
     key = "String",
-    convert = r#"{ unit.name.clone() }"#
+    convert = { unit.name.clone() }
 )]
 pub async fn get_unit_id_or_create(
     transaction: &mut Transaction<'_, sqlx::Postgres>,
@@ -99,11 +96,10 @@ pub async fn get_unit_id_or_create(
 }
 
 #[cached(
-    time = 120,
-    result = true,
+    ttl_secs = 120,
     sync_writes = "default",
     key = "Uuid",
-    convert = r#"{ sensor.uuid }"#
+    convert = { sensor.uuid }
 )]
 pub async fn get_sensor_id_or_create_sensor(
     transaction: &mut Transaction<'_, Postgres>,
@@ -170,11 +166,10 @@ pub async fn get_sensor_id_or_create_sensor(
 }
 
 #[cached(
-    time = 120,
-    result = true,
+    ttl_secs = 120,
     sync_writes = "default",
     key = "String",
-    convert = r#"{ string_value.to_string() }"#
+    convert = { string_value.to_string() }
 )]
 pub async fn get_string_value_id_or_create(
     transaction: &mut Transaction<'_, Postgres>,

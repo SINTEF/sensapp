@@ -41,7 +41,7 @@ impl PostgresStorage {
                     integer_group_by_clause(limit, "bucket_us")
                 );
 
-                let rows: Vec<Row> = sqlx::query_as(&sql)
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                     .bind(sensor_id)
                     .bind(start_time)
                     .bind(end_time)
@@ -74,7 +74,7 @@ impl PostgresStorage {
                     integer_group_by_clause(limit, "bucket_us")
                 );
 
-                let rows: Vec<Row> = sqlx::query_as(&sql)
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                     .bind(sensor_id)
                     .bind(start_time)
                     .bind(end_time)
@@ -108,7 +108,7 @@ impl PostgresStorage {
                     integer_group_by_clause(limit, "bucket_us")
                 );
 
-                let rows: Vec<Row> = sqlx::query_as(&sql)
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                     .bind(sensor_id)
                     .bind(start_time)
                     .bind(end_time)
@@ -158,7 +158,7 @@ impl PostgresStorage {
                     integer_group_by_clause(limit, "bucket_us")
                 );
 
-                let rows: Vec<Row> = sqlx::query_as(&sql)
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                     .bind(sensor_id)
                     .bind(start_time)
                     .bind(end_time)
@@ -192,7 +192,7 @@ impl PostgresStorage {
                     integer_group_by_clause(limit, "bucket_us")
                 );
 
-                let rows: Vec<Row> = sqlx::query_as(&sql)
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                     .bind(sensor_id)
                     .bind(start_time)
                     .bind(end_time)
@@ -242,7 +242,7 @@ impl PostgresStorage {
                     integer_group_by_clause(limit, "bucket_us")
                 );
 
-                let rows: Vec<Row> = sqlx::query_as(&sql)
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                     .bind(sensor_id)
                     .bind(start_time)
                     .bind(end_time)
@@ -276,7 +276,7 @@ impl PostgresStorage {
                     integer_group_by_clause(limit, "bucket_us")
                 );
 
-                let rows: Vec<Row> = sqlx::query_as(&sql)
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                     .bind(sensor_id)
                     .bind(start_time)
                     .bind(end_time)
@@ -668,6 +668,7 @@ fn numeric_bucketed_cte() -> &'static str {
 }
 
 fn integer_group_by_clause(limit: i64, bucket_column: &str) -> String {
+    // Callers pass a fixed column name and a numeric limit, never request text.
     format!(
         "FROM bucketed GROUP BY {} ORDER BY {} ASC LIMIT {}",
         bucket_column, bucket_column, limit

@@ -200,7 +200,8 @@ impl TimeScaleDBStorage {
             unit_description: Option<String>,
         }
 
-        let mut query = sqlx::query_as::<_, SensorRow>(&sql);
+        // SQL fragments contain only fixed operators and numbered placeholders; matcher values are bound below.
+        let mut query = sqlx::query_as::<_, SensorRow>(sqlx::AssertSqlSafe(sql.as_str()));
         for param in &params {
             query = query.bind(param);
         }
@@ -394,7 +395,7 @@ impl TimeScaleDBStorage {
             "#
         );
 
-        let timestamp_us: Option<i64> = sqlx::query_scalar(&sql)
+        let timestamp_us: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(sensor_id)
             .bind(start_time.map(micros_to_offset_datetime))
             .bind(end_time.map(micros_to_offset_datetime))
@@ -439,7 +440,7 @@ impl TimeScaleDBStorage {
                 "#
             );
 
-            sqlx::query_as(&sql)
+            sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(step_ms)
                 .bind(start_ts)
                 .bind(sensor_id)
@@ -462,7 +463,7 @@ impl TimeScaleDBStorage {
                 "#
             );
 
-            sqlx::query_as(&sql)
+            sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(sensor_id)
                 .bind(start_ts)
                 .bind(end_ts)
@@ -481,6 +482,7 @@ impl TimeScaleDBStorage {
 }
 
 fn timescaledb_bucketed_cte(table_name: &str) -> String {
+    // Callers pass fixed sensor-type table names, never request text.
     format!(
         r#"
         WITH bucketed AS (
@@ -1329,23 +1331,23 @@ impl StorageInstance for TimeScaleDBStorage {
         // The cached macro generates cache variables named after the function in uppercase
         use cached::Cached;
         timescaledb_utilities::GET_LABEL_NAME_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
         timescaledb_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
         timescaledb_utilities::GET_UNIT_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
         timescaledb_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
-            .lock()
+            .write()
             .await
             .cache_clear();
         timescaledb_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
 
@@ -1425,11 +1427,11 @@ impl TimeScaleDBStorage {
                     value: f64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_time, AVG(value)::double precision AS value {}",
                     timescaledb_bucketed_cte("integer_values"),
                     timescaledb_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time_ts)
                 .bind(end_time_ts)
@@ -1455,11 +1457,11 @@ impl TimeScaleDBStorage {
                     value: i64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
                     timescaledb_bucketed_cte("integer_values"),
                     timescaledb_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time_ts)
                 .bind(end_time_ts)
@@ -1485,12 +1487,12 @@ impl TimeScaleDBStorage {
                     value: i64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_time, {} AS value {}",
                     timescaledb_bucketed_cte("integer_values"),
                     timescaledb_integer_expression(aggregation),
                     timescaledb_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time_ts)
                 .bind(end_time_ts)
@@ -1535,11 +1537,11 @@ impl TimeScaleDBStorage {
                     value: i64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
                     timescaledb_bucketed_cte("float_values"),
                     timescaledb_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time_ts)
                 .bind(end_time_ts)
@@ -1565,12 +1567,12 @@ impl TimeScaleDBStorage {
                     value: f64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_time, {} AS value {}",
                     timescaledb_bucketed_cte("float_values"),
                     timescaledb_float_expression(aggregation),
                     timescaledb_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time_ts)
                 .bind(end_time_ts)
@@ -1615,11 +1617,11 @@ impl TimeScaleDBStorage {
                     value: i64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
                     timescaledb_bucketed_cte("numeric_values"),
                     timescaledb_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time_ts)
                 .bind(end_time_ts)
@@ -1645,12 +1647,12 @@ impl TimeScaleDBStorage {
                     value: rust_decimal::Decimal,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_time, {} AS value {}",
                     timescaledb_bucketed_cte("numeric_values"),
                     timescaledb_numeric_expression(aggregation),
                     timescaledb_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time_ts)
                 .bind(end_time_ts)

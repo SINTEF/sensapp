@@ -193,7 +193,7 @@ impl PostgresStorage {
             "#
         );
 
-        let timestamp_us: Option<i64> = sqlx::query_scalar(&sql)
+        let timestamp_us: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(sensor_id)
             .bind(start_time)
             .bind(end_time)
@@ -236,7 +236,7 @@ impl PostgresStorage {
                 "#
             );
 
-            sqlx::query_as(&sql)
+            sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(start_time)
                 .bind(step_us)
                 .bind(sensor_id)
@@ -259,7 +259,7 @@ impl PostgresStorage {
                 "#
             );
 
-            sqlx::query_as(&sql)
+            sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -932,23 +932,23 @@ impl StorageInstance for PostgresStorage {
         // The cached macro generates cache variables named after the function in uppercase
         use cached::Cached;
         postgresql_utilities::GET_LABEL_NAME_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
         postgresql_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
         postgresql_utilities::GET_UNIT_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
         postgresql_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
-            .lock()
+            .write()
             .await
             .cache_clear();
         postgresql_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
 

@@ -1,6 +1,7 @@
 use crate::storage::Aggregation;
 
 pub(super) fn sqlite_bucketed_cte(table_name: &str) -> String {
+    // Callers select table_name from fixed sensor-type tables, never request text.
     format!(
         r#"
         WITH bucketed AS (

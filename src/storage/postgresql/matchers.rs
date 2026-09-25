@@ -168,7 +168,8 @@ impl PostgresStorage {
             unit_description: Option<String>,
         }
 
-        let mut query = sqlx::query_as::<_, SensorRow>(&sql);
+        // SQL fragments contain only fixed operators and numbered placeholders; matcher values are bound below.
+        let mut query = sqlx::query_as::<_, SensorRow>(sqlx::AssertSqlSafe(sql.as_str()));
         for param in &params {
             query = query.bind(param);
         }

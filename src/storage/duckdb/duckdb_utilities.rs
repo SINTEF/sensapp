@@ -1,16 +1,15 @@
 use crate::datamodel::Sensor;
 use crate::datamodel::unit::Unit;
 use anyhow::Result;
-use cached::proc_macro::cached;
+use cached::macros::cached;
 use duckdb::{CachedStatement, OptionalExt, Transaction, params};
 use uuid::Uuid;
 
 #[cached(
-    time = 120,
-    result = true,
+    ttl_secs = 120,
     sync_writes = "default",
     key = "String",
-    convert = r#"{ label_name.to_string() }"#
+    convert = { label_name.to_string() }
 )]
 pub fn get_label_name_id_or_create(transaction: &Transaction, label_name: &str) -> Result<i64> {
     let mut select_stmt: CachedStatement =
@@ -31,11 +30,10 @@ pub fn get_label_name_id_or_create(transaction: &Transaction, label_name: &str) 
 }
 
 #[cached(
-    time = 120,
-    result = true,
+    ttl_secs = 120,
     sync_writes = "default",
     key = "String",
-    convert = r#"{ label_description.to_string() }"#
+    convert = { label_description.to_string() }
 )]
 pub fn get_label_description_id_or_create(
     transaction: &Transaction,
@@ -61,11 +59,10 @@ pub fn get_label_description_id_or_create(
 }
 
 #[cached(
-    time = 120,
-    result = true,
+    ttl_secs = 120,
     sync_writes = "default",
     key = "String",
-    convert = r#"{ unit.name.clone() }"#
+    convert = { unit.name.clone() }
 )]
 pub fn get_unit_id_or_create(transaction: &Transaction, unit: &Unit) -> Result<i64> {
     let mut select_stmt: CachedStatement =
@@ -87,11 +84,10 @@ pub fn get_unit_id_or_create(transaction: &Transaction, unit: &Unit) -> Result<i
 }
 
 #[cached(
-    time = 120,
-    result = true,
+    ttl_secs = 120,
     sync_writes = "default",
     key = "Uuid",
-    convert = r#"{ sensor.uuid }"#
+    convert = { sensor.uuid }
 )]
 pub fn get_sensor_id_or_create_sensor(transaction: &Transaction, sensor: &Sensor) -> Result<i64> {
     let uuid_string = sensor.uuid.to_string();
@@ -135,11 +131,10 @@ pub fn get_sensor_id_or_create_sensor(transaction: &Transaction, sensor: &Sensor
 }
 
 #[cached(
-    time = 120,
-    result = true,
+    ttl_secs = 120,
     sync_writes = "default",
     key = "String",
-    convert = r#"{ string_value.to_string() }"#
+    convert = { string_value.to_string() }
 )]
 pub fn get_string_value_id_or_create(transaction: &Transaction, string_value: &str) -> Result<i64> {
     let mut select_stmt: CachedStatement =
