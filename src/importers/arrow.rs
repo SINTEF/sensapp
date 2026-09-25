@@ -433,7 +433,6 @@ fn microseconds_to_sensapp_datetime(micros: i64) -> Option<SensAppDateTime> {
 
 #[cfg(test)]
 pub mod test_utils {
-    use super::*;
     use crate::datamodel::unit::Unit;
     use crate::datamodel::*;
     use crate::exporters::arrow::ArrowConverter;

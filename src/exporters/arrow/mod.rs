@@ -693,7 +693,6 @@ impl ToMicroseconds for SensAppDateTime {
 
 #[cfg(test)]
 pub mod test_data_helpers {
-    use super::*;
     use crate::datamodel::unit::Unit;
     use crate::datamodel::*;
     use geo::Point;
