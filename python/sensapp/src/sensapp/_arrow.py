@@ -37,7 +37,7 @@ def read_arrow_table(data: bytes) -> pa.Table:
     source = pa.py_buffer(data)
     try:
         return ipc.open_stream(source).read_all()
-    except (pa.ArrowInvalid, OSError):
+    except pa.ArrowInvalid, OSError:
         return ipc.open_file(source).read_all()
 
 
@@ -283,7 +283,7 @@ def _coerce_location(value: Any) -> tuple[float, float]:
 def _stream_write_options() -> ipc.IpcWriteOptions:
     try:
         return ipc.IpcWriteOptions(compression="lz4")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return ipc.IpcWriteOptions()
 
 

@@ -282,7 +282,7 @@ def _check_response(resp: niquests.Response) -> None:
     message = resp.text or f"HTTP {resp.status_code}"
     try:
         payload = resp.json()
-    except (ValueError, json.JSONDecodeError):
+    except ValueError, json.JSONDecodeError:
         payload = None
 
     if isinstance(payload, dict):

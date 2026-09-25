@@ -1,6 +1,7 @@
 # Python SDK
 
 SensApp now includes a small Python client in `python/sensapp`.
+It requires Python 3.14 or newer.
 
 ## Design goals
 

@@ -2,6 +2,8 @@
 
 Async Python client for the [SensApp](https://github.com/SINTEF/sensapp) HTTP API.
 
+Requires Python 3.14 or newer.
+
 Arrow-first data exchange, typed DCAT catalog models, and Polars-first query results, powered by [niquests](https://niquests.readthedocs.io/).
 
 ## Why this client
