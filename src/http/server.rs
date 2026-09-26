@@ -366,6 +366,22 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn openapi_document_includes_core_routes() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI document");
+        let paths = document["paths"].as_object().expect("OpenAPI paths");
+
+        for path in [
+            "/publish",
+            "/metrics",
+            "/series/{series_uuid}",
+            "/api/v1/query",
+            "/health/live",
+        ] {
+            assert!(paths.contains_key(path), "missing OpenAPI path: {path}");
+        }
+    }
+
     /// Helper to get test database URL - uses the centralized constant from test_utils
     fn get_test_database_url() -> String {
         sensapp::test_utils::get_test_database_url()

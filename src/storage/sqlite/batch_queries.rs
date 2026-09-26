@@ -164,7 +164,8 @@ impl SqliteStorage {
             sensor_ids.len() + 4
         );
 
-        let mut query = sqlx::query_as::<_, Row>(&sql);
+        // The IN list contains generated placeholders only; sensor IDs and time bounds are bound below.
+        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
         for sensor_id in sensor_ids {
             query = query.bind(sensor_id);
         }
@@ -233,7 +234,7 @@ impl SqliteStorage {
             sensor_ids.len() + 4
         );
 
-        let mut query = sqlx::query_as::<_, Row>(&sql);
+        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
         for sensor_id in sensor_ids {
             query = query.bind(sensor_id);
         }
@@ -303,7 +304,7 @@ impl SqliteStorage {
             sensor_ids.len() + 4
         );
 
-        let mut query = sqlx::query_as::<_, Row>(&sql);
+        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
         for sensor_id in sensor_ids {
             query = query.bind(sensor_id);
         }
@@ -372,7 +373,7 @@ impl SqliteStorage {
             sensor_ids.len() + 4
         );
 
-        let mut query = sqlx::query_as::<_, Row>(&sql);
+        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
         for sensor_id in sensor_ids {
             query = query.bind(sensor_id);
         }
@@ -440,7 +441,7 @@ impl SqliteStorage {
             sensor_ids.len() + 4
         );
 
-        let mut query = sqlx::query_as::<_, Row>(&sql);
+        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
         for sensor_id in sensor_ids {
             query = query.bind(sensor_id);
         }
@@ -509,7 +510,7 @@ impl SqliteStorage {
             sensor_ids.len() + 4
         );
 
-        let mut query = sqlx::query_as::<_, Row>(&sql);
+        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
         for sensor_id in sensor_ids {
             query = query.bind(sensor_id);
         }
@@ -577,7 +578,7 @@ impl SqliteStorage {
             sensor_ids.len() + 4
         );
 
-        let mut query = sqlx::query_as::<_, Row>(&sql);
+        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
         for sensor_id in sensor_ids {
             query = query.bind(sensor_id);
         }
@@ -647,7 +648,7 @@ impl SqliteStorage {
             sensor_ids.len() + 4
         );
 
-        let mut query = sqlx::query_as::<_, Row>(&sql);
+        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
         for sensor_id in sensor_ids {
             query = query.bind(sensor_id);
         }

@@ -28,11 +28,17 @@ fn ensure_config() {
     });
 }
 
+fn backend_is_explicitly_configured(db_type: &DatabaseType) -> bool {
+    std::env::var("TEST_DATABASE_URL")
+        .is_ok_and(|url| DatabaseType::from_connection_string(&url) == *db_type)
+}
+
 async fn assert_bucketed_average_for_backend(db_type: DatabaseType) -> Result<()> {
     ensure_config();
 
     let test_db = match TestDb::new_with_type(db_type.clone()).await {
         Ok(test_db) => test_db,
+        Err(error) if backend_is_explicitly_configured(&db_type) => return Err(error),
         Err(error) => {
             eprintln!("skipping {db_type:?} backend test: {error:#}");
             return Ok(());
@@ -119,6 +125,7 @@ async fn assert_latest_and_availability_for_backend(db_type: DatabaseType) -> Re
 
     let test_db = match TestDb::new_with_type(db_type.clone()).await {
         Ok(test_db) => test_db,
+        Err(error) if backend_is_explicitly_configured(&db_type) => return Err(error),
         Err(error) => {
             eprintln!("skipping {db_type:?} backend test: {error:#}");
             return Ok(());
@@ -207,6 +214,13 @@ async fn assert_latest_and_availability_for_backend(db_type: DatabaseType) -> Re
     );
 
     Ok(())
+}
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+#[serial]
+async fn test_postgresql_native_bucketed_average_query() -> Result<()> {
+    assert_bucketed_average_for_backend(DatabaseType::PostgreSQL).await
 }
 
 #[cfg(feature = "postgres")]

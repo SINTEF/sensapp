@@ -838,23 +838,23 @@ impl StorageInstance for SqliteStorage {
         // The cached macro generates cache variables named after the function in uppercase
         use cached::Cached;
         super::sqlite_utilities::GET_LABEL_NAME_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
         super::sqlite_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
         super::sqlite_utilities::GET_UNIT_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
         super::sqlite_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
-            .lock()
+            .write()
             .await
             .cache_clear();
         super::sqlite_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .lock()
+            .write()
             .await
             .cache_clear();
 
@@ -979,7 +979,7 @@ impl SqliteStorage {
 
     async fn query_latest_timestamp_us(
         &self,
-        table_name: &str,
+        table_name: &'static str,
         sensor_id: i64,
         start_time: Option<i64>,
         end_time: Option<i64>,
@@ -994,7 +994,7 @@ impl SqliteStorage {
             "#
         );
 
-        let timestamp_us: Option<i64> = sqlx::query_scalar(&sql)
+        let timestamp_us: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(sensor_id)
             .bind(start_time)
             .bind(start_time)
@@ -1008,7 +1008,7 @@ impl SqliteStorage {
 
     async fn query_availability_summary_native(
         &self,
-        table_name: &str,
+        table_name: &'static str,
         sensor_id: i64,
         sensor: Sensor,
         start_time: i64,
@@ -1039,7 +1039,7 @@ impl SqliteStorage {
                 "#
             );
 
-            sqlx::query_as(&sql)
+            sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(start_time)
                 .bind(step_us)
                 .bind(sensor_id)
@@ -1062,7 +1062,7 @@ impl SqliteStorage {
                 "#
             );
 
-            sqlx::query_as(&sql)
+            sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -1217,11 +1217,11 @@ impl SqliteStorage {
                     value: f64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_us AS timestamp_us, AVG(value) AS value {}",
                     sqlite_bucketed_cte("integer_values"),
                     sqlite_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -1247,11 +1247,11 @@ impl SqliteStorage {
                     value: i64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_us AS timestamp_us, COUNT(*) AS value {}",
                     sqlite_bucketed_cte("integer_values"),
                     sqlite_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -1277,11 +1277,11 @@ impl SqliteStorage {
                     value: i64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&sqlite_first_last_query(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sqlite_first_last_query(
                     "integer_values",
                     aggregation,
                     "value",
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -1307,12 +1307,12 @@ impl SqliteStorage {
                     value: i64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_us AS timestamp_us, {} AS value {}",
                     sqlite_bucketed_cte("integer_values"),
                     sqlite_integer_expression(aggregation),
                     sqlite_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -1355,11 +1355,11 @@ impl SqliteStorage {
                     value: i64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_us AS timestamp_us, COUNT(*) AS value {}",
                     sqlite_bucketed_cte("float_values"),
                     sqlite_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -1385,11 +1385,11 @@ impl SqliteStorage {
                     value: f64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&sqlite_first_last_query(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sqlite_first_last_query(
                     "float_values",
                     aggregation,
                     "value",
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -1415,12 +1415,12 @@ impl SqliteStorage {
                     value: f64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_us AS timestamp_us, {} AS value {}",
                     sqlite_bucketed_cte("float_values"),
                     sqlite_float_expression(aggregation),
                     sqlite_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -1463,11 +1463,11 @@ impl SqliteStorage {
                     value: i64,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_us AS timestamp_us, COUNT(*) AS value {}",
                     sqlite_bucketed_cte("numeric_values"),
                     sqlite_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -1493,11 +1493,11 @@ impl SqliteStorage {
                     value: String,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&sqlite_first_last_query(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sqlite_first_last_query(
                     "numeric_values",
                     aggregation,
                     "CAST(value AS TEXT)",
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)
@@ -1524,12 +1524,12 @@ impl SqliteStorage {
                     value: String,
                 }
 
-                let rows: Vec<Row> = sqlx::query_as(&format!(
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                     "{} SELECT bucket_us AS timestamp_us, CAST({} AS TEXT) AS value {}",
                     sqlite_bucketed_cte("numeric_values"),
                     sqlite_numeric_expression(aggregation),
                     sqlite_group_by_clause()
-                ))
+                )))
                 .bind(sensor_id)
                 .bind(start_time)
                 .bind(end_time)

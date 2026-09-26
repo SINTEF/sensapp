@@ -166,7 +166,10 @@ async fn ensure_postgres_test_database(connection_string: &str) -> Result<()> {
 
     let create_database_sql = format!("CREATE DATABASE \"{}\"", database_name.replace('"', "\"\""));
 
-    match sqlx::query(&create_database_sql).execute(&pool).await {
+    match sqlx::query(sqlx::AssertSqlSafe(create_database_sql.as_str()))
+        .execute(&pool)
+        .await
+    {
         Ok(_) => Ok(()),
         Err(sqlx::Error::Database(db_err)) if db_err.code().as_deref() == Some("42P04") => Ok(()),
         Err(e) => Err(anyhow!(

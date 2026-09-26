@@ -1,6 +1,7 @@
 use crate::storage::Aggregation;
 
-pub(super) fn sqlite_bucketed_cte(table_name: &str) -> String {
+pub(super) fn sqlite_bucketed_cte(table_name: &'static str) -> String {
+    // Callers select table_name from fixed sensor-type tables, never request text.
     format!(
         r#"
         WITH bucketed AS (
@@ -22,9 +23,9 @@ pub(super) fn sqlite_group_by_clause() -> &'static str {
 }
 
 pub(super) fn sqlite_first_last_query(
-    table_name: &str,
+    table_name: &'static str,
     aggregation: Aggregation,
-    value_expression: &str,
+    value_expression: &'static str,
 ) -> String {
     let direction = match aggregation {
         Aggregation::First => "ASC",

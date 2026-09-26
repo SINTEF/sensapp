@@ -171,7 +171,8 @@ impl SqliteStorage {
             unit_description: Option<String>,
         }
 
-        let mut query = sqlx::query_as::<_, SensorRow>(&sql);
+        // SQL fragments contain only fixed operators and numbered placeholders; matcher values are bound below.
+        let mut query = sqlx::query_as::<_, SensorRow>(sqlx::AssertSqlSafe(sql.as_str()));
         for param in &params {
             query = query.bind(param);
         }
@@ -207,7 +208,8 @@ impl SqliteStorage {
             placeholders.join(", ")
         );
 
-        let mut labels_query = sqlx::query_as::<_, LabelRow>(&labels_sql);
+        let mut labels_query =
+            sqlx::query_as::<_, LabelRow>(sqlx::AssertSqlSafe(labels_sql.as_str()));
         for sensor_id in &sensor_ids {
             labels_query = labels_query.bind(sensor_id);
         }

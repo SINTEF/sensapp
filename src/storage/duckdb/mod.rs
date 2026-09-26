@@ -966,17 +966,19 @@ impl StorageInstance for DuckDBStorage {
         // The cached macro generates cache variables named after the function in uppercase
         use cached::Cached;
         duckdb_utilities::GET_LABEL_NAME_ID_OR_CREATE
-            .lock()
+            .write()
             .cache_clear();
         duckdb_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
-            .lock()
+            .write()
             .cache_clear();
-        duckdb_utilities::GET_UNIT_ID_OR_CREATE.lock().cache_clear();
+        duckdb_utilities::GET_UNIT_ID_OR_CREATE
+            .write()
+            .cache_clear();
         duckdb_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
-            .lock()
+            .write()
             .cache_clear();
         duckdb_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .lock()
+            .write()
             .cache_clear();
 
         Ok(())
