@@ -70,7 +70,7 @@ curl http://localhost:3000/metrics \
 | `GET /docs` | No | — |
 | `GET /health/live` | No | — |
 | `GET /health/ready` | No | — |
-| `GET /prometheus/metrics` | No | — |
+| `GET /prometheus/metrics` | No for service metrics; yes when `include_latest_samples=true` | `read` for latest samples |
 | `GET /metrics` | Yes | `read` |
 | `GET /series` | Yes | `read` |
 | `GET /series/{uuid}` | Yes | `read` |
@@ -119,3 +119,6 @@ Tokens use the HS256 (HMAC-SHA256) algorithm with the following claims:
 - Use a cryptographically random secret of at least 32 characters.
 - For production deployments, consider short-lived tokens and rotate secrets periodically.
 - The sensor allow list uses exact string matching on sensor names.
+- When present, the sensor allow list applies to all API reads and writes, including Prometheus and InfluxDB compatibility endpoints. Catalog and selector results omit other sensors; direct series requests for another sensor return 404, and writes to another sensor return 403.
+- With JWT authentication enabled, `/prometheus/metrics?include_latest_samples=true` requires a read token and applies its sensor allow list. Plain `/prometheus/metrics` stays public for service monitoring.
+- Sensor-scoped tokens cannot run the database-wide `/api/v1/admin/vacuum` operation.

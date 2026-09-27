@@ -273,24 +273,24 @@ fn parse_promql_query_from_expr(ast: Expr) -> Result<ParsedQuery, AppError> {
 )]
 pub async fn simple_promql_query(
     State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     Query(query): Query<PromQLQuery>,
 ) -> Result<Response, AppError> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let metrics = state.metrics.clone();
     let started = Instant::now();
 
     let result = async move {
         let parsed = parse_promql_query(&query.query)?;
 
-        let results = state
-            .storage
-            .query_sensors_by_labels(
-                &parsed.matchers,
-                parsed.start_time,
-                parsed.end_time,
-                None,
-                false,
-            )
-            .await?;
+        let results = crate::http::limits::query_selector_bounded(
+            &state.storage,
+            &parsed.matchers,
+            parsed.start_time,
+            parsed.end_time,
+            false,
+        )
+        .await?;
 
         let series = results.len();
         let samples = results

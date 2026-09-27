@@ -29,13 +29,27 @@ pub struct InfluxDBQueryParams {
     pub precision: Option<String>,
 }
 
-fn bytes_to_string(headers: &HeaderMap, bytes: &Bytes) -> Result<String, AppError> {
+fn bytes_to_string(
+    headers: &HeaderMap,
+    bytes: &Bytes,
+    max_bytes: usize,
+) -> Result<String, AppError> {
+    if bytes.len() > max_bytes {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "Request body exceeds {max_bytes} bytes"
+        )));
+    }
     match headers.get("content-encoding") {
         Some(value) => match value.to_str() {
             Ok("gzip") => {
-                let mut d = GzDecoder::new(&bytes[..]);
+                let mut d = GzDecoder::new(&bytes[..]).take(max_bytes as u64 + 1);
                 let mut s = String::new();
                 d.read_to_string(&mut s).map_err(AppError::bad_request)?;
+                if s.len() > max_bytes {
+                    return Err(AppError::bad_request(anyhow::anyhow!(
+                        "Decompressed request body exceeds {max_bytes} bytes"
+                    )));
+                }
                 Ok(s)
             }
             _ => Err(AppError::bad_request(anyhow::anyhow!(
@@ -172,6 +186,7 @@ impl FromStr for Precision {
 #[debug_handler]
 pub async fn publish_influxdb(
     State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     headers: HeaderMap,
     Query(InfluxDBQueryParams {
         bucket,
@@ -181,6 +196,7 @@ pub async fn publish_influxdb(
     }): Query<InfluxDBQueryParams>,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let metrics = state.metrics.clone();
     let started = Instant::now();
 
@@ -214,7 +230,8 @@ pub async fn publish_influxdb(
             None => Precision::default(),
         };
 
-        let bytes_string = bytes_to_string(&headers, &bytes)?;
+        let max_bytes = crate::config::get()?.parse_http_body_limit()?;
+        let bytes_string = bytes_to_string(&headers, &bytes, max_bytes)?;
         let parser = parse_lines(&bytes_string);
 
         let mut batch_builder = BatchBuilder::new()?;
@@ -346,7 +363,7 @@ mod tests {
     fn test_bytes_to_string() {
         let headers = HeaderMap::new();
         let bytes = Bytes::from("test");
-        let result = bytes_to_string(&headers, &bytes).unwrap();
+        let result = bytes_to_string(&headers, &bytes, 64 * 1024 * 1024).unwrap();
         assert_eq!(result, "test".to_string());
 
         // Gziped bytes
@@ -356,21 +373,28 @@ mod tests {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(raw_bytes).unwrap();
         let bytes = Bytes::from(encoder.finish().unwrap());
-        let result = bytes_to_string(&headers, &bytes).unwrap();
+        let result = bytes_to_string(&headers, &bytes, 64 * 1024 * 1024).unwrap();
         assert_eq!(result, "test".to_string());
 
         // Unsupported content-encoding
         let mut headers = HeaderMap::new();
         headers.insert("content-encoding", "deflate".parse().unwrap());
         let bytes = Bytes::from("test");
-        let result = bytes_to_string(&headers, &bytes);
+        let result = bytes_to_string(&headers, &bytes, 64 * 1024 * 1024);
         assert!(result.is_err());
+
+        let mut headers = HeaderMap::new();
+        headers.insert("content-encoding", "gzip".parse().unwrap());
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(b"expanded beyond limit").unwrap();
+        let bytes = Bytes::from(encoder.finish().unwrap());
+        assert!(bytes_to_string(&headers, &bytes, 8).is_err());
 
         // Invalid UTF-8 bytes
         let headers = HeaderMap::new();
         // Starts with a 0
         let bytes = Bytes::from(&[0, 159, 146, 150][..]);
-        let result = bytes_to_string(&headers, &bytes);
+        let result = bytes_to_string(&headers, &bytes, 64 * 1024 * 1024);
         assert!(result.is_err());
     }
 
@@ -417,7 +441,7 @@ mod tests {
             "cpu_first,host=A,region=west usage_system=64i {}",
             current_nanoseconds
         ));
-        let result = publish_influxdb(state.clone(), headers, query, bytes)
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes)
             .await
             .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
@@ -432,7 +456,7 @@ mod tests {
             precision: None,
         });
         let bytes = Bytes::from("definetely not gzip");
-        let result = publish_influxdb(state.clone(), headers, query, bytes).await;
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes).await;
         assert!(result.is_err());
         // Check it's an AppError::BadRequest
         assert!(matches!(result, Err(AppError::BadRequest(_))));
@@ -446,7 +470,7 @@ mod tests {
             precision: None,
         });
         let bytes = Bytes::from("wrong line protocol");
-        let result = publish_influxdb(state.clone(), headers, query, bytes).await;
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes).await;
         assert!(result.is_err());
         // Check it's an AppError::BadRequest
         assert!(matches!(result, Err(AppError::BadRequest(_))));
@@ -463,7 +487,7 @@ mod tests {
             "cpu,host=A,region=west usage_system=64i {}",
             current_nanoseconds
         ));
-        let result = publish_influxdb(state.clone(), headers, query, bytes).await;
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(AppError::BadRequest(_))));
 
@@ -479,7 +503,7 @@ mod tests {
             "{} usage_system=64i {}",
             no_tag_measurement, current_nanoseconds
         ));
-        let result = publish_influxdb(state.clone(), headers, query, bytes)
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes)
             .await
             .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
@@ -493,7 +517,7 @@ mod tests {
             precision: None,
         });
         let bytes = Bytes::from("cpu_without_datetime,host=A,region=west usage_system=64i");
-        let result = publish_influxdb(state.clone(), headers, query, bytes)
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes)
             .await
             .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
@@ -507,7 +531,7 @@ mod tests {
             precision: None,
         });
         let bytes = Bytes::from("cpu usage_system=9223372036854775808u");
-        let result = publish_influxdb(state.clone(), headers, query, bytes).await;
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(AppError::BadRequest(_))));
 
@@ -523,7 +547,7 @@ mod tests {
             "cpu_ns,host=A,region=west usage_system=64i {}",
             current_nanoseconds
         ));
-        let result = publish_influxdb(state.clone(), headers, query, bytes)
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes)
             .await
             .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
@@ -539,7 +563,7 @@ mod tests {
             "cpu_us,host=A,region=west usage_system=64i {}",
             current_microseconds
         ));
-        let result = publish_influxdb(state.clone(), headers, query, bytes)
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes)
             .await
             .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
@@ -555,7 +579,7 @@ mod tests {
             "cpu_ms,host=A,region=west usage_system=64i {}",
             current_milliseconds
         ));
-        let result = publish_influxdb(state.clone(), headers, query, bytes)
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes)
             .await
             .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
@@ -571,7 +595,7 @@ mod tests {
             "cpu_s,host=A,region=west usage_system=64i {}",
             current_seconds
         ));
-        let result = publish_influxdb(state.clone(), headers, query, bytes)
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes)
             .await
             .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
@@ -588,7 +612,7 @@ mod tests {
             "cpu,host=A,region=west usage_system=64i {}",
             current_seconds
         ));
-        let result = publish_influxdb(state.clone(), headers, query, bytes).await;
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(AppError::BadRequest(_))));
 
@@ -740,7 +764,7 @@ mod tests {
             "memory,host=B usage_int=42i,usage_float=3.14 {}",
             current_nanoseconds
         ));
-        let result = publish_influxdb(state.clone(), headers, query, bytes)
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes)
             .await
             .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
@@ -757,7 +781,7 @@ mod tests {
             "{} usage_big=9223372036854775808u {}",
             no_tag_measurement, current_nanoseconds
         ));
-        let result = publish_influxdb(state.clone(), headers, query, bytes)
+        let result = publish_influxdb(state.clone(), None, headers, query, bytes)
             .await
             .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);

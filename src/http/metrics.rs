@@ -22,6 +22,7 @@ use crate::parsing::prometheus::converter::datetime_to_millis;
 
 const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 const LATEST_SERIES_PAGE_SIZE: usize = crate::storage::MAX_LIST_SERIES_LIMIT;
+const MAX_LATEST_SAMPLE_SERIES: usize = 10_000;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct PrometheusMetricsQuery {
@@ -294,8 +295,22 @@ impl HttpMetrics {
 )]
 pub async fn prometheus_metrics(
     State(state): State<HttpServerState>,
+    headers: axum::http::HeaderMap,
     Query(query): Query<PrometheusMetricsQuery>,
 ) -> Result<Response, AppError> {
+    let state = if query.include_latest_samples {
+        if let Some(auth) = &state.auth {
+            let access = super::auth::validate_token(&headers, auth)?;
+            if !access.can_read {
+                return Err(AppError::Forbidden("Read access required".into()));
+            }
+            state.with_access(Some(access))
+        } else {
+            state
+        }
+    } else {
+        state
+    };
     let mut body = state
         .metrics
         .render(state.storage.health_check().await.is_ok())
@@ -331,6 +346,7 @@ async fn render_latest_sample_metrics(
 
     let mut bookmark = None;
     let mut rendered = String::new();
+    let mut matched_series = 0usize;
 
     loop {
         let result = state
@@ -351,6 +367,13 @@ async fn render_latest_sample_metrics(
                 && !sensor_matches_matchers(&sensor, matchers)
             {
                 continue;
+            }
+
+            matched_series += 1;
+            if matched_series > MAX_LATEST_SAMPLE_SERIES {
+                return Err(AppError::bad_request(anyhow::anyhow!(
+                    "Latest-sample scrape exceeds {MAX_LATEST_SAMPLE_SERIES} series; add a metric or selector filter"
+                )));
             }
 
             let Some(sensor_data) = state

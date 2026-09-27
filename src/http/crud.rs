@@ -379,8 +379,10 @@ fn last_sample_json(samples: &crate::datamodel::TypedSamples) -> Option<(String,
 )]
 pub async fn list_metrics(
     State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     Query(query): Query<MetricsQuery>,
 ) -> Result<Json<Value>, AppError> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let metrics_registry = state.metrics.clone();
     let started = Instant::now();
 
@@ -550,8 +552,10 @@ pub async fn list_metrics(
 )]
 pub async fn list_series(
     State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     Query(query): Query<SeriesQuery>,
 ) -> Result<axum::response::Response, AppError> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let metrics_registry = state.metrics.clone();
     let started = Instant::now();
 
@@ -744,7 +748,7 @@ pub async fn list_series(
         ("format" = Option<String>, Query, description = "Output format: senml, csv, or jsonl (default: senml)"),
         ("start" = Option<String>, Query, description = "Start datetime in ISO 8601 format (e.g., '2024-01-15T10:30:00Z')"),
         ("end" = Option<String>, Query, description = "End datetime in ISO 8601 format (e.g., '2024-01-15T11:00:00Z')"),
-        ("limit" = Option<usize>, Query, description = "Maximum number of samples (default: 10,000,000)"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of samples (at most 100,000)"),
         ("step" = Option<String>, Query, description = "Bucket width using Prometheus duration syntax (e.g., '1h', '5m', '1d')"),
         ("aggregation" = Option<String>, Query, description = "Aggregation function: avg, min, max, sum, count, first, last"),
         ("simplify" = Option<bool>, Query, description = "Explicitly enable simplify-based point reduction"),
@@ -759,9 +763,11 @@ pub async fn list_series(
 )]
 pub async fn get_series_data(
     State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     Path(series_uuid): Path<String>,
     Query(query): Query<SensorDataQuery>,
 ) -> Result<axum::response::Response, AppError> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let metrics_registry = state.metrics.clone();
     let started = Instant::now();
 
@@ -829,10 +835,24 @@ pub async fn get_series_data(
             None
         };
 
+        if query
+            .limit
+            .is_some_and(|limit| limit > crate::http::limits::MAX_DIRECT_SAMPLES)
+        {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "limit cannot exceed {}",
+                crate::http::limits::MAX_DIRECT_SAMPLES
+            )));
+        }
+
         let query_options = SensorDataQueryOptions {
             start_time,
             end_time,
-            limit: query.limit,
+            limit: Some(
+                query
+                    .limit
+                    .unwrap_or(crate::http::limits::MAX_DIRECT_SAMPLES + 1),
+            ),
             step_ms,
             aggregation,
             simplify,
@@ -854,6 +874,8 @@ pub async fn get_series_data(
                 )));
             }
         };
+
+        crate::http::limits::validate_direct_sample_count(series_data.samples.len())?;
 
         let sample_count = series_data.samples.len();
 
@@ -927,9 +949,11 @@ pub async fn get_series_data(
 )]
 pub async fn get_series_last_sample(
     State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     Path(series_uuid): Path<String>,
     Query(query): Query<LastSampleQuery>,
 ) -> Result<Json<Value>, AppError> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let metrics_registry = state.metrics.clone();
     let started = Instant::now();
 
@@ -1003,9 +1027,11 @@ pub async fn get_series_last_sample(
 )]
 pub async fn get_series_availability(
     State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     Path(series_uuid): Path<String>,
     Query(query): Query<AvailabilityQuery>,
 ) -> Result<Json<Value>, AppError> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let metrics_registry = state.metrics.clone();
     let started = Instant::now();
 

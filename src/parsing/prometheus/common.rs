@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use snap::raw::Decoder;
 
 /// Decompress snappy-compressed data using block format.
@@ -10,6 +10,18 @@ use snap::raw::Decoder;
 /// > no choice but to do the same. Otherwise, the Snappy frame format
 /// > should probably always be preferred.
 pub fn decompress_snappy(input: &[u8]) -> Result<Vec<u8>> {
+    let max_bytes = crate::config::get()
+        .ok()
+        .and_then(|config| config.parse_http_body_limit().ok())
+        .unwrap_or(64 * 1024 * 1024);
+    decompress_snappy_limited(input, max_bytes)
+}
+
+fn decompress_snappy_limited(input: &[u8], max_bytes: usize) -> Result<Vec<u8>> {
+    let decoded_len = snap::raw::decompress_len(input)?;
+    if decoded_len > max_bytes {
+        bail!("Decompressed request body exceeds {max_bytes} bytes");
+    }
     Ok(Decoder::new().decompress_vec(input)?)
 }
 
@@ -26,5 +38,6 @@ mod tests {
 
         let decompressed = decompress_snappy(&compressed).unwrap();
         assert_eq!(decompressed, input);
+        assert!(decompress_snappy_limited(&compressed, input.len() - 1).is_err());
     }
 }

@@ -52,7 +52,7 @@ fn query_options_from_read_hints(query: &Query) -> Option<SensorDataQueryOptions
         end_time: Some(SensAppDateTime::from_unix_milliseconds_i64(
             query.end_timestamp_ms,
         )),
-        limit: None,
+        limit: Some(crate::http::limits::MAX_SELECTOR_SAMPLES_PER_SERIES + 1),
         step_ms: Some(hints.step_ms),
         aggregation: Some(aggregation),
         simplify: None,
@@ -67,7 +67,7 @@ async fn query_sensor_data_for_prometheus(
     let start_time = SensAppDateTime::from_unix_milliseconds_i64(query.start_timestamp_ms);
     let end_time = SensAppDateTime::from_unix_milliseconds_i64(query.end_timestamp_ms);
 
-    if let Some(options) = query_options_from_read_hints(query) {
+    if let Some(mut options) = query_options_from_read_hints(query) {
         let discovered = state
             .storage
             .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), Some(1), true)
@@ -79,6 +79,13 @@ async fn query_sensor_data_for_prometheus(
                 ))
             })?;
 
+        if discovered.len() > crate::http::limits::MAX_SELECTOR_SERIES {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Remote read exceeds {} series; narrow the selector",
+                crate::http::limits::MAX_SELECTOR_SERIES
+            )));
+        }
+
         if let Some(hints) = &query.hints {
             info!(
                 "Prometheus remote read: applying hints func='{}' step={}ms to {} discovered series",
@@ -89,8 +96,10 @@ async fn query_sensor_data_for_prometheus(
         }
 
         let mut aggregated = Vec::with_capacity(discovered.len());
+        let mut remaining = crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL;
         for sensor_data in discovered {
             let sensor_uuid = sensor_data.sensor.uuid.to_string();
+            options.limit = Some(remaining + 1);
             if let Some(sensor_data) = state
                 .storage
                 .query_sensor_data_advanced(&sensor_uuid, &options)
@@ -103,20 +112,29 @@ async fn query_sensor_data_for_prometheus(
                 })?
                 && !sensor_data.samples.is_empty()
             {
+                if sensor_data.samples.len() > remaining {
+                    return Err(AppError::bad_request(anyhow::anyhow!(
+                        "Remote read exceeds {} samples in total",
+                        crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL
+                    )));
+                }
+                remaining -= sensor_data.samples.len();
                 aggregated.push(sensor_data);
             }
         }
 
+        crate::http::limits::validate_selector_result(&aggregated)?;
         return Ok(aggregated);
     }
 
-    state
-        .storage
-        .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), None, true)
-        .await
-        .map_err(|e| {
-            AppError::internal_server_error(anyhow::anyhow!("Storage query failed: {}", e))
-        })
+    crate::http::limits::query_selector_bounded(
+        &state.storage,
+        &matchers,
+        Some(start_time),
+        Some(end_time),
+        true,
+    )
+    .await
 }
 
 fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
@@ -201,9 +219,11 @@ fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
 #[debug_handler]
 pub async fn prometheus_remote_read(
     State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Result<Response<axum::body::Body>, AppError> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let metrics = state.metrics.clone();
     let started = Instant::now();
 
@@ -295,10 +315,23 @@ async fn handle_samples_response(
 
     for query in &read_request.queries {
         let sensor_data = query_sensor_data_for_prometheus(state, query).await?;
+        if series_count.saturating_add(sensor_data.len()) > crate::http::limits::MAX_SELECTOR_SERIES
+        {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Remote read exceeds {} series in total",
+                crate::http::limits::MAX_SELECTOR_SERIES
+            )));
+        }
         sample_count += sensor_data
             .iter()
             .map(|series| series.samples.len())
             .sum::<usize>();
+        if sample_count > crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Remote read exceeds {} samples in total",
+                crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL
+            )));
+        }
 
         debug!("Query returned {} sensors", sensor_data.len());
 
@@ -350,6 +383,25 @@ async fn handle_streamed_response(
 
     for (query_index, query) in read_request.queries.iter().enumerate() {
         let sensor_data = query_sensor_data_for_prometheus(state, query).await?;
+        if series_count.saturating_add(sensor_data.len()) > crate::http::limits::MAX_SELECTOR_SERIES
+        {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Remote read exceeds {} series in total",
+                crate::http::limits::MAX_SELECTOR_SERIES
+            )));
+        }
+        let query_samples = sensor_data
+            .iter()
+            .map(|series| series.samples.len())
+            .sum::<usize>();
+        if sample_count.saturating_add(query_samples)
+            > crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL
+        {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Remote read exceeds {} samples in total",
+                crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL
+            )));
+        }
 
         println!(
             "[DEBUG PROM READ] Query {} returned {} sensors from storage",
