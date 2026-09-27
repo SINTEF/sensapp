@@ -3,7 +3,7 @@ use super::{
     batch::{Batch, SingleSensorBatch},
 };
 use crate::{datamodel::SensAppVec, storage::StorageInstance};
-use anyhow::{Error, anyhow};
+use anyhow::Error;
 use hybridmap::HybridMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -202,7 +202,7 @@ impl BatchBuilder {
         }
         match self.send(storage, len).await {
             Ok(()) => Ok(true),
-            Err(err) => Err(anyhow!("Error sending batch: {:?}", err)),
+            Err(err) => Err(err.context("Error sending batch")),
         }
     }
 }

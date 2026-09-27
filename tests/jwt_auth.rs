@@ -13,6 +13,7 @@ mod common;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use common::TestDb;
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -21,6 +22,7 @@ use sensapp::http::crud::{get_series_data, list_metrics, list_series};
 use sensapp::http::health::{liveness, readiness};
 use sensapp::http::metrics::{HttpMetrics, prometheus_metrics};
 use sensapp::http::server::publish_senml_data;
+use sensapp::http::simple_promql::simple_promql_query;
 use sensapp::http::state::HttpServerState;
 use sensapp::storage::StorageInstance;
 use serde::Serialize;
@@ -65,6 +67,17 @@ fn read_write_token() -> String {
         iat: Some(0),
         scope: Some("read write".into()),
         sensors: None,
+    })
+}
+
+fn sensor_token(scope: &str, sensors: &[&str]) -> String {
+    make_token(&TestClaims {
+        sub: "sensor-client".into(),
+        exp: 4_102_444_800,
+        nbf: None,
+        iat: None,
+        scope: Some(scope.into()),
+        sensors: Some(sensors.iter().map(|sensor| (*sensor).into()).collect()),
     })
 }
 
@@ -119,9 +132,11 @@ fn not_yet_valid_token() -> String {
 /// Unified test publish handler
 async fn test_publish_handler(
     axum::extract::State(state): axum::extract::State<HttpServerState>,
+    access: Option<axum::Extension<sensapp::http::auth::AccessContext>>,
     headers: axum::http::HeaderMap,
     body: Body,
 ) -> Result<String, (StatusCode, String)> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let content_type = headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
@@ -135,7 +150,10 @@ async fn test_publish_handler(
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("utf8: {e}")))?;
         publish_senml_data(&json_str, state.storage.clone())
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+            .map_err(|e| {
+                let message = format!("{e:?}");
+                (e.into_response().status(), message)
+            })?;
     }
     Ok("ok".to_string())
 }
@@ -162,6 +180,7 @@ fn build_test_router(storage: Arc<dyn StorageInstance>, auth: Option<AuthConfig>
         .route("/metrics", get(list_metrics))
         .route("/series", get(list_series))
         .route("/series/{series_uuid}", get(get_series_data))
+        .route("/api/v1/query", get(simple_promql_query))
         .route_layer(axum::middleware::from_fn_with_state(
             auth.clone(),
             require_read_auth,
@@ -595,4 +614,127 @@ fn malformed_bearer_prefix_rejected() {
         "Token some-garbage".parse().unwrap(),
     );
     assert!(sensapp::http::auth::validate_token(&headers, &config).is_err());
+}
+
+#[tokio::test]
+#[serial]
+async fn sensor_allow_list_controls_writes_and_reads() {
+    sensapp::config::load_configuration_for_tests().unwrap();
+    let db = TestDb::new().await.expect("test db");
+    let storage = db.storage();
+    let auth = AuthConfig::from_secret(TEST_SECRET).unwrap();
+    let app = build_test_router(storage.clone(), Some(auth));
+    let token = sensor_token("read write", &["temperature"]);
+
+    let allowed_write = app
+        .clone()
+        .oneshot(
+            Request::post("/publish")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"[{"n":"temperature","v":21.5,"t":1700000000}]"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let allowed_status = allowed_write.status();
+    let allowed_body = axum::body::to_bytes(allowed_write.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        allowed_status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&allowed_body)
+    );
+
+    let denied_write = app
+        .clone()
+        .oneshot(
+            Request::post("/publish")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"[{"n":"humidity","v":55.0,"t":1700000000}]"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied_write.status(), StatusCode::FORBIDDEN);
+
+    publish_senml_data(
+        r#"[{"n":"humidity","v":55.0,"t":1700000000}]"#,
+        storage.clone(),
+    )
+    .await
+    .unwrap();
+
+    let humidity_uuid = storage
+        .list_series(Some("humidity"), None, None)
+        .await
+        .unwrap()
+        .series[0]
+        .uuid;
+
+    for path in ["/metrics", "/series", "/api/v1/query?query=humidity"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(
+            !String::from_utf8_lossy(&bytes).contains("humidity"),
+            "{path}"
+        );
+    }
+
+    let denied_series = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/series/{humidity_uuid}"))
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied_series.status(), StatusCode::NOT_FOUND);
+
+    let public_samples = app
+        .clone()
+        .oneshot(
+            Request::get("/prometheus/metrics?include_latest_samples=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(public_samples.status(), StatusCode::UNAUTHORIZED);
+
+    let scoped_samples = app
+        .oneshot(
+            Request::get("/prometheus/metrics?include_latest_samples=true")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(scoped_samples.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(scoped_samples.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&bytes);
+    assert!(body.contains("temperature"));
+    assert!(!body.contains("humidity"));
 }

@@ -107,9 +107,11 @@ fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
 #[debug_handler]
 pub async fn publish_prometheus(
     State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Result<StatusCode, AppError> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let metrics = state.metrics.clone();
     let started = Instant::now();
 

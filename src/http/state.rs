@@ -1,4 +1,5 @@
-use crate::http::auth::AuthConfig;
+use crate::http::auth::{AccessContext, AuthConfig};
+use crate::http::authorized_storage::AuthorizedStorage;
 use crate::http::metrics::HttpMetrics;
 use crate::storage::StorageInstance;
 use std::sync::Arc;
@@ -17,4 +18,13 @@ pub struct HttpServerState {
     /// Optional JWT authentication configuration.
     /// When `None`, all endpoints are open (no security).
     pub auth: Option<AuthConfig>,
+}
+
+impl HttpServerState {
+    pub fn with_access(mut self, access: Option<AccessContext>) -> Self {
+        if let Some(access) = access {
+            self.storage = Arc::new(AuthorizedStorage::new(self.storage, access));
+        }
+        self
+    }
 }

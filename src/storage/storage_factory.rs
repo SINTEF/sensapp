@@ -48,7 +48,9 @@ pub async fn create_storage_from_connection_string(
         s if s.starts_with("rrdcached:") => Arc::new(RrdCachedStorage::connect(s).await?),
 
         #[cfg(feature = "clickhouse")]
-        s if s.starts_with("clickhouse:") => Arc::new(ClickHouseStorage::connect(s).await?),
+        s if s.starts_with("clickhouse:") || s.starts_with("clickhouses:") => {
+            Arc::new(ClickHouseStorage::connect(s).await?)
+        }
 
         // Provide helpful error messages for disabled backends
         #[cfg(not(feature = "bigquery"))]
@@ -82,7 +84,7 @@ pub async fn create_storage_from_connection_string(
         }
 
         #[cfg(not(feature = "clickhouse"))]
-        s if s.starts_with("clickhouse:") => {
+        s if s.starts_with("clickhouse:") || s.starts_with("clickhouses:") => {
             bail!("ClickHouse storage backend is not enabled. Enable with --features clickhouse")
         }
 

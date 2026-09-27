@@ -25,11 +25,15 @@ use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::Json;
 use axum::Router;
+use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
+use axum::extract::Request;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::http::header;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::routing::post;
 use futures::TryStreamExt;
@@ -60,7 +64,10 @@ struct ApiDoc;
 
 pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
     let config = config::get()?;
-    let max_body_layer = DefaultBodyLimit::max(config.parse_http_body_limit()?);
+    let max_body_bytes = config.parse_http_body_limit()?;
+    let max_body_layer =
+        axum::middleware::from_fn_with_state(max_body_bytes, enforce_request_body_limit);
+    let bytes_body_layer = DefaultBodyLimit::max(max_body_bytes);
     let timeout_seconds = config.http_server_timeout_seconds;
 
     // Initialize tracing
@@ -108,7 +115,9 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .route("/api/v1/query", get(simple_promql_query))
         .route(
             "/api/v1/prometheus_remote_read",
-            post(prometheus_remote_read).layer(max_body_layer),
+            post(prometheus_remote_read)
+                .layer(bytes_body_layer)
+                .layer(max_body_layer.clone()),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.auth.clone(),
@@ -117,14 +126,21 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
 
     // Write-protected routes — require a valid JWT with "write" scope when auth is enabled:
     let write_routes = Router::new()
-        .route("/publish", post(publish_sensors_data).layer(max_body_layer))
+        .route(
+            "/publish",
+            post(publish_sensors_data).layer(max_body_layer.clone()),
+        )
         .route(
             "/api/v2/write",
-            post(publish_influxdb).layer(max_body_layer),
+            post(publish_influxdb)
+                .layer(bytes_body_layer)
+                .layer(max_body_layer.clone()),
         )
         .route(
             "/api/v1/prometheus_remote_write",
-            post(publish_prometheus).layer(max_body_layer),
+            post(publish_prometheus)
+                .layer(bytes_body_layer)
+                .layer(max_body_layer),
         )
         .route("/api/v1/admin/vacuum", post(vacuum_database))
         .route_layer(axum::middleware::from_fn_with_state(
@@ -169,6 +185,25 @@ async fn shutdown_signal() {
         .expect("failed to install shutdown CTRL+C signal handler");
 }
 
+async fn enforce_request_body_limit(
+    State(max_bytes): State<usize>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    match axum::body::to_bytes(body, max_bytes).await {
+        Ok(bytes) => {
+            next.run(Request::from_parts(parts, Body::from(bytes)))
+                .await
+        }
+        Err(_) => (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("Request body exceeds {max_bytes} bytes"),
+        )
+            .into_response(),
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/",
@@ -206,9 +241,11 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
 )]
 async fn publish_sensors_data(
     State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     headers: HeaderMap,
     body: axum::body::Body,
 ) -> Result<String, AppError> {
+    let state = state.with_access(access.map(|extension| extension.0));
     let metrics = state.metrics.clone();
     let started = Instant::now();
 
@@ -349,7 +386,15 @@ pub async fn publish_senml_data(
         (status = 500, description = "Failed to vacuum database", body = String)
     )
 )]
-async fn vacuum_database(State(state): State<HttpServerState>) -> Result<Json<String>, AppError> {
+async fn vacuum_database(
+    State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
+) -> Result<Json<String>, AppError> {
+    if access.is_some_and(|extension| extension.0.sensor_allow_list.is_some()) {
+        return Err(AppError::Forbidden(
+            "Sensor-scoped tokens cannot run database-wide maintenance".into(),
+        ));
+    }
     state.storage.vacuum().await?;
     Ok(Json("Database vacuum completed successfully".to_string()))
 }
@@ -431,5 +476,26 @@ mod tests {
         let body_str =
             String::from_utf8(to_bytes(response.into_body(), 128).await.unwrap().to_vec()).unwrap();
         assert_eq!(body_str, "\"hello world\"");
+    }
+
+    #[tokio::test]
+    async fn raw_body_is_limited_before_handler_reads_it() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let app = Router::new().route(
+            "/publish",
+            post(|body: Body| async move { axum::body::to_bytes(body, usize::MAX).await.unwrap() })
+                .layer(axum::middleware::from_fn_with_state(
+                    4usize,
+                    enforce_request_body_limit,
+                )),
+        );
+        let response = app
+            .oneshot(Request::post("/publish").body(Body::from("12345")).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

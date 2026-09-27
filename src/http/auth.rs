@@ -186,7 +186,7 @@ pub fn validate_token(headers: &HeaderMap, config: &AuthConfig) -> Result<Access
 /// When `auth` is `None` (security disabled), all requests pass through.
 pub async fn require_read_auth(
     State(auth): State<Option<AuthConfig>>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Result<Response, AppError> {
     if let Some(config) = &auth {
@@ -194,6 +194,7 @@ pub async fn require_read_auth(
         if !access.can_read {
             return Err(AppError::Forbidden("Read access required".into()));
         }
+        request.extensions_mut().insert(access);
     }
     Ok(next.run(request).await)
 }
@@ -203,7 +204,7 @@ pub async fn require_read_auth(
 /// When `auth` is `None` (security disabled), all requests pass through.
 pub async fn require_write_auth(
     State(auth): State<Option<AuthConfig>>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Result<Response, AppError> {
     if let Some(config) = &auth {
@@ -211,6 +212,7 @@ pub async fn require_write_auth(
         if !access.can_write {
             return Err(AppError::Forbidden("Write access required".into()));
         }
+        request.extensions_mut().insert(access);
     }
     Ok(next.run(request).await)
 }

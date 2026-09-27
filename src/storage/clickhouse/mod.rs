@@ -31,8 +31,7 @@ pub struct ClickHouseStorage {
     #[allow(dead_code)]
     client: Client,
     database: Option<String>,
-    host: String,
-    port: u16,
+    endpoint_url: String,
     user: String,
     password: Option<String>,
 }
@@ -75,10 +74,17 @@ impl ClickHouseStorage {
 
     pub async fn connect(connection_string: &str) -> Result<Self> {
         // Parse ClickHouse connection string
-        // Format: clickhouse://user:password@host:port/database
-        let url = connection_string
-            .strip_prefix("clickhouse://")
-            .context("ClickHouse connection string must start with 'clickhouse://'")?;
+        // clickhouse:// uses HTTP; clickhouses:// uses HTTPS.
+        let (url, secure) = if let Some(url) = connection_string.strip_prefix("clickhouses://") {
+            (url, true)
+        } else {
+            (
+                connection_string.strip_prefix("clickhouse://").context(
+                    "ClickHouse connection string must start with 'clickhouse://' or 'clickhouses://'",
+                )?,
+                false,
+            )
+        };
 
         let (auth, rest) = if let Some(at_pos) = url.find('@') {
             let (auth_part, rest) = url.split_at(at_pos);
@@ -101,7 +107,7 @@ impl ClickHouseStorage {
                 .context("Invalid port number in ClickHouse connection string")?;
             (host, port)
         } else {
-            (host_port, 8123) // Default ClickHouse HTTP port
+            (host_port, if secure { 8443 } else { 8123 })
         };
 
         let (user, password) = if let Some(auth) = auth {
@@ -115,10 +121,14 @@ impl ClickHouseStorage {
             ("default", None)
         };
 
-        // Build ClickHouse HTTP URL
-        let http_url = format!("http://{}:{}", host, port);
+        let endpoint_url = format!(
+            "{}://{}:{}",
+            if secure { "https" } else { "http" },
+            host,
+            port
+        );
 
-        let mut client = Client::default().with_url(&http_url).with_user(user);
+        let mut client = Client::default().with_url(&endpoint_url).with_user(user);
 
         if let Some(password) = password {
             client = client.with_password(password);
@@ -131,8 +141,7 @@ impl ClickHouseStorage {
         Ok(Self {
             client,
             database: database.map(|s| s.to_string()),
-            host: host.to_string(),
-            port,
+            endpoint_url,
             user: user.to_string(),
             password: password.map(|s| s.to_string()),
         })
@@ -143,8 +152,9 @@ impl ClickHouseStorage {
         // First, create the database if it doesn't exist
         if let Some(database) = &self.database {
             // Create a client without database specification to create the database
-            let http_url = format!("http://{}:{}", self.host, self.port);
-            let mut create_db_client = Client::default().with_url(&http_url).with_user(&self.user);
+            let mut create_db_client = Client::default()
+                .with_url(&self.endpoint_url)
+                .with_user(&self.user);
 
             if let Some(password) = &self.password {
                 create_db_client = create_db_client.with_password(password);
@@ -1578,5 +1588,36 @@ fn clickhouse_numeric_expression(aggregation: Aggregation) -> &'static str {
         Aggregation::First => "argMin(value, timestamp_us)",
         Aggregation::Last => "argMax(value, timestamp_us)",
         Aggregation::Count => unreachable!("handled separately"),
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn supports_http_and_https_connection_strings() {
+        let plain = ClickHouseStorage::connect("clickhouse://reader:secret@localhost/sensapp")
+            .await
+            .unwrap();
+        assert_eq!(plain.endpoint_url, "http://localhost:8123");
+
+        let secure = ClickHouseStorage::connect("clickhouses://reader:secret@example.com/sensapp")
+            .await
+            .unwrap();
+        assert_eq!(secure.endpoint_url, "https://example.com:8443");
+        assert_eq!(secure.database.as_deref(), Some("sensapp"));
+
+        let custom_port =
+            ClickHouseStorage::connect("clickhouses://reader:secret@example.com:9443/sensapp")
+                .await
+                .unwrap();
+        assert_eq!(custom_port.endpoint_url, "https://example.com:9443");
+
+        crate::storage::storage_factory::create_storage_from_connection_string(
+            "clickhouses://reader:secret@example.com/sensapp",
+        )
+        .await
+        .unwrap();
     }
 }

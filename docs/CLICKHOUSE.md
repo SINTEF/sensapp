@@ -24,9 +24,16 @@ Use a connection string like this:
 clickhouse://default:password@clickhouse:8123/sensapp
 ```
 
+For a TLS endpoint, use `clickhouses://`:
+
+```text
+clickhouses://default:password@clickhouse.example.com:8443/sensapp
+```
+
 Notes:
 
 - Port `8123` is the expected HTTP port.
+- `clickhouses://` uses HTTPS and defaults to port `8443` when no port is specified. The connection uses standard trusted certificate authorities.
 - Port `9000` is the native ClickHouse protocol and is not what the current Rust client path uses.
 - SensApp creates the target database if it does not already exist.
 

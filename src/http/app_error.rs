@@ -109,6 +109,9 @@ impl From<StorageError> for AppError {
 // Generic conversion for anyhow::Error specifically
 impl From<anyhow::Error> for AppError {
     fn from(err: anyhow::Error) -> Self {
+        if err.is::<crate::http::authorized_storage::SensorAccessDenied>() {
+            return Self::Forbidden(err.to_string());
+        }
         match err.downcast::<StorageError>() {
             Ok(storage_error) => Self::Storage(storage_error),
             Err(err) => Self::InternalServerError(err),
