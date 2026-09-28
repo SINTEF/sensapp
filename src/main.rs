@@ -69,10 +69,7 @@ async fn async_main() -> Result<()> {
         .context("Failed to set async instance ID")?;
 
     // Initialize storage backend
-    println!(
-        "🗄️  Connecting to storage: {}",
-        config.storage_connection_string
-    );
+    println!("🗄️  Connecting to storage...");
     let storage = create_storage_from_connection_string(&config.storage_connection_string)
         .await
         .context("Failed to create storage backend")?;
