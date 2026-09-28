@@ -76,15 +76,14 @@ curl http://127.0.0.1:3000/health/ready
 
 ## Helm Example
 
-For Helm deployments, set the storage connection string to an external ClickHouse service:
+For Helm deployments, put the connection string for an external ClickHouse service in a Kubernetes Secret as described in the [chart README](../charts/sensapp/README.md):
 
 ```bash
 helm install sensapp ./charts/sensapp \
-  --set storage.connectionString=clickhouse://default:password@clickhouse:8123/sensapp \
-  --set persistence.enabled=false
+  --set storage.existingSecret=sensapp-storage
 ```
 
-`persistence.enabled=false` is intentional here because ClickHouse should own persistence, not the SensApp pod.
+`persistence.enabled=false` is the default because ClickHouse owns persistence, not the SensApp pod.
 
 ## Startup And Readiness Expectations
 

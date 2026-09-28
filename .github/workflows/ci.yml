@@ -548,6 +548,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: helm-validation
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout repository
@@ -566,6 +569,18 @@ jobs:
         with:
           name: sensapp-helm-chart
           path: dist/*.tgz
+
+      - name: Log in to GHCR for Helm
+        if: github.event_name == 'release' && github.event.action == 'published'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish chart to GHCR
+        if: github.event_name == 'release' && github.event.action == 'published'
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          helm push dist/sensapp-*.tgz "oci://ghcr.io/$owner/charts"
 
   release:
     name: Release

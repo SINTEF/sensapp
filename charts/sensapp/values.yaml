@@ -58,6 +58,7 @@ tolerations: []
 affinity: {}
 
 persistence:
+  # Only needed for a durable local SQLite database.
   enabled: false
   accessModes:
     - ReadWriteOnce
@@ -73,7 +74,13 @@ env:
   SENSAPP_INFLUXDB_WITH_NUMERIC: "false"
 
 storage:
+  # One storage backend per release. SQLite uses the pod's data volume.
+  # For external storage, set this to its URL or use an existing Secret below.
   connectionString: sqlite:///var/lib/sensapp/sensapp.db
+  # The Secret must contain SENSAPP_STORAGE_CONNECTION_STRING (or existingSecretKey).
+  # When set, it takes precedence over connectionString.
+  existingSecret: ""
+  existingSecretKey: SENSAPP_STORAGE_CONNECTION_STRING
 
 # Optional JWT authentication.
 # When jwtSecret is set, read/write endpoints require a valid Bearer token.

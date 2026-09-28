@@ -43,14 +43,25 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "sensapp.fullname" . }}
+            {{- if or (not .Values.storage.existingSecret) .Values.auth.jwtSecret .Values.secretEnv }}
             - secretRef:
                 name: {{ include "sensapp.fullname" . }}
+            {{- end }}
           {{- with .Values.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.extraEnv }}
+          {{- if or .Values.storage.existingSecret .Values.extraEnv }}
           env:
+            {{- if .Values.storage.existingSecret }}
+            - name: SENSAPP_STORAGE_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.storage.existingSecret | quote }}
+                  key: {{ .Values.storage.existingSecretKey | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
@@ -60,9 +71,12 @@ spec:
             {{- toYaml .Values.startupProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if or .Values.persistence.enabled (and (not .Values.storage.existingSecret) (hasPrefix "sqlite:" .Values.storage.connectionString)) }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/sensapp
+          {{- end }}
+      {{- if or .Values.persistence.enabled (and (not .Values.storage.existingSecret) (hasPrefix "sqlite:" .Values.storage.connectionString)) }}
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}
@@ -71,6 +85,7 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
