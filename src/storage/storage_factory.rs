@@ -88,6 +88,23 @@ pub async fn create_storage_from_connection_string(
             bail!("ClickHouse storage backend is not enabled. Enable with --features clickhouse")
         }
 
-        _ => bail!("Unsupported storage type: {}", connection_string),
+        _ => bail!("Unsupported storage type"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unsupported_storage_type_does_not_expose_connection_string() {
+        let connection_string = "unknown://user:secret-password@localhost/db?token=secret-token";
+
+        let error = match create_storage_from_connection_string(connection_string).await {
+            Ok(_) => panic!("unsupported storage type should fail"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.to_string(), "Unsupported storage type");
+    }
 }
