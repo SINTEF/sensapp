@@ -71,6 +71,9 @@ impl IntoResponse for AppError {
                     error!("Invalid data format: {}", storage_error);
                     (StatusCode::BAD_REQUEST, storage_error.to_string())
                 }
+                StorageError::Unsupported(_) => {
+                    (StatusCode::NOT_IMPLEMENTED, storage_error.to_string())
+                }
                 StorageError::Configuration(_) => {
                     error!("Storage configuration error: {}", storage_error);
                     (

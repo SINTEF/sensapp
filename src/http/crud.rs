@@ -7,6 +7,7 @@ use crate::storage::query::{LabelMatcher, MatcherType};
 use crate::storage::{Aggregation, SensorDataQueryOptions, SimplifyOptions};
 use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use regex::Regex;
 use rusty_promql_parser::{Expr, expr};
 use serde::Deserialize;
@@ -149,6 +150,12 @@ pub struct SensorDataQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct LastSampleQuery {
+    pub start: Option<String>,
+    pub end: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteSamplesQuery {
     pub start: Option<String>,
     pub end: Option<String>,
 }
@@ -1080,6 +1087,162 @@ pub async fn get_series_last_sample(
     }
 
     result
+}
+
+/// Delete a series: all its samples, its labels and the sensor itself.
+///
+/// Publishing the same sensor again recreates it with the same UUID.
+/// Requires the `delete` scope when authentication is enabled.
+#[utoipa::path(
+    delete,
+    path = "/series/{series_uuid}",
+    tag = "Admin",
+    params(
+        ("series_uuid" = String, Path, description = "UUID of the series to delete")
+    ),
+    responses(
+        (status = 204, description = "Series deleted"),
+        (status = 400, description = "Invalid UUID"),
+        (status = 403, description = "The token does not have the delete scope"),
+        (status = 404, description = "Series not found"),
+        (status = 501, description = "The storage backend does not support deletion")
+    )
+)]
+pub async fn delete_series(
+    State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
+    Path(series_uuid): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let access = access.map(|extension| extension.0);
+    let subject = access.as_ref().map(|access| access.subject.clone());
+    let state = state.with_access(access);
+    let metrics_registry = state.metrics.clone();
+    let started = Instant::now();
+
+    let result = async move {
+        let parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
+            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+        })?;
+
+        if !state
+            .storage
+            .delete_series(&parsed_uuid.to_string())
+            .await?
+        {
+            return Err(AppError::not_found(anyhow::anyhow!(
+                "Series with UUID '{}' not found",
+                series_uuid
+            )));
+        }
+
+        tracing::info!(series = %parsed_uuid, subject = ?subject, "Deleted series");
+        Ok::<_, AppError>(StatusCode::NO_CONTENT)
+    }
+    .await;
+
+    metrics_registry.observe_operation_result(
+        "delete",
+        "delete_series",
+        started.elapsed(),
+        result.is_ok(),
+    );
+    if result.is_ok() {
+        metrics_registry.observe_series("delete", "delete_series", 1);
+    }
+
+    result
+}
+
+/// Delete the samples of a series between `start` and `end`, both inclusive.
+///
+/// Both bounds are required, so that a request cannot wipe a whole series by
+/// accident (use `DELETE /series/{series_uuid}` for that). `start` equal to `end`
+/// deletes the samples at one exact timestamp. The sensor and its labels are kept.
+/// Requires the `delete` scope when authentication is enabled.
+#[utoipa::path(
+    delete,
+    path = "/series/{series_uuid}/samples",
+    tag = "Admin",
+    params(
+        ("series_uuid" = String, Path, description = "UUID of the series"),
+        ("start" = String, Query, description = "Inclusive start datetime in ISO 8601 format"),
+        ("end" = String, Query, description = "Inclusive end datetime in ISO 8601 format")
+    ),
+    responses(
+        (status = 200, description = "Number of deleted samples", body = Value),
+        (status = 400, description = "Invalid UUID, or missing or invalid time bounds"),
+        (status = 403, description = "The token does not have the delete scope"),
+        (status = 404, description = "Series not found"),
+        (status = 501, description = "The storage backend does not support deletion")
+    )
+)]
+pub async fn delete_series_samples(
+    State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
+    Path(series_uuid): Path<String>,
+    Query(query): Query<DeleteSamplesQuery>,
+) -> Result<Json<Value>, AppError> {
+    let access = access.map(|extension| extension.0);
+    let subject = access.as_ref().map(|access| access.subject.clone());
+    let state = state.with_access(access);
+    let metrics_registry = state.metrics.clone();
+    let started = Instant::now();
+
+    let result = async move {
+        let parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
+            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+        })?;
+
+        let (start_time, end_time) =
+            parse_optional_time_bounds(query.start.as_ref(), query.end.as_ref())?;
+        let (Some(start_time), Some(end_time)) = (start_time, end_time) else {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Both 'start' and 'end' are required to delete samples"
+            )));
+        };
+
+        let deleted_samples = state
+            .storage
+            .delete_series_samples(&parsed_uuid.to_string(), start_time, end_time)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found(anyhow::anyhow!(
+                    "Series with UUID '{}' not found",
+                    series_uuid
+                ))
+            })?;
+
+        tracing::info!(
+            series = %parsed_uuid,
+            subject = ?subject,
+            deleted_samples,
+            "Deleted samples"
+        );
+        Ok::<_, AppError>((
+            Json(json!({
+                "series_uuid": parsed_uuid,
+                "deleted_samples": deleted_samples,
+            })),
+            deleted_samples,
+        ))
+    }
+    .await;
+
+    metrics_registry.observe_operation_result(
+        "delete",
+        "delete_series_samples",
+        started.elapsed(),
+        result.is_ok(),
+    );
+    if let Ok((_, deleted_samples)) = &result {
+        metrics_registry.observe_samples(
+            "delete",
+            "delete_series_samples",
+            usize::try_from(*deleted_samples).unwrap_or(usize::MAX),
+        );
+    }
+
+    result.map(|(response, _)| response)
 }
 
 /// Get presence and optional bucket coverage for a series over a time window.

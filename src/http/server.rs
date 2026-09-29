@@ -1,7 +1,8 @@
 use super::app_error::AppError;
-use super::auth::{require_read_auth, require_write_auth};
+use super::auth::{require_delete_auth, require_read_auth, require_write_auth};
 use super::crud::{
-    get_series_availability, get_series_data, get_series_last_sample, list_metrics, list_series,
+    delete_series, delete_series_samples, get_series_availability, get_series_data,
+    get_series_last_sample, list_metrics, list_series,
 };
 use super::influxdb::publish_influxdb;
 use super::metrics::{prometheus_metrics, track_http_metrics};
@@ -11,8 +12,8 @@ use super::simple_promql::simple_promql_query;
 use super::state::HttpServerState;
 use crate::config;
 use crate::http::crud::{
-    __path_get_series_availability, __path_get_series_data, __path_get_series_last_sample,
-    __path_list_metrics, __path_list_series,
+    __path_delete_series, __path_delete_series_samples, __path_get_series_availability,
+    __path_get_series_data, __path_get_series_last_sample, __path_list_metrics, __path_list_series,
 };
 use crate::http::health::{__path_liveness, __path_readiness, liveness, readiness};
 use crate::http::influxdb::__path_publish_influxdb;
@@ -34,6 +35,7 @@ use axum::http::StatusCode;
 use axum::http::header;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
 use futures::TryStreamExt;
@@ -58,7 +60,7 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
         (name = "Admin", description = "Administrative operations"),
         (name = "Health", description = "Health check endpoints"),
     ),
-    paths(frontpage, publish_sensors_data, prometheus_metrics, list_metrics, list_series, get_series_data, get_series_last_sample, get_series_availability, publish_influxdb, publish_prometheus, prometheus_remote_read, simple_promql_query, vacuum_database, liveness, readiness),
+    paths(frontpage, publish_sensors_data, prometheus_metrics, list_metrics, list_series, get_series_data, get_series_last_sample, get_series_availability, delete_series, delete_series_samples, publish_influxdb, publish_prometheus, prometheus_remote_read, simple_promql_query, vacuum_database, liveness, readiness),
 )]
 struct ApiDoc;
 
@@ -148,9 +150,23 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             require_write_auth,
         ));
 
+    // Delete-protected routes — require a valid JWT with "delete" scope when auth is enabled.
+    // The delete scope is never part of the default "read write" scope.
+    let delete_routes = Router::new()
+        .route("/series/{series_uuid}", delete(delete_series))
+        .route(
+            "/series/{series_uuid}/samples",
+            delete(delete_series_samples),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.auth.clone(),
+            require_delete_auth,
+        ));
+
     let app = public_routes
         .merge(read_routes)
         .merge(write_routes)
+        .merge(delete_routes)
         .layer(axum::middleware::from_fn_with_state(
             state.metrics.clone(),
             track_http_metrics,
@@ -420,6 +436,7 @@ mod tests {
             "/publish",
             "/metrics",
             "/series/{series_uuid}",
+            "/series/{series_uuid}/samples",
             "/api/v1/query",
             "/health/live",
         ] {

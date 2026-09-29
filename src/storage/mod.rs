@@ -52,6 +52,23 @@ pub trait StorageInstance: Send + Sync + Debug {
 
     async fn vacuum(&self) -> Result<()>;
 
+    /// Delete a series: all its samples, its labels and the sensor itself.
+    ///
+    /// Returns `Ok(false)` when no series has this UUID. Publishing the same sensor
+    /// again afterwards recreates it with the same UUID.
+    async fn delete_series(&self, sensor_uuid: &str) -> Result<bool>;
+
+    /// Delete the samples of a series with `start_time <= timestamp <= end_time`.
+    ///
+    /// Returns the number of deleted samples, or `None` when no series has this UUID.
+    /// The sensor and its labels are kept.
+    async fn delete_series_samples(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+    ) -> Result<Option<u64>>;
+
     async fn list_series(
         &self,
         metric_filter: Option<&str>,

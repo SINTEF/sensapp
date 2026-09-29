@@ -2,11 +2,11 @@ pub mod timescaledb_publishers;
 pub mod timescaledb_utilities;
 
 use self::timescaledb_publishers::*;
-use self::timescaledb_utilities::get_sensor_id_or_create_sensor;
+use self::timescaledb_utilities::{forget_sensor_id, get_sensor_id_or_create_sensor};
 use super::{
     Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT,
     SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
-    common::datetime_to_micros,
+    common::{VALUE_TABLES, datetime_to_micros},
 };
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
@@ -565,6 +565,75 @@ impl StorageInstance for TimeScaleDBStorage {
     async fn vacuum(&self) -> Result<()> {
         self.vacuum().await?;
         Ok(())
+    }
+
+    async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
+        let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
+        let mut transaction = self.pool.begin().await?;
+
+        let sensor_id: Option<i64> =
+            sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = $1")
+                .bind(parsed_uuid)
+                .fetch_optional(&mut *transaction)
+                .await?;
+        let Some(sensor_id) = sensor_id else {
+            return Ok(false);
+        };
+
+        for table in VALUE_TABLES {
+            // `table` comes from the static VALUE_TABLES list
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {table} WHERE sensor_id = $1"
+            )))
+            .bind(sensor_id)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        sqlx::query("DELETE FROM labels WHERE sensor_id = $1")
+            .bind(sensor_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM sensors WHERE sensor_id = $1")
+            .bind(sensor_id)
+            .execute(&mut *transaction)
+            .await?;
+
+        transaction.commit().await?;
+        forget_sensor_id(&parsed_uuid).await;
+        Ok(true)
+    }
+
+    async fn delete_series_samples(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+    ) -> Result<Option<u64>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let table = match sensor.sensor_type {
+            SensorType::Integer => "integer_values",
+            SensorType::Numeric => "numeric_values",
+            SensorType::Float => "float_values",
+            SensorType::String => "string_values",
+            SensorType::Boolean => "boolean_values",
+            SensorType::Location => "location_values",
+            SensorType::Json => "json_values",
+            SensorType::Blob => "blob_values",
+        };
+        // `table` comes from the match above
+        let result = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE sensor_id = $1 AND time >= $2 AND time <= $3"
+        )))
+        .bind(sensor_id)
+        .bind(micros_to_offset_datetime(datetime_to_micros(&start_time)))
+        .bind(micros_to_offset_datetime(datetime_to_micros(&end_time)))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(Some(result.rows_affected()))
     }
 
     async fn list_series(

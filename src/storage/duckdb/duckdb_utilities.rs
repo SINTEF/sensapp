@@ -154,3 +154,14 @@ pub fn get_string_value_id_or_create(transaction: &Transaction, string_value: &s
         Ok(string_id)
     }
 }
+
+/// Forget the cached id of a deleted sensor.
+///
+/// Without this, publishing the same sensor again within the cache TTL would write
+/// samples under a sensor id that no longer exists.
+pub fn forget_sensor_id(sensor_uuid: &Uuid) {
+    use cached::Cached;
+    let _ = GET_SENSOR_ID_OR_CREATE_SENSOR
+        .write()
+        .cache_remove(sensor_uuid);
+}

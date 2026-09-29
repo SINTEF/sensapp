@@ -1,6 +1,6 @@
 use super::{
     Aggregation, DEFAULT_QUERY_LIMIT, SensorAvailabilitySummary, SensorDataQueryOptions,
-    StorageError, StorageInstance,
+    StorageError, StorageInstance, common::VALUE_TABLES,
 };
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::{
@@ -486,6 +486,85 @@ impl StorageInstance for ClickHouseStorage {
         }
 
         Ok(())
+    }
+
+    async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
+        let uuid = Uuid::from_str(sensor_uuid).map_err(|e| {
+            StorageError::invalid_data_format(
+                &format!("Invalid UUID '{}': {}", sensor_uuid, e),
+                None,
+                None,
+            )
+        })?;
+        let sensor_id = uuid_to_sensor_id(&uuid);
+
+        let existing: u64 = self
+            .client
+            .query("SELECT count() FROM sensors WHERE sensor_id = ?")
+            .bind(sensor_id)
+            .fetch_one()
+            .await
+            .context("Failed to look up sensor")?;
+        if existing == 0 {
+            return Ok(false);
+        }
+
+        // Lightweight deletes are synchronous by default (lightweight_deletes_sync = 2)
+        // and rows are physically removed by later merges or OPTIMIZE.
+        for table in VALUE_TABLES.into_iter().chain(["labels", "sensors"]) {
+            self.client
+                .query(&format!("DELETE FROM {table} WHERE sensor_id = ?"))
+                .bind(sensor_id)
+                .execute()
+                .await
+                .with_context(|| format!("Failed to delete series rows from {table}"))?;
+        }
+
+        Ok(true)
+    }
+
+    async fn delete_series_samples(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+    ) -> Result<Option<u64>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let table = Self::sensor_table_name(sensor.sensor_type);
+        let start_us = datetime_to_micros(&start_time);
+        let end_us = datetime_to_micros(&end_time);
+
+        // Lightweight deletes do not report the number of deleted rows, so count first.
+        let count_sql = format!(
+            "SELECT count() FROM {table} WHERE sensor_id = ? AND timestamp_us BETWEEN ? AND ?"
+        );
+        let count: u64 = self
+            .client
+            .query(&count_sql)
+            .bind(sensor_id)
+            .bind(start_us)
+            .bind(end_us)
+            .fetch_one()
+            .await
+            .with_context(|| format!("Failed to count samples to delete from {table}"))?;
+
+        if count > 0 {
+            let delete_sql =
+                format!("DELETE FROM {table} WHERE sensor_id = ? AND timestamp_us BETWEEN ? AND ?");
+            self.client
+                .query(&delete_sql)
+                .bind(sensor_id)
+                .bind(start_us)
+                .bind(end_us)
+                .execute()
+                .await
+                .with_context(|| format!("Failed to delete samples from {table}"))?;
+        }
+
+        Ok(Some(count))
     }
 
     async fn list_series(

@@ -10,6 +10,19 @@ use simplify_polyline::{Point, simplify};
 use smallvec::smallvec;
 use std::collections::BTreeSet;
 
+/// Names of the per-type sample tables, shared by the SQL backends for bulk deletes.
+#[allow(dead_code)] // Used by the SQL backends when enabled
+pub const VALUE_TABLES: [&str; 8] = [
+    "blob_values",
+    "json_values",
+    "location_values",
+    "boolean_values",
+    "string_values",
+    "float_values",
+    "numeric_values",
+    "integer_values",
+];
+
 /// Convert SensAppDateTime to Unix microseconds for database storage
 #[allow(dead_code)] // Used by SQLite backend when enabled
 pub fn datetime_to_micros(datetime: &SensAppDateTime) -> i64 {
