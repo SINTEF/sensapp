@@ -65,11 +65,13 @@ asyncio.run(main())
 docker compose up
 ```
 
-You can deploy SensApp on Kubernetes using [the included Helm chart](./charts/sensapp).
+You can deploy SensApp on Kubernetes using [the included Helm chart](./charts/sensapp/README.md). It defaults to SQLite on an ephemeral volume, or can connect to an external PostgreSQL, TimescaleDB, or ClickHouse database.
 
 ```bash
 helm install sensapp ./charts/sensapp
 ```
+
+Published releases also provide the chart through GHCR as an OCI package; see the chart README for the versioned install command.
 
 ## Features
 
