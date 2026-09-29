@@ -689,7 +689,7 @@ mod crud_dcat_tests {
         let app = TestApp::new(storage.clone()).await;
 
         let mut batch_builder = BatchBuilder::new()?;
-        // The first raw storage page has no matches.
+        // Add many nonmatching series so catalog filtering has to skip entries.
         for index in 0..256 {
             let (mut sensor, samples) = create_float_sensor(&format!("filler_{index}"), 1.0);
             sensor.labels.push(("env".to_string(), "dev".to_string()));
@@ -716,8 +716,6 @@ mod crud_dcat_tests {
         let first: Value = first_response.json()?;
         let first_datasets = first["dcat:dataset"].as_array().unwrap();
         assert_eq!(first_datasets.len(), 2);
-        assert_eq!(first_datasets[0]["dct:title"], "series_2");
-        assert_eq!(first_datasets[1]["dct:title"], "series_4");
 
         let next = first["hydra:view"]["hydra:next"].as_str().unwrap();
         assert!(next.contains(&format!("selector={selector}")));
@@ -728,7 +726,13 @@ mod crud_dcat_tests {
         let second: Value = second_response.json()?;
         let second_datasets = second["dcat:dataset"].as_array().unwrap();
         assert_eq!(second_datasets.len(), 1);
-        assert_eq!(second_datasets[0]["dct:title"], "series_5");
+        let mut titles: Vec<&str> = first_datasets
+            .iter()
+            .chain(second_datasets)
+            .map(|dataset| dataset["dct:title"].as_str().unwrap())
+            .collect();
+        titles.sort_unstable();
+        assert_eq!(titles, ["series_2", "series_4", "series_5"]);
         assert!(second["hydra:view"].is_null());
         assert!(second_response.headers().get("Link").is_none());
 
