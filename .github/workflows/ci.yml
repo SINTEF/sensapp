@@ -229,6 +229,7 @@ jobs:
         with:
           channel: ${{ matrix.rust }}
           components: clippy
+          cache-extra-identifier: ${{ matrix.feature }}
 
       - name: Cache cargo-make
         uses: actions/cache@v5
