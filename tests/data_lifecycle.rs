@@ -293,6 +293,52 @@ async fn assert_invalid_uuid_is_an_error_for_backend(db_type: DatabaseType) -> R
     Ok(())
 }
 
+/// Another SensApp instance, or someone with SQL access, deletes a sensor that this
+/// instance has cached: publishing it again must recreate it instead of failing.
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+async fn assert_publish_recovers_from_stale_sensor_id_for_backend(
+    db_type: DatabaseType,
+) -> Result<()> {
+    use sqlx::Executor;
+
+    let Some(test_db) = open(&db_type).await? else {
+        return Ok(());
+    };
+    let storage = test_db.storage();
+
+    let cached = sensor("lifecycle_stale_cache", SensorType::Float, "a");
+    publish(&storage, &cached, float_samples(&[0, 1])).await?;
+
+    // Delete it with raw SQL, behind the back of the storage and its sensor id cache
+    let url = test_db
+        .connection_string
+        .replacen("timescaledb://", "postgres://", 1);
+    let pool = sqlx::PgPool::connect(&url).await?;
+    let uuid = cached.uuid;
+    for table in sensapp::storage::common::VALUE_TABLES {
+        let sql = format!(
+            "DELETE FROM {table} WHERE sensor_id IN (SELECT sensor_id FROM sensors WHERE uuid = $1)"
+        );
+        pool.execute(sqlx::query(sqlx::AssertSqlSafe(sql)).bind(uuid))
+            .await?;
+    }
+    pool.execute(
+        sqlx::query(
+            "DELETE FROM labels WHERE sensor_id IN (SELECT sensor_id FROM sensors WHERE uuid = $1)",
+        )
+        .bind(uuid),
+    )
+    .await?;
+    pool.execute(sqlx::query("DELETE FROM sensors WHERE uuid = $1").bind(uuid))
+        .await?;
+    pool.close().await;
+
+    publish(&storage, &cached, float_samples(&[5])).await?;
+    assert_eq!(stored_minutes(&storage, &cached).await?, vec![5]);
+
+    Ok(())
+}
+
 macro_rules! backend_tests {
     ($feature:literal, $db_type:expr, $prefix:ident) => {
         #[cfg(feature = $feature)]
@@ -330,6 +376,20 @@ macro_rules! backend_tests {
             }
         }
     };
+}
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+#[serial]
+async fn postgresql_publish_recovers_from_stale_sensor_id() -> Result<()> {
+    assert_publish_recovers_from_stale_sensor_id_for_backend(DatabaseType::PostgreSQL).await
+}
+
+#[cfg(feature = "timescaledb")]
+#[tokio::test]
+#[serial]
+async fn timescaledb_publish_recovers_from_stale_sensor_id() -> Result<()> {
+    assert_publish_recovers_from_stale_sensor_id_for_backend(DatabaseType::TimescaleDB).await
 }
 
 backend_tests!("postgres", DatabaseType::PostgreSQL, postgresql);

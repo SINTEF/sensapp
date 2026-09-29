@@ -10,6 +10,20 @@ use simplify_polyline::{Point, simplify};
 use smallvec::smallvec;
 use std::collections::BTreeSet;
 
+/// Whether an error comes from a foreign-key violation reported by the database.
+///
+/// The PostgreSQL-based backends use it to detect a cached sensor id whose sensor was
+/// deleted, possibly by another SensApp instance or by hand.
+#[allow(dead_code)] // Used by the PostgreSQL-based backends when enabled
+pub fn is_foreign_key_violation(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<sqlx::Error>()
+            .and_then(|error| error.as_database_error())
+            .is_some_and(|error| error.is_foreign_key_violation())
+    })
+}
+
 /// Names of the per-type sample tables, shared by the SQL backends for bulk deletes.
 #[allow(dead_code)] // Used by the SQL backends when enabled
 pub const VALUE_TABLES: [&str; 8] = [

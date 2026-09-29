@@ -65,9 +65,10 @@ see `ideas/sample-deduplication-in-maintenance.md`.
 ### Several SensApp instances
 
 Each instance caches the internal id of a sensor for up to 2 minutes. The instance that runs
-`DELETE /series/{uuid}` forgets it immediately. Other instances keep it until it expires, so
-**if you delete a whole series and re-publish it within 2 minutes through another instance**, the
-publish can fail (PostgreSQL, TimescaleDB) and should be retried. Deleting a range of samples does not have this issue.
+`DELETE /series/{uuid}` forgets it immediately. On PostgreSQL and TimescaleDB, another instance
+that still holds the old id gets a foreign-key error on its next publish, forgets the id, and
+retries once, which recreates the series. This also covers series removed by hand with SQL.
+No action is needed.
 
 ## Authorization
 

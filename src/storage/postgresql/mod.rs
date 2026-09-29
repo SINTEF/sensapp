@@ -10,7 +10,7 @@
 
 use super::{
     DEFAULT_QUERY_LIMIT, SensorAvailabilitySummary, StorageError, StorageInstance,
-    common::{VALUE_TABLES, datetime_to_micros},
+    common::{VALUE_TABLES, datetime_to_micros, is_foreign_key_violation},
 };
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
@@ -292,13 +292,18 @@ impl StorageInstance for PostgresStorage {
         Ok(())
     }
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
-        for single_sensor_batch in batch.sensors.as_ref() {
-            self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
-                .await?;
+        match self.publish_once(&batch).await {
+            Err(error) if is_foreign_key_violation(&error) => {
+                // A cached sensor id points to a sensor deleted since it was cached, for
+                // example by another SensApp instance. The transaction was rolled back, so
+                // forget the ids and try again, which recreates the sensors.
+                for single_sensor_batch in batch.sensors.as_ref() {
+                    forget_sensor_id(&single_sensor_batch.sensor.uuid).await;
+                }
+                self.publish_once(&batch).await
+            }
+            result => result,
         }
-        transaction.commit().await?;
-        Ok(())
     }
 
     async fn vacuum(&self) -> Result<()> {
@@ -1026,6 +1031,16 @@ impl StorageInstance for PostgresStorage {
 }
 
 impl PostgresStorage {
+    async fn publish_once(&self, batch: &Batch) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        for single_sensor_batch in batch.sensors.as_ref() {
+            self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     async fn publish_single_sensor_batch(
         &self,
         transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,

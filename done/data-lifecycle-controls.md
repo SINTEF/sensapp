@@ -33,8 +33,10 @@ Prometheus, InfluxDB and friends offer: delete by series and time range.
   deleted series inside that window failed on the foreign key (PostgreSQL, TimescaleDB) and,
   on SQLite (foreign keys off), silently wrote samples under a sensor id that no longer existed.
   Fixed with `forget_sensor_id` after `delete_series`, covered by the `correction_recipe` tests.
-  Other instances of a multi-instance deployment still hold the stale id until the TTL expires
-  (documented in `docs/DATA_LIFECYCLE.md`).
+  Other instances (or manual SQL) can still hold a stale id, so on PostgreSQL and TimescaleDB
+  `publish` retries once after a foreign-key violation, having forgotten the ids of the batch
+  (`is_foreign_key_violation` in `src/storage/common.rs`, tested by
+  `*_publish_recovers_from_stale_sensor_id`).
 - SenML and Arrow imports use random UUIDs, so each publish creates a new series. Not fixed here:
   `ideas/senml-arrow-random-sensor-uuids.md`.
 - ClickHouse: the `sensor_catalog_view` and `metrics_summary_view` materialized views are not
