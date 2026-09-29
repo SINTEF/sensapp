@@ -293,6 +293,34 @@ jobs:
           cargo test --features rrdcached --no-default-features http::influxdb::tests::test_publish_influxdb_with_numeric_enabled -- --exact
           cargo test --features rrdcached --no-default-features --test rrdcached_integration
 
+  prometheus-live:
+    name: Live Prometheus Compatibility
+    runs-on: ubuntu-latest
+    needs: quality-checks
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: sensapp-test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v6
+      - uses: moonrepo/setup-rust@v1
+        with:
+          channel: stable
+      - name: Run live Prometheus integration checks
+        env:
+          SENSAPP_STORAGE_CONNECTION_STRING: postgres://postgres:postgres@127.0.0.1:5432/sensapp-test
+        run: bash tests/prometheus_live/run.sh
+
   helm-validation:
     name: Helm Validation
     runs-on: ubuntu-latest
@@ -494,7 +522,7 @@ jobs:
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
-    needs: [security-audit, frontend, python-sdk, test-matrix, helm-validation, docker-smoke]
+    needs: [security-audit, frontend, python-sdk, test-matrix, prometheus-live, helm-validation, docker-smoke]
     if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')) || github.event_name == 'release'
     permissions:
       contents: read
@@ -546,8 +574,11 @@ jobs:
   helm-package:
     name: Helm Package
     runs-on: ubuntu-latest
-    needs: helm-validation
+    needs: [helm-validation, prometheus-live]
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout repository
@@ -566,6 +597,18 @@ jobs:
         with:
           name: sensapp-helm-chart
           path: dist/*.tgz
+
+      - name: Log in to GHCR for Helm
+        if: github.event_name == 'release' && github.event.action == 'published'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish chart to GHCR
+        if: github.event_name == 'release' && github.event.action == 'published'
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          helm push dist/sensapp-*.tgz "oci://ghcr.io/$owner/charts"
 
   release:
     name: Release

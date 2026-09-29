@@ -682,6 +682,74 @@ mod crud_dcat_tests {
 
     #[tokio::test]
     #[serial]
+    async fn test_series_selector_paginates_matching_series() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let mut batch_builder = BatchBuilder::new()?;
+        // The first raw storage page has no matches.
+        for index in 0..256 {
+            let (mut sensor, samples) = create_float_sensor(&format!("filler_{index}"), 1.0);
+            sensor.labels.push(("env".to_string(), "dev".to_string()));
+            batch_builder.add(Arc::new(sensor), samples).await?;
+        }
+        batch_builder.send_what_is_left(storage.clone()).await?;
+        for (index, environment) in ["dev", "dev", "prod", "dev", "prod", "prod"]
+            .into_iter()
+            .enumerate()
+        {
+            let (mut sensor, samples) = create_float_sensor(&format!("series_{index}"), 1.0);
+            sensor
+                .labels
+                .push(("env".to_string(), environment.to_string()));
+            batch_builder.add(Arc::new(sensor), samples).await?;
+            batch_builder.send_what_is_left(storage.clone()).await?;
+        }
+
+        let selector = urlencoding::encode("{env=\"prod\"}");
+        let first_response = app
+            .get(&format!("/series?limit=2&selector={selector}"))
+            .await?;
+        first_response.assert_status(StatusCode::OK);
+        let first: Value = first_response.json()?;
+        let first_datasets = first["dcat:dataset"].as_array().unwrap();
+        assert_eq!(first_datasets.len(), 2);
+        assert_eq!(first_datasets[0]["dct:title"], "series_2");
+        assert_eq!(first_datasets[1]["dct:title"], "series_4");
+
+        let next = first["hydra:view"]["hydra:next"].as_str().unwrap();
+        assert!(next.contains(&format!("selector={selector}")));
+        assert!(first_response.headers()["Link"].to_str()?.contains(next));
+
+        let second_response = app.get(next).await?;
+        second_response.assert_status(StatusCode::OK);
+        let second: Value = second_response.json()?;
+        let second_datasets = second["dcat:dataset"].as_array().unwrap();
+        assert_eq!(second_datasets.len(), 1);
+        assert_eq!(second_datasets[0]["dct:title"], "series_5");
+        assert!(second["hydra:view"].is_null());
+        assert!(second_response.headers().get("Link").is_none());
+
+        let none = app
+            .get(&format!(
+                "/series?limit=2&selector={}",
+                urlencoding::encode("{env=\"missing\"}")
+            ))
+            .await?;
+        assert!(
+            none.json::<Value>()?["dcat:dataset"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn test_series_pagination_last_page() -> Result<()> {
         ensure_config();
         // Given: A database with exactly 3 sensors
