@@ -1,7 +1,5 @@
-FROM rust:1.96-slim-bookworm AS builder
+FROM rust:1.96-slim-bookworm AS chef
 
-ARG FEATURES="postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached"
-ARG NO_DEFAULT_FEATURES="true"
 ARG DUCKDB_DOWNLOAD_LIB="1"
 
 ENV DUCKDB_DOWNLOAD_LIB=${DUCKDB_DOWNLOAD_LIB}
@@ -17,7 +15,26 @@ RUN apt-get update \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Prime the dependency cache before copying the full source tree.
+RUN cargo install --locked cargo-chef --version 0.1.78
+
+FROM chef AS planner
+
+COPY Cargo.toml Cargo.lock build.rs settings.toml ./
+COPY src ./src
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+
+ARG FEATURES="postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached"
+ARG NO_DEFAULT_FEATURES="true"
+
+COPY --from=planner /app/recipe.json recipe.json
+RUN if [ "$NO_DEFAULT_FEATURES" = "true" ]; then \
+        cargo chef cook --release --recipe-path recipe.json --no-default-features --features "$FEATURES"; \
+    else \
+        cargo chef cook --release --recipe-path recipe.json --features "$FEATURES"; \
+    fi
+
 COPY Cargo.toml Cargo.lock build.rs settings.toml ./
 COPY src ./src
 

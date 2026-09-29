@@ -229,6 +229,7 @@ jobs:
         with:
           channel: ${{ matrix.rust }}
           components: clippy
+          cache-extra-identifier: ${{ matrix.feature }}
 
       - name: Cache cargo-make
         uses: actions/cache@v5
@@ -389,8 +390,10 @@ jobs:
           build-args: |
             FEATURES=${{ matrix.features }}
             NO_DEFAULT_FEATURES=true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=runtime-smoke
+            type=gha,scope=runtime-publish
+          cache-to: type=gha,scope=runtime-smoke,mode=max
 
       - name: Start runtime image against ClickHouse
         if: matrix.name == 'runtime'
@@ -562,8 +565,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=runtime-publish
+            type=gha,scope=runtime-smoke
+          cache-to: type=gha,scope=runtime-publish,mode=max
           build-args: |
             FEATURES=postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached
             NO_DEFAULT_FEATURES=true
