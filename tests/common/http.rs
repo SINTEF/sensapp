@@ -298,32 +298,26 @@ async fn test_publish_handler(
     } else if content_type.contains("application/vnd.apache.arrow.stream")
         || content_type.contains("application/vnd.apache.arrow.file")
     {
-        // Handle Arrow data
-        use sensapp::importers::arrow::publish_arrow_async;
+        // Handle Arrow data like the real server: payload errors are bad requests
+        use sensapp::importers::arrow::{parse_arrow_sensors, publish_arrow_sensors};
 
-        let stream = body.into_data_stream();
-        let stream = stream.map_err(io::Error::other);
-        let reader = stream.into_async_read();
+        let body_bytes = axum::body::to_bytes(body, usize::MAX).await.map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Failed to read body: {}", e),
+            )
+        })?;
 
-        publish_arrow_async(reader, state.storage.clone())
+        let sensor_data_maps = parse_arrow_sensors(&body_bytes).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid Arrow format: {}", e),
+            )
+        })?;
+
+        publish_arrow_sensors(sensor_data_maps, state.storage.clone())
             .await
-            .map_err(|e| {
-                // Arrow parsing errors should be bad requests, not internal server errors
-                if e.to_string().contains("Failed to create Arrow file reader")
-                    || e.to_string().contains("Failed to read Arrow batch")
-                    || e.to_string()
-                        .contains("Failed to read Arrow batch from stream")
-                    || e.to_string()
-                        .contains("Arrow IPC payload contains no data batches")
-                {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        format!("Invalid Arrow format: {}", e),
-                    )
-                } else {
-                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-                }
-            })?;
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
         Ok("Arrow data ingested successfully".to_string())
     } else {

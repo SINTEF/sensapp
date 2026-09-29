@@ -17,6 +17,12 @@ from sensapp import (
 )
 from sensapp._exceptions import SensAppValidationError
 
+UUID_123 = "00000000-0000-4000-8000-000000000123"
+UUID_1 = "00000000-0000-4000-8000-000000000001"
+UUID_2 = "00000000-0000-4000-8000-000000000002"
+UUID_ABC = "00000000-0000-4000-8000-00000000abc0"
+UUID_SERIES = "9d87123d-9b47-466d-9eda-001c2ecf9c54"
+
 
 def test_build_upload_table_for_float_samples() -> None:
     table = build_upload_table(
@@ -25,7 +31,7 @@ def test_build_upload_table_for_float_samples() -> None:
             SamplePoint(datetime(2026, 3, 16, 12, 0, tzinfo=UTC), 21.5),
             SamplePoint("2026-03-16T12:01:00Z", 21.7),
         ],
-        sensor_id="9d87123d-9b47-466d-9eda-001c2ecf9c54",
+        sensor_id=UUID_SERIES,
     )
 
     assert table.column_names == [
@@ -121,12 +127,12 @@ def test_build_upload_table_from_polars_uses_explicit_sensor_name() -> None:
     table = build_upload_table_from_polars(
         frame,
         sensor_name="temperature",
-        sensor_id="sensor-123",
+        sensor_id=UUID_123,
     )
 
     assert table.column_names == ["timestamp", "value", "sensor_name", "sensor_id"]
     assert table["sensor_name"].to_pylist() == ["temperature", "temperature"]
-    assert table["sensor_id"].to_pylist() == ["sensor-123", "sensor-123"]
+    assert table["sensor_id"].to_pylist() == [UUID_123, UUID_123]
 
 
 def test_build_upload_table_from_polars_uses_uniform_sensor_name_column() -> None:
@@ -149,13 +155,13 @@ def test_build_upload_table_from_polars_uses_uniform_sensor_id_column() -> None:
             "timestamp": [datetime(2026, 3, 16, 12, 0, tzinfo=UTC)],
             "value": [21.5],
             "sensor_name": ["temperature"],
-            "sensor_id": ["sensor-123"],
+            "sensor_id": [UUID_123],
         }
     )
 
     table = build_upload_table_from_polars(frame)
 
-    assert table["sensor_id"].to_pylist() == ["sensor-123"]
+    assert table["sensor_id"].to_pylist() == [UUID_123]
 
 
 def test_build_upload_table_from_polars_rejects_missing_required_columns() -> None:
@@ -190,7 +196,7 @@ def test_build_upload_table_from_polars_rejects_multiple_sensor_ids() -> None:
             ],
             "value": [21.5, 21.7],
             "sensor_name": ["temperature", "temperature"],
-            "sensor_id": ["sensor-1", "sensor-2"],
+            "sensor_id": [UUID_1, UUID_2],
         }
     )
 
@@ -233,7 +239,7 @@ def test_arrow_round_trip() -> None:
     source = build_upload_table(
         "temperature",
         [SamplePoint(datetime(2026, 3, 16, 12, 0, tzinfo=UTC), 21.5)],
-        sensor_id="abc",
+        sensor_id=UUID_ABC,
     )
 
     encoded = serialize_arrow_table(source)

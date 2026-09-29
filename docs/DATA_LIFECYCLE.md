@@ -47,13 +47,19 @@ Do not expect an update API. The usual recipe, the same one used with Prometheus
 1. Delete the range (`DELETE /series/{uuid}/samples?start=…&end=…`).
 2. Publish the fixed samples again, with the same sensor name, labels and unit.
 
-For CSV, InfluxDB Line Protocol, and Prometheus Remote Write, the series UUID is derived from the
-sensor name, type, unit and labels, so the corrected data lands in the same series, including
-after a whole-series delete.
+For CSV, InfluxDB Line Protocol, Prometheus Remote Write, SenML, and Arrow, the series UUID is derived
+from the sensor name, type, unit and labels, so the corrected data lands in the same series, including
+after a whole-series delete. The derivation is keyed by the configured `sensor_salt`: changing the salt
+changes every derived UUID.
 
-> **SenML and Arrow imports do not do this yet.** They create a random UUID on every import, so
-> every publish creates a new series, and deleting a range then re-publishing does not put the
-> data back in the original series. See `ideas/senml-arrow-random-sensor-uuids.md`.
+Two importers also accept an explicit UUID, which then identifies the series:
+
+- **SenML**: a base name (`bn`) that is a UUID, as written by the SenML export. The name is read
+  from the `_name` field when present. SenML has no labels, so the unit is the only extra input to the
+  derived UUID: publishing the same name with and without a unit creates two series.
+- **Arrow**: the `sensapp.sensor.uuid` schema metadata or a `sensor_id` column. Without a UUID, the
+  sensor name (`sensapp.sensor.name` metadata or `sensor_name` column) is required. A payload with
+  neither is rejected with `400`.
 
 ### Publishing the same timestamp twice keeps both samples
 

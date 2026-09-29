@@ -318,11 +318,15 @@ async fn publish_arrow_format(
     body: axum::body::Body,
     storage: Arc<dyn StorageInstance>,
 ) -> Result<crate::importers::IngestionStats, AppError> {
-    let stream = body.into_data_stream();
-    let stream = stream.map_err(io::Error::other);
-    let reader = stream.into_async_read();
+    let body_bytes = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .map_err(|e| AppError::bad_request(anyhow::anyhow!("Failed to read Arrow body: {}", e)))?;
 
-    crate::importers::arrow::publish_arrow_async(reader, storage)
+    // Errors from parsing are caused by the payload
+    let sensor_data_maps =
+        crate::importers::arrow::parse_arrow_sensors(&body_bytes).map_err(AppError::bad_request)?;
+
+    crate::importers::arrow::publish_arrow_sensors(sensor_data_maps, storage)
         .await
         .map_err(AppError::internal_server_error)
 }

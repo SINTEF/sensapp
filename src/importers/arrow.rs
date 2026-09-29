@@ -14,34 +14,34 @@ use arrow::array::{
 use arrow::datatypes::{DataType, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::{FileReader, StreamReader};
-use futures::io::{AsyncRead, AsyncReadExt};
 use geo::Point;
 use rust_decimal::Decimal;
 use smallvec::SmallVec;
 use std::{collections::HashMap, io::Cursor, sync::Arc};
 
 /// Type alias for complex sensor data map
-type SensorDataMap = HashMap<String, (Arc<Sensor>, Vec<(SensAppDateTime, TypedSamples)>)>;
+pub type SensorDataMap = HashMap<String, (Arc<Sensor>, Vec<(SensAppDateTime, TypedSamples)>)>;
 use uuid::Uuid;
 
-/// Publish Arrow data asynchronously to storage
-pub async fn publish_arrow_async<R: AsyncRead + Unpin + Send>(
-    mut arrow_reader: R,
+/// Read an Arrow IPC payload and convert it to sensors and samples.
+///
+/// Every error returned here is caused by the payload itself.
+pub fn parse_arrow_sensors(buffer: &[u8]) -> Result<Vec<SensorDataMap>> {
+    parse_arrow_file(buffer)?
+        .iter()
+        .map(convert_record_batch_to_sensors)
+        .collect()
+}
+
+/// Publish parsed Arrow sensors to storage
+pub async fn publish_arrow_sensors(
+    sensor_data_maps: Vec<SensorDataMap>,
     storage: Arc<dyn StorageInstance>,
 ) -> Result<IngestionStats> {
-    // Read all data into a buffer first
-    let mut buffer = Vec::new();
-    arrow_reader.read_to_end(&mut buffer).await?;
-
-    // Parse the Arrow data
-    let record_batches = parse_arrow_file(&buffer)?;
     let mut stats = IngestionStats::default();
-
-    // Convert Arrow data to SensApp format and publish
     let mut batch_builder = BatchBuilder::new()?;
 
-    for record_batch in record_batches {
-        let sensor_data_map = convert_record_batch_to_sensors(&record_batch)?;
+    for sensor_data_map in sensor_data_maps {
         stats.series += sensor_data_map.len();
 
         for (_sensor_key, (sensor, sample_entries)) in sensor_data_map {
@@ -56,7 +56,6 @@ pub async fn publish_arrow_async<R: AsyncRead + Unpin + Send>(
     Ok(stats)
 }
 
-/// Parse Arrow IPC stream or file format from bytes.
 fn parse_arrow_file(buffer: &[u8]) -> Result<Vec<RecordBatch>> {
     let stream_batches = StreamReader::try_new(Cursor::new(buffer), None)
         .ok()
@@ -149,14 +148,24 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
     let unit = extract_sensor_unit(batch);
     let labels = extract_sensor_labels(batch)?;
 
-    let sensor_name = sensor_name.unwrap_or_else(|| sensor_id.to_string());
-    let sensor = Arc::new(Sensor {
-        uuid: sensor_id,
-        name: sensor_name.clone(),
-        sensor_type,
-        unit,
-        labels,
-    });
+    // An explicit UUID is the series identity. Without one, the name is required and the UUID is
+    // derived from it, so publishing the same sensor again appends to the same series.
+    let sensor = match (sensor_id, sensor_name) {
+        (Some(uuid), name) => {
+            let name = name.unwrap_or_else(|| uuid.to_string());
+            Sensor::new(uuid, name, sensor_type, unit, Some(labels))
+        }
+        (None, Some(name)) => Sensor::new_without_uuid(name, sensor_type, unit, Some(labels))?,
+        (None, None) => {
+            return Err(anyhow!(
+                "Arrow data must identify its sensor: provide a sensor UUID (sensapp.sensor.uuid \
+                 metadata or sensor_id column) or a sensor name (sensapp.sensor.name metadata or \
+                 sensor_name column)"
+            ));
+        }
+    };
+    let sensor_name = sensor.name.clone();
+    let sensor = Arc::new(sensor);
 
     let mut result = HashMap::new();
     let sensor_key = sensor_name;
@@ -330,9 +339,10 @@ fn find_column_index(schema: &arrow::datatypes::Schema, column_name: &str) -> Op
         .position(|field| field.name() == column_name)
 }
 
-fn extract_sensor_id(batch: &RecordBatch, sensor_id_idx: Option<usize>) -> Result<Uuid> {
+fn extract_sensor_id(batch: &RecordBatch, sensor_id_idx: Option<usize>) -> Result<Option<Uuid>> {
     if let Some(uuid_str) = batch.schema().metadata().get("sensapp.sensor.uuid") {
         return Uuid::parse_str(uuid_str)
+            .map(Some)
             .map_err(|e| anyhow!("Invalid UUID in sensapp.sensor.uuid metadata: {}", e));
     }
 
@@ -346,12 +356,12 @@ fn extract_sensor_id(batch: &RecordBatch, sensor_id_idx: Option<usize>) -> Resul
         if array.len() > 0 {
             let uuid_str = array.value(0);
             return Uuid::parse_str(uuid_str)
+                .map(Some)
                 .map_err(|e| anyhow!("Invalid UUID in sensor_id: {}", e));
         }
     }
 
-    // Generate a new UUID if no sensor_id provided
-    Ok(Uuid::new_v4())
+    Ok(None)
 }
 
 fn extract_sensor_name(batch: &RecordBatch, sensor_name_idx: Option<usize>) -> Option<String> {
@@ -509,6 +519,123 @@ mod tests {
             }
             other => panic!("expected integer samples, got {:?}", other),
         }
+    }
+
+    /// A one-sample float batch carrying the given `sensapp.sensor.*` metadata and columns.
+    fn batch_with_identity(
+        metadata: &[(&str, &str)],
+        sensor_id: Option<&str>,
+        sensor_name: Option<&str>,
+    ) -> RecordBatch {
+        use arrow::array::TimestampMicrosecondArray;
+        use arrow::datatypes::{Field, Schema};
+
+        let mut fields = vec![
+            Field::new(
+                "timestamp",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                false,
+            ),
+            Field::new("value", DataType::Float64, false),
+        ];
+        let mut columns: Vec<ArrayRef> = vec![
+            Arc::new(TimestampMicrosecondArray::from(vec![1_640_995_200_000_000])),
+            Arc::new(Float64Array::from(vec![1.5])),
+        ];
+        if let Some(id) = sensor_id {
+            fields.push(Field::new("sensor_id", DataType::Utf8, false));
+            columns.push(Arc::new(StringArray::from(vec![id])));
+        }
+        if let Some(name) = sensor_name {
+            fields.push(Field::new("sensor_name", DataType::Utf8, false));
+            columns.push(Arc::new(StringArray::from(vec![name])));
+        }
+        let metadata: HashMap<String, String> = metadata
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect();
+        RecordBatch::try_new(
+            Arc::new(Schema::new_with_metadata(fields, metadata)),
+            columns,
+        )
+        .unwrap()
+    }
+
+    fn sensor_of(batch: &RecordBatch) -> Result<Arc<Sensor>> {
+        _ = crate::config::load_configuration();
+        let map = convert_record_batch_to_sensors(batch)?;
+        Ok(map.into_values().next().unwrap().0)
+    }
+
+    #[test]
+    fn test_named_sensor_without_uuid_has_a_stable_uuid() {
+        let first = sensor_of(&batch_with_identity(&[], None, Some("temp"))).unwrap();
+        let second = sensor_of(&batch_with_identity(
+            &[("sensapp.sensor.name", "temp")],
+            None,
+            None,
+        ))
+        .unwrap();
+        let other = sensor_of(&batch_with_identity(&[], None, Some("humidity"))).unwrap();
+
+        assert_eq!(first.uuid, second.uuid);
+        assert_ne!(first.uuid, other.uuid);
+        assert_eq!(first.name, "temp");
+    }
+
+    #[test]
+    fn test_unit_and_labels_are_part_of_the_derived_identity() {
+        let plain = sensor_of(&batch_with_identity(&[], None, Some("temp"))).unwrap();
+        let with_unit = sensor_of(&batch_with_identity(
+            &[("sensapp.sensor.unit", "Cel")],
+            None,
+            Some("temp"),
+        ))
+        .unwrap();
+        let with_labels = sensor_of(&batch_with_identity(
+            &[("sensapp.sensor.labels", r#"{"room":"lab"}"#)],
+            None,
+            Some("temp"),
+        ))
+        .unwrap();
+
+        assert_ne!(plain.uuid, with_unit.uuid);
+        assert_ne!(plain.uuid, with_labels.uuid);
+    }
+
+    #[test]
+    fn test_explicit_uuid_wins_over_the_name() {
+        let uuid = Uuid::new_v4();
+        let from_metadata = sensor_of(&batch_with_identity(
+            &[("sensapp.sensor.uuid", &uuid.to_string())],
+            None,
+            Some("temp"),
+        ))
+        .unwrap();
+        let from_column = sensor_of(&batch_with_identity(
+            &[],
+            Some(&uuid.to_string()),
+            Some("temp"),
+        ))
+        .unwrap();
+        let without_name = sensor_of(&batch_with_identity(
+            &[("sensapp.sensor.uuid", &uuid.to_string())],
+            None,
+            None,
+        ))
+        .unwrap();
+
+        assert_eq!(from_metadata.uuid, uuid);
+        assert_eq!(from_metadata.name, "temp");
+        assert_eq!(from_column.uuid, uuid);
+        assert_eq!(without_name.uuid, uuid);
+        assert_eq!(without_name.name, uuid.to_string());
+    }
+
+    #[test]
+    fn test_sensor_without_uuid_and_name_is_rejected() {
+        let error = sensor_of(&batch_with_identity(&[], None, None)).unwrap_err();
+        assert!(error.to_string().contains("must identify its sensor"));
     }
 
     #[test]

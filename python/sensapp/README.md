@@ -92,14 +92,13 @@ async with SensAppClient() as client:
     await client.publish("temperature", frame)
 
 table = build_upload_table_from_polars(
-    frame.with_columns(
-        sensor_name=pl.lit("temperature"),
-        sensor_id=pl.lit("sensor-123"),
-    )
+    frame.with_columns(sensor_name=pl.lit("temperature"))
 )
 ```
 
-For `publish()`, the sensor name still comes from the method argument. If you want the Polars frame itself to carry a uniform `sensor_name` and optional `sensor_id`, use `build_upload_table_from_polars()` directly.
+For `publish()`, the sensor name still comes from the method argument. If you want the Polars frame itself to carry a uniform `sensor_name`, use `build_upload_table_from_polars()` directly.
+
+The series UUID is derived from the sensor name, type, unit and labels, so publishing `temperature` again appends to the same series. To target a series by UUID instead, add a `sensor_id` column holding a valid UUID (the `sensor_id` argument of `publish()` does the same). A payload with neither a name nor a UUID is rejected.
 
 ## Query results
 

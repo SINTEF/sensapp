@@ -281,3 +281,84 @@ async fn test_csv_ingestion_hyphenated_sensor_name() -> Result<()> {
 
     Ok(())
 }
+
+/// Publishing the same SenML sensor twice extends one series instead of creating a new one
+#[tokio::test]
+#[serial]
+async fn test_senml_publishes_append_to_the_same_series() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let app = TestApp::new(storage.clone()).await;
+
+    let sensor_name = format!("senml_stable_{}", uuid::Uuid::new_v4().simple());
+    let first = format!(
+        r#"[{{"bn": "{sensor_name}", "bt": 1704067200, "v": 20.5, "u": "Cel"}}, {{"t": 60, "v": 21.0}}]"#
+    );
+    let second = format!(
+        r#"[{{"bn": "{sensor_name}", "bt": 1704067320, "v": 21.5, "u": "Cel"}}, {{"t": 60, "v": 22.0}}]"#
+    );
+
+    app.post_json("/sensors/publish", &first)
+        .await?
+        .assert_status(StatusCode::OK);
+    app.post_json("/sensors/publish", &second)
+        .await?
+        .assert_status(StatusCode::OK);
+
+    let series = storage.list_series(None, None, None).await?;
+    let matching = series
+        .series
+        .iter()
+        .filter(|sensor| sensor.name == sensor_name)
+        .count();
+    assert_eq!(matching, 1, "both publishes should land in one series");
+    DbHelpers::verify_sensor_data(&storage, &sensor_name, 4).await?;
+
+    Ok(())
+}
+
+/// Deleting a range and publishing it again puts the data back in the original series
+#[tokio::test]
+#[serial]
+async fn test_senml_republish_after_range_delete_restores_the_series() -> Result<()> {
+    use sensapp::datamodel::SensAppDateTime;
+
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let app = TestApp::new(storage.clone()).await;
+
+    let sensor_name = format!("senml_republish_{}", uuid::Uuid::new_v4().simple());
+    let payload = format!(
+        r#"[{{"bn": "{sensor_name}", "bt": 1704067200, "v": 1.0}}, {{"t": 60, "v": 2.0}}, {{"t": 120, "v": 3.0}}]"#
+    );
+
+    app.post_json("/sensors/publish", &payload)
+        .await?
+        .assert_status(StatusCode::OK);
+    let original = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+        .await?
+        .expect("sensor should exist after the first publish");
+
+    let deleted = storage
+        .delete_series_samples(
+            &original.uuid.to_string(),
+            SensAppDateTime::from_unix_seconds(1704067200.0),
+            SensAppDateTime::from_unix_seconds(1704067320.0),
+        )
+        .await?;
+    assert_eq!(deleted, Some(3));
+
+    app.post_json("/sensors/publish", &payload)
+        .await?
+        .assert_status(StatusCode::OK);
+
+    let restored = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+        .await?
+        .expect("sensor should exist after the second publish");
+    assert_eq!(restored.uuid, original.uuid);
+    DbHelpers::verify_sensor_data(&storage, &sensor_name, 3).await?;
+
+    Ok(())
+}

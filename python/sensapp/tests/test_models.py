@@ -9,6 +9,8 @@ from sensapp._models import (
     parse_series_catalog,
 )
 
+SERIES_UUID = "9d87123d-9b47-466d-9eda-001c2ecf9c54"
+
 
 def _make_metric_dataset(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
@@ -39,7 +41,7 @@ def _make_series_dataset(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "@type": "dcat:Dataset",
         "@id": 'temperature{room="lab"}',
-        "dct:identifier": "abc-123",
+        "dct:identifier": SERIES_UUID,
         "dct:title": "temperature",
         "dct:description": "Sensor data from temperature (float)",
         "dcat:keyword": ["sensor", "IoT", "time-series", "float", "room"],
@@ -49,7 +51,7 @@ def _make_series_dataset(**overrides: Any) -> dict[str, Any]:
         "dcat:distribution": [
             {
                 "@type": "dcat:Distribution",
-                "dcat:downloadURL": "/series/abc-123?format=senml",
+                "dcat:downloadURL": f"/series/{SERIES_UUID}?format=senml",
                 "dcat:mediaType": "application/senml+json",
                 "dct:format": "SenML JSON",
             },
@@ -104,7 +106,7 @@ def test_parse_series_catalog_basic() -> None:
     assert len(catalog.series) == 1
 
     s = catalog.series[0]
-    assert s.uuid == "abc-123"
+    assert s.uuid == SERIES_UUID
     assert s.name == "temperature"
     assert s.sensor_type == "float"
     assert s.labels == {"room": "lab"}

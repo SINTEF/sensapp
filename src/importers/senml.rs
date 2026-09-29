@@ -30,6 +30,7 @@ impl SenMLImporter {
                 .push(record);
         }
 
+        let export_names = Self::exported_sensor_names(json_str);
         let mut result = Vec::new();
 
         for (sensor_name, sensor_records) in sensors_map {
@@ -79,12 +80,21 @@ impl SenMLImporter {
                 .and_then(|r| r.unit.as_ref())
                 .map(|u| Unit::new(u.clone(), None));
 
-            let sensor = Sensor {
-                uuid: Uuid::new_v4(),
-                name: sensor_name.clone(),
-                sensor_type,
-                unit,
-                labels: SmallVec::new(),
+            // A UUID as the name is the identity written by the SenML exporter, so importing an
+            // export goes back to the original series. Any other name derives a reproducible
+            // UUID, so publishing the same sensor again appends to the same series.
+            let sensor = match Uuid::parse_str(&sensor_name) {
+                Ok(uuid) => Sensor::new(
+                    uuid,
+                    export_names
+                        .get(&uuid)
+                        .cloned()
+                        .unwrap_or_else(|| sensor_name.clone()),
+                    sensor_type,
+                    unit,
+                    None,
+                ),
+                Err(_) => Sensor::new_without_uuid(sensor_name.clone(), sensor_type, unit, None)?,
             };
 
             let sensor_data = SensorData::new(sensor, samples);
@@ -92,6 +102,31 @@ impl SenMLImporter {
         }
 
         Ok(result)
+    }
+
+    /// Map the UUID base names to the `_name` extension field written by the SenML exporter.
+    ///
+    /// The SenML parser does not expose extension fields, so the raw JSON is scanned again.
+    /// Base names are sticky in SenML: `_name` belongs to the `bn` in effect for its record.
+    fn exported_sensor_names(json_str: &str) -> HashMap<Uuid, String> {
+        let mut names = HashMap::new();
+        let Ok(serde_json::Value::Array(records)) = serde_json::from_str(json_str) else {
+            return names;
+        };
+
+        let mut base_name = String::new();
+        for record in &records {
+            if let Some(bn) = record.get("bn").and_then(|value| value.as_str()) {
+                base_name = bn.to_string();
+            }
+            if let (Ok(uuid), Some(name)) = (
+                Uuid::parse_str(&base_name),
+                record.get("_name").and_then(|value| value.as_str()),
+            ) {
+                names.insert(uuid, name.to_string());
+            }
+        }
+        names
     }
 
     /// Convert sindit-senml DateTime to SensAppDateTime using the time module
@@ -148,6 +183,52 @@ mod tests {
     use smallvec::smallvec;
     use uuid::Uuid;
 
+    fn import(json_str: &str) -> Vec<(String, SensorData)> {
+        _ = crate::config::load_configuration();
+        SenMLImporter::from_senml_json(json_str).unwrap()
+    }
+
+    #[test]
+    fn test_same_name_gives_same_uuid() {
+        let first = import(r#"[{"bn": "temp", "bt": 1609459200.0, "v": 1.0}]"#);
+        let second = import(r#"[{"bn": "temp", "bt": 1609459260.0, "v": 2.0}]"#);
+        assert_eq!(first[0].1.sensor.uuid, second[0].1.sensor.uuid);
+        assert_eq!(first[0].1.sensor.name, "temp");
+    }
+
+    #[test]
+    fn test_different_names_or_units_give_different_uuids() {
+        let temp = import(r#"[{"n": "temp", "t": 1609459200.0, "v": 1.0}]"#);
+        let humidity = import(r#"[{"n": "humidity", "t": 1609459200.0, "v": 1.0}]"#);
+        let temp_cel = import(r#"[{"n": "temp", "u": "Cel", "t": 1609459200.0, "v": 1.0}]"#);
+        assert_ne!(temp[0].1.sensor.uuid, humidity[0].1.sensor.uuid);
+        assert_ne!(temp[0].1.sensor.uuid, temp_cel[0].1.sensor.uuid);
+    }
+
+    #[test]
+    fn test_uuid_base_name_is_the_series_uuid() {
+        let uuid = Uuid::new_v4();
+        let json = format!(r#"[{{"bn": "{uuid}", "bt": 1609459200.0, "v": 1.0}}]"#);
+        let imported = import(&json);
+        assert_eq!(imported[0].1.sensor.uuid, uuid);
+        // Without `_name`, the name is the UUID itself
+        assert_eq!(imported[0].1.sensor.name, uuid.to_string());
+    }
+
+    #[test]
+    fn test_exported_name_is_used_with_uuid_base_name() {
+        let uuid = Uuid::new_v4();
+        let json = format!(
+            r#"[{{"bn": "{uuid}", "_name": "kitchen_temp", "bt": 1609459200.0, "v": 1.0}},
+                {{"t": 60.0, "v": 2.0}}]"#
+        );
+        let imported = import(&json);
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].1.sensor.uuid, uuid);
+        assert_eq!(imported[0].1.sensor.name, "kitchen_temp");
+        assert_eq!(imported[0].1.samples.len(), 2);
+    }
+
     #[test]
     fn test_blob_samples_senml_roundtrip() {
         let uuid = Uuid::new_v4();
@@ -174,12 +255,13 @@ mod tests {
         assert!(json_str.contains("_name")); // Sensor name is in _name field
         assert!(json_str.contains("blob_sensor"));
 
-        // Verify roundtrip - note: bn is now the UUID, so imported "name" will be the UUID
+        // Verify roundtrip: bn is the UUID, so the import goes back to the original series
         let imported = SenMLImporter::from_senml_json(&json_str).unwrap();
         assert_eq!(imported.len(), 1);
         let (name, imported_data) = &imported[0];
-        // The "name" from import is actually the bn field, which is now the UUID
         assert_eq!(name, &uuid.to_string());
+        assert_eq!(imported_data.sensor.uuid, uuid);
+        assert_eq!(imported_data.sensor.name, "blob_sensor");
 
         if let TypedSamples::Blob(samples) = &imported_data.samples {
             assert_eq!(samples.len(), 1);

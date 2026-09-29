@@ -17,6 +17,10 @@ from sensapp._exceptions import SensAppHTTPError
 
 from .conftest import MockResponse
 
+UUID_1 = "00000000-0000-4000-8000-000000000001"
+UUID_2 = "00000000-0000-4000-8000-000000000002"
+SERIES_UUID = "9d87123d-9b47-466d-9eda-001c2ecf9c54"
+
 # ── helpers ─────────────────────────────────────────────────────
 
 
@@ -37,7 +41,7 @@ def _arrow_response_table() -> pa.Table:
                 [datetime(2026, 3, 16, 12, 0, tzinfo=UTC)],
                 type=pa.timestamp("us", tz="UTC"),
             ),
-            "sensor_id": ["sensor-1"],
+            "sensor_id": [UUID_1],
             "sensor_name": ["temperature"],
             "sensor_type": ["float"],
             "unit": ["degC"],
@@ -54,7 +58,7 @@ def _single_series_response_table() -> pa.Table:
             pa.field("value", pa.float64(), nullable=False),
         ],
         metadata={
-            b"sensapp.sensor.uuid": b"series-uuid",
+            b"sensapp.sensor.uuid": SERIES_UUID.encode(),
             b"sensapp.sensor.name": b"temperature",
             b"sensapp.sensor.type": b"float",
             b"sensapp.sensor.unit": b"degC",
@@ -152,13 +156,13 @@ async def test_publish_polars_frame_sends_arrow() -> None:
         }
     )
 
-    result = await client.publish("temperature", frame, sensor_id="sensor-1")
+    result = await client.publish("temperature", frame, sensor_id=UUID_1)
 
     assert result == "ok"
     body = session.post.call_args[1]["data"]
     payload = pa.ipc.open_stream(pa.py_buffer(body)).read_all()
     assert payload["sensor_name"].to_pylist() == ["temperature", "temperature"]
-    assert payload["sensor_id"].to_pylist() == ["sensor-1", "sensor-1"]
+    assert payload["sensor_id"].to_pylist() == [UUID_1, UUID_1]
 
 
 async def test_publish_with_token_sends_auth_header() -> None:
@@ -183,7 +187,7 @@ async def test_query_returns_compact_time_series() -> None:
 
     assert len(result) == 1
     series = result[0]
-    assert series.sensor_id == "sensor-1"
+    assert series.sensor_id == UUID_1
     assert series.name == "temperature"
     assert series.sensor_type == "float"
     assert series.unit == "degC"
@@ -203,7 +207,7 @@ async def test_query_returns_multiple_series() -> None:
                 [datetime(2026, 3, 16, 12, 1, tzinfo=UTC)],
                 type=pa.timestamp("us", tz="UTC"),
             ),
-            "sensor_id": ["sensor-2"],
+            "sensor_id": [UUID_2],
             "sensor_name": ["humidity"],
             "sensor_type": ["integer"],
             "unit": [None],
@@ -283,7 +287,7 @@ async def test_query_one_rejects_multiple_series() -> None:
                 [datetime(2026, 3, 16, 12, 1, tzinfo=UTC)],
                 type=pa.timestamp("us", tz="UTC"),
             ),
-            "sensor_id": ["sensor-2"],
+            "sensor_id": [UUID_2],
             "sensor_name": ["humidity"],
             "sensor_type": ["integer"],
             "unit": [None],
@@ -373,9 +377,9 @@ async def test_get_series_returns_arrow_table() -> None:
     client, session = _mock_client()
     session.get.return_value = MockResponse.bytes_ok(serialize_arrow_table(table))
 
-    result = await client.get_series("series-uuid", step="5m")
+    result = await client.get_series(SERIES_UUID, step="5m")
 
-    assert result.sensor_id == "series-uuid"
+    assert result.sensor_id == SERIES_UUID
     assert result.name == "temperature"
     assert result.sensor_type == "float"
     assert result.unit == "degC"
