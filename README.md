@@ -4,7 +4,7 @@ SensApp is an open-source sensor data platform developed by SINTEF.
 
 It handles time-series data ingestion, storage, and retrieval. From small edge devices to big data digital twins, SensApp *may* be useful.
 
-## SensApp allows you to process years of sensor data efficiently
+## SensApp Allows You to Process Years of Sensor Data Efficiently
 
 SensApp is compatible with Prometheus and InfluxDB, but with an alternative architecture that prioritise data analysis and long-term storage over ingestion performance and real-time monitoring.
 
@@ -12,7 +12,7 @@ Dealing with system statistics for the last 24 hours? InfluxDB or Prometheus are
 
 But you don't have to chose, both InfluxDB and Prometheus can replicate their data to SensApp for long-term storage and analysis. So you get the best of both worlds.
 
-You can also use Sensapp as a standalone time-series database.
+You can also use SensApp as a standalone time-series database.
 
 ## Quickstart
 
@@ -43,6 +43,8 @@ curl 'http://127.0.0.1:3000/api/v1/query?query=temperature&format=csv'
 ```
 
 ## Python Quickstart
+
+For a small write, query, and plotting tutorial, open the [Jupyter quickstart](./python/quickstart.ipynb).
 
 Check the [python/sensapp](./python/sensapp) documentation for more details.
 
@@ -88,7 +90,7 @@ Published releases also provide the chart through GHCR as an OCI package; see th
   - **CSV**: The classic.
   - **SenML**: Standardized format for sensor data representation, that is almost unheard of but actually pretty good.
   - **Apache Arrow IPC Support**: Efficient IPC format for high-performance data interchange.
-- **Flexible Time Series DataBase Storage**:
+- **Flexible Time Series Database Storage**:
   - **SQLite**: Lightweight embedded database for edge deployments.
   - **DuckDB**: Alternative to SQLite, potentially faster for analytical queries. *Not enabled by default*.
   - **PostgreSQL**: Robust relational database for medium to large deployments, with optional TimeScaleDB plugin for enhanced time-series capabilities.
@@ -103,8 +105,8 @@ SensApp's architecture is relatively simple as the complex problems are delegate
 Most of the complexity lies in the [database schema design](docs/DATAMODEL.md). After that, it's mostly some code glue.
 
 - On the **edge**, SensApp can be deployed as a single lightweight instance with an embedded SQLite database.
-- For **medium** deployments, SensApp can be deployed with a single message broker and a PostgreSQL database.
-- For **larger** deployments, many SensApp instances can be deployed behind a load balancer, connected to a ClickHouse database cluster.
+- For **medium** deployments, SensApp can be deployed with a PostgreSQL database.
+- For **larger** deployments, many SensApp instances can be deployed behind a load balancer, connected to a ClickHouse database cluster. A message queue and some middleware can be considered to ingest data at scale.
 
 SensApp storage is based on the findings of the paper [TSM-Bench: Benchmarking Time Series Database Systems for Monitoring Applications](https://dl.acm.org/doi/abs/10.14778/3611479.3611532). ClickHouse also released [an experimental time-series engine](https://clickhouse.com/docs/engines/table-engines/special/time_series) that is somewhat similar to SensApp's storage schema.
 
@@ -134,11 +136,11 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 The SensApp software is provided "as is," with no warranties, and the creators of SensApp are not liable for any damages that may arise from its use.
 
-## You may not want to use it in production (yet)
+## You May Not Want to Use It in Production (Yet)
 
 SensApp is currently under development. It is not ready for production.
 
-## Acknowledgments
+## Acknowledgements
 
 We thank [the historical authors of SensApp](https://github.com/SINTEF/sensapp/graphs/contributors) who created the first version a decade ago.
 

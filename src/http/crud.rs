@@ -537,6 +537,76 @@ pub async fn list_metrics(
     result.map(|(catalog, _)| catalog)
 }
 
+/// Fill a page after applying catalog filters. Storage bookmarks point to raw
+/// series, so the bookmark must be taken from the last series returned here.
+async fn list_filtered_series(
+    storage: &dyn crate::storage::StorageInstance,
+    metric: Option<&str>,
+    limit: usize,
+    bookmark: Option<&str>,
+    matchers: Option<&[LabelMatcher]>,
+    access: Option<&crate::http::auth::AccessContext>,
+) -> Result<crate::storage::ListSeriesResult, AppError> {
+    let scan_limit = limit.max(crate::storage::DEFAULT_LIST_SERIES_LIMIT);
+    let mut cursor = bookmark.map(str::to_owned);
+    let mut series = Vec::with_capacity(limit);
+    let mut boundary = None;
+
+    let has_more_matches = loop {
+        let page = storage
+            .list_series(metric, Some(scan_limit), cursor.as_deref())
+            .await?;
+        let page_len = page.series.len();
+        let page_bookmark = page.bookmark;
+        let mut boundary_position = None;
+        let mut has_next_match = false;
+
+        for (index, sensor) in page.series.into_iter().enumerate() {
+            if !access.is_none_or(|access| access.can_access_sensor(&sensor.name))
+                || !matchers.is_none_or(|matchers| sensor_matches_matchers(&sensor, matchers))
+            {
+                continue;
+            }
+
+            if series.len() < limit {
+                series.push(sensor);
+                if series.len() == limit {
+                    boundary_position = Some(index + 1);
+                }
+            } else {
+                has_next_match = true;
+                break;
+            }
+        }
+
+        if let Some(position) = boundary_position {
+            // Requery the prefix to obtain the storage cursor for the last
+            // returned match, even when it lies in the middle of this page.
+            boundary = if position == page_len {
+                page_bookmark.clone()
+            } else {
+                storage
+                    .list_series(metric, Some(position), cursor.as_deref())
+                    .await?
+                    .bookmark
+            };
+        }
+
+        if has_next_match {
+            break true;
+        }
+        match page_bookmark {
+            Some(next_cursor) => cursor = Some(next_cursor),
+            None => break false,
+        }
+    };
+
+    Ok(crate::storage::ListSeriesResult {
+        series,
+        bookmark: if has_more_matches { boundary } else { None },
+    })
+}
+
 /// List all series (time series) in DCAT catalog format.
 #[utoipa::path(
     get,
@@ -555,34 +625,35 @@ pub async fn list_series(
     access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     Query(query): Query<SeriesQuery>,
 ) -> Result<axum::response::Response, AppError> {
-    let state = state.with_access(access.map(|extension| extension.0));
+    let access = access.map(|extension| extension.0);
     let metrics_registry = state.metrics.clone();
     let started = Instant::now();
 
     let result = async move {
-        let limit = query
-            .limit
-            .map(|l| l.min(crate::storage::MAX_LIST_SERIES_LIMIT));
-
-        let result = state
-            .storage
-            .list_series(query.metric.as_deref(), limit, query.bookmark.as_deref())
-            .await?;
+        let limit = query.limit.map(|l| l.clamp(1, crate::storage::MAX_LIST_SERIES_LIMIT));
 
         let label_matchers = match &query.selector {
             Some(selector) => Some(parse_selector_to_matchers(selector)?),
             None => None,
         };
 
-        let filtered_sensors: Vec<_> = if let Some(matchers) = &label_matchers {
-            result
-                .series
-                .into_iter()
-                .filter(|sensor| sensor_matches_matchers(sensor, matchers))
-                .collect()
+        let result = if label_matchers.is_some() || access.is_some() {
+            list_filtered_series(
+                state.storage.as_ref(),
+                query.metric.as_deref(),
+                limit.unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT),
+                query.bookmark.as_deref(),
+                label_matchers.as_deref(),
+                access.as_ref(),
+            )
+            .await?
         } else {
-            result.series
+            state
+                .storage
+                .list_series(query.metric.as_deref(), limit, query.bookmark.as_deref())
+                .await?
         };
+        let filtered_sensors = result.series;
 
         let datasets: Vec<Value> = filtered_sensors
             .iter()
@@ -690,6 +761,9 @@ pub async fn list_series(
         );
         if let Some(metric) = &query.metric {
             next_url = format!("{}&metric={}", next_url, urlencoding::encode(metric));
+        }
+        if let Some(selector) = &query.selector {
+            next_url = format!("{}&selector={}", next_url, urlencoding::encode(selector));
         }
 
         // Add Hydra view to catalog

@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 2s
+  evaluation_interval: 2s
+
+scrape_configs:
+  - job_name: sensapp_live
+    metrics_path: /prometheus/metrics
+    static_configs:
+      - targets: ["host.docker.internal:3017"]
+
+remote_write:
+  - url: http://host.docker.internal:3017/api/v1/prometheus_remote_write
+    protobuf_message: prometheus.WriteRequest
+    write_relabel_configs:
+      - source_labels: [__name__]
+        regex: sensapp_storage_ready
+        action: keep
+
+remote_read:
+  - url: http://host.docker.internal:3017/api/v1/prometheus_remote_read
+    read_recent: true
