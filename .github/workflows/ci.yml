@@ -18,8 +18,6 @@ env:
   RUST_BACKTRACE: 1
   DUCKDB_DOWNLOAD_LIB: "1"
   DUCKDB_CMAKE_BUILD_TYPE: Release
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   quality-checks:
@@ -349,6 +347,7 @@ jobs:
   docker-smoke:
     name: Docker Smoke Build (${{ matrix.name }})
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: quality-checks
     strategy:
       fail-fast: false
@@ -390,9 +389,7 @@ jobs:
           build-args: |
             FEATURES=${{ matrix.features }}
             NO_DEFAULT_FEATURES=true
-          cache-from: |
-            type=gha,scope=runtime-smoke
-            type=gha,scope=runtime-publish
+          cache-from: type=gha,scope=runtime-smoke
           cache-to: type=gha,scope=runtime-smoke,mode=max
 
       - name: Start runtime image against ClickHouse
@@ -446,6 +443,7 @@ jobs:
   docker-bigquery-compile:
     name: Experimental BigQuery Image Compile
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: quality-checks
     if: github.event_name == 'workflow_dispatch'
     steps:
@@ -522,59 +520,44 @@ jobs:
   #         file: lcov.info
   #         fail_ci_if_error: true
 
+  # Multi-arch image built with one native runner per platform (amd64 on
+  # ubuntu-24.04, arm64 on ubuntu-24.04-arm), no QEMU emulation. The reusable
+  # workflow pushes each platform by digest and publishes the merged manifest.
+  # Caveat: a job calling a reusable workflow cannot set timeout-minutes.
   docker:
     name: Docker Build & Push
-    runs-on: ubuntu-latest
     needs: [security-audit, frontend, python-sdk, test-matrix, prometheus-live, helm-validation, docker-smoke]
     if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')) || github.event_name == 'release'
+    uses: docker/github-builder/.github/workflows/build.yml@v1
     permissions:
       contents: read
+      id-token: write
       packages: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
+    with:
+      output: image
+      push: true
+      platforms: linux/amd64,linux/arm64
+      meta-images: ghcr.io/${{ github.repository }}
+      meta-tags: |
+        type=ref,event=branch
+        type=ref,event=pr
+        type=semver,pattern={{version}}
+        type=semver,pattern={{major}}.{{minor}}
+        type=sha
+      # cargo-chef dependency layers live in the builder stage, so they are
+      # only cached with mode=max.
+      cache: true
+      cache-mode: max
+      cache-scope: runtime-publish
+      set-meta-labels: true
+      build-args: |
+        FEATURES=postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached
+        NO_DEFAULT_FEATURES=true
+    secrets:
+      registry-auths: |
+        - registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: |
-            type=gha,scope=runtime-publish
-            type=gha,scope=runtime-smoke
-          cache-to: type=gha,scope=runtime-publish,mode=max
-          build-args: |
-            FEATURES=postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached
-            NO_DEFAULT_FEATURES=true
-            BUILDTIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
-            VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
-            REVISION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
 
   helm-package:
     name: Helm Package
