@@ -9,7 +9,7 @@
 //! - Multiple matchers combined with AND logic
 //! - The special `__name__` label for sensor name matching
 
-mod common;
+use crate::common;
 
 use anyhow::Result;
 use common::TestDb;

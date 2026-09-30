@@ -9,7 +9,7 @@
 //! - Sensor allow lists are enforced.
 //! - Health/docs/prometheus-metrics remain public even with auth enabled.
 
-mod common;
+use crate::common;
 
 use axum::Router;
 use axum::body::Body;

@@ -16,6 +16,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Incremental artifacts are useless on CI and bloat the caches.
+  CARGO_INCREMENTAL: 0
   DUCKDB_DOWNLOAD_LIB: "1"
   DUCKDB_CMAKE_BUILD_TYPE: Release
 
@@ -28,25 +30,13 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Rust toolchain
-        uses: moonrepo/setup-rust@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          channel: stable
-          components: rustfmt, clippy
-
-      - name: Cache cargo-make
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin/cargo-make
-          key: cargo-make-${{ runner.os }}
-
-      - name: Install cargo-make
-        run: |
-          if ! command -v cargo-make &> /dev/null; then
-            cargo install cargo-make
-          fi
+          toolchain: stable
+          components: rustfmt
 
       - name: Format check
-        run: cargo make fmt-check
+        run: cargo fmt -- --check
 
       - name: Verify release tag and chart version
         if: github.event_name == 'release'
@@ -72,24 +62,14 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Rust toolchain
-        uses: moonrepo/setup-rust@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          channel: stable
+          toolchain: stable
 
-      - name: Cache cargo-make
-        uses: actions/cache@v5
+      - name: Install cargo-make and cargo-audit (prebuilt)
+        uses: taiki-e/install-action@v2
         with:
-          path: ~/.cargo/bin/cargo-make
-          key: cargo-make-${{ runner.os }}
-
-      - name: Install cargo-make
-        run: |
-          if ! command -v cargo-make &> /dev/null; then
-            cargo install cargo-make
-          fi
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+          tool: cargo-make,cargo-audit
 
       - name: Security audit
         run: cargo make security-audit
@@ -151,6 +131,11 @@ jobs:
           uv run ruff format --check .
           python -m pytest -m 'not integration'
           uv build
+      - name: Smoke test wheel install
+        run: |
+          python -m venv /tmp/sensapp-wheel
+          /tmp/sensapp-wheel/bin/python -m pip install dist/*.whl
+          /tmp/sensapp-wheel/bin/python -c "import sensapp; print(sensapp.__all__[0])"
 
   test-matrix:
     name: Test Suite
@@ -223,26 +208,25 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Rust toolchain
-        uses: moonrepo/setup-rust@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          channel: ${{ matrix.rust }}
+          toolchain: ${{ matrix.rust }}
           components: clippy
-          cache-extra-identifier: ${{ matrix.feature }}
 
-      - name: Cache cargo-make
-        uses: actions/cache@v5
+      # Caches dependencies only (workspace crates are pruned), keyed per
+      # feature. Only main/develop save, PRs restore from main. Saving on
+      # failure lets a retry start warm.
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          path: ~/.cargo/bin/cargo-make
-          key: cargo-make-${{ runner.os }}
+          key: ${{ matrix.feature }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
 
-      - name: Install cargo-make
-        run: |
-          if ! command -v cargo-make &> /dev/null; then
-            cargo install cargo-make
-          fi
-
-      - name: Install sqlx-cli
-        run: cargo install sqlx-cli --no-default-features --features postgres,sqlite
+      - name: Install cargo-make (prebuilt)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-make
 
       - name: Start RRDCached test service
         if: matrix.feature == 'rrdcached'
@@ -266,18 +250,6 @@ jobs:
           ${{ matrix.test-env }}
           echo "${{ matrix.test-env }}" >> $GITHUB_ENV
 
-      - name: Run migrations (PostgreSQL)
-        if: matrix.feature == 'postgres'
-        run: cargo make migrate-postgres
-
-      - name: Run migrations (SQLite)
-        if: matrix.feature == 'sqlite'
-        run: cargo make migrate-sqlite
-
-      - name: Run migrations (TimescaleDB)
-        if: matrix.feature == 'timescaledb'
-        run: cargo make migrate-timescaledb
-
       - name: Run tests
         if: matrix.feature != 'rrdcached'
         run: cargo make check-${{ matrix.feature }}
@@ -290,7 +262,7 @@ jobs:
           cargo test --features rrdcached --no-default-features storage::rrdcached --lib
           cargo test --features rrdcached --no-default-features http::influxdb::tests::test_publish_influxdb -- --exact
           cargo test --features rrdcached --no-default-features http::influxdb::tests::test_publish_influxdb_with_numeric_enabled -- --exact
-          cargo test --features rrdcached --no-default-features --test rrdcached_integration
+          cargo test --features rrdcached --no-default-features --test integration rrdcached_integration::
 
   prometheus-live:
     name: Live Prometheus Compatibility
@@ -312,9 +284,13 @@ jobs:
           - 5432:5432
     steps:
       - uses: actions/checkout@v6
-      - uses: moonrepo/setup-rust@v1
+      - uses: dtolnay/rust-toolchain@master
         with:
-          channel: stable
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
       - name: Run live Prometheus integration checks
         env:
           SENSAPP_STORAGE_CONNECTION_STRING: postgres://postgres:postgres@127.0.0.1:5432/sensapp-test
@@ -349,6 +325,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs: quality-checks
+    # A release tags a commit that already passed this job on main; the publish
+    # job below still builds the image, so skip the duplicate amd64 build.
+    if: github.event_name != 'release'
     strategy:
       fail-fast: false
       matrix:
@@ -527,7 +506,11 @@ jobs:
   docker:
     name: Docker Build & Push
     needs: [security-audit, frontend, python-sdk, test-matrix, prometheus-live, helm-validation, docker-smoke]
-    if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')) || github.event_name == 'release'
+    # docker-smoke is skipped on releases: a skipped need must not skip this job,
+    # but a failed or cancelled one still must.
+    if: >-
+      !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') &&
+      ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')) || github.event_name == 'release')
     uses: docker/github-builder/.github/workflows/build.yml@v1
     permissions:
       contents: read
@@ -602,7 +585,9 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     needs: [security-audit, frontend, python-sdk, test-matrix, helm-validation, docker-smoke, docker, helm-package]
-    if: github.event_name == 'release' && github.event.action == 'published'
+    if: >-
+      !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') &&
+      github.event_name == 'release' && github.event.action == 'published'
     permissions:
       contents: write
       packages: write
@@ -612,9 +597,9 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Rust toolchain
-        uses: moonrepo/setup-rust@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          channel: stable
+          toolchain: stable
 
       - name: Verify crate package
         run: cargo package --locked

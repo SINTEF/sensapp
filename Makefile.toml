@@ -102,12 +102,14 @@ args = [
   "warnings",
 ]
 
+# --all-targets is a superset of --tests (lib, bins, tests, examples), so check-*
+# only needs this single clippy pass after the test build.
 [tasks.template-clippy-tests]
 private = true
 command = "cargo"
 args = [
   "clippy",
-  "--tests",
+  "--all-targets",
   "--features",
   "${CARGO_MAKE_TASK_FEATURE}",
   "--no-default-features",
@@ -120,9 +122,7 @@ args = [
 [tasks.check-sqlite]
 description = "Run all SQLite checks"
 dependencies = [
-  "build-sqlite",
   "test-sqlite",
-  "clippy-sqlite",
   "clippy-test-sqlite",
 ]
 
@@ -154,9 +154,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "sqlite" }
 [tasks.check-postgres]
 description = "Run all PostgreSQL checks"
 dependencies = [
-  "build-postgres",
   "test-postgres",
-  "clippy-postgres",
   "clippy-test-postgres",
 ]
 
@@ -188,9 +186,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "postgres" }
 [tasks.check-clickhouse]
 description = "Run all ClickHouse checks"
 dependencies = [
-  "build-clickhouse",
   "test-clickhouse",
-  "clippy-clickhouse",
   "clippy-test-clickhouse",
 ]
 
@@ -222,9 +218,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "clickhouse" }
 [tasks.check-timescaledb]
 description = "Run all TimescaleDB checks"
 dependencies = [
-  "build-timescaledb",
   "test-timescaledb",
-  "clippy-timescaledb",
   "clippy-test-timescaledb",
 ]
 
@@ -256,9 +250,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "timescaledb" }
 [tasks.check-duckdb]
 description = "Run all DuckDB checks"
 dependencies = [
-  "build-duckdb",
   "test-duckdb",
-  "clippy-duckdb",
   "clippy-test-duckdb",
 ]
 
@@ -290,9 +282,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "duckdb" }
 [tasks.check-bigquery]
 description = "Run all BigQuery checks"
 dependencies = [
-  "build-bigquery",
   "test-bigquery",
-  "clippy-bigquery",
   "clippy-test-bigquery",
 ]
 
@@ -325,9 +315,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "bigquery" }
 [tasks.check-rrdcached]
 description = "Run all RRDCached checks"
 dependencies = [
-  "build-rrdcached",
   "test-rrdcached",
-  "clippy-rrdcached",
   "clippy-test-rrdcached",
 ]
 
@@ -339,18 +327,13 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached" }
 
 [tasks.test-rrdcached]
 private = false
-description = "Test RRDCached with unit/bin tests plus the dedicated RRDCached integration suite"
-command = "cargo"
-args = [
-  "test",
-  "--features",
-  "rrdcached",
-  "--no-default-features",
-  "--lib",
-  "--bins",
-  "--test",
-  "rrdcached_integration",
-]
+description = "Test RRDCached with unit/bin tests plus the dedicated RRDCached integration module"
+script_runner = "@shell"
+script = '''
+set -e
+cargo test --features rrdcached --no-default-features --lib --bins
+cargo test --features rrdcached --no-default-features --test integration rrdcached_integration::
+'''
 env = { "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_RRDCACHED}" }
 
 [tasks.clippy-rrdcached]
@@ -369,9 +352,7 @@ env = { "CARGO_MAKE_TASK_FEATURE" = "rrdcached" }
 [tasks.check-working-features]
 description = "Run checks with both PostgreSQL and SQLite features"
 dependencies = [
-  "build-working",
   "test-working",
-  "clippy-working",
   "clippy-test-working",
 ]
 

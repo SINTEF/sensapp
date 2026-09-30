@@ -1,5 +1,3 @@
-mod common;
-
 #[cfg(feature = "clickhouse")]
 mod clickhouse_tests {
     use crate::common::{DatabaseType, TestDb};

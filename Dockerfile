@@ -9,13 +9,21 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        ca-certificates \
         clang \
         cmake \
+        curl \
         libssl-dev \
         pkg-config \
+        xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-RUN cargo install --locked cargo-chef --version 0.1.78
+# Prebuilt static cargo-chef: compiling it from source took minutes on every cold cache.
+ARG CARGO_CHEF_VERSION=0.1.78
+RUN arch="$(uname -m)" \
+    && curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}/cargo-chef-${arch}-unknown-linux-musl.tar.xz" \
+    | tar -xJ --strip-components=1 -C /usr/local/bin "cargo-chef-${arch}-unknown-linux-musl/cargo-chef"
 
 FROM chef AS planner
 
@@ -44,6 +52,13 @@ RUN if [ "$NO_DEFAULT_FEATURES" = "true" ]; then \
         cargo build --locked --release --bin sensapp --features "$FEATURES"; \
     fi
 
+# The duckdb feature links the prebuilt libduckdb dynamically (DUCKDB_DOWNLOAD_LIB):
+# stage it so the runtime image can ship it. Empty when duckdb is not enabled.
+RUN mkdir -p /out/lib \
+    && if [ -d target/duckdb-download ]; then \
+        find target/duckdb-download -name 'libduckdb.so' -exec cp {} /out/lib/ \; ; \
+    fi
+
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
@@ -59,6 +74,8 @@ RUN apt-get update \
 WORKDIR /var/lib/sensapp
 
 COPY --from=builder /app/target/release/sensapp /usr/local/bin/sensapp
+COPY --from=builder /out/lib/ /usr/local/lib/
+RUN ldconfig
 
 ENV SENSAPP_ENDPOINT=0.0.0.0 \
     SENSAPP_PORT=3000 \

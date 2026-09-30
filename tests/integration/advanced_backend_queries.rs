@@ -8,7 +8,7 @@
     allow(dead_code, unused_imports)
 )]
 
-mod common;
+use crate::common;
 
 use anyhow::Result;
 use common::{DatabaseType, TestDb};

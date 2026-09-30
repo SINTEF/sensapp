@@ -1,6 +1,6 @@
 #![cfg_attr(feature = "rrdcached", allow(unused_imports, dead_code))]
 
-mod common;
+use crate::common;
 
 use anyhow::Result;
 use axum::http::StatusCode;

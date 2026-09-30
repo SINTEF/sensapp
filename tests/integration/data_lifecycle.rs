@@ -11,7 +11,7 @@
 
 //! Deleting series and samples, on every backend that supports it.
 
-mod common;
+use crate::common;
 
 use anyhow::Result;
 use common::{DatabaseType, TestDb};

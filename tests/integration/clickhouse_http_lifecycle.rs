@@ -1,10 +1,8 @@
-mod common;
-
 #[cfg(feature = "clickhouse")]
 mod clickhouse_http_lifecycle_tests {
-    use super::common::db::DbHelpers;
-    use super::common::http::TestApp;
-    use super::common::{DatabaseType, TestDb};
+    use crate::common::db::DbHelpers;
+    use crate::common::http::TestApp;
+    use crate::common::{DatabaseType, TestDb};
     use anyhow::Result;
     use axum::http::StatusCode;
     use hifitime::Epoch;
