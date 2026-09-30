@@ -296,7 +296,7 @@ where
     Ok(keep_indices)
 }
 
-fn bucket_start(timestamp_us: i64, origin_us: i64, step_us: i64) -> i64 {
+pub(crate) fn bucket_start(timestamp_us: i64, origin_us: i64, step_us: i64) -> i64 {
     origin_us + (timestamp_us - origin_us).div_euclid(step_us) * step_us
 }
 

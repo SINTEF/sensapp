@@ -44,9 +44,7 @@ curl 'http://127.0.0.1:3000/api/v1/query?query=temperature&format=csv'
 
 ## Python Quickstart
 
-For a small write, query, and plotting tutorial, open the [Jupyter quickstart](./python/quickstart.ipynb).
-
-Check the [python/sensapp](./python/sensapp) documentation for more details.
+Check the [python/sensapp](./python/sensapp) documentation or the [python quickstart notebook](./python/quickstart.ipynb) for more details.
 
 ```python
 import asyncio

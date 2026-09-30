@@ -128,6 +128,8 @@ SensApp can compose sensors together. For example if you have a sensor that meas
 
 This can be useful to simplify the data model and the queries. Composite Sensors can also be represented as materialised views in the database, which can improve the read performances.
 
+> **Status:** not implemented. The simple PromQL endpoint (`/api/v1/query`) already combines series at query time with `sum`, `avg`, `min`, `max` and `count`, grouped `by` or `without` labels and bucketed by `step`. This covers the common "average temperature across a room" need. A composite sensor could later be a saved cross-series query, materialised only if read performances require it.
+
 Virtual Sensors time-series data is joined through the timestamp, using a configurable window size. For example every second, minute, day… It is possible to have a composite sensor consisting of only one sensor to enable resampling.
 
 ## Optimisations and Compression

@@ -754,6 +754,76 @@ async fn sensor_allow_list_controls_writes_and_reads() {
     assert!(!body.contains("humidity"));
 }
 
+/// Cross-series aggregation must only combine the series the token may read.
+#[tokio::test]
+#[serial]
+async fn sensor_allow_list_limits_cross_series_aggregation() {
+    sensapp::config::load_configuration_for_tests().unwrap();
+    let db = TestDb::new().await.expect("test db");
+    let storage = db.storage();
+    let auth = AuthConfig::from_secret(TEST_SECRET).unwrap();
+    let app = build_test_router(storage.clone(), Some(auth));
+
+    // The default query window is the last hour, so the samples must be recent
+    let recent = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 60;
+    publish_senml_data(
+        &format!(
+            r#"[{{"n":"temperature","v":21.5,"t":{recent}}},{{"n":"humidity","v":55.0,"t":{recent}}}]"#
+        ),
+        storage.clone(),
+    )
+    .await
+    .unwrap();
+
+    let query = urlencoding::encode(r#"sum({__name__=~"temperature|humidity"})"#).into_owned();
+    let aggregate = |token: String, expression: String| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::get(format!("/api/v1/query?format=jsonl&query={expression}"))
+                        .header("authorization", format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&bytes)
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .collect::<Vec<_>>()
+        }
+    };
+
+    // Unrestricted token: both sensors are combined
+    let all = aggregate(read_write_token(), query.clone()).await;
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0]["value"].as_f64(), Some(76.5));
+
+    // Restricted token: humidity is invisible, so it is not part of the sum
+    let scoped = aggregate(sensor_token("read", &["temperature"]), query.clone()).await;
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0]["value"].as_f64(), Some(21.5));
+
+    // The count is scoped as well
+    let count_query =
+        urlencoding::encode(r#"count({__name__=~"temperature|humidity"})"#).into_owned();
+    let scoped_count = aggregate(sensor_token("read", &["temperature"]), count_query).await;
+    assert_eq!(scoped_count[0]["value"].as_f64(), Some(1.0));
+
+    // A token allowed on no matching sensor sees nothing, not a zero
+    let nothing = aggregate(sensor_token("read", &["pressure"]), query).await;
+    assert!(nothing.is_empty());
+}
+
 // ---------------------------------------------------------------------------
 // Tests: deleting series and samples
 // ---------------------------------------------------------------------------

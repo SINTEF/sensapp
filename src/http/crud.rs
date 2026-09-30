@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use std::str::FromStr;
 use std::time::Instant;
 
-mod promql_duration {
+pub(crate) mod promql_duration {
     use anyhow::{Result, anyhow};
     use nom::{
         Parser,

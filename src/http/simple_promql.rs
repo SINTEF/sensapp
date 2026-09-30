@@ -4,21 +4,30 @@
 //! data using familiar PromQL syntax (e.g., `my_metric{env="prod"}`) without needing
 //! a full Prometheus setup.
 //!
-//! Only simple selectors are supported:
-//! - `VectorSelector` (instant query): `my_metric{label="value"}`
-//! - `MatrixSelector` (range query): `my_metric{label="value"}[5m]`
+//! Supported expressions:
+//! - `VectorSelector` (last hour): `my_metric{label="value"}`
+//! - `MatrixSelector` (given window): `my_metric{label="value"}[5m]`
+//! - A cross-series aggregation of either selector, optionally grouped:
+//!   `avg by (room) (temperature[24h])`. Operators: `sum`, `avg`, `min`, `max`, `count`.
+//!   The `step` query parameter sets the time bucket width; without it the whole window is a
+//!   single bucket. Unlike strict PromQL, a matrix selector is accepted inside an aggregation,
+//!   because it is the only way to choose the window.
 //!
-//! Complex operations like `sum()`, `rate()`, or arithmetic are rejected.
+//! Other operations like `rate()`, arithmetic or `topk()` are rejected.
 
 use crate::datamodel::SensAppDateTime;
 use crate::exporters::{ArrowConverter, CsvConverter, JsonlConverter, SenMLConverter};
 use crate::http::app_error::AppError;
 use crate::http::crud::ExportFormat;
+use crate::http::crud::promql_duration;
 use crate::http::state::HttpServerState;
+use crate::storage::Aggregation;
+use crate::storage::common::datetime_to_micros;
+use crate::storage::cross_series::{CrossSeriesQuery, Grouping, aggregate_across_series};
 use crate::storage::query::{LabelMatcher, MatcherType};
 use axum::extract::{Query, State};
 use axum::response::Response;
-use rusty_promql_parser::{Expr, expr};
+use rusty_promql_parser::{Expr, GroupingAction, expr};
 use serde::Deserialize;
 use std::time::Instant;
 
@@ -32,6 +41,8 @@ pub struct PromQLQuery {
     pub query: String,
     /// Output format: senml, csv, jsonl, or arrow (default: senml)
     pub format: Option<String>,
+    /// Time bucket width for aggregations, in Prometheus duration syntax (e.g. `5m`)
+    pub step: Option<String>,
 }
 
 /// Convert PromQL LabelMatchOp to SensApp MatcherType
@@ -78,7 +89,17 @@ struct ParsedQuery {
     matchers: Vec<LabelMatcher>,
     start_time: Option<SensAppDateTime>,
     end_time: Option<SensAppDateTime>,
+    aggregate: Option<AggregateSpec>,
 }
+
+/// A cross-series aggregation wrapped around the selector
+#[derive(Debug)]
+struct AggregateSpec {
+    aggregation: Aggregation,
+    grouping: Option<Grouping>,
+}
+
+const SIMPLE_QUERY_HINT: &str = "Only selectors like 'metric_name{label=\"value\"}' or 'metric_name[5m]', optionally wrapped in sum, avg, min, max or count, are supported.";
 
 fn binary_operation_error_message(query: &str) -> String {
     let trimmed = query.trim();
@@ -92,12 +113,106 @@ fn binary_operation_error_message(query: &str) -> String {
         return "Binary operations (like +, -, *, /) are not supported. If you intended to query a sensor named like 'demo-temperature', PromQL parses '-' as subtraction. Query it as '{__name__=\"demo-temperature\"}[5m]' or use an underscore-friendly metric name for bare selectors.".to_string();
     }
 
-    "Binary operations (like +, -, *, /) are not supported. Only simple selectors like 'metric_name{label=\"value\"}' or 'metric_name[5m]' are supported.".to_string()
+    format!("Binary operations (like +, -, *, /) are not supported. {SIMPLE_QUERY_HINT}")
+}
+
+/// Selectors read the last `window_ms` milliseconds
+fn selector_query(
+    selector: &rusty_promql_parser::VectorSelector,
+    window_ms: i64,
+) -> Result<ParsedQuery, AppError> {
+    let matchers = extract_matchers_from_vector_selector(selector);
+
+    if matchers.is_empty() {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "Query must have at least one matcher (metric name or label)"
+        )));
+    }
+
+    let now = hifitime::Epoch::now().map_err(|e| {
+        AppError::internal_server_error(anyhow::anyhow!("Failed to get current time: {}", e))
+    })?;
+    let start_time = now - hifitime::Duration::from_milliseconds(window_ms as f64);
+
+    Ok(ParsedQuery {
+        matchers,
+        start_time: Some(start_time),
+        end_time: Some(now),
+        aggregate: None,
+    })
+}
+
+fn aggregate_spec(agg: &rusty_promql_parser::Aggregation) -> Result<AggregateSpec, AppError> {
+    let aggregation = match agg.op.to_ascii_lowercase().as_str() {
+        "sum" => Aggregation::Sum,
+        "avg" => Aggregation::Avg,
+        "min" => Aggregation::Min,
+        "max" => Aggregation::Max,
+        "count" => Aggregation::Count,
+        other => {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Aggregation '{other}' is not supported. Supported aggregations: sum, avg, min, max, count."
+            )));
+        }
+    };
+
+    let grouping = agg.grouping.as_ref().map(|grouping| match grouping.action {
+        GroupingAction::By => Grouping::By(grouping.labels.clone()),
+        GroupingAction::Without => Grouping::Without(grouping.labels.clone()),
+    });
+
+    Ok(AggregateSpec {
+        aggregation,
+        grouping,
+    })
+}
+
+/// Validate a parsed expression and extract what the storage layer needs
+fn parse_expr(ast: Expr, query: &str) -> Result<ParsedQuery, AppError> {
+    match ast {
+        // Instant queries use a default lookback period
+        Expr::VectorSelector(selector) => selector_query(&selector, DEFAULT_LOOKBACK_MS),
+        Expr::MatrixSelector(selector) => {
+            selector_query(&selector.selector, selector.range_millis())
+        }
+        Expr::Paren(inner) => parse_expr(*inner, query),
+        Expr::Aggregation(agg) => {
+            let spec = aggregate_spec(&agg)?;
+            if agg.param.is_some() {
+                return Err(AppError::bad_request(anyhow::anyhow!(
+                    "Parametric aggregations are not supported. {SIMPLE_QUERY_HINT}"
+                )));
+            }
+            let mut parsed = parse_expr(agg.expr, query)?;
+            if parsed.aggregate.is_some() {
+                return Err(AppError::bad_request(anyhow::anyhow!(
+                    "Nested aggregations are not supported."
+                )));
+            }
+            parsed.aggregate = Some(spec);
+            Ok(parsed)
+        }
+        // Reject all other complex expressions
+        Expr::Call(_) => Err(AppError::bad_request(anyhow::anyhow!(
+            "Function calls (like rate(), increase(), histogram_quantile()) are not supported. {SIMPLE_QUERY_HINT}"
+        ))),
+        Expr::Binary(_) => Err(AppError::bad_request(anyhow::anyhow!(
+            binary_operation_error_message(query)
+        ))),
+        Expr::Unary(_) => Err(AppError::bad_request(anyhow::anyhow!(
+            "Unary operations are not supported. {SIMPLE_QUERY_HINT}"
+        ))),
+        Expr::Subquery(_) => Err(AppError::bad_request(anyhow::anyhow!(
+            "Subqueries are not supported. {SIMPLE_QUERY_HINT}"
+        ))),
+        Expr::Number(_) | Expr::String(_) => Err(AppError::bad_request(anyhow::anyhow!(
+            "Literal values are not valid queries. Use a metric selector like 'metric_name{{label=\"value\"}}'."
+        ))),
+    }
 }
 
 /// Parse and validate a PromQL query, returning the extracted information
 fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
-    // Parse the query
     let (rest, ast) = expr(query).map_err(|e| {
         AppError::bad_request(anyhow::anyhow!("Failed to parse PromQL query: {:?}", e))
     })?;
@@ -110,140 +225,7 @@ fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
         )));
     }
 
-    // Extract information based on the AST type
-    match ast {
-        Expr::VectorSelector(selector) => {
-            let matchers = extract_matchers_from_vector_selector(&selector);
-
-            if matchers.is_empty() {
-                return Err(AppError::bad_request(anyhow::anyhow!(
-                    "Query must have at least one matcher (metric name or label)"
-                )));
-            }
-
-            // For instant queries, use a default lookback period (1 hour)
-            let now = hifitime::Epoch::now().map_err(|e| {
-                AppError::internal_server_error(anyhow::anyhow!(
-                    "Failed to get current time: {}",
-                    e
-                ))
-            })?;
-            let start_time =
-                now - hifitime::Duration::from_milliseconds(DEFAULT_LOOKBACK_MS as f64);
-
-            Ok(ParsedQuery {
-                matchers,
-                start_time: Some(start_time),
-                end_time: Some(now),
-            })
-        }
-        Expr::MatrixSelector(selector) => {
-            let matchers = extract_matchers_from_vector_selector(&selector.selector);
-
-            if matchers.is_empty() {
-                return Err(AppError::bad_request(anyhow::anyhow!(
-                    "Query must have at least one matcher (metric name or label)"
-                )));
-            }
-
-            // Calculate time range from the matrix selector's range
-            let range_ms = selector.range_millis();
-            let now = hifitime::Epoch::now().map_err(|e| {
-                AppError::internal_server_error(anyhow::anyhow!(
-                    "Failed to get current time: {}",
-                    e
-                ))
-            })?;
-            let start_time = now - hifitime::Duration::from_milliseconds(range_ms as f64);
-
-            Ok(ParsedQuery {
-                matchers,
-                start_time: Some(start_time),
-                end_time: Some(now),
-            })
-        }
-        // Reject all complex expressions
-        Expr::Aggregation(_) => Err(AppError::bad_request(anyhow::anyhow!(
-            "Aggregation expressions (like sum(), avg(), count()) are not supported. Only simple selectors like 'metric_name{{label=\"value\"}}' or 'metric_name[5m]' are supported."
-        ))),
-        Expr::Call(_) => Err(AppError::bad_request(anyhow::anyhow!(
-            "Function calls (like rate(), increase(), histogram_quantile()) are not supported. Only simple selectors like 'metric_name{{label=\"value\"}}' or 'metric_name[5m]' are supported."
-        ))),
-        Expr::Binary(_) => Err(AppError::bad_request(anyhow::anyhow!(
-            binary_operation_error_message(query)
-        ))),
-        Expr::Unary(_) => Err(AppError::bad_request(anyhow::anyhow!(
-            "Unary operations are not supported. Only simple selectors like 'metric_name{{label=\"value\"}}' or 'metric_name[5m]' are supported."
-        ))),
-        Expr::Paren(inner) => {
-            // Unwrap parentheses and try again
-            parse_promql_query_from_expr(*inner)
-        }
-        Expr::Subquery(_) => Err(AppError::bad_request(anyhow::anyhow!(
-            "Subqueries are not supported. Only simple selectors like 'metric_name{{label=\"value\"}}' or 'metric_name[5m]' are supported."
-        ))),
-        Expr::Number(_) | Expr::String(_) => Err(AppError::bad_request(anyhow::anyhow!(
-            "Literal values are not valid queries. Use a metric selector like 'metric_name{{label=\"value\"}}'."
-        ))),
-    }
-}
-
-/// Parse a PromQL query from an already-parsed Expr
-fn parse_promql_query_from_expr(ast: Expr) -> Result<ParsedQuery, AppError> {
-    match ast {
-        Expr::VectorSelector(selector) => {
-            let matchers = extract_matchers_from_vector_selector(&selector);
-
-            if matchers.is_empty() {
-                return Err(AppError::bad_request(anyhow::anyhow!(
-                    "Query must have at least one matcher (metric name or label)"
-                )));
-            }
-
-            let now = hifitime::Epoch::now().map_err(|e| {
-                AppError::internal_server_error(anyhow::anyhow!(
-                    "Failed to get current time: {}",
-                    e
-                ))
-            })?;
-            let start_time =
-                now - hifitime::Duration::from_milliseconds(DEFAULT_LOOKBACK_MS as f64);
-
-            Ok(ParsedQuery {
-                matchers,
-                start_time: Some(start_time),
-                end_time: Some(now),
-            })
-        }
-        Expr::MatrixSelector(selector) => {
-            let matchers = extract_matchers_from_vector_selector(&selector.selector);
-
-            if matchers.is_empty() {
-                return Err(AppError::bad_request(anyhow::anyhow!(
-                    "Query must have at least one matcher (metric name or label)"
-                )));
-            }
-
-            let range_ms = selector.range_millis();
-            let now = hifitime::Epoch::now().map_err(|e| {
-                AppError::internal_server_error(anyhow::anyhow!(
-                    "Failed to get current time: {}",
-                    e
-                ))
-            })?;
-            let start_time = now - hifitime::Duration::from_milliseconds(range_ms as f64);
-
-            Ok(ParsedQuery {
-                matchers,
-                start_time: Some(start_time),
-                end_time: Some(now),
-            })
-        }
-        Expr::Paren(inner) => parse_promql_query_from_expr(*inner),
-        _ => Err(AppError::bad_request(anyhow::anyhow!(
-            "Only simple selectors are supported."
-        ))),
-    }
+    parse_expr(ast, query)
 }
 
 /// Simple PromQL query endpoint.
@@ -263,7 +245,8 @@ fn parse_promql_query_from_expr(ast: Expr) -> Result<ParsedQuery, AppError> {
     tag = "SensApp",
     params(
         ("query" = String, Query, description = "PromQL query string (e.g., 'my_metric{label=\"value\"}' or 'my_metric[5m]')"),
-        ("format" = Option<String>, Query, description = "Output format: senml (default), csv, jsonl, or arrow")
+        ("format" = Option<String>, Query, description = "Output format: senml (default), csv, jsonl, or arrow"),
+        ("step" = Option<String>, Query, description = "Bucket width for aggregation queries, using Prometheus duration syntax (e.g., '5m'). Without it, the whole window is one bucket")
     ),
     responses(
         (status = 200, description = "Query results in requested format", body = Value),
@@ -283,12 +266,31 @@ pub async fn simple_promql_query(
     let result = async move {
         let parsed = parse_promql_query(&query.query)?;
 
+        let step_us =
+            match query.step.as_deref() {
+                Some(step) => {
+                    if parsed.aggregate.is_none() {
+                        return Err(AppError::bad_request(anyhow::anyhow!(
+                            "'step' is only supported with an aggregation like avg(...)"
+                        )));
+                    }
+                    let step_ms = promql_duration::parse_duration_millis(step).map_err(|e| {
+                        AppError::bad_request(anyhow::anyhow!("Invalid step duration: {}", e))
+                    })?;
+                    Some(step_ms.checked_mul(1000).ok_or_else(|| {
+                        AppError::bad_request(anyhow::anyhow!("'step' is too large"))
+                    })?)
+                }
+                None => None,
+            };
+
+        // Prometheus series are numeric, so an aggregation only considers numeric sensors
         let results = crate::http::limits::query_selector_bounded(
             &state.storage,
             &parsed.matchers,
             parsed.start_time,
             parsed.end_time,
-            false,
+            parsed.aggregate.is_some(),
         )
         .await?;
 
@@ -297,6 +299,24 @@ pub async fn simple_promql_query(
             .iter()
             .map(|sensor_data| sensor_data.samples.len())
             .sum();
+
+        let results = match parsed.aggregate {
+            Some(spec) => aggregate_across_series(
+                results,
+                &CrossSeriesQuery {
+                    aggregation: spec.aggregation,
+                    grouping: spec.grouping,
+                    step_us,
+                    origin_us: parsed
+                        .start_time
+                        .as_ref()
+                        .map(datetime_to_micros)
+                        .unwrap_or(0),
+                },
+            )
+            .map_err(AppError::bad_request)?,
+            None => results,
+        };
 
         let format = match query.format.as_deref() {
             Some(format_str) => ExportFormat::from_extension(format_str).ok_or_else(|| {
@@ -405,15 +425,50 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_aggregation() {
-        let result = parse_promql_query("sum(my_metric)");
-        assert!(result.is_err());
-        // Check that the error is about aggregation
-        match result {
-            Err(AppError::BadRequest(err)) => {
-                assert!(err.to_string().contains("Aggregation"));
+    fn test_parse_aggregations() {
+        let parsed = parse_promql_query("avg(my_metric)").unwrap();
+        let spec = parsed.aggregate.unwrap();
+        assert_eq!(spec.aggregation, Aggregation::Avg);
+        assert_eq!(spec.grouping, None);
+        assert_eq!(parsed.matchers.len(), 1);
+
+        let parsed = parse_promql_query(r#"sum by (room, floor) (temp{env="prod"}[5m])"#).unwrap();
+        let spec = parsed.aggregate.unwrap();
+        assert_eq!(spec.aggregation, Aggregation::Sum);
+        assert_eq!(
+            spec.grouping,
+            Some(Grouping::By(vec!["room".into(), "floor".into()]))
+        );
+        assert_eq!(parsed.matchers.len(), 2);
+        assert!(parsed.start_time.is_some());
+
+        let parsed = parse_promql_query("count without (id) ((temp))").unwrap();
+        let spec = parsed.aggregate.unwrap();
+        assert_eq!(spec.aggregation, Aggregation::Count);
+        assert_eq!(spec.grouping, Some(Grouping::Without(vec!["id".into()])));
+
+        for op in ["min", "max"] {
+            assert!(parse_promql_query(&format!("{op}(temp)")).is_ok());
+        }
+        assert!(parse_promql_query("temp").unwrap().aggregate.is_none());
+    }
+
+    #[test]
+    fn test_reject_unsupported_aggregations() {
+        for query in [
+            "stddev(my_metric)",
+            "quantile(0.5, my_metric)",
+            "topk(3, my_metric)",
+            "count_values(\"v\", my_metric)",
+            "sum(avg(my_metric))",
+            "sum(rate(my_metric[5m]))",
+            "sum(my_metric) + 1",
+            "sum({})",
+        ] {
+            match parse_promql_query(query) {
+                Err(AppError::BadRequest(_)) => {}
+                other => panic!("expected BadRequest for {query}, got {other:?}"),
             }
-            _ => panic!("Expected BadRequest error with Aggregation message"),
         }
     }
 

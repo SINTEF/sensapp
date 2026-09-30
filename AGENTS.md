@@ -27,6 +27,10 @@ We use a folder-based task tracking system to maintain visibility into ongoing w
 - **`ideas/`** — Ideas for future work, improvements, or features. Add a markdown file for each idea, even if it's rough or speculative.
 - **`done/`** — Completed tasks. When a task from `current_tasks/` is finished, move it here. This provides a historical record of what has been accomplished.
 
+## Documentation
+
+It is important to document the project correctly, however please refrain from editing the project main [README.md](README.md) as it is human written and kept short on purpose. You can invite the human user to edit it if justified.
+
 **Rules:**
 - Always check `current_tasks/` before starting work to understand what's in progress.
 - When completing a major task, move its file from `current_tasks/` to `done/`.

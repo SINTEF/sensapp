@@ -8,6 +8,7 @@ pub mod error;
 pub use error::StorageError;
 
 pub mod common;
+pub mod cross_series;
 pub mod data_query;
 pub mod query;
 
