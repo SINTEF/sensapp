@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use anyhow::Result;
 use sensapp::config::load_configuration_for_tests;

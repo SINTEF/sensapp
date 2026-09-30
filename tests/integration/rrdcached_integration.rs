@@ -1,5 +1,3 @@
-mod common;
-
 #[cfg(feature = "rrdcached")]
 mod rrdcached_tests {
     use crate::common::{DatabaseType, TestDb};

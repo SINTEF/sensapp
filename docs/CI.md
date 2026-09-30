@@ -7,7 +7,8 @@ tags, published releases, and manual dispatch.
 
 - Rust formatting, a blocking `cargo audit` (with the documented RSA advisory
   exception in `Makefile.toml`), frontend lint/typecheck/tests/build and a
-  high-severity npm audit, and Python 3.14 SDK unit tests, lint, and package build.
+  high-severity npm audit, and Python 3.14 SDK unit tests, lint, package build and
+  wheel install smoke test.
 
 The OpenAPI generator has been upgraded to 0.99.0 and its client regenerated.
 The generator still depends on a vulnerable `js-yaml`, so `package.json`
@@ -23,9 +24,9 @@ see `ideas/remove-frontend-js-yaml-override.md` for the override follow-up.
   actually started with ClickHouse, then `tests/clickhouse_container_smoke.py`
   checks readiness, publish, query, and service metrics. Live Python SDK tests
   also run against this image. CI stops ClickHouse and verifies that readiness
-  becomes unhealthy, restarts it, and verifies recovery. The separate SDK
-  workflow also starts a SQLite-backed server for its live tests whenever SDK
-  paths change.
+  becomes unhealthy, restarts it, and verifies recovery. The image smoke job is
+  skipped on published releases: the tagged commit already passed it on `main`,
+  and the publish job builds the image again anyway.
 
 The image push depends on these checks. Publishing a GitHub Release for a
 `vX.Y.Z` tag is the release trigger; a tag push alone runs CI but does not
@@ -33,6 +34,22 @@ publish packages. CI first checks that the tag, Cargo package version, and Helm
 `appVersion` agree. The release job waits for the image and chart jobs, verifies
 the crate package, and publishes it to crates.io. The Python SDK package is
 built and checked, but is not yet published by this workflow.
+
+## Build time and caching
+
+- Rust jobs use `Swatinem/rust-cache` with one cache per storage feature. Only pushes to
+  `main`/`develop` save it; pull requests restore from `main`. The first `main` run after a
+  `Cargo.lock` change is cold. Jobs save the cache even when they fail, so a retry starts warm.
+- `duckdb` links the prebuilt `libduckdb` (`DUCKDB_DOWNLOAD_LIB=1`, see `.cargo/config.toml`)
+  and must not be given the `bundled` feature, which compiles DuckDB from C++ (~20 min) and
+  ignores that variable. The Docker runtime image ships `libduckdb.so` in `/usr/local/lib`.
+- `cargo make check-<feature>` runs the tests and one `clippy --all-targets` pass; the build is
+  a by-product of the test run.
+- Tools come prebuilt (`taiki-e/install-action`, cargo-chef release binaries). No sqlx-cli is
+  needed: every backend runs its own migrations (`create_or_migrate`) when the tests connect.
+- All integration tests are one binary (`tests/integration/main.rs`, one module per former
+  file), so the dependency tree is linked once. Filter by module:
+  `cargo test --test integration jwt_auth::`.
 
 ## Local reproduction
 

@@ -1,5 +1,3 @@
-mod common;
-
 use rust_decimal::Decimal;
 use sensapp::infer::columns::{InferedColumn, infer_column};
 use sensapp::infer::datetime_guesser::likely_datetime_column;

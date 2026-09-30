@@ -90,7 +90,7 @@ Integration tests are available but **not enabled by default** due to the limita
 ```bash
 # Ensure RRDCached is running on port 42217
 TEST_DATABASE_URL="rrdcached://127.0.0.1:42217?preset=hoarder" \
-  cargo test --no-default-features --features rrdcached --test rrdcached_integration
+  cargo test --no-default-features --features rrdcached --test integration rrdcached_integration::
 ```
 
 Note: Generic storage tests that depend on full metadata support will fail. This includes:

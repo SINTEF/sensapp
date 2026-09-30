@@ -1,6 +1,6 @@
 #![cfg(not(feature = "rrdcached"))]
 
-mod common;
+use crate::common;
 
 use anyhow::Result;
 use axum::http::StatusCode;

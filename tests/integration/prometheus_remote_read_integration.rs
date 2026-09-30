@@ -5,7 +5,7 @@
 //! - Queries the storage backend
 //! - Returns properly formatted responses (both SAMPLES and STREAMED_XOR_CHUNKS)
 
-mod common;
+use crate::common;
 
 use anyhow::Result;
 use axum::Router;

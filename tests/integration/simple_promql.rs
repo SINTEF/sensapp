@@ -3,7 +3,7 @@
 //! Tests the `GET /api/v1/query` endpoint with various PromQL queries.
 //! The endpoint supports multiple export formats: SenML (default), CSV, JSONL, and Arrow.
 
-mod common;
+use crate::common;
 
 use anyhow::Result;
 use arrow_ipc::reader::StreamReader;
