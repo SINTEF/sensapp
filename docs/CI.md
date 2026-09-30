@@ -31,8 +31,8 @@ see `ideas/remove-frontend-js-yaml-override.md` for the override follow-up.
 The image push depends on these checks. Publishing a GitHub Release for a
 `vX.Y.Z` tag is the release trigger; a tag push alone runs CI but does not
 publish packages. CI first checks that the tag, Cargo package version, and Helm
-`appVersion` agree. The release job waits for the image and chart jobs, verifies
-the crate package, and publishes it to crates.io. The Python SDK package is
+`appVersion` agree. The release then publishes the image and the Helm chart. The
+crate is not published to crates.io for now. The Python SDK package is
 built and checked, but is not yet published by this workflow.
 
 ## Build time and caching
