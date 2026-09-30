@@ -230,6 +230,25 @@ impl StorageInstance for BigQueryStorage {
         Ok(())
     }
 
+    async fn delete_series(&self, _sensor_uuid: &str) -> Result<bool> {
+        Err(crate::storage::StorageError::Unsupported(
+            "deleting series is not implemented for BigQuery".to_string(),
+        )
+        .into())
+    }
+
+    async fn delete_series_samples(
+        &self,
+        _sensor_uuid: &str,
+        _start_time: SensAppDateTime,
+        _end_time: SensAppDateTime,
+    ) -> Result<Option<u64>> {
+        Err(crate::storage::StorageError::Unsupported(
+            "deleting samples is not implemented for BigQuery".to_string(),
+        )
+        .into())
+    }
+
     async fn list_series(
         &self,
         _metric_filter: Option<&str>,

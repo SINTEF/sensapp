@@ -247,7 +247,7 @@ async fn test_simple_promql_matrix_selector() -> Result<()> {
     Ok(())
 }
 
-/// Test rejected aggregation query
+/// Test rejected (unsupported) aggregation query
 #[tokio::test]
 #[serial]
 async fn test_simple_promql_reject_aggregation() -> Result<()> {
@@ -259,7 +259,7 @@ async fn test_simple_promql_reject_aggregation() -> Result<()> {
     // Try aggregation query
     let request = Request::builder()
         .method("GET")
-        .uri("/api/v1/query?query=sum(cpu_usage)")
+        .uri("/api/v1/query?query=stddev(cpu_usage)")
         .body(Body::empty())?;
 
     let response = app.oneshot(request).await?;
@@ -267,7 +267,7 @@ async fn test_simple_promql_reject_aggregation() -> Result<()> {
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
     let body_str = String::from_utf8_lossy(&body);
-    assert!(body_str.contains("Aggregation"));
+    assert!(body_str.contains("Aggregation 'stddev' is not supported"));
 
     Ok(())
 }
@@ -832,6 +832,287 @@ async fn test_simple_promql_multi_sensor_csv() -> Result<()> {
         header.contains("sensor_name") || header.contains("sensor"),
         "CSV header should include sensor identification"
     );
+
+    Ok(())
+}
+
+/// Float samples 1 minute apart within the last hour, starting at `base`
+fn create_float_samples_from(count: usize, base: f64) -> TypedSamples {
+    let TypedSamples::Float(mut samples) = create_float_samples(count) else {
+        unreachable!("create_float_samples returns floats");
+    };
+    for (i, sample) in samples.iter_mut().enumerate() {
+        sample.value = base + i as f64;
+    }
+    TypedSamples::Float(samples)
+}
+
+/// Two sensors in room a (values 20..=22 and 40..=42) and one in room b (100..=102)
+async fn cross_series_app() -> Result<(TestDb, Router)> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let sensor = |room: &str, id: &str| {
+        create_sensor_with_labels(
+            "cross_temp",
+            SensorType::Float,
+            vec![
+                ("room".to_string(), room.to_string()),
+                ("id".to_string(), id.to_string()),
+            ],
+        )
+    };
+    publish_test_sensors(
+        &storage,
+        vec![
+            (sensor("a", "1"), create_float_samples_from(3, 20.0)),
+            (sensor("a", "2"), create_float_samples_from(3, 40.0)),
+            (sensor("b", "3"), create_float_samples_from(3, 100.0)),
+        ],
+    )
+    .await?;
+
+    let app = create_test_app(storage).await;
+    Ok((test_db, app))
+}
+
+/// Run a query expression and return the JSONL lines
+async fn jsonl_query(app: &Router, expr: &str, step: Option<&str>) -> Result<Vec<Value>> {
+    let mut uri = format!(
+        "/api/v1/query?format=jsonl&query={}",
+        urlencoding::encode(expr)
+    );
+    if let Some(step) = step {
+        uri.push_str(&format!("&step={step}"));
+    }
+    let request = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .body(Body::empty())?;
+    let response = app.clone().oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::OK, "query: {expr}");
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+    String::from_utf8_lossy(&body)
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| Ok(serde_json::from_str(line)?))
+        .collect()
+}
+
+fn values_for_room(lines: &[Value], room: &str) -> Vec<f64> {
+    lines
+        .iter()
+        .filter(|line| line["labels"]["room"] == room)
+        .map(|line| line["value"].as_f64().expect("numeric value"))
+        .collect()
+}
+
+/// avg by (room) averages all samples of the room's sensors over the window
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_avg_by_label() -> Result<()> {
+    let (_db, app) = cross_series_app().await?;
+
+    let lines = jsonl_query(&app, "avg by (room) (cross_temp[1h])", None).await?;
+
+    assert_eq!(values_for_room(&lines, "a"), vec![31.0]);
+    assert_eq!(values_for_room(&lines, "b"), vec![101.0]);
+    assert_eq!(lines.len(), 2, "one point per group without step");
+    // Only the grouping label is kept
+    assert!(lines[0]["labels"].get("id").is_none());
+    assert_eq!(lines[0]["sensor_name"], "avg(cross_temp)");
+
+    Ok(())
+}
+
+/// Without a grouping clause every series collapses into one
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_avg_all_series() -> Result<()> {
+    let (_db, app) = cross_series_app().await?;
+
+    let lines = jsonl_query(&app, "avg(cross_temp)", None).await?;
+
+    assert_eq!(lines.len(), 1);
+    let expected = (31.0 * 6.0 + 101.0 * 3.0) / 9.0;
+    let value = lines[0]["value"].as_f64().unwrap();
+    assert!((value - expected).abs() < 1e-9, "{value} != {expected}");
+
+    Ok(())
+}
+
+/// With a step, the counts of every bucket add up to the number of samples
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_count_with_step() -> Result<()> {
+    let (_db, app) = cross_series_app().await?;
+
+    let lines = jsonl_query(&app, "count by (room) (cross_temp[1h])", Some("10m")).await?;
+
+    assert_eq!(values_for_room(&lines, "a").iter().sum::<f64>(), 6.0);
+    assert_eq!(values_for_room(&lines, "b").iter().sum::<f64>(), 3.0);
+    assert!(lines.iter().all(|line| line["type"] == "integer"));
+
+    Ok(())
+}
+
+/// min, max and sum over a selector with matchers
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_min_max_sum_with_matchers() -> Result<()> {
+    let (_db, app) = cross_series_app().await?;
+
+    let min = jsonl_query(&app, r#"min(cross_temp{room="a"})"#, None).await?;
+    let max = jsonl_query(&app, r#"max(cross_temp{room="a"})"#, None).await?;
+    let sum = jsonl_query(&app, r#"sum(cross_temp{room="a"})"#, None).await?;
+
+    assert_eq!(min[0]["value"].as_f64(), Some(20.0));
+    assert_eq!(max[0]["value"].as_f64(), Some(42.0));
+    assert_eq!(sum[0]["value"].as_f64(), Some(186.0));
+
+    Ok(())
+}
+
+/// Unsupported shapes are rejected with a 400
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_aggregation_errors() -> Result<()> {
+    let (_db, app) = cross_series_app().await?;
+
+    for query in [
+        "query=cross_temp&step=5m",
+        "query=avg(cross_temp)&step=nonsense",
+        "query=topk(2,%20cross_temp)",
+        "query=sum(rate(cross_temp[5m]))",
+        "query=avg(cross_temp)%20*%202",
+    ] {
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/api/v1/query?{query}"))
+            .body(Body::empty())?;
+        let response = app.clone().oneshot(request).await?;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "query: {query}");
+    }
+
+    Ok(())
+}
+
+/// A non-numeric sensor matching the selector is ignored, not an error
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_aggregation_ignores_non_numeric_sensors() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let now = hifitime::Epoch::now()?;
+    let strings = TypedSamples::String(smallvec::smallvec![Sample {
+        datetime: now - hifitime::Duration::from_seconds(60.0),
+        value: "on".to_string(),
+    }]);
+    publish_test_sensors(
+        &storage,
+        vec![
+            (
+                create_sensor_with_labels("mixed", SensorType::Float, vec![]),
+                create_float_samples_from(2, 10.0),
+            ),
+            (
+                create_sensor_with_labels("mixed", SensorType::String, vec![]),
+                strings,
+            ),
+        ],
+    )
+    .await?;
+    let app = create_test_app(storage).await;
+
+    let lines = jsonl_query(&app, "sum(mixed)", None).await?;
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["value"].as_f64(), Some(21.0));
+
+    Ok(())
+}
+
+/// An aggregation matching nothing returns an empty result, like a selector
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_aggregation_no_matches() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let app = create_test_app(test_db.storage()).await;
+
+    let lines = jsonl_query(&app, "avg by (room) (does_not_exist)", None).await?;
+
+    assert!(lines.is_empty());
+
+    Ok(())
+}
+
+/// Series lacking the grouping label fall into one group without that label
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_group_by_missing_label() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    publish_test_sensors(
+        &storage,
+        vec![
+            (
+                create_sensor_with_labels(
+                    "partial",
+                    SensorType::Float,
+                    vec![("room".to_string(), "a".to_string())],
+                ),
+                create_float_samples_from(1, 1.0),
+            ),
+            (
+                create_sensor_with_labels("partial", SensorType::Float, vec![]),
+                create_float_samples_from(1, 3.0),
+            ),
+        ],
+    )
+    .await?;
+    let app = create_test_app(storage).await;
+
+    let lines = jsonl_query(&app, "sum by (room) (partial)", None).await?;
+
+    assert_eq!(lines.len(), 2);
+    assert_eq!(values_for_room(&lines, "a"), vec![1.0]);
+    let unlabelled: Vec<_> = lines
+        .iter()
+        .filter(|line| line["labels"].get("room").is_none())
+        .collect();
+    assert_eq!(unlabelled.len(), 1);
+    assert_eq!(unlabelled[0]["value"].as_f64(), Some(3.0));
+
+    Ok(())
+}
+
+/// Synthetic aggregate series go through every exporter
+#[tokio::test]
+#[serial]
+async fn test_simple_promql_aggregation_all_formats() -> Result<()> {
+    let (_db, app) = cross_series_app().await?;
+
+    for format in ["senml", "csv", "jsonl", "arrow"] {
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/v1/query?format={format}&query={}",
+                urlencoding::encode("avg by (room) (cross_temp[1h])")
+            ))
+            .body(Body::empty())?;
+        let response = app.clone().oneshot(request).await?;
+        assert_eq!(response.status(), StatusCode::OK, "format: {format}");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+        assert!(!body.is_empty(), "format: {format}");
+        if format == "csv" {
+            assert!(String::from_utf8_lossy(&body).contains("avg(cross_temp)"));
+        }
+    }
 
     Ok(())
 }

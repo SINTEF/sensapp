@@ -588,6 +588,25 @@ impl StorageInstance for RrdCachedStorage {
         Ok(())
     }
 
+    async fn delete_series(&self, _sensor_uuid: &str) -> Result<bool> {
+        Err(StorageError::Unsupported(
+            "deleting series is not implemented for RRDcached".to_string(),
+        )
+        .into())
+    }
+
+    async fn delete_series_samples(
+        &self,
+        _sensor_uuid: &str,
+        _start_time: crate::datamodel::SensAppDateTime,
+        _end_time: crate::datamodel::SensAppDateTime,
+    ) -> Result<Option<u64>> {
+        Err(StorageError::Unsupported(
+            "deleting samples is not implemented for RRDcached".to_string(),
+        )
+        .into())
+    }
+
     async fn list_series(
         &self,
         metric_filter: Option<&str>,

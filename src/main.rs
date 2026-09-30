@@ -134,7 +134,7 @@ async fn async_main() -> Result<()> {
 /// CLI subcommand: generate a signed JWT token.
 ///
 /// Usage: sensapp generate-token <subject> [OPTIONS]
-///   --scope <read|write|readwrite>  (default: "read write")
+///   --scope <read|write|delete|readwrite,...>  (default: "read write")
 ///   --duration <seconds>            (default: 3600)
 ///   --sensors <name1,name2,...>      (optional sensor allow list)
 fn generate_token_command(args: &[String]) -> Result<()> {
@@ -153,7 +153,9 @@ fn generate_token_command(args: &[String]) -> Result<()> {
         eprintln!("Usage: sensapp generate-token <subject> [OPTIONS]");
         eprintln!();
         eprintln!("Options:");
-        eprintln!("  --scope <read|write|readwrite>  Token scope (default: \"read write\")");
+        eprintln!(
+            "  --scope <scopes>                Comma-separated read, write, delete, or readwrite (default: \"read write\")"
+        );
         eprintln!("  --duration <seconds>            Token validity duration (default: 3600)");
         eprintln!("  --sensors <name1,name2,...>      Restrict to specific sensors");
         eprintln!();
@@ -173,12 +175,7 @@ fn generate_token_command(args: &[String]) -> Result<()> {
             "--scope" => {
                 i += 1;
                 let raw = args.get(i).context("--scope requires a value")?;
-                scope = match raw.as_str() {
-                    "read" => "read".to_string(),
-                    "write" => "write".to_string(),
-                    "readwrite" | "read write" | "read,write" => "read write".to_string(),
-                    other => anyhow::bail!("Unknown scope: {other}. Use read, write, or readwrite"),
-                };
+                scope = parse_scope_argument(raw)?;
             }
             "--duration" => {
                 i += 1;
@@ -205,4 +202,54 @@ fn generate_token_command(args: &[String]) -> Result<()> {
 
     println!("{token}");
     Ok(())
+}
+
+/// Parse the `--scope` value: comma or space separated `read`, `write`, `delete`,
+/// with `readwrite` as a shorthand for `read write`.
+fn parse_scope_argument(raw: &str) -> Result<String> {
+    let mut scopes: Vec<&str> = Vec::new();
+    for item in raw.split([',', ' ']).filter(|item| !item.is_empty()) {
+        let expanded: &[&str] = match item {
+            "read" => &["read"],
+            "write" => &["write"],
+            "delete" => &["delete"],
+            "readwrite" => &["read", "write"],
+            other => anyhow::bail!("Unknown scope: {other}. Use read, write, delete, or readwrite"),
+        };
+        for scope in expanded {
+            if !scopes.contains(scope) {
+                scopes.push(scope);
+            }
+        }
+    }
+    if scopes.is_empty() {
+        anyhow::bail!("--scope requires at least one scope");
+    }
+    Ok(scopes.join(" "))
+}
+
+#[cfg(test)]
+mod scope_argument_tests {
+    use super::parse_scope_argument;
+
+    #[test]
+    fn parses_scope_combinations() {
+        assert_eq!(parse_scope_argument("read").unwrap(), "read");
+        assert_eq!(parse_scope_argument("readwrite").unwrap(), "read write");
+        assert_eq!(parse_scope_argument("read write").unwrap(), "read write");
+        assert_eq!(parse_scope_argument("read,write").unwrap(), "read write");
+        assert_eq!(parse_scope_argument("delete").unwrap(), "delete");
+        assert_eq!(
+            parse_scope_argument("readwrite,delete").unwrap(),
+            "read write delete"
+        );
+        assert_eq!(parse_scope_argument("read,read").unwrap(), "read");
+    }
+
+    #[test]
+    fn rejects_unknown_or_empty_scopes() {
+        assert!(parse_scope_argument("admin").is_err());
+        assert!(parse_scope_argument("read,admin").is_err());
+        assert!(parse_scope_argument("").is_err());
+    }
 }

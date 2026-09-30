@@ -10,7 +10,7 @@
 
 use super::{
     DEFAULT_QUERY_LIMIT, SensorAvailabilitySummary, StorageError, StorageInstance,
-    common::datetime_to_micros,
+    common::{VALUE_TABLES, datetime_to_micros, is_foreign_key_violation},
 };
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
@@ -37,7 +37,7 @@ pub mod postgresql_publishers;
 pub mod postgresql_utilities;
 
 use postgresql_publishers::*;
-use postgresql_utilities::get_sensor_id_or_create_sensor;
+use postgresql_utilities::{forget_sensor_id, get_sensor_id_or_create_sensor};
 
 #[derive(Debug)]
 pub struct PostgresStorage {
@@ -292,13 +292,18 @@ impl StorageInstance for PostgresStorage {
         Ok(())
     }
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
-        for single_sensor_batch in batch.sensors.as_ref() {
-            self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
-                .await?;
+        match self.publish_once(&batch).await {
+            Err(error) if is_foreign_key_violation(&error) => {
+                // A cached sensor id points to a sensor deleted since it was cached, for
+                // example by another SensApp instance. The transaction was rolled back, so
+                // forget the ids and try again, which recreates the sensors.
+                for single_sensor_batch in batch.sensors.as_ref() {
+                    forget_sensor_id(&single_sensor_batch.sensor.uuid).await;
+                }
+                self.publish_once(&batch).await
+            }
+            result => result,
         }
-        transaction.commit().await?;
-        Ok(())
     }
 
     async fn vacuum(&self) -> Result<()> {
@@ -308,6 +313,75 @@ impl StorageInstance for PostgresStorage {
             .context("Failed to vacuum database")?;
 
         Ok(())
+    }
+
+    async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
+        let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
+        let mut transaction = self.pool.begin().await?;
+
+        let sensor_id: Option<i64> =
+            sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = $1")
+                .bind(parsed_uuid)
+                .fetch_optional(&mut *transaction)
+                .await?;
+        let Some(sensor_id) = sensor_id else {
+            return Ok(false);
+        };
+
+        for table in VALUE_TABLES {
+            // `table` comes from the static VALUE_TABLES list
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {table} WHERE sensor_id = $1"
+            )))
+            .bind(sensor_id)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        sqlx::query("DELETE FROM labels WHERE sensor_id = $1")
+            .bind(sensor_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM sensors WHERE sensor_id = $1")
+            .bind(sensor_id)
+            .execute(&mut *transaction)
+            .await?;
+
+        transaction.commit().await?;
+        forget_sensor_id(&parsed_uuid).await;
+        Ok(true)
+    }
+
+    async fn delete_series_samples(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+    ) -> Result<Option<u64>> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+
+        let table = match sensor.sensor_type {
+            SensorType::Integer => "integer_values",
+            SensorType::Numeric => "numeric_values",
+            SensorType::Float => "float_values",
+            SensorType::String => "string_values",
+            SensorType::Boolean => "boolean_values",
+            SensorType::Location => "location_values",
+            SensorType::Json => "json_values",
+            SensorType::Blob => "blob_values",
+        };
+        // `table` comes from the match above
+        let result = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE sensor_id = $1 AND timestamp_us BETWEEN $2 AND $3"
+        )))
+        .bind(sensor_id)
+        .bind(datetime_to_micros(&start_time))
+        .bind(datetime_to_micros(&end_time))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(Some(result.rows_affected()))
     }
 
     async fn list_series(
@@ -957,6 +1031,16 @@ impl StorageInstance for PostgresStorage {
 }
 
 impl PostgresStorage {
+    async fn publish_once(&self, batch: &Batch) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        for single_sensor_batch in batch.sensors.as_ref() {
+            self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     async fn publish_single_sensor_batch(
         &self,
         transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,

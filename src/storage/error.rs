@@ -41,6 +41,11 @@ pub enum StorageError {
     #[allow(dead_code)] // Part of error API, will be used for storage config errors
     Configuration(String),
 
+    /// The storage backend does not implement this operation
+    #[error("Operation not supported by this storage backend: {0}")]
+    #[allow(dead_code)] // Only used by backends that cannot implement every operation
+    Unsupported(String),
+
     /// Generic storage operation error with context
     #[error("Storage operation failed: {operation} - {details}")]
     #[allow(dead_code)] // Part of error API, will be used for generic storage operations

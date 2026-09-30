@@ -14,6 +14,18 @@ pub enum Aggregation {
 }
 
 impl Aggregation {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Avg => "avg",
+            Self::Min => "min",
+            Self::Max => "max",
+            Self::Sum => "sum",
+            Self::Count => "count",
+            Self::First => "first",
+            Self::Last => "last",
+        }
+    }
+
     pub fn output_is_count(self) -> bool {
         matches!(self, Self::Count)
     }

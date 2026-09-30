@@ -7,9 +7,9 @@ use crate::datamodel::{
 };
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use duckdb::Connection;
+use duckdb::{Connection, OptionalExt};
 use duckdb_publishers::*;
-use duckdb_utilities::get_sensor_id_or_create_sensor;
+use duckdb_utilities::{forget_sensor_id, get_sensor_id_or_create_sensor};
 use geo::Point;
 use regex::Regex;
 use rust_decimal::Decimal;
@@ -23,6 +23,7 @@ use uuid::Uuid;
 
 use super::{
     Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
+    common::VALUE_TABLES,
 };
 
 mod duckdb_publishers;
@@ -91,6 +92,94 @@ impl StorageInstance for DuckDBStorage {
 
         connection.execute("VACUUM ANALYZE", [])?;
         Ok(())
+    }
+
+    async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
+        let connection = Arc::clone(&self.connection);
+        let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
+        let sensor_uuid = parsed_uuid.to_string();
+
+        spawn_blocking(move || -> Result<bool> {
+            let mut connection = connection.blocking_lock();
+
+            let sensor_id: Option<i64> = connection
+                .prepare("SELECT sensor_id FROM sensors WHERE CAST(uuid AS TEXT) = ?")?
+                .query_row([sensor_uuid.as_str()], |row| row.get(0))
+                .optional()?;
+            let Some(sensor_id) = sensor_id else {
+                return Ok(false);
+            };
+
+            // DuckDB checks foreign keys against committed data, so the labels must be
+            // gone in a committed transaction before the sensor row can be deleted.
+            let transaction = connection.transaction()?;
+            for table in VALUE_TABLES {
+                transaction.execute(
+                    &format!("DELETE FROM {table} WHERE sensor_id = ?"),
+                    [sensor_id],
+                )?;
+            }
+            transaction.execute("DELETE FROM labels WHERE sensor_id = ?", [sensor_id])?;
+            transaction.commit()?;
+
+            connection.execute("DELETE FROM sensors WHERE sensor_id = ?", [sensor_id])?;
+            forget_sensor_id(&parsed_uuid);
+            Ok(true)
+        })
+        .await?
+    }
+
+    async fn delete_series_samples(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+    ) -> Result<Option<u64>> {
+        let connection = Arc::clone(&self.connection);
+        let sensor_uuid = Uuid::from_str(sensor_uuid)
+            .context("Failed to parse sensor UUID")?
+            .to_string();
+        // DuckDB stores millisecond timestamps
+        let start_time_ms = start_time.to_unix_milliseconds().floor() as i64;
+        let end_time_ms = end_time.to_unix_milliseconds().floor() as i64;
+
+        spawn_blocking(move || -> Result<Option<u64>> {
+            let connection = connection.blocking_lock();
+
+            let sensor: Option<(i64, String)> = connection
+                .prepare("SELECT sensor_id, type FROM sensors WHERE CAST(uuid AS TEXT) = ?")?
+                .query_row([sensor_uuid.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
+                .optional()?;
+            let Some((sensor_id, sensor_type_str)) = sensor else {
+                return Ok(None);
+            };
+            let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
+                anyhow::Error::from(StorageError::invalid_data_format(
+                    &format!("Failed to parse sensor type '{}': {}", sensor_type_str, e),
+                    None,
+                    None,
+                ))
+            })?;
+
+            let table = match sensor_type {
+                SensorType::Integer => "integer_values",
+                SensorType::Numeric => "numeric_values",
+                SensorType::Float => "float_values",
+                SensorType::String => "string_values",
+                SensorType::Boolean => "boolean_values",
+                SensorType::Location => "location_values",
+                SensorType::Json => "json_values",
+                SensorType::Blob => "blob_values",
+            };
+            let deleted = connection.execute(
+                &format!(
+                    "DELETE FROM {table} WHERE sensor_id = ? AND epoch_ms(timestamp_ms) BETWEEN ? AND ?"
+                ),
+                duckdb::params![sensor_id, start_time_ms, end_time_ms],
+            )?;
+            Ok(Some(deleted as u64))
+        })
+        .await?
     }
 
     async fn list_series(

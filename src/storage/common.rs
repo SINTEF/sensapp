@@ -10,6 +10,33 @@ use simplify_polyline::{Point, simplify};
 use smallvec::smallvec;
 use std::collections::BTreeSet;
 
+/// Whether an error comes from a foreign-key violation reported by the database.
+///
+/// The PostgreSQL-based backends use it to detect a cached sensor id whose sensor was
+/// deleted, possibly by another SensApp instance or by hand.
+#[allow(dead_code)] // Used by the PostgreSQL-based backends when enabled
+pub fn is_foreign_key_violation(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<sqlx::Error>()
+            .and_then(|error| error.as_database_error())
+            .is_some_and(|error| error.is_foreign_key_violation())
+    })
+}
+
+/// Names of the per-type sample tables, shared by the SQL backends for bulk deletes.
+#[allow(dead_code)] // Used by the SQL backends when enabled
+pub const VALUE_TABLES: [&str; 8] = [
+    "blob_values",
+    "json_values",
+    "location_values",
+    "boolean_values",
+    "string_values",
+    "float_values",
+    "numeric_values",
+    "integer_values",
+];
+
 /// Convert SensAppDateTime to Unix microseconds for database storage
 #[allow(dead_code)] // Used by SQLite backend when enabled
 pub fn datetime_to_micros(datetime: &SensAppDateTime) -> i64 {
@@ -269,7 +296,7 @@ where
     Ok(keep_indices)
 }
 
-fn bucket_start(timestamp_us: i64, origin_us: i64, step_us: i64) -> i64 {
+pub(crate) fn bucket_start(timestamp_us: i64, origin_us: i64, step_us: i64) -> i64 {
     origin_us + (timestamp_us - origin_us).div_euclid(step_us) * step_us
 }
 

@@ -1,6 +1,6 @@
 # JWT Authentication
 
-SensApp supports **optional** JWT (JSON Web Token) authentication. By default, all endpoints are open — just like Prometheus. When enabled, JWT tokens control read and write access, and can optionally restrict which sensors a client may interact with.
+SensApp supports **optional** JWT (JSON Web Token) authentication. By default, all endpoints are open — just like Prometheus. When enabled, JWT tokens control read, write and delete access, and can optionally restrict which sensors a client may interact with.
 
 ## Enabling Authentication
 
@@ -28,6 +28,12 @@ sensapp generate-token edge-device --scope write --sensors "temperature,humidity
 
 # Read + write (explicit)
 sensapp generate-token admin --scope readwrite --duration 3600
+
+# Permission to delete series and samples, never granted by default
+sensapp generate-token cleanup --scope delete --duration 900
+
+# Scopes can be combined
+sensapp generate-token admin --scope readwrite,delete
 ```
 
 The token is printed to stdout.
@@ -36,7 +42,7 @@ The token is printed to stdout.
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--scope` | `read`, `write`, or `readwrite` | `read write` (both) |
+| `--scope` | Comma-separated `read`, `write`, `delete`, or `readwrite` (shorthand for `read,write`) | `read write` (no `delete`) |
 | `--duration` | Token validity in seconds | `3600` (1 hour) |
 | `--sensors` | Comma-separated sensor name allow list | all sensors |
 
@@ -74,6 +80,8 @@ curl http://localhost:3000/metrics \
 | `GET /metrics` | Yes | `read` |
 | `GET /series` | Yes | `read` |
 | `GET /series/{uuid}` | Yes | `read` |
+| `DELETE /series/{uuid}` | Yes | `delete` |
+| `DELETE /series/{uuid}/samples` | Yes | `delete` |
 | `GET /api/v1/query` | Yes | `read` |
 | `POST /api/v1/prometheus_remote_read` | Yes | `read` |
 | `POST /publish` | Yes | `write` |
@@ -104,7 +112,7 @@ Tokens use the HS256 (HMAC-SHA256) algorithm with the following claims:
 | `exp` | Yes | Expiration time (Unix timestamp). Tokens are rejected after this time |
 | `iat` | No | Issued-at time (informational) |
 | `nbf` | No | Not-before time. If present, the token is rejected before this time |
-| `scope` | No | Space-separated: `"read"`, `"write"`, or `"read write"`. Defaults to `"read write"` |
+| `scope` | No | Space-separated among `"read"`, `"write"` and `"delete"`. Defaults to `"read write"`, which does not include `"delete"` |
 | `sensors` | No | Array of allowed sensor names. If absent, all sensors are accessible |
 
 ### Time Validation
@@ -122,3 +130,4 @@ Tokens use the HS256 (HMAC-SHA256) algorithm with the following claims:
 - When present, the sensor allow list applies to all API reads and writes, including Prometheus and InfluxDB compatibility endpoints. Catalog and selector results omit other sensors; direct series requests for another sensor return 404, and writes to another sensor return 403.
 - With JWT authentication enabled, `/prometheus/metrics?include_latest_samples=true` requires a read token and applies its sensor allow list. Plain `/prometheus/metrics` stays public for service monitoring.
 - Sensor-scoped tokens cannot run the database-wide `/api/v1/admin/vacuum` operation.
+- The `delete` scope is never implied by `read write`. It only allows deleting, not reading. With a sensor allow list, series the token cannot access are reported as not found. See [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md).

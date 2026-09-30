@@ -90,7 +90,8 @@ impl AuthConfig {
 /// # Optional fields
 /// - `iat`: Issued-at time (informational)
 /// - `nbf`: Not-before time — if present, the token is rejected before this time
-/// - `scope`: Space-separated scopes: `"read"`, `"write"`, or `"read write"` (default: `"read write"`)
+/// - `scope`: Space-separated scopes among `"read"`, `"write"` and `"delete"` (default: `"read write"`).
+///   `"delete"` allows removing series and samples and is never part of the default.
 /// - `sensors`: Allow list of sensor names; if absent all sensors are accessible
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Claims {
@@ -104,8 +105,8 @@ pub struct Claims {
     /// Not-before time (Unix timestamp). Validated when present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nbf: Option<u64>,
-    /// Space-separated scopes: "read", "write", or "read write".
-    /// Defaults to "read write" if absent.
+    /// Space-separated scopes among "read", "write" and "delete".
+    /// Defaults to "read write" if absent, which does not include "delete".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
     /// Optional list of allowed sensor name patterns.
@@ -125,6 +126,7 @@ pub struct AccessContext {
     pub subject: String,
     pub can_read: bool,
     pub can_write: bool,
+    pub can_delete: bool,
     pub sensor_allow_list: Option<Vec<String>>,
 }
 
@@ -168,11 +170,15 @@ pub fn validate_token(headers: &HeaderMap, config: &AuthConfig) -> Result<Access
     let can_write = scope
         .split_whitespace()
         .any(|s| s.eq_ignore_ascii_case("write"));
+    let can_delete = scope
+        .split_whitespace()
+        .any(|s| s.eq_ignore_ascii_case("delete"));
 
     Ok(AccessContext {
         subject: claims.sub,
         can_read,
         can_write,
+        can_delete,
         sensor_allow_list: claims.sensors,
     })
 }
@@ -211,6 +217,25 @@ pub async fn require_write_auth(
         let access = validate_token(request.headers(), config)?;
         if !access.can_write {
             return Err(AppError::Forbidden("Write access required".into()));
+        }
+        request.extensions_mut().insert(access);
+    }
+    Ok(next.run(request).await)
+}
+
+/// Middleware that requires a valid JWT with **delete** scope.
+///
+/// The `delete` scope is never implied by the default `read write` scope.
+/// When `auth` is `None` (security disabled), all requests pass through.
+pub async fn require_delete_auth(
+    State(auth): State<Option<AuthConfig>>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    if let Some(config) = &auth {
+        let access = validate_token(request.headers(), config)?;
+        if !access.can_delete {
+            return Err(AppError::Forbidden("Delete access required".into()));
         }
         request.extensions_mut().insert(access);
     }
@@ -399,6 +424,30 @@ mod tests {
             validate_token(&bearer_headers(&token), &make_config()).expect("should decode");
         assert!(access.can_read);
         assert!(access.can_write);
+        assert!(!access.can_delete, "delete must not be part of the default");
+    }
+
+    #[test]
+    fn scope_delete_is_explicit() {
+        for (scope, expected) in [
+            ("delete", true),
+            ("read write delete", true),
+            ("read DELETE", true),
+            ("read write", false),
+            ("deleted", false),
+        ] {
+            let token = encode_test_claims(&Claims {
+                sub: "cleaner".to_string(),
+                exp: 4_102_444_800,
+                iat: None,
+                nbf: None,
+                scope: Some(scope.to_string()),
+                sensors: None,
+            });
+            let access =
+                validate_token(&bearer_headers(&token), &make_config()).expect("should decode");
+            assert_eq!(access.can_delete, expected, "scope {scope:?}");
+        }
     }
 
     #[test]

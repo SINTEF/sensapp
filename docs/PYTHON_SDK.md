@@ -51,7 +51,7 @@ asyncio.run(main())
 
 The backend currently exposes two Arrow layouts:
 
-- upload uses a typed per-sensor table with `timestamp` and `value`, plus optional `sensor_id` and `sensor_name`
+- upload uses a typed per-sensor table with `timestamp` and `value`, plus a `sensor_name` or a `sensor_id` (a UUID). The server derives the series UUID from the name, so republishing the same name appends to the same series
 - download uses streamed Arrow IPC and the client normalizes that into `TimeSeries` objects backed by Polars
 
 The client keeps upload Arrow explicit and hides download wire-format details behind a compact API.
@@ -62,7 +62,7 @@ The package also exposes `__version__` and includes runnable examples in `python
 
 You can upload either simple scalar values, explicit `SamplePoint` lists, or a Polars DataFrame with `timestamp` and `value` columns.
 
-If you want the frame itself to carry upload metadata, `build_upload_table_from_polars()` also accepts uniform `sensor_name` and optional `sensor_id` columns.
+If you want the frame itself to carry upload metadata, `build_upload_table_from_polars()` also accepts uniform `sensor_name` and optional `sensor_id` columns. `sensor_id` must be a valid UUID, otherwise the server rejects the upload.
 
 ## What is included
 

@@ -15,6 +15,7 @@ use sensapp::exporters::ArrowConverter;
 use serial_test::serial;
 use smallvec::smallvec;
 use std::io::Cursor;
+use std::sync::Arc;
 use uuid::Uuid;
 
 // Ensure configuration is loaded once for all tests in this module
@@ -312,6 +313,93 @@ mod import_tests {
 
         // Verify data was ingested
         storage.expect_sensor_count(1).await?;
+
+        Ok(())
+    }
+
+    /// An Arrow stream with two float samples that only carries the given sensor name column.
+    fn arrow_stream_without_uuid(sensor_name: Option<&str>, first_micros: i64) -> Result<Vec<u8>> {
+        use arrow::array::{ArrayRef, Float64Array, StringArray, TimestampMicrosecondArray};
+        use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+        use arrow_ipc::writer::StreamWriter;
+
+        let mut fields = vec![
+            Field::new(
+                "timestamp",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                false,
+            ),
+            Field::new("value", DataType::Float64, false),
+        ];
+        let mut columns: Vec<ArrayRef> = vec![
+            Arc::new(TimestampMicrosecondArray::from(vec![
+                first_micros,
+                first_micros + 60_000_000,
+            ])),
+            Arc::new(Float64Array::from(vec![1.0, 2.0])),
+        ];
+        if let Some(name) = sensor_name {
+            fields.push(Field::new("sensor_name", DataType::Utf8, false));
+            columns.push(Arc::new(StringArray::from(vec![name, name])));
+        }
+        let schema = Arc::new(Schema::new(fields));
+        let batch = RecordBatch::try_new(schema.clone(), columns)?;
+
+        let mut bytes = Vec::new();
+        let mut writer = StreamWriter::try_new(&mut bytes, &schema)?;
+        writer.write(&batch)?;
+        writer.finish()?;
+        drop(writer);
+        Ok(bytes)
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_import_arrow_without_uuid_appends_to_the_same_series() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let sensor_name = format!("arrow_stable_{}", Uuid::new_v4().simple());
+        for first_micros in [1_704_067_200_000_000, 1_704_067_320_000_000] {
+            let bytes = arrow_stream_without_uuid(Some(&sensor_name), first_micros)?;
+            let response = app
+                .post_binary(
+                    "/sensors/publish",
+                    "application/vnd.apache.arrow.stream",
+                    &bytes,
+                )
+                .await?;
+            assert_eq!(response.status(), 200);
+        }
+
+        storage.expect_sensor_count(1).await?;
+        DbHelpers::verify_sensor_data(&storage, &sensor_name, 4).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_import_arrow_without_uuid_or_name_is_rejected() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let bytes = arrow_stream_without_uuid(None, 1_704_067_200_000_000)?;
+        let response = app
+            .post_binary(
+                "/sensors/publish",
+                "application/vnd.apache.arrow.stream",
+                &bytes,
+            )
+            .await?;
+
+        assert_eq!(response.status(), 400);
+        response.assert_body_contains("must identify its sensor");
+        storage.expect_sensor_count(0).await?;
 
         Ok(())
     }

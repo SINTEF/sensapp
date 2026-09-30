@@ -4,6 +4,7 @@
 //! - Without auth configured (`auth: None`), all endpoints are open.
 //! - With auth configured, read endpoints require a "read" scope token.
 //! - With auth configured, write endpoints require a "write" scope token.
+//! - With auth configured, delete endpoints require an explicit "delete" scope token.
 //! - Expired and not-yet-valid tokens are rejected.
 //! - Sensor allow lists are enforced.
 //! - Health/docs/prometheus-metrics remain public even with auth enabled.
@@ -14,11 +15,13 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use common::TestDb;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use sensapp::http::auth::AuthConfig;
-use sensapp::http::crud::{get_series_data, list_metrics, list_series};
+use sensapp::http::crud::{
+    delete_series, delete_series_samples, get_series_data, list_metrics, list_series,
+};
 use sensapp::http::health::{liveness, readiness};
 use sensapp::http::metrics::{HttpMetrics, prometheus_metrics};
 use sensapp::http::server::publish_senml_data;
@@ -160,7 +163,7 @@ async fn test_publish_handler(
 
 /// Build a test router with the same auth layering as the real server.
 fn build_test_router(storage: Arc<dyn StorageInstance>, auth: Option<AuthConfig>) -> Router {
-    use sensapp::http::auth::{require_read_auth, require_write_auth};
+    use sensapp::http::auth::{require_delete_auth, require_read_auth, require_write_auth};
 
     let state = HttpServerState {
         name: Arc::new("SensApp Auth Test".into()),
@@ -189,13 +192,25 @@ fn build_test_router(storage: Arc<dyn StorageInstance>, auth: Option<AuthConfig>
     let write_routes = Router::new()
         .route("/publish", post(test_publish_handler))
         .route_layer(axum::middleware::from_fn_with_state(
-            auth,
+            auth.clone(),
             require_write_auth,
+        ));
+
+    let delete_routes = Router::new()
+        .route("/series/{series_uuid}", delete(delete_series))
+        .route(
+            "/series/{series_uuid}/samples",
+            delete(delete_series_samples),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            auth,
+            require_delete_auth,
         ));
 
     public
         .merge(read_routes)
         .merge(write_routes)
+        .merge(delete_routes)
         .with_state(state)
 }
 
@@ -737,4 +752,291 @@ async fn sensor_allow_list_controls_writes_and_reads() {
     let body = String::from_utf8_lossy(&bytes);
     assert!(body.contains("temperature"));
     assert!(!body.contains("humidity"));
+}
+
+/// Cross-series aggregation must only combine the series the token may read.
+#[tokio::test]
+#[serial]
+async fn sensor_allow_list_limits_cross_series_aggregation() {
+    sensapp::config::load_configuration_for_tests().unwrap();
+    let db = TestDb::new().await.expect("test db");
+    let storage = db.storage();
+    let auth = AuthConfig::from_secret(TEST_SECRET).unwrap();
+    let app = build_test_router(storage.clone(), Some(auth));
+
+    // The default query window is the last hour, so the samples must be recent
+    let recent = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 60;
+    publish_senml_data(
+        &format!(
+            r#"[{{"n":"temperature","v":21.5,"t":{recent}}},{{"n":"humidity","v":55.0,"t":{recent}}}]"#
+        ),
+        storage.clone(),
+    )
+    .await
+    .unwrap();
+
+    let query = urlencoding::encode(r#"sum({__name__=~"temperature|humidity"})"#).into_owned();
+    let aggregate = |token: String, expression: String| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::get(format!("/api/v1/query?format=jsonl&query={expression}"))
+                        .header("authorization", format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&bytes)
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .collect::<Vec<_>>()
+        }
+    };
+
+    // Unrestricted token: both sensors are combined
+    let all = aggregate(read_write_token(), query.clone()).await;
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0]["value"].as_f64(), Some(76.5));
+
+    // Restricted token: humidity is invisible, so it is not part of the sum
+    let scoped = aggregate(sensor_token("read", &["temperature"]), query.clone()).await;
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0]["value"].as_f64(), Some(21.5));
+
+    // The count is scoped as well
+    let count_query =
+        urlencoding::encode(r#"count({__name__=~"temperature|humidity"})"#).into_owned();
+    let scoped_count = aggregate(sensor_token("read", &["temperature"]), count_query).await;
+    assert_eq!(scoped_count[0]["value"].as_f64(), Some(1.0));
+
+    // A token allowed on no matching sensor sees nothing, not a zero
+    let nothing = aggregate(sensor_token("read", &["pressure"]), query).await;
+    assert!(nothing.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Tests: deleting series and samples
+// ---------------------------------------------------------------------------
+
+fn delete_token() -> String {
+    make_token(&TestClaims {
+        sub: "cleaner".into(),
+        exp: 4_102_444_800,
+        nbf: None,
+        iat: None,
+        scope: Some("delete".into()),
+        sensors: None,
+    })
+}
+
+/// Publish three temperature samples, one minute apart from 2023-11-14T22:13:20Z,
+/// and return the UUID of the series.
+async fn publish_temperature(storage: &Arc<dyn StorageInstance>, name: &str) -> uuid::Uuid {
+    publish_senml_data(
+        &format!(
+            r#"[{{"n":"{name}","v":1.0,"t":1700000000}},{{"n":"{name}","v":2.0,"t":1700000060}},{{"n":"{name}","v":3.0,"t":1700000120}}]"#
+        ),
+        storage.clone(),
+    )
+    .await
+    .unwrap();
+    storage
+        .list_series(Some(name), None, None)
+        .await
+        .unwrap()
+        .series[0]
+        .uuid
+}
+
+async fn stored_sample_count(storage: &Arc<dyn StorageInstance>, series: uuid::Uuid) -> usize {
+    let Some(data) = storage
+        .query_sensor_data(&series.to_string(), None, None, None)
+        .await
+        .unwrap()
+    else {
+        return 0;
+    };
+    match data.samples {
+        sensapp::datamodel::TypedSamples::Float(samples) => samples.len(),
+        other => panic!("unexpected samples {other:?}"),
+    }
+}
+
+async fn send_delete(app: &Router, uri: &str, token: Option<&str>) -> (StatusCode, String) {
+    let mut request = Request::delete(uri);
+    if let Some(token) = token {
+        request = request.header("authorization", format!("Bearer {token}"));
+    }
+    let response = app
+        .clone()
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[tokio::test]
+#[serial]
+async fn delete_requires_the_delete_scope() {
+    sensapp::config::load_configuration_for_tests().unwrap();
+    let db = TestDb::new().await.expect("test db");
+    let storage = db.storage();
+    let series = publish_temperature(&storage, "temperature").await;
+    let app = build_test_router(
+        storage.clone(),
+        Some(AuthConfig::from_secret(TEST_SECRET).unwrap()),
+    );
+
+    let series_uri = format!("/series/{series}");
+    let samples_uri =
+        format!("/series/{series}/samples?start=2023-11-14T22:14:20Z&end=2023-11-14T22:15:20Z");
+
+    // No token, and the default "read write" scope, cannot delete
+    for uri in [&series_uri, &samples_uri] {
+        let (status, _) = send_delete(&app, uri, None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{uri}");
+        for token in [read_write_token(), read_only_token(), write_only_token()] {
+            let (status, body) = send_delete(&app, uri, Some(&token)).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: {body}");
+        }
+    }
+    assert_eq!(stored_sample_count(&storage, series).await, 3);
+
+    // The delete scope can, and the deletion is inclusive on both bounds
+    let (status, body) = send_delete(&app, &samples_uri, Some(&delete_token())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["deleted_samples"], 2);
+    assert_eq!(body["series_uuid"], series.to_string());
+    assert_eq!(stored_sample_count(&storage, series).await, 1);
+
+    let (status, body) = send_delete(&app, &series_uri, Some(&delete_token())).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(stored_sample_count(&storage, series).await, 0);
+    assert!(
+        storage
+            .list_series(Some("temperature"), None, None)
+            .await
+            .unwrap()
+            .series
+            .is_empty()
+    );
+
+    // Already gone
+    let (status, _) = send_delete(&app, &series_uri, Some(&delete_token())).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = send_delete(&app, &samples_uri, Some(&delete_token())).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+#[serial]
+async fn delete_is_open_without_auth() {
+    sensapp::config::load_configuration_for_tests().unwrap();
+    let db = TestDb::new().await.expect("test db");
+    let storage = db.storage();
+    let series = publish_temperature(&storage, "temperature").await;
+    let app = build_test_router(storage.clone(), None);
+
+    let (status, body) = send_delete(&app, &format!("/series/{series}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(stored_sample_count(&storage, series).await, 0);
+}
+
+#[tokio::test]
+#[serial]
+async fn delete_samples_validates_its_parameters() {
+    sensapp::config::load_configuration_for_tests().unwrap();
+    let db = TestDb::new().await.expect("test db");
+    let storage = db.storage();
+    let series = publish_temperature(&storage, "temperature").await;
+    let app = build_test_router(storage.clone(), None);
+
+    for uri in [
+        // Both bounds are required, so a request cannot wipe a series by accident
+        format!("/series/{series}/samples"),
+        format!("/series/{series}/samples?start=2023-11-14T22:14:20Z"),
+        format!("/series/{series}/samples?end=2023-11-14T22:14:20Z"),
+        // Invalid or inverted bounds
+        format!("/series/{series}/samples?start=yesterday&end=2023-11-14T22:14:20Z"),
+        format!("/series/{series}/samples?start=2023-11-14T22:15:20Z&end=2023-11-14T22:14:20Z"),
+        // Invalid UUID
+        "/series/not-a-uuid/samples?start=2023-11-14T22:14:20Z&end=2023-11-14T22:15:20Z"
+            .to_string(),
+        "/series/not-a-uuid".to_string(),
+    ] {
+        let (status, body) = send_delete(&app, &uri, None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}: {body}");
+    }
+    assert_eq!(stored_sample_count(&storage, series).await, 3);
+
+    // start == end deletes the sample at that exact timestamp
+    let (status, body) = send_delete(
+        &app,
+        &format!("/series/{series}/samples?start=2023-11-14T22:14:20Z&end=2023-11-14T22:14:20Z"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["deleted_samples"], 1);
+    assert_eq!(stored_sample_count(&storage, series).await, 2);
+
+    // A valid UUID nobody owns
+    let (status, _) = send_delete(
+        &app,
+        &format!(
+            "/series/{}/samples?start=2023-11-14T22:14:20Z&end=2023-11-14T22:15:20Z",
+            uuid::Uuid::new_v4()
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+#[serial]
+async fn sensor_scoped_delete_token_only_deletes_its_sensors() {
+    sensapp::config::load_configuration_for_tests().unwrap();
+    let db = TestDb::new().await.expect("test db");
+    let storage = db.storage();
+    let temperature = publish_temperature(&storage, "temperature").await;
+    let humidity = publish_temperature(&storage, "humidity").await;
+    let app = build_test_router(
+        storage.clone(),
+        Some(AuthConfig::from_secret(TEST_SECRET).unwrap()),
+    );
+    let token = sensor_token("delete", &["temperature"]);
+
+    // Other sensors look like they do not exist, as they do for reads
+    let (status, _) = send_delete(&app, &format!("/series/{humidity}"), Some(&token)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = send_delete(
+        &app,
+        &format!("/series/{humidity}/samples?start=2023-11-14T22:13:20Z&end=2023-11-14T22:15:20Z"),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(stored_sample_count(&storage, humidity).await, 3);
+
+    let (status, body) = send_delete(&app, &format!("/series/{temperature}"), Some(&token)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(stored_sample_count(&storage, temperature).await, 0);
+    assert_eq!(stored_sample_count(&storage, humidity).await, 3);
 }

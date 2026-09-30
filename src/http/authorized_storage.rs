@@ -1,3 +1,4 @@
+use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{Metric, SensAppDateTime, SensorData};
 use crate::storage::{
     LabelMatcher, ListSeriesResult, SensorAvailabilitySummary, SensorDataQueryOptions,
@@ -28,6 +29,23 @@ impl AuthorizedStorage {
     fn allows(&self, name: &str) -> bool {
         self.access.can_access_sensor(name)
     }
+
+    /// Whether the token may act on the sensor with this UUID.
+    ///
+    /// Sensors the token cannot access are reported like missing ones, as the read
+    /// paths do. Unknown UUIDs pass through so the inner storage reports them.
+    async fn can_see_sensor(&self, sensor_uuid: &str) -> Result<bool> {
+        if self.access.sensor_allow_list.is_none() {
+            return Ok(true);
+        }
+        // A one-instant window returns the sensor metadata without loading its samples
+        let instant = SensAppDateTime::from_unix_microseconds_i64(0);
+        let sensor_data = self
+            .inner
+            .query_sensor_data(sensor_uuid, Some(instant), Some(instant), Some(1))
+            .await?;
+        Ok(sensor_data.is_none_or(|data| self.allows(&data.sensor.name)))
+    }
 }
 
 #[async_trait]
@@ -49,6 +67,27 @@ impl StorageInstance for AuthorizedStorage {
 
     async fn vacuum(&self) -> Result<()> {
         self.inner.vacuum().await
+    }
+
+    async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
+        if !self.can_see_sensor(sensor_uuid).await? {
+            return Ok(false);
+        }
+        self.inner.delete_series(sensor_uuid).await
+    }
+
+    async fn delete_series_samples(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+    ) -> Result<Option<u64>> {
+        if !self.can_see_sensor(sensor_uuid).await? {
+            return Ok(None);
+        }
+        self.inner
+            .delete_series_samples(sensor_uuid, start_time, end_time)
+            .await
     }
 
     async fn list_series(
