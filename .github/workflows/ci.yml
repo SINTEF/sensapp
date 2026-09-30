@@ -215,17 +215,21 @@ jobs:
 
       # Caches dependencies only (workspace crates are pruned), keyed per
       # feature. Only main/develop save, PRs restore from main. Saving on
-      # failure lets a retry start warm. The duckdb build script downloads
-      # libduckdb into target/duckdb-download, outside the directories
-      # rust-cache saves; without it a warm cache skips the script and the
-      # link fails with "unable to find library -lduckdb".
+      # failure lets a retry start warm.
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.feature }}-v2
-          cache-directories: target/duckdb-download
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
           cache-on-failure: true
+
+      # The duckdb build script downloads libduckdb into target/duckdb-download,
+      # which rust-cache deletes when cleaning. A warm cache would then skip the
+      # script and fail to link ("unable to find library -lduckdb"), so force
+      # the script to run again. It only re-downloads the prebuilt library.
+      - name: Refresh libduckdb download
+        if: matrix.feature == 'duckdb'
+        run: cargo clean -p libduckdb-sys
 
       - name: Install cargo-make (prebuilt)
         uses: taiki-e/install-action@v2
