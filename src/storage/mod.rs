@@ -213,6 +213,10 @@ pub trait StorageInstance: Send + Sync + Debug {
 
 pub mod storage_factory;
 
+// Sensor registration shared by the backends that use PostgreSQL's SQL dialect and schema
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+pub mod pg_sensor_registration;
+
 // Storage backends - conditionally compiled based on features
 #[cfg(feature = "postgres")]
 pub mod postgresql;

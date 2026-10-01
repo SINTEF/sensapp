@@ -1,5 +1,7 @@
 use super::timescaledb_utilities::get_string_value_id_or_create;
-use crate::datamodel::{Sample, sensapp_datetime::sensapp_datetime_to_offset_datetime};
+use crate::datamodel::{
+    Sample, TypedSamples, sensapp_datetime::sensapp_datetime_to_offset_datetime,
+};
 use anyhow::Result;
 use sqlx::types::time::OffsetDateTime;
 use sqlx::{Postgres, Transaction, prelude::*};
@@ -18,67 +20,96 @@ fn times<T>(values: &[Sample<T>]) -> Result<Vec<OffsetDateTime>> {
         .collect()
 }
 
-pub async fn publish_integer_values(
+/// The numeric samples (integer, numeric, float) of all the sensors of a batch, with one
+/// statement per type: one array per column, expanded with unnest(). A batch of a Prometheus
+/// request holds hundreds of sensors with a few samples each, so one statement per sensor was
+/// the main cost of a write once the sensors were registered in bulk.
+pub async fn publish_numeric_samples(
     transaction: &mut Transaction<'_, Postgres>,
-    sensor_id: i64,
-    values: &[Sample<i64>],
+    sensors: &[(i64, &TypedSamples)],
 ) -> Result<()> {
-    if values.is_empty() {
-        return Ok(());
+    let mut integers = Columns::<i64>::default();
+    let mut numerics = Columns::<rust_decimal::Decimal>::default();
+    let mut floats = Columns::<f64>::default();
+    for (sensor_id, samples) in sensors {
+        match samples {
+            TypedSamples::Integer(values) => integers.add(*sensor_id, values)?,
+            TypedSamples::Numeric(values) => numerics.add(*sensor_id, values)?,
+            TypedSamples::Float(values) => floats.add(*sensor_id, values)?,
+            _ => {}
+        }
     }
-    let query = sqlx::query(
-        r#"
-        INSERT INTO integer_values (sensor_id, time, value)
-        SELECT $1, t, v FROM unnest($2::TIMESTAMPTZ[], $3::BIGINT[]) AS u(t, v)
-        "#,
-    )
-    .bind(sensor_id)
-    .bind(times(values)?)
-    .bind(values.iter().map(|value| value.value).collect::<Vec<_>>());
-    transaction.execute(query).await?;
+
+    if !integers.is_empty() {
+        let query = sqlx::query(
+            r#"
+            INSERT INTO integer_values (sensor_id, time, value)
+            SELECT * FROM unnest($1::BIGINT[], $2::TIMESTAMPTZ[], $3::BIGINT[])
+            "#,
+        )
+        .bind(integers.sensor_ids)
+        .bind(integers.times)
+        .bind(integers.values);
+        transaction.execute(query).await?;
+    }
+    if !numerics.is_empty() {
+        let query = sqlx::query(
+            r#"
+            INSERT INTO numeric_values (sensor_id, time, value)
+            SELECT * FROM unnest($1::BIGINT[], $2::TIMESTAMPTZ[], $3::NUMERIC[])
+            "#,
+        )
+        .bind(numerics.sensor_ids)
+        .bind(numerics.times)
+        .bind(numerics.values);
+        transaction.execute(query).await?;
+    }
+    if !floats.is_empty() {
+        let query = sqlx::query(
+            r#"
+            INSERT INTO float_values (sensor_id, time, value)
+            SELECT * FROM unnest($1::BIGINT[], $2::TIMESTAMPTZ[], $3::FLOAT8[])
+            "#,
+        )
+        .bind(floats.sensor_ids)
+        .bind(floats.times)
+        .bind(floats.values);
+        transaction.execute(query).await?;
+    }
     Ok(())
 }
 
-pub async fn publish_numeric_values(
-    transaction: &mut Transaction<'_, Postgres>,
-    sensor_id: i64,
-    values: &[Sample<rust_decimal::Decimal>],
-) -> Result<()> {
-    if values.is_empty() {
-        return Ok(());
-    }
-    let query = sqlx::query(
-        r#"
-        INSERT INTO numeric_values (sensor_id, time, value)
-        SELECT $1, t, v FROM unnest($2::TIMESTAMPTZ[], $3::NUMERIC[]) AS u(t, v)
-        "#,
-    )
-    .bind(sensor_id)
-    .bind(times(values)?)
-    .bind(values.iter().map(|value| value.value).collect::<Vec<_>>());
-    transaction.execute(query).await?;
-    Ok(())
+/// The columns of the samples of many sensors, one entry per sample.
+struct Columns<T> {
+    sensor_ids: Vec<i64>,
+    times: Vec<OffsetDateTime>,
+    values: Vec<T>,
 }
 
-pub async fn publish_float_values(
-    transaction: &mut Transaction<'_, Postgres>,
-    sensor_id: i64,
-    values: &[Sample<f64>],
-) -> Result<()> {
-    if values.is_empty() {
-        return Ok(());
+impl<T> Default for Columns<T> {
+    fn default() -> Self {
+        Self {
+            sensor_ids: Vec::new(),
+            times: Vec::new(),
+            values: Vec::new(),
+        }
     }
-    let query = sqlx::query(
-        r#"
-        INSERT INTO float_values (sensor_id, time, value)
-        SELECT $1, t, v FROM unnest($2::TIMESTAMPTZ[], $3::FLOAT8[]) AS u(t, v)
-        "#,
-    )
-    .bind(sensor_id)
-    .bind(times(values)?)
-    .bind(values.iter().map(|value| value.value).collect::<Vec<_>>());
-    transaction.execute(query).await?;
-    Ok(())
+}
+
+impl<T: Copy> Columns<T> {
+    fn add(&mut self, sensor_id: i64, samples: &[Sample<T>]) -> Result<()> {
+        for sample in samples {
+            self.sensor_ids.push(sensor_id);
+            self.times
+                .push(sensapp_datetime_to_offset_datetime(&sample.datetime)?);
+            self.values.push(sample.value);
+        }
+        Ok(())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
 }
 
 pub async fn publish_string_values(
