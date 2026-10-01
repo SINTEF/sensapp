@@ -64,9 +64,18 @@ You can upload either simple scalar values, explicit `SamplePoint` lists, or a P
 
 If you want the frame itself to carry upload metadata, `build_upload_table_from_polars()` also accepts uniform `sensor_name` and optional `sensor_id` columns. `sensor_id` must be a valid UUID, otherwise the server rejects the upload.
 
+## Retries
+
+When SensApp is overloaded it answers `503` (or `429`) and the client retries, within limits (`RetryPolicy`, three attempts by default):
+
+- It waits for the server's `Retry-After`, or backs off exponentially with full jitter when there is none (`random(0, min(30 s, 0.1 s * 2^n))`).
+- It drops the request and raises `SensAppHTTPError` after `max_attempts`, when the next wait would pass `total_timeout` (60 s), or when `Retry-After` is above `max_delay` (30 s).
+- Only `503` and `429` are retried, never other errors. `publish` is only resent when the `503` carries `Retry-After`, which SensApp sends when it rejected the write before reading it. A bare `503` (storage unavailable) or a timeout may follow a partial write, and SensApp keeps duplicate samples, so those are not resent. Reads are resent in all cases.
+- `SensAppClient(..., retry=None)` disables retries, `retry=RetryPolicy(max_attempts=5, ...)` tunes them. If you retry in a proxy or another layer too, disable one of them.
+
 ## What is included
 
-- `SensAppClient` for the HTTP API
+- `SensAppClient` for the HTTP API, and `RetryPolicy` for its overload retries
 - `SamplePoint` for lightweight upload payloads
 - `TimeSeries` for query results with Polars and pandas conversion helpers
 - `build_upload_table()` to build Arrow upload tables explicitly

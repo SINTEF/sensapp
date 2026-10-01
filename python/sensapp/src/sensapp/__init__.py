@@ -22,6 +22,7 @@ from ._models import (
     TimeSeries,
     UploadValue,
 )
+from ._retry import RetryPolicy
 from .client import SensAppClient
 
 try:
@@ -35,6 +36,7 @@ __all__ = [
     "MetricInfo",
     "MetricsCatalog",
     "ReadinessStatus",
+    "RetryPolicy",
     "SamplePoint",
     "SensAppClient",
     "SensAppError",
