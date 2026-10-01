@@ -12,7 +12,7 @@ The next phase is not to add more features. It is to make the existing system so
 
 Code, tests and docs for this exist (see `docs/CLICKHOUSE.md`, `done/clickhouse-*.md`). What remains is evidence from a real environment:
 
-- [ ] Verify the revised CI on GitHub: backend matrix, DuckDB and Docker smoke durations, cache sizes (`current_tasks/ci-build-time.md`)
+- [ ] Verify the revised CI on GitHub: backend matrix, DuckDB and Docker smoke durations, cache sizes (`done/ci-build-time.md`)
 - [ ] Stage a deployment of the image and Helm chart against an external persistent ClickHouse
 - [ ] Exercise operations: restart SensApp, interrupt and recover ClickHouse, practise backup and restore on disposable data
 - [ ] Review dependency audit findings, align Cargo and chart versions, write the changelog, publish from a reviewed tag, smoke-test the published artifacts
@@ -21,13 +21,13 @@ Code, tests and docs for this exist (see `docs/CLICKHOUSE.md`, `done/clickhouse-
 
 Done: Prometheus scrape endpoint with HTTP request count, duration and in-flight gauges, per-operation counts and durations (queries and writes), processed sample and series counts, and storage readiness; request tracing through `tower-http`; request timeout; request body and read-size limits.
 
-- [ ] Add ingestion rate limiting and backpressure handling (concurrency limit, `429`/`503` with `Retry-After`)
-- [ ] Add request correlation identifiers (`x-request-id`) to logs and error responses
+- [x] Backpressure on writes: concurrency limit, `503` with `Retry-After` (`docs/CONFIGURATION.md`). Rate limiting is left to a reverse proxy on purpose
+- [x] Request correlation identifiers (`x-request-id`) in logs and response headers
 - [ ] Review structured logging for enough context to diagnose backend failures (credentials are already redacted)
 
 ### 3. Documentation
 
-- [ ] Write a short configuration reference for common deployments (environment variables live in `src/config/mod.rs`)
+- [x] Configuration reference: `docs/CONFIGURATION.md`
 - [ ] Document backend trade-offs clearly, and which backends are maintained versus experimental. The release plan already positions ClickHouse as the reference, the other backends as tested compatibility paths, and BigQuery and RRDCached as experimental
 - [ ] Document which features are production-oriented and which remain research-oriented
 

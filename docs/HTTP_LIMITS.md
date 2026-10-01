@@ -4,6 +4,7 @@ SensApp bounds HTTP work to keep one request from using excessive memory.
 
 - `SENSAPP_HTTP_BODY_LIMIT` defaults to `64MiB`. It applies to `/publish`, InfluxDB write, Prometheus remote write, and Prometheus remote read. Requests over the limit return HTTP 413. The server buffers each accepted request body before parsing it.
 - Gzip-compressed InfluxDB writes and Snappy-compressed Prometheus requests are also limited after decompression. An expanded body over the configured size is rejected.
+- `SENSAPP_HTTP_MAX_CONCURRENT_WRITES` defaults to `16`. At most that many write requests run at once; a write that finds no free slot is rejected at once with HTTP 503 and a jittered `Retry-After`, before its body is read. `0` disables the limit. See [CONFIGURATION.md](CONFIGURATION.md#backpressure).
 - `GET /series/{uuid}` allows at most 100,000 samples. An explicit `limit` above that is rejected. Without `limit`, the server detects a larger result and asks the client to narrow the time range or use aggregation.
 - `limit` on `GET /series/{uuid}` returns the **oldest** N samples of the window, in time order, and does not signal that more exist. Use `start`/`end` to page through a series.
 - `simplify` runs on the rows read for the window, after bucketing when `step` is set and after `limit`. If that read holds more than 100,000 rows, the request is rejected with HTTP 400 rather than simplified from a truncated read. Add `step` and `aggregation`, or narrow `start`/`end`. The 100,000 cap applies to the rows simplify reads, not only to its output.

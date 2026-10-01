@@ -23,6 +23,11 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS", default = 30)]
     pub http_server_timeout_seconds: u64,
 
+    /// Maximum number of write requests handled at the same time (`/publish`, InfluxDB and
+    /// Prometheus writes, admin). Extra writes get `503` with `Retry-After`. `0` disables the limit.
+    #[config(env = "SENSAPP_HTTP_MAX_CONCURRENT_WRITES", default = 16)]
+    pub http_max_concurrent_writes: usize,
+
     #[config(env = "SENSAPP_MAX_INFERENCES_ROWS", default = 128)]
     #[allow(dead_code)]
     pub max_inference_rows: usize,

@@ -1,6 +1,7 @@
 pub mod app_error;
 pub mod auth;
 pub mod authorized_storage;
+pub mod backpressure;
 pub mod crud;
 pub mod health;
 pub mod influxdb;

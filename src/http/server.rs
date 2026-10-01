@@ -1,5 +1,6 @@
 use super::app_error::AppError;
 use super::auth::{require_delete_auth, require_read_auth, require_write_auth};
+use super::backpressure::{WriteLimiter, limit_concurrent_writes};
 use super::crud::{
     delete_series, delete_series_samples, get_series_availability, get_series_data,
     get_series_last_sample, list_metrics, list_series,
@@ -44,6 +45,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
+use tower_http::request_id::MakeRequestUuid;
 use tower_http::trace;
 use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::Level;
@@ -71,6 +73,7 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         axum::middleware::from_fn_with_state(max_body_bytes, enforce_request_body_limit);
     let bytes_body_layer = DefaultBodyLimit::max(max_body_bytes);
     let timeout_seconds = config.http_server_timeout_seconds;
+    let write_limiter = WriteLimiter::new(config.http_max_concurrent_writes);
 
     // Initialize tracing
     // Note: tracing subscriber is initialized in main.rs
@@ -79,11 +82,29 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
     let sensitive_headers: Arc<[_]> = vec![header::AUTHORIZATION, header::COOKIE].into();
 
     // Middleware creation
+    // Every request gets an `x-request-id` (kept when the client or a proxy already sent one).
+    // It is part of the request's log span and is echoed in the response headers, errors included.
     let middleware = ServiceBuilder::new()
+        .set_x_request_id(MakeRequestUuid)
+        .propagate_x_request_id()
         .sensitive_request_headers(sensitive_headers.clone())
         .layer(
             TraceLayer::new_for_http()
-                .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
+                .make_span_with(|request: &Request| {
+                    let request_id = request
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or_default();
+                    tracing::span!(
+                        Level::INFO,
+                        "request",
+                        method = %request.method(),
+                        uri = %request.uri(),
+                        version = ?request.version(),
+                        request_id = %request_id,
+                    )
+                })
                 .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
         )
         .sensitive_response_headers(sensitive_headers)
@@ -145,6 +166,13 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
                 .layer(max_body_layer),
         )
         .route("/api/v1/admin/vacuum", post(vacuum_database))
+        // Layers added later run first: authenticate, then take a write slot, then (per route)
+        // buffer the body. Only authenticated writers hold slots, and nothing is buffered
+        // before a slot is free.
+        .route_layer(axum::middleware::from_fn_with_state(
+            write_limiter,
+            limit_concurrent_writes,
+        ))
         .route_layer(axum::middleware::from_fn_with_state(
             state.auth.clone(),
             require_write_auth,

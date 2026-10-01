@@ -13,11 +13,13 @@ storage_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp
 #endpoint = "0.0.0.0"
 
 # Optional Configuration
+# All settings are listed in docs/CONFIGURATION.md
+
+# Maximum concurrent write requests, extra writes get 503 + a jittered Retry-After (default: 16, 0 = no limit)
+# http_max_concurrent_writes = 16
+
 # Sentry DSN for error tracking (leave commented to disable)
 # sentry_dsn = "https://your-dsn@your-sentry-instance/project-id"
-
-# Storage sync timeout in seconds (default: 15)
-# storage_sync_timeout_seconds = 30
 
 # JWT Authentication (optional)
 # Set to a random string of at least 32 characters to enable JWT auth.
