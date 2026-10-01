@@ -1,7 +1,6 @@
 use crate::datamodel::{Sample, TypedSamples, batch::SingleSensorBatch};
 use crate::storage::clickhouse::clickhouse_utilities::{
-    datetime_to_micros, decimal_to_clickhouse_raw, get_sensor_id_or_create_sensor,
-    map_clickhouse_error,
+    datetime_to_micros, decimal_to_clickhouse_raw, map_clickhouse_error, uuid_to_sensor_id,
 };
 use anyhow::Result;
 use base64::prelude::*;
@@ -95,25 +94,10 @@ impl<'a> ClickHousePublisher<'a> {
         }
     }
 
-    /// Publish a single sensor batch to ClickHouse
+    /// Publish the samples of a single sensor batch to ClickHouse. The sensor must have been
+    /// registered with `register_sensors` first.
     pub async fn publish_single_sensor_batch(&mut self, batch: &SingleSensorBatch) -> Result<()> {
-        // Get or create the sensor. Its labels are written once, when it is created: a sensor
-        // UUID is derived from its name, type, unit and labels, so they cannot change afterwards.
-        let labels: Vec<(String, String)> = batch
-            .sensor
-            .labels
-            .iter()
-            .map(|(name, description)| (name.clone(), description.clone()))
-            .collect();
-        let sensor_id = get_sensor_id_or_create_sensor(
-            self.client,
-            &batch.sensor.uuid,
-            &batch.sensor.name,
-            &batch.sensor.sensor_type,
-            batch.sensor.unit.as_ref(),
-            &labels,
-        )
-        .await?;
+        let sensor_id = uuid_to_sensor_id(&batch.sensor.uuid);
 
         // Publish samples - need to acquire read lock first
         let samples_guard = batch.samples.read().await;

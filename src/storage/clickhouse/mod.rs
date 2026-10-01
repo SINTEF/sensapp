@@ -26,7 +26,7 @@ use clickhouse_publishers::ClickHousePublisher;
 pub use clickhouse_utilities::classify_clickhouse_error;
 use clickhouse_utilities::{
     datetime_to_micros, decimal_from_clickhouse_raw, map_clickhouse_error, micros_to_datetime,
-    uuid_to_sensor_id,
+    register_sensors, uuid_to_sensor_id,
 };
 use connection::{ConnectionParams, quote_identifier};
 
@@ -446,6 +446,13 @@ impl StorageInstance for ClickHouseStorage {
     }
 
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
+        let sensors: Vec<&Sensor> = batch
+            .sensors
+            .iter()
+            .map(|single_sensor_batch| single_sensor_batch.sensor.as_ref())
+            .collect();
+        register_sensors(&self.client, &sensors).await?;
+
         let mut publisher = ClickHousePublisher::new(&self.client);
 
         for single_sensor_batch in batch.sensors.as_ref() {
@@ -709,31 +716,28 @@ impl StorageInstance for ClickHouseStorage {
                 None
             };
 
-            // Query labels for this sensor
-            let labels_query =
-                "SELECT name, COALESCE(description, '') FROM labels FINAL WHERE sensor_id = ?";
-            let mut labels_cursor = self
-                .client
-                .query(labels_query)
-                .bind(sensor_id)
-                .fetch::<(String, String)>()
-                .map_err(|e| map_clickhouse_error(e, Some(uuid), Some(&name)))?;
-
-            let mut labels = Vec::new();
-            while let Some((label_name, label_description)) = labels_cursor.next().await? {
-                labels.push((label_name, label_description));
-            }
-
-            let sensor = Sensor {
-                uuid,
-                name,
-                sensor_type,
-                unit,
-                labels: SensAppLabels::from(labels),
-            };
-
-            sensors.push(sensor);
+            sensors.push((
+                sensor_id,
+                Sensor {
+                    uuid,
+                    name,
+                    sensor_type,
+                    unit,
+                    labels: SensAppLabels::new(),
+                },
+            ));
         }
+
+        // One query for the labels of the whole page, not one per series
+        let sensor_ids: Vec<u64> = sensors.iter().map(|(sensor_id, _)| *sensor_id).collect();
+        let mut labels = self.labels_of_sensors(&sensor_ids).await?;
+        let sensors: Vec<Sensor> = sensors
+            .into_iter()
+            .map(|(sensor_id, mut sensor)| {
+                sensor.labels = labels.remove(&sensor_id).unwrap_or_default();
+                sensor
+            })
+            .collect();
 
         Ok(crate::storage::ListSeriesResult {
             series: sensors,

@@ -247,3 +247,61 @@ async fn extreme_timestamps_round_trip() -> Result<()> {
     assert_eq!(stored, expected);
     Ok(())
 }
+
+/// Backends look sensors up in chunks: use more sensors than any chunk, with labels and a
+/// shared unit, in one batch, then page through the catalog.
+#[tokio::test]
+#[serial]
+async fn a_batch_of_many_new_sensors_registers_all_of_them() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let count = 2_100;
+    let run = Uuid::new_v4();
+    let unit = sensapp::datamodel::unit::Unit {
+        name: "celsius".to_string(),
+        description: Some("degrees".to_string()),
+    };
+
+    let mut batch_builder = BatchBuilder::new()?;
+    for index in 0..count {
+        let labels: SensAppLabels = [
+            ("host".to_string(), format!("h{}", index % 50)),
+            ("index".to_string(), index.to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let sensor = Arc::new(Sensor::new_without_uuid(
+            format!("many_sensors_{run}"),
+            SensorType::Float,
+            Some(unit.clone()),
+            Some(labels),
+        )?);
+        batch_builder.add(sensor, one_sample(index)).await?;
+    }
+    batch_builder.send_what_is_left(storage.clone()).await?;
+
+    let name = format!("many_sensors_{run}");
+    let mut seen = std::collections::HashSet::new();
+    let mut bookmark: Option<String> = None;
+    loop {
+        let page = storage
+            .list_series(Some(&name), None, bookmark.as_deref())
+            .await?;
+        for sensor in &page.series {
+            assert_eq!(sensor.labels.len(), 2, "labels of {}", sensor.uuid);
+            // (SQLite does not keep unit descriptions)
+            assert_eq!(
+                sensor.unit.as_ref().map(|u| u.name.as_str()),
+                Some("celsius")
+            );
+            assert!(seen.insert(sensor.uuid), "{} is listed twice", sensor.uuid);
+        }
+        bookmark = page.bookmark;
+        if bookmark.is_none() {
+            break;
+        }
+    }
+    assert_eq!(seen.len(), count);
+    Ok(())
+}
