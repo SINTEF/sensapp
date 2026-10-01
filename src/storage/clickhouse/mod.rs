@@ -27,6 +27,11 @@ use clickhouse_utilities::{
     uuid_to_sensor_id,
 };
 
+/// Tables are partitioned by month. ClickHouse refuses an insert touching more than 100
+/// partitions by default, which would reject a backfill of more than 8 years of history in a
+/// single request. 2400 partitions is 200 years: a limit against absurd timestamps only.
+const MAX_PARTITIONS_PER_INSERT: u32 = 2400;
+
 pub struct ClickHouseStorage {
     #[allow(dead_code)]
     client: Client,
@@ -128,7 +133,13 @@ impl ClickHouseStorage {
             port
         );
 
-        let mut client = Client::default().with_url(&endpoint_url).with_user(user);
+        let mut client = Client::default()
+            .with_url(&endpoint_url)
+            .with_user(user)
+            .with_setting(
+                "max_partitions_per_insert_block",
+                MAX_PARTITIONS_PER_INSERT.to_string(),
+            );
 
         if let Some(password) = password {
             client = client.with_password(password);

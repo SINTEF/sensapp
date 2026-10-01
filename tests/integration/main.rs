@@ -20,6 +20,7 @@ mod parser_edge_cases;
 mod prometheus_metrics;
 mod prometheus_remote_read_integration;
 mod prometheus_write_integration;
+mod publish_robustness;
 mod query_export;
 mod query_sensors_by_labels;
 mod rrdcached_integration;
