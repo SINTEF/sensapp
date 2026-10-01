@@ -81,6 +81,13 @@ impl IntoResponse for AppError {
                         "Storage configuration error".to_string(),
                     )
                 }
+                StorageError::Unavailable(_) => {
+                    error!("Storage backend unavailable: {}", storage_error);
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Database unavailable".to_string(),
+                    )
+                }
                 StorageError::Database(_) | StorageError::OperationFailed { .. } => {
                     if storage_error_is_unavailable(&storage_error) {
                         error!("Storage backend unavailable: {}", storage_error);
@@ -114,6 +121,12 @@ impl From<anyhow::Error> for AppError {
     fn from(err: anyhow::Error) -> Self {
         if err.is::<crate::http::authorized_storage::SensorAccessDenied>() {
             return Self::Forbidden(err.to_string());
+        }
+        // Errors of the ClickHouse client travel inside `anyhow` through `?`: classify them here
+        // so that an outage is a 503 and not an anonymous 500.
+        #[cfg(feature = "clickhouse")]
+        if let Some(error) = err.downcast_ref::<clickhouse::error::Error>() {
+            return Self::Storage(crate::storage::clickhouse::classify_clickhouse_error(error));
         }
         match err.downcast::<StorageError>() {
             Ok(storage_error) => Self::Storage(storage_error),
@@ -157,5 +170,29 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
             json!({ "error": "Database unavailable" })
         );
+    }
+
+    #[tokio::test]
+    async fn test_unavailable_storage_is_a_503() {
+        let response = AppError::from(StorageError::Unavailable("timeout expired".to_string()))
+            .into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[cfg(feature = "clickhouse")]
+    #[tokio::test]
+    async fn test_clickhouse_client_errors_are_classified_through_anyhow() {
+        use anyhow::Context;
+
+        let timed_out: anyhow::Result<()> =
+            Err(clickhouse::error::Error::TimedOut).context("while counting samples");
+        let response = AppError::from(timed_out.unwrap_err()).into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let broken: anyhow::Error =
+            clickhouse::error::Error::BadResponse("Code: 62. DB::Exception: Syntax error".into())
+                .into();
+        let response = AppError::from(broken).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

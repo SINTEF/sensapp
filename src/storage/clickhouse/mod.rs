@@ -23,6 +23,7 @@ mod matchers;
 
 use crate::storage::{DEFAULT_LIST_SERIES_LIMIT, MAX_LIST_SERIES_LIMIT};
 use clickhouse_publishers::ClickHousePublisher;
+pub use clickhouse_utilities::classify_clickhouse_error;
 use clickhouse_utilities::{
     datetime_to_micros, decimal_from_clickhouse_raw, map_clickhouse_error, micros_to_datetime,
     uuid_to_sensor_id,
@@ -33,6 +34,9 @@ use connection::{ConnectionParams, quote_identifier};
 /// partitions by default, which would reject a backfill of more than 8 years of history in a
 /// single request. 2400 partitions is 200 years: a limit against absurd timestamps only.
 const MAX_PARTITIONS_PER_INSERT: u32 = 2400;
+
+/// How long the readiness check waits for ClickHouse to answer `SELECT 1`.
+const HEALTH_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 pub struct ClickHouseStorage {
     #[allow(dead_code)]
@@ -1092,11 +1096,15 @@ impl StorageInstance for ClickHouseStorage {
     /// Health check for ClickHouse storage
     /// Executes a simple SELECT 1 query to verify database connectivity
     async fn health_check(&self) -> Result<()> {
-        self.client
-            .query("SELECT 1")
-            .execute()
-            .await
-            .context("ClickHouse health check failed")?;
+        // Bounded, so that a hung ClickHouse makes readiness fail fast: probes and the metrics
+        // scrape are not willing to wait for the HTTP request timeout.
+        tokio::time::timeout(
+            HEALTH_CHECK_TIMEOUT,
+            self.client.query("SELECT 1").execute(),
+        )
+        .await
+        .map_err(|_| StorageError::Unavailable("health check timed out".to_string()))?
+        .context("ClickHouse health check failed")?;
         Ok(())
     }
 
@@ -1693,5 +1701,32 @@ mod connection_tests {
         )
         .await
         .unwrap();
+    }
+    /// A server that accepts the connection and never answers must not block readiness.
+    #[tokio::test(start_paused = true)]
+    async fn health_check_gives_up_on_a_hung_server() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket); // never read, never answer
+            }
+        });
+
+        let storage = ClickHouseStorage::connect(&format!("clickhouse://127.0.0.1:{port}/hung"))
+            .await
+            .unwrap();
+        let started = tokio::time::Instant::now();
+        let error = storage.health_check().await.unwrap_err();
+
+        assert!(started.elapsed() <= HEALTH_CHECK_TIMEOUT + std::time::Duration::from_secs(1));
+        assert!(
+            matches!(
+                error.downcast_ref::<StorageError>(),
+                Some(StorageError::Unavailable(_))
+            ),
+            "{error:#}"
+        );
     }
 }

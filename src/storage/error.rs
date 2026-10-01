@@ -46,6 +46,12 @@ pub enum StorageError {
     #[allow(dead_code)] // Only used by backends that cannot implement every operation
     Unsupported(String),
 
+    /// The storage backend cannot be reached, timed out, or is overloaded: the operation may
+    /// succeed later
+    #[error("Storage backend unavailable: {0}")]
+    #[allow(dead_code)] // Only used by backends that classify their own errors
+    Unavailable(String),
+
     /// Generic storage operation error with context
     #[error("Storage operation failed: {operation} - {details}")]
     #[allow(dead_code)] // Part of error API, will be used for generic storage operations

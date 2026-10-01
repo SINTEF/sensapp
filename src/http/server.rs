@@ -109,7 +109,9 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         )
         .sensitive_response_headers(sensitive_headers)
         .layer(TimeoutLayer::with_status_code(
-            StatusCode::REQUEST_TIMEOUT,
+            // The server was too slow (a hung database, usually), not the client: 5xx is what
+            // Prometheus, Telegraf and friends retry, 408 is not.
+            StatusCode::GATEWAY_TIMEOUT,
             Duration::from_secs(timeout_seconds),
         ))
         .compression()

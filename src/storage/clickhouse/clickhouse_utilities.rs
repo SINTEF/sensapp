@@ -215,13 +215,75 @@ async fn get_or_create_unit(client: &clickhouse::Client, unit: &Unit) -> Result<
     Ok(unit_id)
 }
 
+/// ClickHouse server error codes that mean "try again later" rather than "this request is
+/// wrong": timeouts, network failures, overload and read-only or unavailable replicas.
+const TRANSIENT_SERVER_ERROR_CODES: [u32; 12] = [
+    159, // TIMEOUT_EXCEEDED
+    164, // READONLY
+    202, // TOO_MANY_SIMULTANEOUS_QUERIES
+    203, // NO_FREE_CONNECTION
+    209, // SOCKET_TIMEOUT
+    210, // NETWORK_ERROR
+    225, // NO_ZOOKEEPER
+    241, // MEMORY_LIMIT_EXCEEDED
+    242, // TABLE_IS_READ_ONLY
+    252, // TOO_MANY_PARTS: merges cannot keep up with the inserts
+    285, // TOO_FEW_LIVE_REPLICAS
+    319, // UNKNOWN_STATUS_OF_INSERT
+];
+
+/// The code of a ClickHouse exception message: `Code: 252. DB::Exception: ...`.
+fn server_error_code(message: &str) -> Option<u32> {
+    let digits = message.trim_start().strip_prefix("Code: ")?;
+    let end = digits.find(|c: char| !c.is_ascii_digit())?;
+    digits[..end].parse().ok()
+}
+
+/// Sort an error of the ClickHouse client into the categories SensApp reports over HTTP.
+///
+/// Network failures, timeouts and overload are `Unavailable` (503, the client may retry).
+/// Everything else the server rejects is a failure on our side (500): SensApp builds its
+/// own statements and rows, so ClickHouse refusing them is never the caller's data format.
+pub fn classify_clickhouse_error(error: &clickhouse::error::Error) -> StorageError {
+    use clickhouse::error::Error;
+
+    match error {
+        Error::Network(_) | Error::TimedOut | Error::Other(_) => {
+            StorageError::Unavailable(error.to_string())
+        }
+        Error::BadResponse(message)
+            if server_error_code(message)
+                .is_some_and(|code| TRANSIENT_SERVER_ERROR_CODES.contains(&code)) =>
+        {
+            StorageError::Unavailable(message.clone())
+        }
+        other => StorageError::OperationFailed {
+            operation: "ClickHouse request".to_string(),
+            details: other.to_string(),
+        },
+    }
+}
+
 /// Convert ClickHouse error to StorageError with context
 pub fn map_clickhouse_error(
     error: clickhouse::error::Error,
     uuid: Option<Uuid>,
     name: Option<&str>,
 ) -> anyhow::Error {
-    StorageError::invalid_data_format(&error.to_string(), uuid, name).into()
+    match classify_clickhouse_error(&error) {
+        StorageError::OperationFailed { details, .. } => StorageError::OperationFailed {
+            operation: format!(
+                "ClickHouse request for sensor {}",
+                name.map_or_else(
+                    || uuid.map_or_else(|| "unknown".to_string(), |u| u.to_string()),
+                    str::to_string
+                )
+            ),
+            details,
+        }
+        .into(),
+        classified => classified.into(),
+    }
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -261,6 +323,66 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clickhouse::error::Error;
+
+    fn bad_response(code: u32) -> Error {
+        Error::BadResponse(format!(
+            "Code: {code}. DB::Exception: something (SOME_NAME)"
+        ))
+    }
+
+    #[test]
+    fn server_error_codes_are_read_from_the_message() {
+        assert_eq!(server_error_code("Code: 252. DB::Exception: x"), Some(252));
+        assert_eq!(server_error_code("  Code: 62. DB::Exception"), Some(62));
+        assert_eq!(server_error_code("<html>Bad Gateway</html>"), None);
+        assert_eq!(server_error_code("Code: abc."), None);
+    }
+
+    #[test]
+    fn outages_timeouts_and_overload_are_unavailable() {
+        assert!(matches!(
+            classify_clickhouse_error(&Error::TimedOut),
+            StorageError::Unavailable(_)
+        ));
+        assert!(matches!(
+            classify_clickhouse_error(&Error::Network("connection refused".into())),
+            StorageError::Unavailable(_)
+        ));
+        for code in TRANSIENT_SERVER_ERROR_CODES {
+            assert!(
+                matches!(
+                    classify_clickhouse_error(&bad_response(code)),
+                    StorageError::Unavailable(_)
+                ),
+                "code {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn other_server_errors_are_server_side_failures_not_bad_requests() {
+        // 62 SYNTAX_ERROR, 60 UNKNOWN_TABLE, 516 AUTHENTICATION_FAILED
+        for code in [62, 60, 516] {
+            assert!(
+                matches!(
+                    classify_clickhouse_error(&bad_response(code)),
+                    StorageError::OperationFailed { .. }
+                ),
+                "code {code}"
+            );
+        }
+        assert!(matches!(
+            classify_clickhouse_error(&Error::NotEnoughData),
+            StorageError::OperationFailed { .. }
+        ));
+    }
+
+    #[test]
+    fn sensor_context_is_kept_for_failures() {
+        let error = map_clickhouse_error(bad_response(62), None, Some("temperature"));
+        assert!(format!("{error}").contains("temperature"), "{error}");
+    }
 
     // These values are stored in ClickHouse. If one of these tests fails, the on-disk format
     // changed: existing data would no longer be found.

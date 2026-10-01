@@ -32,7 +32,7 @@ The Helm chart sets variables through `env:` in `values.yaml` (see the [chart RE
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SENSAPP_HTTP_BODY_LIMIT` | `64MiB` | Largest accepted request body, also after gzip or Snappy decompression. Over the limit gives `413`. Accepts units such as `512KiB`, `64MiB`, `1GiB`, up to 128 GiB. |
-| `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS` | `30` | Time a request may take before it is answered with `408`. |
+| `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS` | `30` | Time a request may take before it is answered with `504 Gateway Timeout`. |
 | `SENSAPP_HTTP_MAX_CONCURRENT_WRITES` | `16` | Write requests (`/publish`, InfluxDB write, Prometheus remote write, admin) handled at the same time. See [Backpressure](#backpressure). `0` disables the limit. |
 
 Details on what the limits protect against are in [HTTP_LIMITS.md](HTTP_LIMITS.md).
