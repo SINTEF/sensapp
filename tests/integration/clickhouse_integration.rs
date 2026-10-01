@@ -44,6 +44,19 @@ mod clickhouse_tests {
         TypedSamples::Float(samples)
     }
 
+    /// A client for administrative statements (creating throwaway databases, inspecting
+    /// `system` tables), built from the test connection string.
+    fn admin_client(url: &url::Url) -> clickhouse::Client {
+        clickhouse::Client::default()
+            .with_url(format!(
+                "http://{}:{}",
+                url.host_str().expect("host"),
+                url.port().unwrap_or(8123)
+            ))
+            .with_user(url.username())
+            .with_password(url.password().unwrap_or_default())
+    }
+
     async fn publish_test_sensors(
         storage: &Arc<dyn sensapp::storage::StorageInstance>,
         sensors_with_samples: Vec<(Sensor, TypedSamples)>,
@@ -353,14 +366,7 @@ mod clickhouse_tests {
         ensure_config();
         let connection_string = DatabaseType::ClickHouse.default_connection_string();
         let mut url = url::Url::parse(&connection_string)?;
-        let admin = clickhouse::Client::default()
-            .with_url(format!(
-                "http://{}:{}",
-                url.host_str().expect("host"),
-                url.port().unwrap_or(8123)
-            ))
-            .with_user(url.username())
-            .with_password(url.password().unwrap_or_default());
+        let admin = admin_client(&url);
 
         admin
             .query("DROP DATABASE IF EXISTS sensapp_legacy_test")
@@ -405,14 +411,7 @@ mod clickhouse_tests {
         let connection_string = DatabaseType::ClickHouse.default_connection_string();
         let mut url = url::Url::parse(&connection_string)?;
         let password = url.password().unwrap_or_default().to_string();
-        let admin = clickhouse::Client::default()
-            .with_url(format!(
-                "http://{}:{}",
-                url.host_str().expect("host"),
-                url.port().unwrap_or(8123)
-            ))
-            .with_user(url.username())
-            .with_password(&password);
+        let admin = admin_client(&url);
 
         // Every byte of the password written as %XX
         let encoded: String = password
@@ -451,5 +450,26 @@ mod clickhouse_tests {
             .execute()
             .await?;
         result
+    }
+    /// The backend reads the base tables directly: no materialized view should be kept up to
+    /// date on every write for nothing.
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_schema_has_no_unused_views() -> Result<()> {
+        ensure_config();
+        let _test_db = TestDb::new_with_type(DatabaseType::ClickHouse).await?;
+        let url = url::Url::parse(&DatabaseType::ClickHouse.default_connection_string())?;
+        let database = url.path().trim_start_matches('/');
+
+        let views: u64 = admin_client(&url)
+            .query(
+                "SELECT count() FROM system.tables \
+                 WHERE database = ? AND engine = 'MaterializedView'",
+            )
+            .bind(database)
+            .fetch_one()
+            .await?;
+        assert_eq!(views, 0);
+        Ok(())
     }
 }
