@@ -305,3 +305,30 @@ async fn a_batch_of_many_new_sensors_registers_all_of_them() -> Result<()> {
     assert_eq!(seen.len(), count);
     Ok(())
 }
+
+/// A deleted series that is written again is a new, complete series: its metadata and labels
+/// are registered again, and only the new samples exist.
+#[tokio::test]
+#[serial]
+async fn a_series_written_again_after_its_deletion_is_registered_again() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let sensor = labeled_sensor("deleted_then_rewritten")?;
+
+    for minutes in 0..3 {
+        publish_one_sample(&storage, &sensor, minutes).await?;
+    }
+    assert!(storage.delete_series(&sensor.uuid.to_string()).await?);
+    assert!(
+        storage
+            .list_series(Some(&sensor.name), None, None)
+            .await?
+            .series
+            .is_empty(),
+        "the deleted series is gone"
+    );
+
+    publish_one_sample(&storage, &sensor, 10).await?;
+    assert_single_series_with_its_labels(&storage, &sensor, 1).await
+}
