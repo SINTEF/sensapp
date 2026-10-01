@@ -2,11 +2,13 @@
 -- Uses hybrid UUID/UInt64 approach for optimal performance
 
 -- Create the 'units' table
+-- units, sensors and labels are ReplacingMergeTree: two writers registering the same new
+-- sensor at once both insert it, and the identical rows collapse. Read them with FINAL.
 CREATE TABLE IF NOT EXISTS units (
     id UInt64,
     name String,
     description Nullable(String)
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 ORDER BY id
 SETTINGS index_granularity = 8192;
 
@@ -17,7 +19,7 @@ CREATE TABLE IF NOT EXISTS sensors (
     name String,
     type String,
     unit Nullable(UInt64)
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 ORDER BY sensor_id
 SETTINGS index_granularity = 8192;
 
@@ -26,7 +28,7 @@ CREATE TABLE IF NOT EXISTS labels (
     sensor_id UInt64,
     name String,
     description Nullable(String)
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 ORDER BY (sensor_id, name)
 SETTINGS index_granularity = 8192;
 

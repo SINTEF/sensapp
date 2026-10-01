@@ -180,6 +180,8 @@ impl ClickHouseStorage {
                 .context("Failed to create database")?;
         }
 
+        self.reject_legacy_metadata_tables().await?;
+
         // Read and execute the migration SQL
         let migration_sql = include_str!("migrations/20240223133248_init.sql");
 
@@ -219,6 +221,29 @@ impl ClickHouseStorage {
         Ok(())
     }
 
+    /// `units`, `sensors` and `labels` used to be plain `MergeTree` tables, which cannot be read
+    /// with `FINAL`. `CREATE TABLE IF NOT EXISTS` leaves them untouched, so say it clearly at
+    /// startup instead of failing on the first query. Those databases are also incompatible
+    /// with the current sensor ids, and were only ever used before the first release.
+    async fn reject_legacy_metadata_tables(&self) -> Result<()> {
+        let engine: Option<String> = self
+            .client
+            .query(
+                "SELECT engine FROM system.tables \
+                 WHERE database = currentDatabase() AND name = 'sensors'",
+            )
+            .fetch_optional()
+            .await
+            .context("Failed to read the engine of the sensors table")?;
+        if engine.as_deref() == Some("MergeTree") {
+            anyhow::bail!(
+                "This ClickHouse database was created by an older SensApp, before the first \
+                 release, and cannot be used: create a new database, or drop this one"
+            );
+        }
+        Ok(())
+    }
+
     async fn get_sensor_metadata(&self, sensor_uuid: &str) -> Result<Option<(u64, Sensor)>> {
         let uuid = Uuid::from_str(sensor_uuid).map_err(|e| {
             StorageError::invalid_data_format(
@@ -237,8 +262,8 @@ impl ClickHouseStorage {
                 s.type,
                 u.name AS unit_name,
                 u.description AS unit_description
-            FROM sensors s
-            LEFT JOIN units u ON s.unit = u.id
+            FROM sensors s FINAL
+            LEFT JOIN units u FINAL ON s.unit = u.id
             WHERE s.sensor_id = ?
             LIMIT 1
         "#;
@@ -281,7 +306,8 @@ impl ClickHouseStorage {
             None
         };
 
-        let labels_query = "SELECT name, COALESCE(description, '') FROM labels WHERE sensor_id = ?";
+        let labels_query =
+            "SELECT name, COALESCE(description, '') FROM labels FINAL WHERE sensor_id = ?";
         let mut labels_cursor = self
             .client
             .query(labels_query)
@@ -608,8 +634,8 @@ impl StorageInstance for ClickHouseStorage {
                     SELECT s.sensor_id, s.uuid, s.name, s.type,
                            COALESCE(u.name, '') as unit_name,
                            COALESCE(u.description, '') as unit_description
-                    FROM sensors s
-                    LEFT JOIN units u ON s.unit = u.id
+                    FROM sensors s FINAL
+                    LEFT JOIN units u FINAL ON s.unit = u.id
                     WHERE s.name = ? AND s.sensor_id > ?
                     ORDER BY s.sensor_id ASC
                     LIMIT ?
@@ -622,8 +648,8 @@ impl StorageInstance for ClickHouseStorage {
                     SELECT s.sensor_id, s.uuid, s.name, s.type,
                            COALESCE(u.name, '') as unit_name,
                            COALESCE(u.description, '') as unit_description
-                    FROM sensors s
-                    LEFT JOIN units u ON s.unit = u.id
+                    FROM sensors s FINAL
+                    LEFT JOIN units u FINAL ON s.unit = u.id
                     WHERE s.name = ?
                     ORDER BY s.sensor_id ASC
                     LIMIT ?
@@ -636,8 +662,8 @@ impl StorageInstance for ClickHouseStorage {
                     SELECT s.sensor_id, s.uuid, s.name, s.type,
                            COALESCE(u.name, '') as unit_name,
                            COALESCE(u.description, '') as unit_description
-                    FROM sensors s
-                    LEFT JOIN units u ON s.unit = u.id
+                    FROM sensors s FINAL
+                    LEFT JOIN units u FINAL ON s.unit = u.id
                     WHERE s.sensor_id > ?
                     ORDER BY s.sensor_id ASC
                     LIMIT ?
@@ -650,8 +676,8 @@ impl StorageInstance for ClickHouseStorage {
                     SELECT s.sensor_id, s.uuid, s.name, s.type,
                            COALESCE(u.name, '') as unit_name,
                            COALESCE(u.description, '') as unit_description
-                    FROM sensors s
-                    LEFT JOIN units u ON s.unit = u.id
+                    FROM sensors s FINAL
+                    LEFT JOIN units u FINAL ON s.unit = u.id
                     ORDER BY s.sensor_id ASC
                     LIMIT ?
                 "#,
@@ -724,7 +750,7 @@ impl StorageInstance for ClickHouseStorage {
 
             // Query labels for this sensor
             let labels_query =
-                "SELECT name, COALESCE(description, '') FROM labels WHERE sensor_id = ?";
+                "SELECT name, COALESCE(description, '') FROM labels FINAL WHERE sensor_id = ?";
             let mut labels_cursor = self
                 .client
                 .query(labels_query)
@@ -764,7 +790,7 @@ impl StorageInstance for ClickHouseStorage {
                 name,
                 type,
                 count(*) AS sensor_count
-            FROM sensors
+            FROM sensors FINAL
             GROUP BY name, type
             ORDER BY name ASC
         "#;
@@ -825,8 +851,8 @@ impl StorageInstance for ClickHouseStorage {
                 s.type,
                 u.name AS unit_name,
                 u.description AS unit_description
-            FROM sensors s
-            LEFT JOIN units u ON s.unit = u.id
+            FROM sensors s FINAL
+            LEFT JOIN units u FINAL ON s.unit = u.id
             WHERE s.sensor_id = ?
             LIMIT 1
         "#;
@@ -877,7 +903,8 @@ impl StorageInstance for ClickHouseStorage {
         };
 
         // Get labels
-        let labels_query = "SELECT name, COALESCE(description, '') FROM labels WHERE sensor_id = ?";
+        let labels_query =
+            "SELECT name, COALESCE(description, '') FROM labels FINAL WHERE sensor_id = ?";
         let mut labels_cursor = self
             .client
             .query(labels_query)

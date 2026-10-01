@@ -20,8 +20,8 @@ impl ClickHouseStorage {
             r#"SELECT DISTINCT s.sensor_id, s.uuid, s.name, s.type,
                       COALESCE(u.name, '') AS unit_name,
                       COALESCE(u.description, '') AS unit_description
-               FROM sensors s
-               LEFT JOIN units u ON s.unit = u.id"#,
+               FROM sensors s FINAL
+               LEFT JOIN units u FINAL ON s.unit = u.id"#,
         );
         let mut where_clauses: Vec<String> = Vec::new();
         let mut params: Vec<String> = Vec::new();
@@ -143,7 +143,7 @@ impl ClickHouseStorage {
             let mut labels_cursor = self
                 .client
                 .query(
-                    "SELECT sensor_id, name, COALESCE(description, '') AS description FROM labels WHERE sensor_id = ? ORDER BY name ASC",
+                    "SELECT sensor_id, name, COALESCE(description, '') AS description FROM labels FINAL WHERE sensor_id = ? ORDER BY name ASC",
                 )
                 .bind(sensor_id)
                 .fetch::<LabelRow>()

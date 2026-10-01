@@ -157,3 +157,25 @@ async fn republishing_a_series_does_not_duplicate_its_labels() -> Result<()> {
 
     assert_single_series_with_its_labels(&storage, &sensor, 5).await
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
+async fn concurrent_first_writes_create_one_series() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let sensor = labeled_sensor("concurrent")?;
+    let writers = 16;
+
+    let tasks: Vec<_> = (0..writers)
+        .map(|minutes| {
+            let storage = storage.clone();
+            let sensor = sensor.clone();
+            tokio::spawn(async move { publish_one_sample(&storage, &sensor, minutes).await })
+        })
+        .collect();
+    for task in tasks {
+        task.await??;
+    }
+
+    assert_single_series_with_its_labels(&storage, &sensor, writers).await
+}

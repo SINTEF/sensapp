@@ -345,4 +345,55 @@ mod clickhouse_tests {
 
         Ok(())
     }
+    /// Databases created before the metadata tables became `ReplacingMergeTree` cannot be read
+    /// with `FINAL`: startup must say so instead of failing on the first query.
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_rejects_databases_with_plain_merge_tree_metadata() -> Result<()> {
+        ensure_config();
+        let connection_string = DatabaseType::ClickHouse.default_connection_string();
+        let mut url = url::Url::parse(&connection_string)?;
+        let admin = clickhouse::Client::default()
+            .with_url(format!(
+                "http://{}:{}",
+                url.host_str().expect("host"),
+                url.port().unwrap_or(8123)
+            ))
+            .with_user(url.username())
+            .with_password(url.password().unwrap_or_default());
+
+        admin
+            .query("DROP DATABASE IF EXISTS sensapp_legacy_test")
+            .execute()
+            .await?;
+        admin
+            .query("CREATE DATABASE sensapp_legacy_test")
+            .execute()
+            .await?;
+        admin
+            .query(
+                "CREATE TABLE sensapp_legacy_test.sensors (sensor_id UInt64) \
+                 ENGINE = MergeTree() ORDER BY sensor_id",
+            )
+            .execute()
+            .await?;
+
+        url.set_path("/sensapp_legacy_test");
+        let storage =
+            sensapp::storage::storage_factory::create_storage_from_connection_string(url.as_str())
+                .await?;
+        let result = storage.create_or_migrate().await;
+
+        admin
+            .query("DROP DATABASE IF EXISTS sensapp_legacy_test")
+            .execute()
+            .await?;
+
+        let error = result.expect_err("a legacy database must be rejected");
+        assert!(
+            format!("{error:#}").contains("older SensApp"),
+            "unexpected error: {error:#}"
+        );
+        Ok(())
+    }
 }
