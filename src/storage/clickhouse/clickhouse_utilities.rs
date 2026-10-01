@@ -61,6 +61,7 @@ pub async fn get_sensor_id_or_create_sensor(
     name: &str,
     sensor_type: &SensorType,
     unit: Option<&Unit>,
+    labels: &[(String, String)],
 ) -> Result<u64> {
     let sensor_id = uuid_to_sensor_id(uuid);
 
@@ -82,6 +83,11 @@ pub async fn get_sensor_id_or_create_sensor(
     } else {
         None
     };
+
+    // The labels go first and the sensor row last: the sensor row is what makes the sensor
+    // visible, so a failure in between leaves no sensor without its labels, and a retry
+    // starts again from here.
+    insert_labels(client, sensor_id, uuid, name, labels).await?;
 
     // Define Row struct for sensor insertion
     #[derive(Row, Serialize)]
@@ -119,6 +125,45 @@ pub async fn get_sensor_id_or_create_sensor(
         .map_err(|e| StorageError::invalid_data_format(&e.to_string(), Some(*uuid), Some(name)))?;
 
     Ok(sensor_id)
+}
+
+/// Write the labels of a newly created sensor.
+async fn insert_labels(
+    client: &clickhouse::Client,
+    sensor_id: u64,
+    uuid: &Uuid,
+    name: &str,
+    labels: &[(String, String)],
+) -> Result<()> {
+    if labels.is_empty() {
+        return Ok(());
+    }
+
+    #[derive(Row, Serialize)]
+    struct LabelRow<'a> {
+        sensor_id: u64,
+        name: &'a str,
+        description: Option<&'a str>,
+    }
+
+    let to_error = |e: clickhouse::error::Error| map_clickhouse_error(e, Some(*uuid), Some(name));
+
+    let mut insert = client
+        .insert::<LabelRow>("labels")
+        .await
+        .map_err(to_error)?;
+    for (label_name, label_description) in labels {
+        insert
+            .write(&LabelRow {
+                sensor_id,
+                name: label_name,
+                description: Some(label_description),
+            })
+            .await
+            .map_err(to_error)?;
+    }
+    insert.end().await.map_err(to_error)?;
+    Ok(())
 }
 
 /// Get or create a unit in the units table

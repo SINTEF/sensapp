@@ -6,7 +6,9 @@ use crate::common::TestDb;
 use anyhow::Result;
 use sensapp::config::load_configuration_for_tests;
 use sensapp::datamodel::batch_builder::BatchBuilder;
+use sensapp::datamodel::sensapp_vec::SensAppLabels;
 use sensapp::datamodel::{Sample, SensAppDateTime, Sensor, SensorType, TypedSamples};
+use sensapp::storage::StorageInstance;
 use serial_test::serial;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -73,4 +75,85 @@ async fn one_request_can_span_many_years() -> Result<()> {
             .any(|sample| (sample.datetime.to_unix_seconds() - YEAR_2000).abs() < 1.0)
     );
     Ok(())
+}
+
+fn labeled_sensor(name_prefix: &str) -> Result<Arc<Sensor>> {
+    let labels: SensAppLabels = [("room", "lab"), ("floor", "2")]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+    Ok(Arc::new(Sensor::new_without_uuid(
+        format!("{name_prefix}_{}", Uuid::new_v4()),
+        SensorType::Float,
+        None,
+        Some(labels),
+    )?))
+}
+
+/// One sample at `minutes` minutes after 2024-01-01T00:00:00Z.
+fn one_sample(minutes: usize) -> TypedSamples {
+    TypedSamples::Float(
+        vec![Sample {
+            datetime: hifitime::Epoch::from_unix_seconds(1_704_067_200.0 + minutes as f64 * 60.0),
+            value: minutes as f64,
+        }]
+        .into(),
+    )
+}
+
+async fn publish_one_sample(
+    storage: &Arc<dyn StorageInstance>,
+    sensor: &Arc<Sensor>,
+    minutes: usize,
+) -> Result<()> {
+    let mut batch_builder = BatchBuilder::new()?;
+    batch_builder
+        .add(sensor.clone(), one_sample(minutes))
+        .await?;
+    batch_builder.send_what_is_left(storage.clone()).await?;
+    Ok(())
+}
+
+fn sorted_labels(sensor: &Sensor) -> Vec<(String, String)> {
+    let mut labels: Vec<_> = sensor.labels.iter().cloned().collect();
+    labels.sort();
+    labels
+}
+
+async fn assert_single_series_with_its_labels(
+    storage: &Arc<dyn StorageInstance>,
+    sensor: &Sensor,
+    expected_samples: usize,
+) -> Result<()> {
+    let expected_labels = vec![
+        ("floor".to_string(), "2".to_string()),
+        ("room".to_string(), "lab".to_string()),
+    ];
+
+    let listed = storage.list_series(Some(&sensor.name), None, None).await?;
+    assert_eq!(listed.series.len(), 1, "the series is listed once");
+    assert_eq!(sorted_labels(&listed.series[0]), expected_labels);
+
+    let data = storage
+        .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
+        .await?
+        .expect("the series should exist");
+    assert_eq!(sorted_labels(&data.sensor), expected_labels);
+    assert_eq!(data.samples.len(), expected_samples);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn republishing_a_series_does_not_duplicate_its_labels() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let sensor = labeled_sensor("republishing")?;
+
+    for minutes in 0..5 {
+        publish_one_sample(&storage, &sensor, minutes).await?;
+    }
+
+    assert_single_series_with_its_labels(&storage, &sensor, 5).await
 }
