@@ -396,4 +396,60 @@ mod clickhouse_tests {
         );
         Ok(())
     }
+
+    /// Database names such as `sensapp-prod` need quoting, and credentials are percent-decoded.
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_hyphenated_database_and_percent_encoded_password() -> Result<()> {
+        ensure_config();
+        let connection_string = DatabaseType::ClickHouse.default_connection_string();
+        let mut url = url::Url::parse(&connection_string)?;
+        let password = url.password().unwrap_or_default().to_string();
+        let admin = clickhouse::Client::default()
+            .with_url(format!(
+                "http://{}:{}",
+                url.host_str().expect("host"),
+                url.port().unwrap_or(8123)
+            ))
+            .with_user(url.username())
+            .with_password(&password);
+
+        // Every byte of the password written as %XX
+        let encoded: String = password
+            .bytes()
+            .map(|byte| format!("%{byte:02X}"))
+            .collect();
+        url.set_password(Some(&encoded)).expect("password");
+        url.set_path("/sensapp-hyphen-test");
+
+        admin
+            .query("DROP DATABASE IF EXISTS `sensapp-hyphen-test`")
+            .execute()
+            .await?;
+        let result = async {
+            let storage = sensapp::storage::storage_factory::create_storage_from_connection_string(
+                url.as_str(),
+            )
+            .await?;
+            storage.create_or_migrate().await?;
+            storage.health_check().await?;
+            publish_test_sensors(
+                &storage,
+                vec![(
+                    create_sensor_with_labels("hyphen", SensorType::Float, vec![]),
+                    create_float_samples(3),
+                )],
+            )
+            .await?;
+            let listed = storage.list_series(Some("hyphen"), None, None).await?;
+            assert_eq!(listed.series.len(), 1);
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        admin
+            .query("DROP DATABASE IF EXISTS `sensapp-hyphen-test`")
+            .execute()
+            .await?;
+        result
+    }
 }

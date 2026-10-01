@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 pub mod clickhouse_publishers;
 pub mod clickhouse_utilities;
+mod connection;
 mod matchers;
 
 use crate::storage::{DEFAULT_LIST_SERIES_LIMIT, MAX_LIST_SERIES_LIMIT};
@@ -26,6 +27,7 @@ use clickhouse_utilities::{
     datetime_to_micros, decimal_from_clickhouse_raw, map_clickhouse_error, micros_to_datetime,
     uuid_to_sensor_id,
 };
+use connection::{ConnectionParams, quote_identifier};
 
 /// Tables are partitioned by month. ClickHouse refuses an insert touching more than 100
 /// partitions by default, which would reject a backfill of more than 8 years of history in a
@@ -78,83 +80,35 @@ impl ClickHouseStorage {
     }
 
     pub async fn connect(connection_string: &str) -> Result<Self> {
-        // Parse ClickHouse connection string
-        // clickhouse:// uses HTTP; clickhouses:// uses HTTPS.
-        let (url, secure) = if let Some(url) = connection_string.strip_prefix("clickhouses://") {
-            (url, true)
-        } else {
-            (
-                connection_string.strip_prefix("clickhouse://").context(
-                    "ClickHouse connection string must start with 'clickhouse://' or 'clickhouses://'",
-                )?,
-                false,
-            )
-        };
-
-        let (auth, rest) = if let Some(at_pos) = url.find('@') {
-            let (auth_part, rest) = url.split_at(at_pos);
-            (Some(auth_part), &rest[1..]) // Skip the '@'
-        } else {
-            (None, url)
-        };
-
-        let (host_port, database) = if let Some(slash_pos) = rest.find('/') {
-            let (host_part, db_part) = rest.split_at(slash_pos);
-            (host_part, Some(&db_part[1..])) // Skip the '/'
-        } else {
-            (rest, None)
-        };
-
-        let (host, port) = if let Some(colon_pos) = host_port.rfind(':') {
-            let (host, port_str) = host_port.split_at(colon_pos);
-            let port = port_str[1..]
-                .parse::<u16>()
-                .context("Invalid port number in ClickHouse connection string")?;
-            (host, port)
-        } else {
-            (host_port, if secure { 8443 } else { 8123 })
-        };
-
-        let (user, password) = if let Some(auth) = auth {
-            if let Some(colon_pos) = auth.find(':') {
-                let (user, pass) = auth.split_at(colon_pos);
-                (user, Some(&pass[1..])) // Skip the ':'
-            } else {
-                (auth, None)
-            }
-        } else {
-            ("default", None)
-        };
-
-        let endpoint_url = format!(
-            "{}://{}:{}",
-            if secure { "https" } else { "http" },
-            host,
-            port
-        );
+        let ConnectionParams {
+            endpoint_url,
+            user,
+            password,
+            database,
+        } = ConnectionParams::parse(connection_string)?;
 
         let mut client = Client::default()
             .with_url(&endpoint_url)
-            .with_user(user)
+            .with_user(&user)
             .with_setting(
                 "max_partitions_per_insert_block",
                 MAX_PARTITIONS_PER_INSERT.to_string(),
             );
 
-        if let Some(password) = password {
+        if let Some(password) = &password {
             client = client.with_password(password);
         }
 
-        if let Some(database) = database {
+        if let Some(database) = &database {
             client = client.with_database(database);
         }
 
         Ok(Self {
             client,
-            database: database.map(|s| s.to_string()),
+            database,
             endpoint_url,
-            user: user.to_string(),
-            password: password.map(|s| s.to_string()),
+            user,
+            password,
         })
     }
 
@@ -171,7 +125,10 @@ impl ClickHouseStorage {
                 create_db_client = create_db_client.with_password(password);
             }
 
-            let create_db_query = format!("CREATE DATABASE IF NOT EXISTS {}", database);
+            let create_db_query = format!(
+                "CREATE DATABASE IF NOT EXISTS {}",
+                quote_identifier(database)
+            );
 
             create_db_client
                 .query(&create_db_query)
