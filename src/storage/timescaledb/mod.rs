@@ -1,3 +1,4 @@
+mod selector;
 pub mod timescaledb_publishers;
 pub mod timescaledb_utilities;
 
@@ -1334,6 +1335,27 @@ impl StorageInstance for TimeScaleDBStorage {
         }
 
         Ok(results)
+    }
+
+    async fn query_selector(
+        &self,
+        matchers: &[super::LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        numeric_only: bool,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<super::SelectorRead> {
+        crate::storage::selector::read_selector_in_bulk(
+            self,
+            matchers,
+            start_time,
+            end_time,
+            numeric_only,
+            max_series,
+            max_samples,
+        )
+        .await
     }
 
     /// Health check for TimescaleDB storage

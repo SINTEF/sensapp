@@ -188,7 +188,7 @@ This round trip was exercised on a SensApp database (ClickHouse 24.8): after `DR
 - SensApp currently targets ClickHouse through the HTTP endpoint only.
 - Schema creation is embedded in the binary through the migration SQL file. It runs at every startup, so a future change must keep it safe to repeat.
 - The backend is tested against a real ClickHouse service, but production readiness still depends on good external operations: backups, disk sizing, and ClickHouse monitoring remain the operator's responsibility.
-- A selector query reads each matching series with its own queries, about 15 ms per series on a laptop: a selector matching a hundred series takes about a second and a half in a debug build. Prefer selectors that match few series, or cross-series aggregation.
+- A selector query (`/api/v1/query`, Prometheus remote read) reads all its series with a handful of queries whatever their number: about 20 ms for 100 series on a laptop, and a selector over the 256 series limit is rejected after one metadata query. The read of a window larger than the 100 000 samples budget stops as soon as the budget is exceeded.
 - If you expose SensApp beyond a trusted network, enable JWT auth.
 
 ## Recommended Near-Term Checks

@@ -818,6 +818,27 @@ impl StorageInstance for SqliteStorage {
         Ok(results)
     }
 
+    async fn query_selector(
+        &self,
+        matchers: &[crate::storage::LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        numeric_only: bool,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<crate::storage::SelectorRead> {
+        crate::storage::selector::read_selector_in_bulk(
+            self,
+            matchers,
+            start_time,
+            end_time,
+            numeric_only,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
     /// Health check for SQLite storage
     /// Executes a simple SELECT 1 query to verify database connectivity
     async fn health_check(&self) -> Result<()> {

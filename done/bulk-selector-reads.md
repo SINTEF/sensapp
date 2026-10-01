@@ -52,16 +52,16 @@ Backends that override it (PostgreSQL, TimescaleDB, SQLite, ClickHouse):
 
 ## Done when
 
-- [ ] Trait method, default implementation, `limits.rs` uses it; Prometheus remote read and
+- [x] Trait method, default implementation, `limits.rs` uses it; Prometheus remote read and
   `/api/v1/query` unchanged for callers.
-- [ ] Overrides for ClickHouse, PostgreSQL, TimescaleDB, SQLite.
-- [ ] Backend-generic tests (run on SQLite, PostgreSQL, TimescaleDB, ClickHouse): same results as
+- [x] Overrides for ClickHouse, PostgreSQL, TimescaleDB, SQLite.
+- [x] Backend-generic tests (run on SQLite, PostgreSQL, TimescaleDB, ClickHouse): same results as
   the default implementation on a mix of numeric and non-numeric sensors, empty window, sensors
   without samples, `Series` and `Samples` limits at their exact boundaries, order of samples.
-- [ ] Measured again with the script of this task: 100 series under 0.1 s on ClickHouse and
+- [x] Measured again with the script of this task: 100 series under 0.1 s on ClickHouse and
   PostgreSQL, the 300 series rejection under 0.1 s; numbers recorded below.
-- [ ] No regression: default, ClickHouse and TimescaleDB test suites, clippy, Python SDK tests.
-- [ ] `docs/CLICKHOUSE.md` caveat about selector cost removed or updated.
+- [x] No regression: default, ClickHouse and TimescaleDB test suites, clippy, Python SDK tests.
+- [x] `docs/CLICKHOUSE.md` caveat about selector cost removed or updated.
 
 ## Out of scope
 
@@ -70,4 +70,39 @@ sensors one by one with `query_sensor_data_advanced`; note it in `ideas/` if it 
 
 ## Progress
 
-(none yet)
+Done 1 Oct 2026, one commit per step:
+
+1. `StorageInstance::query_selector` with a portable default (`storage::selector::query_selector_sequential`);
+   the JWT wrapper delegates when the token sees every sensor and reads through its filtered methods
+   otherwise. No change of behaviour.
+2. `storage::selector::read_selector_in_bulk`, generic for every backend, and the small
+   `BulkSelectorBackend` trait (find the sensors, read numeric samples, read other types). It reads
+   the numeric series in chunks of 8, 16, 32, ... sensors, each query limited to the budget left
+   plus one, so a selector within the budget costs a few queries and one over the budget stops after
+   the chunk that exceeds it. (A single query for all the series read every selected row before
+   sorting on PostgreSQL, where the only index is a BRIN: 1.1 s for 5M rows against 0.2 s for the
+   first chunk.)
+3. Implemented for ClickHouse, PostgreSQL, TimescaleDB and SQLite. DuckDB, BigQuery and RRDCached keep
+   the sequential default.
+4. `tests/integration/selector_reads.rs`: the backend's `query_selector` against the sequential read on
+   22 series of five types, windows (inside, late, empty), empty and single-series selectors, and the
+   exact boundaries of both limits. Passes on the four backends.
+5. `tests/perf/scale.sh`, the benchmark used below.
+
+Measured (release build, local databases, 3000 series x 10 samples, `tests/perf/scale.sh`):
+
+| selector | ClickHouse before | after | PostgreSQL before | after |
+|---|---|---|---|---|
+| 10 series | 0.17 s | 0.015 s | 0.06 s | 0.017 s |
+| 100 series | 1.2-1.5 s | 0.022 s | 0.38 s | 0.020 s |
+| 300 series, rejected | 2.9 s | 0.052 s | 0.65 s | 0.015 s |
+
+Over budget with real volume (100 series x 5000 samples, 500 000 in total): rejected after 0.05 s
+(ClickHouse) and 0.10 s (PostgreSQL); 10 series x 5000 samples (50 000, within the budget): 0.10 s
+and 0.12 s, mostly serialisation of the response.
+
+Full suites pass on SQLite, PostgreSQL, TimescaleDB and ClickHouse; `clippy -D warnings` on all
+features.
+
+Side findings, in `ideas/`: label regex matchers are not anchored (Prometheus anchors them);
+Prometheus remote read with `step` hints still reads series one by one.

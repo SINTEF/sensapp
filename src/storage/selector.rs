@@ -107,6 +107,10 @@ pub trait BulkSelectorBackend: StorageInstance {
     }
 }
 
+/// Sensors read by the first bulk query of a type, doubling up to `MAX_CHUNK`.
+const FIRST_CHUNK: usize = 8;
+const MAX_CHUNK: usize = 256;
+
 fn is_numeric(sensor_type: SensorType) -> bool {
     matches!(
         sensor_type,
@@ -167,15 +171,26 @@ pub async fn read_selector_in_bulk<B: BulkSelectorBackend>(
         if keys.is_empty() {
             continue;
         }
-        let read = backend
-            .read_numeric_samples(sensor_type, &keys, start_us, end_us, remaining + 1)
-            .await?;
-        let count: usize = read.values().map(TypedSamples::len).sum();
-        if count > remaining {
-            return Ok(Err(SelectorLimitExceeded::Samples));
+        // Read the sensors in chunks that double in size: a selector within the budget costs
+        // a few queries, and one over the budget stops after the chunk that exceeds it, instead
+        // of reading every sample of every series before saying so.
+        let mut chunk_size = FIRST_CHUNK;
+        let mut rest: &[B::SensorKey] = &keys;
+        while !rest.is_empty() {
+            let (chunk, tail) = rest.split_at(chunk_size.min(rest.len()));
+            rest = tail;
+            chunk_size = (chunk_size * 2).min(MAX_CHUNK);
+
+            let read = backend
+                .read_numeric_samples(sensor_type, chunk, start_us, end_us, remaining + 1)
+                .await?;
+            let count: usize = read.values().map(TypedSamples::len).sum();
+            if count > remaining {
+                return Ok(Err(SelectorLimitExceeded::Samples));
+            }
+            remaining -= count;
+            samples_by_sensor.extend(read);
         }
-        remaining -= count;
-        samples_by_sensor.extend(read);
     }
 
     for (key, sensor) in &sensors {
