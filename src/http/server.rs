@@ -45,6 +45,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
+use tower_http::classify::ServerErrorsFailureClass;
 use tower_http::request_id::MakeRequestUuid;
 use tower_http::trace;
 use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
@@ -126,7 +127,8 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
                         request_id = %request_id,
                     )
                 })
-                .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
+                .on_response(trace::DefaultOnResponse::new().level(Level::INFO))
+                .on_failure(log_failed_response),
         )
         .sensitive_response_headers(sensitive_headers)
         .layer(TimeoutLayer::with_status_code(
@@ -248,6 +250,29 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .await?;
 
     Ok(())
+}
+
+/// Log a 5xx response, at the level that fits it. The default logs every one of them as an
+/// error: under overload that is one error line per rejected write.
+fn log_failed_response(
+    failure: ServerErrorsFailureClass,
+    latency: Duration,
+    _span: &tracing::Span,
+) {
+    let latency_ms = latency.as_millis();
+    match failure {
+        // Load shedding is counted in `sensapp_http_requests_total{status="503"}`, and a
+        // storage outage is logged as an error where it is detected
+        ServerErrorsFailureClass::StatusCode(StatusCode::SERVICE_UNAVAILABLE) => {
+            tracing::debug!(latency_ms, "service unavailable");
+        }
+        ServerErrorsFailureClass::StatusCode(StatusCode::GATEWAY_TIMEOUT) => {
+            tracing::warn!(latency_ms, "request timed out");
+        }
+        failure => {
+            tracing::error!(classification = %failure, latency_ms, "response failed");
+        }
+    }
 }
 
 async fn shutdown_signal() {

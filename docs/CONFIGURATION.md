@@ -60,6 +60,8 @@ Details on what the limits protect against are in [HTTP_LIMITS.md](HTTP_LIMITS.m
 
 Service metrics are exposed at `/prometheus/metrics`; health checks at `/health/live` and `/health/ready`.
 
+Failed responses are logged at the level that fits them: a `503` (load shedding, or an unavailable database, which logs its own error where it is detected) at `DEBUG` and counted in `sensapp_http_requests_total{status="503"}`, a `504` (timeout) at `WARN`, any other `5xx` at `ERROR`. Every line of a request carries its `request_id`.
+
 ## Backends
 
 The scheme of `SENSAPP_STORAGE_CONNECTION_STRING` picks the backend. A backend only works if it was compiled in: the default build includes `postgres` and `sqlite`, the container image adds `timescaledb`, `duckdb`, `clickhouse` and `rrdcached`, and `--features all-storage` builds everything.

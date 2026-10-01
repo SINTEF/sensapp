@@ -33,11 +33,13 @@ fn ensure_config() {
 
 const SECRET: &str = "test-secret-0123456789abcdef012345";
 
-/// A storage that makes every write take `publish_delay` before it reaches the real one.
+/// A storage that makes every write take `publish_delay` before it reaches the real one, or
+/// fail when `fail_publish` is set.
 #[derive(Debug)]
 struct SlowStorage {
     inner: Arc<dyn StorageInstance>,
     publish_delay: Duration,
+    fail_publish: bool,
 }
 
 #[async_trait]
@@ -47,6 +49,9 @@ impl StorageInstance for SlowStorage {
     }
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         tokio::time::sleep(self.publish_delay).await;
+        if self.fail_publish {
+            anyhow::bail!("the write failed for a reason of its own");
+        }
         self.inner.publish(batch).await
     }
     async fn vacuum(&self) -> Result<()> {
@@ -121,11 +126,21 @@ async fn router(
     auth: Option<AuthConfig>,
     settings: RouterSettings,
 ) -> Result<(TestDb, Router)> {
+    router_with(publish_delay, false, auth, settings).await
+}
+
+async fn router_with(
+    publish_delay: Duration,
+    fail: bool,
+    auth: Option<AuthConfig>,
+    settings: RouterSettings,
+) -> Result<(TestDb, Router)> {
     ensure_config();
     let test_db = TestDb::new().await?;
     let storage: Arc<dyn StorageInstance> = Arc::new(SlowStorage {
         inner: test_db.storage(),
         publish_delay,
+        fail_publish: fail,
     });
     let state = HttpServerState {
         name: Arc::new("SensApp Test".to_string()),
@@ -341,5 +356,123 @@ async fn bodies_over_the_limit_get_a_413() -> Result<()> {
     // Within the limit
     let (status, _, _) = send(&router, write_request(None)).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+    Ok(())
+}
+
+/// What the tracing events of a test wrote, one string per line.
+#[derive(Clone, Default)]
+struct LogBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for LogBuffer {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl LogBuffer {
+    fn lines(&self) -> Vec<String> {
+        String::from_utf8_lossy(&self.0.lock().unwrap())
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+}
+
+/// Route the tracing events of the current thread (these tests run on one thread) to a buffer.
+fn capture_logs() -> (LogBuffer, tracing::subscriber::DefaultGuard) {
+    let buffer = LogBuffer::default();
+    let writer = buffer.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || writer.clone())
+        .with_ansi(false)
+        .with_max_level(tracing::Level::TRACE)
+        .finish();
+    (buffer, tracing::subscriber::set_default(subscriber))
+}
+
+#[tokio::test]
+#[serial]
+async fn load_shedding_is_not_logged_as_an_error() -> Result<()> {
+    let settings = RouterSettings {
+        max_concurrent_writes: 1,
+        ..settings()
+    };
+    let (_db, router) = router(Duration::from_millis(600), None, settings).await?;
+    let (logs, _guard) = capture_logs();
+
+    let first = start_slow_write(&router, None).await;
+    for _ in 0..5 {
+        let (status, _, _) = send(&router, write_request(None)).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+    assert_eq!(first.await?, StatusCode::NO_CONTENT);
+
+    let errors: Vec<String> = logs
+        .lines()
+        .into_iter()
+        .filter(|line| line.contains(" ERROR "))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "load shedding must not log errors: {errors:#?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn timeouts_are_logged_as_warnings_with_the_request_id() -> Result<()> {
+    let settings = RouterSettings {
+        request_timeout: Duration::from_millis(200),
+        ..settings()
+    };
+    let (_db, router) = router(Duration::from_secs(2), None, settings).await?;
+    let (logs, _guard) = capture_logs();
+
+    let mut request = write_request(None);
+    request
+        .headers_mut()
+        .insert("x-request-id", "timeout-id-7".parse()?);
+    let (status, _, _) = send(&router, request).await;
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+
+    let lines = logs.lines();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains(" WARN ") && line.contains("timeout-id-7")),
+        "a warning with the request id was expected: {lines:#?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains(" ERROR ")),
+        "{lines:#?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn real_server_errors_are_still_logged_as_errors() -> Result<()> {
+    let (_db, router) = router_with(Duration::ZERO, true, None, settings()).await?;
+    let (logs, _guard) = capture_logs();
+
+    let mut request = write_request(None);
+    request
+        .headers_mut()
+        .insert("x-request-id", "failing-id-9".parse()?);
+    let (status, _, _) = send(&router, request).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    let lines = logs.lines();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains(" ERROR ") && line.contains("failing-id-9")),
+        "an error with the request id was expected: {lines:#?}"
+    );
     Ok(())
 }

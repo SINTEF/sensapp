@@ -32,8 +32,8 @@ Implemented.
 ## Possible follow-ups
 
 - Limit expensive reads the same way if staging shows overload from queries.
-- Each rejected request is logged at ERROR level by `TraceLayer`; under sustained overload that is noisy.
-- The request-id layers live inside `run_http_server`, so no automated test covers them.
+- ~~Each rejected request is logged at ERROR level by `TraceLayer`~~: fixed, see `done/real-router-tests-and-overload-logging.md`.
+- ~~The request-id layers live inside `run_http_server`, so no automated test covers them~~: fixed, `build_router` is tested.
 - Client retries after a connection error or timeout are not done for writes. A large body can be answered
   with a closed connection instead of the `503`, so the SDK reports an error there.
 - A retry budget or circuit breaker in the SDK, if callers ask for one.
