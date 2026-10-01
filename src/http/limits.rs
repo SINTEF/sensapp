@@ -1,5 +1,5 @@
 use crate::datamodel::{SensAppDateTime, SensorData};
-use crate::storage::{LabelMatcher, StorageInstance};
+use crate::storage::{LabelMatcher, SelectorLimitExceeded, StorageInstance};
 use std::sync::Arc;
 
 use super::app_error::AppError;
@@ -41,7 +41,7 @@ pub fn validate_selector_result(result: &[SensorData]) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Discover matching sensors with one sample each, then spend one shared sample budget.
+/// Read the series of a selector within the series limit and the shared sample budget.
 pub async fn query_selector_bounded(
     storage: &Arc<dyn StorageInstance>,
     matchers: &[LabelMatcher],
@@ -49,36 +49,29 @@ pub async fn query_selector_bounded(
     end_time: Option<SensAppDateTime>,
     numeric_only: bool,
 ) -> Result<Vec<SensorData>, AppError> {
-    let discovered = storage
-        .query_sensors_by_labels(matchers, start_time, end_time, Some(1), numeric_only)
+    let result = storage
+        .query_selector(
+            matchers,
+            start_time,
+            end_time,
+            numeric_only,
+            MAX_SELECTOR_SERIES,
+            MAX_SELECTOR_SAMPLES_TOTAL,
+        )
         .await?;
-    if discovered.len() > MAX_SELECTOR_SERIES {
-        return Err(AppError::bad_request(anyhow::anyhow!(
-            "Query exceeds {MAX_SELECTOR_SERIES} series; narrow the selector"
-        )));
-    }
-
-    let mut remaining = MAX_SELECTOR_SAMPLES_TOTAL;
-    let mut result = Vec::with_capacity(discovered.len());
-    for found in discovered {
-        let data = storage
-            .query_sensor_data(
-                &found.sensor.uuid.to_string(),
-                start_time,
-                end_time,
-                Some(remaining + 1),
-            )
-            .await?;
-        if let Some(data) = data {
-            if data.samples.len() > remaining {
-                return Err(AppError::bad_request(anyhow::anyhow!(
-                    "Query exceeds {MAX_SELECTOR_SAMPLES_TOTAL} samples in total; narrow the selector or time range"
-                )));
-            }
-            remaining -= data.samples.len();
-            result.push(data);
+    let result = match result {
+        Ok(result) => result,
+        Err(SelectorLimitExceeded::Series) => {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Query exceeds {MAX_SELECTOR_SERIES} series; narrow the selector"
+            )));
         }
-    }
+        Err(SelectorLimitExceeded::Samples) => {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Query exceeds {MAX_SELECTOR_SAMPLES_TOTAL} samples in total; narrow the selector or time range"
+            )));
+        }
+    };
     validate_selector_result(&result)?;
     Ok(result)
 }

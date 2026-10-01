@@ -11,10 +11,12 @@ pub mod common;
 pub mod cross_series;
 pub mod data_query;
 pub mod query;
+pub mod selector;
 
 pub use data_query::{Aggregation, SensorDataQueryOptions, SimplifyOptions};
 #[allow(unused_imports)]
 pub use query::{LabelMatcher, MatcherType};
+pub use selector::{SelectorLimitExceeded, SelectorRead};
 
 /// Default limit for timeseries queries when no limit is specified
 /// Set to 10 million records - appropriate for timeseries data
@@ -168,6 +170,34 @@ pub trait StorageInstance: Send + Sync + Debug {
         limit: Option<usize>,
         numeric_only: bool,
     ) -> Result<Vec<crate::datamodel::SensorData>>;
+
+    /// Read the series matching `matchers` within `max_series` series and `max_samples` samples
+    /// in total, or say which limit was exceeded. Series without a sample in the window are
+    /// returned with an empty sample set.
+    ///
+    /// This is the read behind the selector endpoints. The default implementation reads the
+    /// series one after the other (`selector::query_selector_sequential`); backends override it
+    /// to read all the series with a few queries, keeping the same results and limits.
+    async fn query_selector(
+        &self,
+        matchers: &[LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        numeric_only: bool,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<SelectorRead> {
+        selector::query_selector_sequential(
+            self,
+            matchers,
+            start_time,
+            end_time,
+            numeric_only,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
 
     /// Health check for the storage backend
     /// Returns Ok(()) if the storage is healthy and can accept connections
