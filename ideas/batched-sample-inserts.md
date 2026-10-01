@@ -9,15 +9,15 @@ Both the SQLite and the PostgreSQL publishers insert one row per statement:
 - `src/storage/sqlite/sqlite_publishers.rs`: `publish_float_values` loops over the samples and runs `INSERT INTO float_values (...) VALUES (?, ?, ?)` for each one inside the batch transaction. Same shape for integer, string, boolean, etc.
 - `src/storage/postgresql/postgresql_publishers.rs`: the same loop, so on PostgreSQL every sample is also a client-server round trip. PostgreSQL is the main backend, so this is where it matters most.
 
-## Measurements so far (1 Oct 2026, debug build)
+## Measurements so far (1 Oct 2026, SQLite, empty database, one float series)
 
-| upload | 1.33 M samples | rate |
+| upload | debug build | release build |
 |---|---|---|
-| InfluxDB line protocol, 200k lines per request | 73.7 s | 18 000 / s |
-| Arrow `/publish`, 200k rows per request | 50.3 s | 26 500 / s |
-| Arrow `/publish`, one request | rejected by the 30 s request timeout | |
+| InfluxDB line protocol, 200k lines per request | 73.7 s (18 000 / s) | 17.0 s (78 000 / s) |
+| Arrow `/publish`, 200k rows per request | 50.3 s (26 500 / s) | not measured |
+| Arrow `/publish`, one 1.33 M-row request | rejected by the 30 s request timeout | 18.5 s (72 000 / s) |
 
-Arrow is only 1.5 times faster than text parsing, so parsing is not the main cost, even in a debug build. The per-row statements are the likely one. A release build number is missing: `cargo build --release` failed on this machine with a macOS linker error on the sqlx proc-macro dylib (`mis-aligned LINKEDIT string pool`), unrelated to SensApp. Get a release measurement first, ideally on CI or another machine.
+The release build is 4 times faster than debug, so most of the original 70 s was the debug build. Arrow is not faster than line protocol in release, and only 1.5 times faster in debug, so parsing is not the main cost. The per-row statements are the likely one, still to be confirmed with a profile. 78 000 samples/s is acceptable for SQLite on one laptop. The case to check is PostgreSQL over a network, where each row is also a round trip: measure it before doing anything.
 
 ## Ideas
 

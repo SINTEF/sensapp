@@ -231,8 +231,13 @@ class SensAppClient:
         params: dict[str, Any] | None = None,
     ) -> niquests.Response:
         url = f"{self._base_url}{path}"
+        # The server only accepts lowercase `true` / `false`, not Python's `True`.
         clean_params = (
-            {key: value for key, value in params.items() if value is not None}
+            {
+                key: str(value).lower() if isinstance(value, bool) else value
+                for key, value in params.items()
+                if value is not None
+            }
             if params
             else None
         )

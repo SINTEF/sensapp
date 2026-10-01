@@ -38,7 +38,6 @@ pub const VALUE_TABLES: [&str; 8] = [
 ];
 
 /// Convert SensAppDateTime to Unix microseconds for database storage
-#[allow(dead_code)] // Used by SQLite backend when enabled
 pub fn datetime_to_micros(datetime: &SensAppDateTime) -> i64 {
     // Use to_unix with Microsecond unit to get a f64 in microseconds,
     // then convert to i64. This properly handles the Unix time reference.
@@ -186,7 +185,7 @@ fn aggregate_sensor_data(
     Ok(sensor_data)
 }
 
-fn simplify_sensor_data(
+pub fn simplify_sensor_data(
     mut sensor_data: SensorData,
     options: SimplifyOptions,
 ) -> Result<SensorData> {

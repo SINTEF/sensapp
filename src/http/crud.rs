@@ -829,10 +829,10 @@ pub async fn list_series(
         ("format" = Option<String>, Query, description = "Output format: senml, csv, or jsonl (default: senml)"),
         ("start" = Option<String>, Query, description = "Start datetime in ISO 8601 format (e.g., '2024-01-15T10:30:00Z')"),
         ("end" = Option<String>, Query, description = "End datetime in ISO 8601 format (e.g., '2024-01-15T11:00:00Z')"),
-        ("limit" = Option<usize>, Query, description = "Maximum number of samples (at most 100,000)"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of samples (at most 100,000). Returns the oldest N samples of the window, in time order, and silently drops the rest. With simplify, it bounds the rows read before simplification"),
         ("step" = Option<String>, Query, description = "Bucket width using Prometheus duration syntax (e.g., '1h', '5m', '1d')"),
         ("aggregation" = Option<String>, Query, description = "Aggregation function: avg, min, max, sum, count, first, last"),
-        ("simplify" = Option<bool>, Query, description = "Explicitly enable simplify-based point reduction"),
+        ("simplify" = Option<bool>, Query, description = "Explicitly enable simplify-based point reduction. Applied to the rows read for the window (after bucketing when step is set); more than 100,000 rows to simplify is rejected with HTTP 400 instead of being truncated, so use step/aggregation or a narrower start/end"),
         ("simplify_tolerance" = Option<f64>, Query, description = "Dimensionless simplify tolerance on normalized time/value coordinates"),
         ("simplify_high_quality" = Option<bool>, Query, description = "Use Douglas-Peucker only when simplifying")
     ),
@@ -941,9 +941,16 @@ pub async fn get_series_data(
 
         query_options.validate().map_err(AppError::bad_request)?;
 
+        // Simplify runs here, after the sample cap check, so that a read cut at the cap
+        // is rejected instead of being simplified into a result that looks complete.
+        let storage_options = SensorDataQueryOptions {
+            simplify: None,
+            ..query_options
+        };
+
         let series_data = state
             .storage
-            .query_sensor_data_advanced(&series_uuid, &query_options)
+            .query_sensor_data_advanced(&series_uuid, &storage_options)
             .await?;
 
         let series_data = match series_data {
@@ -957,6 +964,13 @@ pub async fn get_series_data(
         };
 
         crate::http::limits::validate_direct_sample_count(series_data.samples.len())?;
+
+        let series_data = match query_options.simplify {
+            Some(simplify_options) => {
+                crate::storage::common::simplify_sensor_data(series_data, simplify_options)?
+            }
+            None => series_data,
+        };
 
         let sample_count = series_data.samples.len();
 

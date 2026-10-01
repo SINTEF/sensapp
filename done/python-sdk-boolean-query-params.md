@@ -2,7 +2,7 @@
 
 ## Status
 
-Bug in the Python SDK, small fix. Found on 1 October 2026.
+Fixed on 1 October 2026. `SensAppClient._get` now sends bools as `true` / `false`; unit test `test_get_series_serializes_bools_for_the_server` and a `simplify=True` call in the live test `test_live_polars_upload_helper_and_get_series` cover it. The live tests were run on 1 October 2026 against a release build (`pytest -m integration`, 2 passed), and `get_series(..., simplify=True, simplify_tolerance=0.001)` works from `zeblab_alarm.ipynb`. Server decision: kept strict on `true` / `false`, no change.
 
 ## Symptom
 

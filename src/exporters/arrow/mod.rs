@@ -1,4 +1,5 @@
-use crate::datamodel::{SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples};
+use crate::datamodel::{Sensor, SensorData, SensorType, TypedSamples};
+use crate::storage::common::datetime_to_micros;
 use anyhow::Result;
 use arrow::array::{
     Array, ArrayRef, BinaryBuilder, BooleanBuilder, Decimal128Builder, Float64Builder,
@@ -113,7 +114,7 @@ impl ArrowConverter {
         match &sensor_data.samples {
             TypedSamples::Integer(samples) => {
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     sensor_id_builder.append(&sensor_id)?;
                     sensor_name_builder.append(sensor_name)?;
                     sensor_type_builder.append(sensor_type_name)?;
@@ -124,7 +125,7 @@ impl ArrowConverter {
             }
             TypedSamples::Numeric(samples) => {
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     sensor_id_builder.append(&sensor_id)?;
                     sensor_name_builder.append(sensor_name)?;
                     sensor_type_builder.append(sensor_type_name)?;
@@ -139,7 +140,7 @@ impl ArrowConverter {
             }
             TypedSamples::Float(samples) => {
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     sensor_id_builder.append(&sensor_id)?;
                     sensor_name_builder.append(sensor_name)?;
                     sensor_type_builder.append(sensor_type_name)?;
@@ -150,7 +151,7 @@ impl ArrowConverter {
             }
             TypedSamples::String(samples) => {
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     sensor_id_builder.append(&sensor_id)?;
                     sensor_name_builder.append(sensor_name)?;
                     sensor_type_builder.append(sensor_type_name)?;
@@ -161,7 +162,7 @@ impl ArrowConverter {
             }
             TypedSamples::Boolean(samples) => {
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     sensor_id_builder.append(&sensor_id)?;
                     sensor_name_builder.append(sensor_name)?;
                     sensor_type_builder.append(sensor_type_name)?;
@@ -172,7 +173,7 @@ impl ArrowConverter {
             }
             TypedSamples::Location(samples) => {
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     sensor_id_builder.append(&sensor_id)?;
                     sensor_name_builder.append(sensor_name)?;
                     sensor_type_builder.append(sensor_type_name)?;
@@ -187,7 +188,7 @@ impl ArrowConverter {
             }
             TypedSamples::Blob(samples) => {
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     sensor_id_builder.append(&sensor_id)?;
                     sensor_name_builder.append(sensor_name)?;
                     sensor_type_builder.append(sensor_type_name)?;
@@ -198,7 +199,7 @@ impl ArrowConverter {
             }
             TypedSamples::Json(samples) => {
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     sensor_id_builder.append(&sensor_id)?;
                     sensor_name_builder.append(sensor_name)?;
                     sensor_type_builder.append(sensor_type_name)?;
@@ -220,7 +221,7 @@ impl ArrowConverter {
             TypedSamples::Integer(samples) => {
                 let mut builder = Int64Builder::new();
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     builder.append_value(sample.value);
                 }
                 (
@@ -231,7 +232,7 @@ impl ArrowConverter {
             TypedSamples::Numeric(samples) => {
                 let mut builder = Decimal128Builder::new().with_precision_and_scale(38, 18)?;
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     let decimal_i128 = sample.value.mantissa()
                         * 10_i128.pow(18_u32.saturating_sub(sample.value.scale()));
                     builder.append_value(decimal_i128);
@@ -244,7 +245,7 @@ impl ArrowConverter {
             TypedSamples::Float(samples) => {
                 let mut builder = Float64Builder::new();
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     builder.append_value(sample.value);
                 }
                 (
@@ -255,7 +256,7 @@ impl ArrowConverter {
             TypedSamples::String(samples) => {
                 let mut builder = StringBuilder::new();
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     builder.append_value(&sample.value);
                 }
                 (
@@ -266,7 +267,7 @@ impl ArrowConverter {
             TypedSamples::Boolean(samples) => {
                 let mut builder = BooleanBuilder::new();
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     builder.append_value(sample.value);
                 }
                 (
@@ -289,7 +290,7 @@ impl ArrowConverter {
                 let mut longitude_builder = Float64Builder::new();
 
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     latitude_builder.append_value(sample.value.y());
                     longitude_builder.append_value(sample.value.x());
                 }
@@ -312,7 +313,7 @@ impl ArrowConverter {
             TypedSamples::Blob(samples) => {
                 let mut builder = BinaryBuilder::new();
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     builder.append_value(&sample.value);
                 }
                 (
@@ -323,7 +324,7 @@ impl ArrowConverter {
             TypedSamples::Json(samples) => {
                 let mut builder = StringBuilder::new();
                 for sample in samples.iter() {
-                    timestamp_builder.append_value(sample.datetime.to_microseconds_since_epoch());
+                    timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
                     builder.append_value(serde_json::to_string(&sample.value)?);
                 }
                 (
@@ -681,16 +682,6 @@ fn sensor_type_name(sensor_type: &SensorType) -> &'static str {
     }
 }
 
-trait ToMicroseconds {
-    fn to_microseconds_since_epoch(&self) -> i64;
-}
-
-impl ToMicroseconds for SensAppDateTime {
-    fn to_microseconds_since_epoch(&self) -> i64 {
-        (self.to_duration_since_j1900().total_nanoseconds() / 1000 - 2_208_988_800_000_000) as i64
-    }
-}
-
 #[cfg(test)]
 pub mod test_data_helpers {
     use crate::datamodel::unit::Unit;
@@ -749,8 +740,10 @@ pub mod test_data_helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::datamodel::SensAppDateTime;
+    use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
     use crate::datamodel::{Sample, Sensor, SensorData, SensorType, TypedSamples};
-    use arrow::array::{Array, BooleanArray, Float64Array};
+    use arrow::array::{Array, BooleanArray, Float64Array, TimestampMicrosecondArray};
     use arrow_ipc::reader::StreamReader;
     use geo::Point;
     use smallvec::{SmallVec, smallvec};
@@ -985,5 +978,99 @@ mod tests {
             .unwrap();
         assert_eq!(lat.value(0), 63.4305);
         assert_eq!(lon.value(0), 10.3951);
+    }
+
+    /// Fixed timestamps in microseconds since the Unix epoch:
+    /// - 2024-02-13T09:15:26Z (TAI - UTC was 37 s)
+    /// - 2010-06-15T12:30:45.123456Z (TAI - UTC was 34 s, with sub-second precision)
+    /// - 2016-12-31T23:59:59.999999Z (just before the 2016 leap second)
+    /// - 1970-01-01T00:00:00Z (the epoch itself)
+    const FIXED_TIMESTAMPS_US: [i64; 4] = [
+        1_707_815_726_000_000,
+        1_276_605_045_123_456,
+        1_483_228_799_999_999,
+        0,
+    ];
+
+    fn fixed_timestamp_samples() -> TypedSamples {
+        TypedSamples::Integer(
+            FIXED_TIMESTAMPS_US
+                .iter()
+                .map(|&us| Sample {
+                    datetime: SensAppDateTime::from_unix_microseconds_i64(us),
+                    value: us,
+                })
+                .collect(),
+        )
+    }
+
+    fn fixed_timestamp_sensor() -> Sensor {
+        Sensor {
+            uuid: Uuid::new_v4(),
+            name: "fixed_timestamps".to_string(),
+            sensor_type: SensorType::Integer,
+            unit: None,
+            labels: SmallVec::new(),
+        }
+    }
+
+    fn timestamps_of(batch: &RecordBatch) -> Vec<i64> {
+        let column = batch
+            .column_by_name("timestamp")
+            .expect("timestamp column")
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>()
+            .expect("timestamp column is a microsecond timestamp");
+        column.values().to_vec()
+    }
+
+    #[test]
+    fn test_arrow_timestamps_are_unix_microseconds() {
+        let sensor_data = SensorData::new(fixed_timestamp_sensor(), fixed_timestamp_samples());
+
+        let batch = ArrowConverter::to_record_batch(&sensor_data).unwrap();
+
+        assert_eq!(timestamps_of(&batch), FIXED_TIMESTAMPS_US);
+    }
+
+    #[test]
+    fn test_arrow_multi_timestamps_are_unix_microseconds() {
+        let sensor_data = SensorData::new(fixed_timestamp_sensor(), fixed_timestamp_samples());
+
+        let bytes = ArrowConverter::to_arrow_stream_multi(&[sensor_data]).unwrap();
+        let reader = StreamReader::try_new(Cursor::new(bytes), None).unwrap();
+        let batch = reader.into_iter().next().unwrap().unwrap();
+
+        assert_eq!(timestamps_of(&batch), FIXED_TIMESTAMPS_US);
+    }
+
+    #[test]
+    fn test_arrow_timestamps_match_every_sample_type() {
+        let us = FIXED_TIMESTAMPS_US[0];
+        let datetime = SensAppDateTime::from_unix_microseconds_i64(us);
+        let samples = vec![
+            TypedSamples::Float(smallvec![Sample {
+                datetime,
+                value: 1.5
+            }]),
+            TypedSamples::Boolean(smallvec![Sample {
+                datetime,
+                value: true
+            }]),
+            TypedSamples::String(smallvec![Sample {
+                datetime,
+                value: "x".to_string(),
+            }]),
+            TypedSamples::Location(smallvec![Sample {
+                datetime,
+                value: Point::new(10.0, 63.0),
+            }]),
+        ];
+
+        for samples in samples {
+            let sensor_data = SensorData::new(fixed_timestamp_sensor(), samples);
+            let batch = ArrowConverter::to_record_batch(&sensor_data).unwrap();
+            assert_eq!(timestamps_of(&batch), vec![us]);
+        }
     }
 }

@@ -390,6 +390,26 @@ async def test_get_series_returns_arrow_table() -> None:
     assert params["step"] == "5m"
 
 
+async def test_get_series_serializes_bools_for_the_server() -> None:
+    client, session = _mock_client()
+    session.get.return_value = MockResponse.bytes_ok(
+        serialize_arrow_table(_single_series_response_table())
+    )
+
+    await client.get_series(
+        SERIES_UUID,
+        simplify=True,
+        simplify_tolerance=0.001,
+        simplify_high_quality=False,
+    )
+
+    params = session.get.call_args[1]["params"]
+    assert params["simplify"] == "true"
+    assert params["simplify_high_quality"] == "false"
+    assert params["simplify_tolerance"] == 0.001
+    assert "step" not in params
+
+
 # ── errors ──────────────────────────────────────────────────────
 
 

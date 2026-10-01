@@ -2,7 +2,7 @@
 
 ## Status
 
-Bug, highest priority of the series-query follow-ups. Found on 1 October 2026 while loading a real 2024-2026 dataset.
+Fixed on 1 October 2026 (see Outcome at the end). Original report: bug, highest priority of the series-query follow-ups. Found on 1 October 2026 while loading a real 2024-2026 dataset.
 
 ## Symptom
 
@@ -50,3 +50,13 @@ No Arrow exporter test asserts a timestamp value. `test_data_helpers` builds sam
 
 - `current_tasks/python-sdk-boolean-query-params.md`
 - `current_tasks/series-limit-and-simplify-semantics.md`
+
+## Outcome
+
+- `ToMicroseconds` is deleted; both Arrow paths call `datetime_to_micros` (its `#[allow(dead_code)]` is gone).
+- Unit tests in `src/exporters/arrow/mod.rs` (fixed timestamps for 2024, 2010 with microseconds, just before the 2016 leap second, and the epoch; single and multi builders; every sample type). They failed with +37 s / +34 s / +36 s before the fix.
+- Integration tests in `tests/integration/arrow_integration.rs` write through the Influx line protocol and compare Arrow (`/series/{uuid}` and `/api/v1/query`) with the written values and CSV, plus `step=1d` bucket alignment. They failed with `00:00:37` buckets before the fix. They run on whichever backend `TestDb` is configured for.
+- The live Python SDK tests (`python/sensapp/tests/test_integration_live.py`) now assert decoded timestamps. Passed against a local SQLite server; not checked against the pre-fix build.
+- Verified end to end on 1 October 2026 with a release build and an empty SQLite database: the 1 331 266-sample Zeblab series was imported, read back through the Python SDK (Arrow) in monthly windows, and compared with the source Parquet. Timestamps and values are identical for all samples. Before the fix every timestamp was +37 s.
+- `zeblab_alarm.ipynb` in `sensapp-quickstart-test` (separate repo) uses the SDK again instead of the CSV workaround.
+- No offset workaround exists in `python/` or the quickstart notebook.

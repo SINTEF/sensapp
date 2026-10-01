@@ -2,6 +2,17 @@
 
 ## Status
 
+Done on 1 October 2026 for problem 1 (option A) and the documentation of `limit`/`simplify`. Problems 2 (`order=desc`, truncation header), 3 and option B moved to `ideas/series-latest-points-and-truncation-signal.md`.
+
+What was done:
+
+- `get_series_data` no longer lets the storage backends simplify. It reads with `simplify: None`, applies the 100 000 sample check, then calls `storage::common::simplify_sensor_data`. A read cut at the cap (default `limit` is cap + 1) is now a 400, for every backend, with or without `step`. An explicit `limit` is at most the cap, so it still works and bounds the rows simplify sees.
+- Test: `advanced_series_query_tests::test_series_query_rejects_simplify_over_sample_cap` (100 001 samples: 400; with `step`: 200; narrower window: 200; `limit=1000`: 200). It fails without the change.
+- `docs/HTTP_LIMITS.md` and the OpenAPI text for `limit` and `simplify`.
+- Decision on the truncation header: not added; `limit` truncation is documented instead.
+
+Original description:
+
 Design and bug fix. Found on 1 October 2026 on a series of 1.3 M samples (SQLite). Follow-up to `done/series-downsampling-and-simplify.md`.
 
 ## Problem 1: `simplify` without `step` only sees the oldest 100 001 samples

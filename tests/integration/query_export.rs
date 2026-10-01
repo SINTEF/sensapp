@@ -823,4 +823,76 @@ mod advanced_series_query_tests {
 
         Ok(())
     }
+
+    /// One sample per second starting at 2024-01-01T00:00:00Z.
+    async fn publish_secondly_series(app: &TestApp, samples: u32) -> Result<String> {
+        let sensor_name = format!("simplify_cap_{}", uuid::Uuid::new_v4().simple());
+        let mut csv_data = String::from("datetime,sensor_name,value,unit\n");
+        for index in 0..samples {
+            csv_data.push_str(&format!(
+                "2024-01-{:02}T{:02}:{:02}:{:02}Z,{},{},°C\n",
+                1 + index / 86_400,
+                index / 3_600 % 24,
+                index / 60 % 60,
+                index % 60,
+                sensor_name,
+                (index % 100) as f64 / 10.0
+            ));
+        }
+        app.post_csv("/sensors/publish", &csv_data).await?;
+        Ok(sensor_name)
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_query_rejects_simplify_over_sample_cap() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let cap = sensapp::http::limits::MAX_DIRECT_SAMPLES as u32;
+        let sensor_name = publish_secondly_series(&app, cap + 1).await?;
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("sensor should exist");
+
+        // The raw read is cut at the cap: it must be rejected, not simplified.
+        let response = app
+            .get(&format!(
+                "/series/{}?format=csv&simplify=true&simplify_tolerance=0.001",
+                sensor.uuid
+            ))
+            .await?;
+        response.assert_status(StatusCode::BAD_REQUEST);
+        response.assert_body_contains("Query exceeds");
+
+        // Bucketing first brings the read under the cap.
+        let response = app
+            .get(&format!(
+                "/series/{}?format=csv&step=1m&aggregation=avg&simplify=true&simplify_tolerance=0.001",
+                sensor.uuid
+            ))
+            .await?;
+        response.assert_status(StatusCode::OK);
+
+        // A narrower window works, as does an explicit limit under the cap.
+        let response = app
+            .get(&format!(
+                "/series/{}?format=csv&end=2024-01-01T00:10:00Z&simplify=true&simplify_tolerance=0.001",
+                sensor.uuid
+            ))
+            .await?;
+        response.assert_status(StatusCode::OK);
+
+        let response = app
+            .get(&format!(
+                "/series/{}?format=csv&limit=1000&simplify=true&simplify_tolerance=0.001",
+                sensor.uuid
+            ))
+            .await?;
+        response.assert_status(StatusCode::OK);
+
+        Ok(())
+    }
 }

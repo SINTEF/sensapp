@@ -13,6 +13,14 @@ from sensapp import (
 )
 
 
+def _utc_timestamps(frame: pl.DataFrame) -> list[datetime]:
+    """Decoded timestamps, sorted. They must equal what was published: the
+    Arrow export used to shift them by the TAI - UTC offset (37 s)."""
+    return [
+        ts.replace(tzinfo=UTC) for ts in frame.get_column("timestamp").sort().to_list()
+    ]
+
+
 @pytest.mark.integration
 async def test_live_publish_polars_and_query_timeseries(
     live_server_url: str,
@@ -37,6 +45,7 @@ async def test_live_publish_polars_and_query_timeseries(
     assert series.to_polars().columns == ["timestamp", "value"]
     assert series.to_polars().height == 2
     assert set(series.to_polars().get_column("value").to_list()) == {21.5, 21.7}
+    assert _utc_timestamps(series.to_polars()) == [now - timedelta(seconds=1), now]
 
 
 @pytest.mark.integration
@@ -68,8 +77,13 @@ async def test_live_polars_upload_helper_and_get_series(
         assert catalog.series, "expected at least one series in the catalog"
 
         series = await client.get_series(catalog.series[0].uuid)
+        simplified = await client.get_series(
+            catalog.series[0].uuid, simplify=True, simplify_tolerance=0.001
+        )
 
     assert series.sensor_id == sensor_id
     assert series.name == sensor_name
     assert series.to_polars().columns == ["timestamp", "value"]
     assert set(series.to_polars().get_column("value").to_list()) == {45, 46}
+    assert _utc_timestamps(series.to_polars()) == [now - timedelta(seconds=1), now]
+    assert simplified.sensor_id == sensor_id
