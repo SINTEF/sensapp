@@ -33,9 +33,43 @@ clickhouses://default:password@clickhouse.example.com:8443/sensapp
 Notes:
 
 - Port `8123` is the expected HTTP port.
-- `clickhouses://` uses HTTPS and defaults to port `8443` when no port is specified. The connection uses standard trusted certificate authorities.
+- `clickhouses://` uses HTTPS and defaults to port `8443` when no port is specified.
 - Port `9000` is the native ClickHouse protocol and is not what the current Rust client path uses.
-- SensApp creates the target database if it does not already exist.
+- SensApp creates the target database if it does not already exist. Database names with a hyphen (`sensapp-prod`) work.
+- The string is a regular URL. The user, the password and the database name are percent-decoded, so a generated password containing `/`, `#` or `?` must be percent-encoded (`/` is `%2F`, `#` is `%23`, `?` is `%3F`, `%` is `%25`). An `@` or `:` in the password works as is, but `%40` and `%3A` are fine too.
+
+### TLS and private certificate authorities
+
+`clickhouses://` trusts the system certificate store, like most Unix tools. For a ClickHouse behind a private CA, point `SSL_CERT_FILE` (a PEM bundle) or `SSL_CERT_DIR` at your CA, or add it to the system store of the image. The official image ships `ca-certificates`. A certificate that no trusted CA signed is refused at startup (`invalid peer certificate: UnknownIssuer`). The server name in the URL must be in the certificate (a DNS or IP subject alternative name).
+
+## Schema And Guarantees
+
+SensApp creates its tables at startup (`CREATE TABLE IF NOT EXISTS`, safe to repeat):
+
+- one table per value type (`float_values`, `integer_values`, ...), partitioned by month in UTC and ordered by `(sensor_id, timestamp_us)`, so a read of one series over a time range touches few parts;
+- `sensors`, `labels` and `units` as `ReplacingMergeTree` tables, read with `FINAL`. Two writers registering the same new series at once both insert it, and the identical rows collapse. Labels are written when a sensor is created, since a sensor UUID is derived from its labels.
+- the table ids are a fixed function of the sensor UUID and of the unit name, so they survive upgrades of SensApp and of Rust.
+
+What to expect:
+
+- **The tables are not replicated.** They are plain `MergeTree` tables for a single ClickHouse server. A replicated or clustered deployment needs its own table definitions (`ReplicatedMergeTree`, `ON CLUSTER`), which SensApp does not create.
+- **Writes are at least once, not atomic.** A write touches several tables, and a failure in the middle (a crash, a timeout) can leave part of a request stored. A client that retries then stores some samples twice: SensApp does not deduplicate samples (see `ideas/sample-deduplication-in-maintenance.md`).
+- **One request may span any period** (up to 200 years): the limit of 100 partitions per insert is raised.
+- **Databases from before the first release are refused** at startup with a clear message: create a new database.
+- `POST /api/v1/admin/vacuum` runs `OPTIMIZE TABLE` on the value tables, which merges parts. It is not needed for normal operation.
+
+Float values use `CODEC(Gorilla, ZSTD(1))` and timestamps `DoubleDelta`: on millions of samples that is between 1 and 7 bytes per float depending on how noisy the series is, and under 0.01 byte per regularly spaced timestamp.
+
+## Failures
+
+| Situation | What SensApp answers |
+| --- | --- |
+| ClickHouse down, unreachable, timing out, read-only, or refusing inserts with `Too many parts` or a memory limit | `503 Database unavailable`, writes and reads. Retry later. |
+| ClickHouse hangs for longer than `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS` | `504 Gateway Timeout`. |
+| Any other error from ClickHouse (a syntax error, access denied, a missing table) | `500`, details in the SensApp log. |
+| `/health/ready` | `503` as soon as ClickHouse does not answer `SELECT 1` within 3 seconds, `200` again when it does. No restart of SensApp is needed. |
+
+A retried write that got a `503` without a `Retry-After` header may have been stored in part, see above.
 
 ## Recommended Topology
 
@@ -130,11 +164,31 @@ curl 'http://127.0.0.1:3000/metrics'
 curl http://127.0.0.1:3000/prometheus/metrics
 ```
 
+## Backup And Restore
+
+Backups are the operator's job. ClickHouse's own `BACKUP` and `RESTORE` statements work on a SensApp database. They need the destination to be allowed in the server configuration, for example in `config.d/backups.xml`:
+
+```xml
+<clickhouse><backups><allowed_path>/backups/</allowed_path></backups></clickhouse>
+```
+
+Without it `BACKUP` fails with `Path '/backups/b1' is not allowed for backups`. Cloud object stores (`TO S3(...)`) and backup disks are configured the same way, see the ClickHouse documentation.
+
+```sql
+BACKUP DATABASE sensapp TO File('/backups/sensapp-2026-10-01');
+-- a disaster later:
+DROP DATABASE sensapp;
+RESTORE DATABASE sensapp FROM File('/backups/sensapp-2026-10-01');
+```
+
+This round trip was exercised on a SensApp database (ClickHouse 24.8): after `DROP DATABASE` and `RESTORE`, a freshly started SensApp listed the same series with the same labels, returned the same samples, and accepted new writes. Test your own backup and restore on disposable data before relying on it, and monitor the size and the age of the backups.
+
 ## Operational Caveats
 
 - SensApp currently targets ClickHouse through the HTTP endpoint only.
-- Schema creation is embedded in the binary through the migration SQL file.
+- Schema creation is embedded in the binary through the migration SQL file. It runs at every startup, so a future change must keep it safe to repeat.
 - The backend is tested against a real ClickHouse service, but production readiness still depends on good external operations: backups, disk sizing, and ClickHouse monitoring remain the operator's responsibility.
+- A selector query reads each matching series with its own queries, about 15 ms per series on a laptop: a selector matching a hundred series takes about a second and a half in a debug build. Prefer selectors that match few series, or cross-series aggregation.
 - If you expose SensApp beyond a trusted network, enable JWT auth.
 
 ## Recommended Near-Term Checks
