@@ -1,5 +1,23 @@
 # Batched sample inserts
 
+## Status (1 Oct 2026)
+
+Implemented for PostgreSQL, TimescaleDB and SQLite. ClickHouse was already batched (one streamed `Inserter` per value type).
+
+- PostgreSQL and TimescaleDB: one `INSERT ... SELECT ... FROM unnest(arrays)` per call (`publish_*_values`), so one round trip per sensor batch instead of one per sample.
+- SQLite: multi-row `INSERT` through `QueryBuilder::push_values`, 8 000 rows per statement (4 columns at most, under SQLite's 32 766 bound variables; `SENSAPP_BATCH_SIZE` is configurable, so the chunking is needed).
+- Tests: `tests/integration/batched_inserts.rs` (20 000 samples of every type, backend-generic).
+- Note: SQLite `json_values.value` is a BLOB column in a STRICT table, so the batched insert binds the JSON as bytes (the read path already reads `Vec<u8>`).
+
+### Result (release build, 1 331 266 float samples, InfluxDB line protocol, 200 000 lines per request, fresh database)
+
+| backend | before | after |
+|---|---|---|
+| SQLite | 17.0 s (78 000 / s) | 3.2 s (412 000 / s) |
+| PostgreSQL 18, localhost | 442 s (3 000 / s) | 9.2 s (145 000 / s) |
+
+PostgreSQL gains the most because each sample was a round trip. TimescaleDB uses the same code shape but was only covered by the integration tests, not benchmarked.
+
 ## Observation
 
 Importing 1 331 266 samples of one float series (InfluxDB line protocol, 200 000 lines per request, SQLite, **debug build** on an idle laptop) took 70 to 74 s, about 18 000 samples/s. A server request timeout (30 s) already rejected a 200 000-line chunk once the machine was busy.

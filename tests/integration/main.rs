@@ -6,6 +6,7 @@ mod common;
 
 mod advanced_backend_queries;
 mod arrow_integration;
+mod batched_inserts;
 mod clickhouse_http_lifecycle;
 mod clickhouse_integration;
 mod crud_dcat_api;
