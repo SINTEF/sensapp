@@ -179,3 +179,71 @@ async fn concurrent_first_writes_create_one_series() -> Result<()> {
 
     assert_single_series_with_its_labels(&storage, &sensor, writers).await
 }
+
+/// Devices with a broken clock send dates far from today. They must be stored and read back
+/// as they were sent, not rejected and not moved.
+#[tokio::test]
+#[serial]
+async fn extreme_timestamps_round_trip() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let dates = [
+        (1900, 1, 1),
+        (1969, 12, 31),
+        (1970, 1, 1),
+        (2262, 6, 1),
+        (2500, 1, 1),
+        (9999, 12, 31),
+    ];
+    let samples: Vec<Sample<f64>> = dates
+        .iter()
+        .enumerate()
+        .map(|(index, (year, month, day))| Sample {
+            datetime: hifitime::Epoch::from_gregorian_utc_at_midnight(*year, *month, *day),
+            value: index as f64,
+        })
+        .collect();
+    let expected: Vec<(i64, f64)> = samples
+        .iter()
+        .map(|sample| {
+            (
+                (sample.datetime.to_unix_seconds() * 1e6).round() as i64,
+                sample.value,
+            )
+        })
+        .collect();
+
+    let sensor = Arc::new(Sensor::new_without_uuid(
+        format!("extreme_timestamps_{}", Uuid::new_v4()),
+        SensorType::Float,
+        None,
+        None,
+    )?);
+    let mut batch_builder = BatchBuilder::new()?;
+    batch_builder
+        .add(sensor.clone(), TypedSamples::Float(samples.into()))
+        .await?;
+    batch_builder.send_what_is_left(storage.clone()).await?;
+
+    let data = storage
+        .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
+        .await?
+        .expect("the series should exist");
+    let TypedSamples::Float(stored) = &data.samples else {
+        panic!("expected float samples");
+    };
+    let mut stored: Vec<(i64, f64)> = stored
+        .iter()
+        .map(|sample| {
+            (
+                (sample.datetime.to_unix_seconds() * 1e6).round() as i64,
+                sample.value,
+            )
+        })
+        .collect();
+    stored.sort_by_key(|(timestamp, _)| *timestamp);
+    assert_eq!(stored, expected);
+    Ok(())
+}
