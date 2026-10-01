@@ -1,4 +1,4 @@
-FROM rust:1.96-slim-bookworm AS chef
+FROM rust:1.98-slim-bookworm AS chef
 
 ARG DUCKDB_DOWNLOAD_LIB="1"
 
