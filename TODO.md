@@ -43,7 +43,7 @@ Done: Prometheus scrape endpoint with HTTP request count, duration and in-flight
 These are valid tasks, but not the current focus. Most have a note in `ideas/`.
 
 - [ ] Bring BigQuery back in sync with the current storage trait and query model (`ideas/bigquery-backend-reconciliation.md`)
-- [ ] Add benchmark tooling for storage backend comparison
+- [ ] Add benchmark tooling for storage backend comparison (a first script exists: `tests/perf/scale.sh`, writes and selector reads of thousands of series through the HTTP API)
 - [ ] Add research-specific comparison endpoints and reporting helpers
 - [ ] Add storage-space and latency comparison reports across backends
 - [ ] Data retention (`ideas/data-retention.md`) and sample deduplication (`ideas/sample-deduplication-in-maintenance.md`)
