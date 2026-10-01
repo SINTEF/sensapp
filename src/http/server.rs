@@ -66,14 +66,35 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
 )]
 struct ApiDoc;
 
-pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
-    let config = config::get()?;
-    let max_body_bytes = config.parse_http_body_limit()?;
+/// The settings of the layers that protect the server.
+#[derive(Clone, Debug)]
+pub struct RouterSettings {
+    /// Largest accepted request body, in bytes
+    pub max_body_bytes: usize,
+    /// Time a request may take before it is answered with a 504
+    pub request_timeout: Duration,
+    /// Write requests handled at the same time, 0 for no limit
+    pub max_concurrent_writes: usize,
+}
+
+impl RouterSettings {
+    pub fn from_config(config: &config::SensAppConfig) -> Result<Self> {
+        Ok(Self {
+            max_body_bytes: config.parse_http_body_limit()?,
+            request_timeout: Duration::from_secs(config.http_server_timeout_seconds),
+            max_concurrent_writes: config.http_max_concurrent_writes,
+        })
+    }
+}
+
+/// The routes and the layers of the HTTP server, without a socket: the real thing, that the
+/// tests run as well.
+pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router {
+    let max_body_bytes = settings.max_body_bytes;
     let max_body_layer =
         axum::middleware::from_fn_with_state(max_body_bytes, enforce_request_body_limit);
     let bytes_body_layer = DefaultBodyLimit::max(max_body_bytes);
-    let timeout_seconds = config.http_server_timeout_seconds;
-    let write_limiter = WriteLimiter::new(config.http_max_concurrent_writes);
+    let write_limiter = WriteLimiter::new(settings.max_concurrent_writes);
 
     // Initialize tracing
     // Note: tracing subscriber is initialized in main.rs
@@ -112,7 +133,7 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             // The server was too slow (a hung database, usually), not the client: 5xx is what
             // Prometheus, Telegraf and friends retry, 408 is not.
             StatusCode::GATEWAY_TIMEOUT,
-            Duration::from_secs(timeout_seconds),
+            settings.request_timeout,
         ))
         .compression()
         .into_inner();
@@ -193,7 +214,7 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             require_delete_auth,
         ));
 
-    let app = public_routes
+    public_routes
         .merge(read_routes)
         .merge(write_routes)
         .merge(delete_routes)
@@ -202,7 +223,12 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             track_http_metrics,
         ))
         .layer(middleware)
-        .with_state(state);
+        .with_state(state)
+}
+
+pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
+    let settings = RouterSettings::from_config(&*config::get()?)?;
+    let app = build_router(state, &settings);
 
     // Bind to the address with improved error handling
     let listener = match tokio::net::TcpListener::bind(address).await {
