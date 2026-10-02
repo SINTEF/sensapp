@@ -78,20 +78,31 @@ impl StorageInstance for DuckDBStorage {
 
     async fn vacuum(&self) -> Result<()> {
         let connection = self.connection.lock().await;
-        /*let transaction = connection.transaction()?;
-
-        transaction.execute(
-            r#"
-            DELETE FROM integer_values WHERE rowid NOT IN (
-                SELECT MIN(rowid) FROM integer_values GROUP BY sensor_id, timestamp_us, value
-            )
-            "#,
-            [],
-        )?;
-        transaction.commit()?;*/
-
         connection.execute("VACUUM ANALYZE", [])?;
         Ok(())
+    }
+
+    async fn deduplicate_samples(&self) -> Result<u64> {
+        let connection = Arc::clone(&self.connection);
+        spawn_blocking(move || -> Result<u64> {
+            let connection = connection.blocking_lock();
+            // One statement per table. The first row written (the smallest rowid) of each group of
+            // equal samples is kept. The table names and the columns come from static lists.
+            let mut removed = 0;
+            for table in VALUE_TABLES {
+                let columns = crate::storage::common::duplicate_key_columns(table, "timestamp_us");
+                let sql = format!(
+                    "DELETE FROM {table} WHERE rowid NOT IN \
+                       (SELECT MIN(rowid) FROM {table} GROUP BY {columns})"
+                );
+                removed += connection
+                    .execute(&sql, [])
+                    .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
+                    as u64;
+            }
+            Ok(removed)
+        })
+        .await?
     }
 
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
