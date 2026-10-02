@@ -30,6 +30,7 @@ features, and has no promise.
 | Remove duplicate samples (vacuum) | yes | yes | yes | yes | not yet | no | no |
 | Registration of many new series per write in bulk | yes | yes | yes | one by one, fast locally | one by one | no | no |
 | A selector reads its series with a few queries | yes | yes | yes | yes | one series at a time | one series at a time | one series at a time |
+| Prometheus remote read with a `step` aggregates its series with a few queries | yes | yes | yes | yes | one series at a time | one series at a time | one series at a time |
 | Replication | not created by SensApp | the database's own | the database's own | no | no | no | managed |
 
 The last two rows are a consequence of how the code is written, not of the databases: a backend that reads

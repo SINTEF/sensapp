@@ -75,7 +75,11 @@ def main() -> None:
         request = urllib.request.Request(
             f"{url}/api/v1/prometheus_remote_read",
             data=body,
-            headers={"content-encoding": "snappy", "content-type": "application/x-protobuf"},
+            headers={
+                "content-encoding": "snappy",
+                "content-type": "application/x-protobuf",
+                "x-prometheus-remote-read-version": "0.1.0",
+            },
         )
         started = time.monotonic()
         try:
