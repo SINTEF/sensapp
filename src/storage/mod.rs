@@ -20,7 +20,6 @@ pub use selector::{SelectorLimitExceeded, SelectorRead};
 
 /// Default limit for timeseries queries when no limit is specified
 /// Set to 10 million records - appropriate for timeseries data
-#[allow(dead_code)]
 pub const DEFAULT_QUERY_LIMIT: usize = 10_000_000;
 
 /// Default limit for list_series when no limit is specified
@@ -207,7 +206,6 @@ pub trait StorageInstance: Send + Sync + Debug {
     /// Clean up all test data from the database
     /// This method is intended for testing purposes only
     #[cfg(any(test, feature = "test-utils"))]
-    #[allow(dead_code)]
     async fn cleanup_test_data(&self) -> Result<()>;
 }
 

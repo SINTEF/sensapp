@@ -37,14 +37,12 @@ pub enum MatcherType {
 impl MatcherType {
     /// Returns true if this matcher uses regex matching.
     #[inline]
-    #[allow(dead_code)] // Useful API method for future PromQL query support
     pub fn is_regex(&self) -> bool {
         matches!(self, Self::RegexMatch | Self::RegexNotMatch)
     }
 
     /// Returns true if this matcher is negated (NOT equal or NOT matching).
     #[inline]
-    #[allow(dead_code)] // Useful API method for future PromQL query support
     pub fn is_negated(&self) -> bool {
         matches!(self, Self::NotEqual | Self::RegexNotMatch)
     }
@@ -148,7 +146,6 @@ impl LabelMatcher {
     /// Creates a not-equal matcher (`!=`).
     ///
     /// Matches sensors where the label does not equal the value.
-    #[allow(dead_code)] // Used in integration tests
     pub fn neq(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self::new(name, value, MatcherType::NotEqual)
     }
@@ -156,7 +153,6 @@ impl LabelMatcher {
     /// Creates a regex match matcher (`=~`).
     ///
     /// Matches sensors where the label matches the regex pattern.
-    #[allow(dead_code)] // Used in integration tests
     pub fn regex(name: impl Into<String>, pattern: impl Into<String>) -> Self {
         Self::new(name, pattern, MatcherType::RegexMatch)
     }
@@ -164,14 +160,12 @@ impl LabelMatcher {
     /// Creates a negated regex matcher (`!~`).
     ///
     /// Matches sensors where the label does not match the regex pattern.
-    #[allow(dead_code)] // Used in integration tests
     pub fn not_regex(name: impl Into<String>, pattern: impl Into<String>) -> Self {
         Self::new(name, pattern, MatcherType::RegexNotMatch)
     }
 
     /// Returns true if this matcher targets the metric name (`__name__`).
     #[inline]
-    #[allow(dead_code)] // Used by tests and feature-dependent call sites
     pub fn is_name_matcher(&self) -> bool {
         self.name == "__name__"
     }

@@ -40,7 +40,6 @@ const MAX_PARTITIONS_PER_INSERT: u32 = 2400;
 const HEALTH_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 pub struct ClickHouseStorage {
-    #[allow(dead_code)]
     client: Client,
     database: Option<String>,
     endpoint_url: String,

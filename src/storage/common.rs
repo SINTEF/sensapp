@@ -14,7 +14,6 @@ use std::collections::BTreeSet;
 ///
 /// The PostgreSQL-based backends use it to detect a cached sensor id whose sensor was
 /// deleted, possibly by another SensApp instance or by hand.
-#[allow(dead_code)] // Used by the PostgreSQL-based backends when enabled
 pub fn is_foreign_key_violation(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause
@@ -25,7 +24,6 @@ pub fn is_foreign_key_violation(error: &anyhow::Error) -> bool {
 }
 
 /// Names of the per-type sample tables, shared by the SQL backends for bulk deletes.
-#[allow(dead_code)] // Used by the SQL backends when enabled
 pub const VALUE_TABLES: [&str; 8] = [
     "blob_values",
     "json_values",

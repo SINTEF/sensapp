@@ -120,7 +120,6 @@ pub struct Claims {
 // ---------------------------------------------------------------------------
 
 /// Validated access context extracted from a JWT token.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug)]
 pub struct AccessContext {
     pub subject: String,
@@ -135,7 +134,6 @@ impl AccessContext {
     ///
     /// When no allow list is set, all sensors are accessible.
     /// Otherwise the sensor name must match one of the entries exactly.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn can_access_sensor(&self, sensor_name: &str) -> bool {
         match &self.sensor_allow_list {
             Some(allow_list) => allow_list.iter().any(|allowed| allowed == sensor_name),
