@@ -12,7 +12,7 @@ commit per point.
 | 4 | DuckDB legacy `timestamp_ms` column | Maintainer: no deployments exist, no guard | done (decision) |
 | 5 | `find_selector_sensors` without `LIMIT` | Confirmed on all five lookups | done |
 | 6 | `admin/vacuum` unbounded | Maintainer: slow is expected, keep it simple. Longer timeout of its own | done |
-| M1 | Measure `register_sensors` on single-sample publishes | Maintainer: worth measuring | |
+| M1 | Measure `register_sensors` on single-sample publishes | Measured: about +0.6 ms per write, no LRU added | done |
 | M2 | Misleading BRIN comment in `postgresql/selector.rs` | Confirmed with `EXPLAIN` | done |
 | M3 | ClickHouse reads without `FINAL`: one sentence in `CLICKHOUSE.md` | Premise wrong (value tables are `MergeTree`), sentence still useful | done |
 | M4 | ClickHouse `deduplicate_samples()` count under load | Confirmed for ClickHouse only; docs were wrong both ways | done |
@@ -194,3 +194,25 @@ commit per point.
 - Done: both bulk reads (`read_numeric_samples` and `read_aggregated_bulk`) use
   `sensor_id IN {ids:Array(UInt64)}` with `.param("ids", sensor_ids)`. Chunks are at most 256 ids, so the URL
   stays small. The selector, regex, PromQL, remote read, label and ClickHouse suites pass (100 tests).
+
+### M1. Single-sample publishes without the sensor cache
+
+- Method: TimescaleDB container, release builds of `main` (`aca6cbf`, with the sensor cache) and of this
+  branch (hashes checked to differ), InfluxDB line protocol, steady state (the series exist and were warmed
+  up), one new sample per request on a known series, persistent connections, two rounds alternating binaries.
+  The script writes 1 500 requests from one client, then 3 200 from 8 clients on 40 series.
+
+  | | main (cache) | this branch | difference |
+  |---|---|---|---|
+  | 1 client, mean / p95 | 2.05 / 2.7 ms | 2.6 to 2.7 / 3.3 to 3.6 ms | +0.6 ms (+30%) |
+  | 1 client, writes/s | 485 | 367 to 382 | -22% |
+  | 8 clients, mean / p95 | 4.4 to 4.7 / 5.9 to 6.5 ms | 5.9 to 6.1 / 8.1 to 9.0 ms | +1.4 ms (+30%) |
+  | 8 clients, writes/s | 1 710 to 1 820 | 1 300 to 1 340 | -25% |
+
+- Reading: the review is right that the cost exists (the sensor and dictionary round trips come back for every
+  write), but it is about 0.6 ms of latency per request, and a single machine still takes more than 1 300
+  single-sample writes per second from 8 clients. A device that sends one sample per second spends 0.06% of a
+  second on it.
+- Decision: no `Uuid -> (sensor_id, labels_hash)` LRU. It would win back part of 0.6 ms and bring back what the
+  branch removed on purpose: a stale id after a rollback or a deletion by another instance. Revisit if
+  somebody ingests mostly tiny requests at thousands per second. The script is the measure to repeat.
