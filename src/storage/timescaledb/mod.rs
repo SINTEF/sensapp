@@ -483,11 +483,23 @@ impl TimeScaleDBStorage {
 }
 
 fn timescaledb_bucketed_cte(table_name: &'static str) -> String {
+    timescaledb_bucketed_cte_for(table_name, false)
+}
+
+/// The buckets of the samples of one sensor (`sensor_id = $1`) or of many (`sensor_id = ANY($1)`,
+/// with the sensor in the rows).
+pub(super) fn timescaledb_bucketed_cte_for(table_name: &'static str, many_sensors: bool) -> String {
+    let (sensor_column, sensor_filter) = if many_sensors {
+        ("sensor_id,", "sensor_id = ANY($1)")
+    } else {
+        ("", "sensor_id = $1")
+    };
     // Callers pass fixed sensor-type table names, never request text.
     format!(
         r#"
         WITH bucketed AS (
             SELECT
+                {sensor_column}
                 time_bucket(
                     $4::bigint * INTERVAL '1 millisecond',
                     time,
@@ -496,7 +508,7 @@ fn timescaledb_bucketed_cte(table_name: &'static str) -> String {
                 time,
                 value
             FROM {table_name}
-            WHERE sensor_id = $1
+            WHERE {sensor_filter}
               AND ($2::TIMESTAMPTZ IS NULL OR time >= $2)
               AND ($3::TIMESTAMPTZ IS NULL OR time <= $3)
         )
@@ -508,18 +520,27 @@ fn timescaledb_group_by_clause() -> &'static str {
     "FROM bucketed GROUP BY 1 ORDER BY 1 ASC LIMIT $6"
 }
 
-fn timescaledb_integer_expression(aggregation: Aggregation) -> &'static str {
+pub(super) fn timescaledb_group_by_clause_for(many_sensors: bool) -> &'static str {
+    if many_sensors {
+        "FROM bucketed GROUP BY sensor_id, bucket_time ORDER BY sensor_id, bucket_time ASC LIMIT $6"
+    } else {
+        timescaledb_group_by_clause()
+    }
+}
+
+pub(super) fn timescaledb_integer_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Min => "MIN(value)",
         Aggregation::Max => "MAX(value)",
-        Aggregation::Sum => "SUM(value)",
+        // The sum of bigints is a numeric in PostgreSQL: it does not decode as an i64
+        Aggregation::Sum => "SUM(value)::bigint",
         Aggregation::First => "first(value, time)",
         Aggregation::Last => "last(value, time)",
         Aggregation::Avg | Aggregation::Count => unreachable!("handled separately"),
     }
 }
 
-fn timescaledb_float_expression(aggregation: Aggregation) -> &'static str {
+pub(super) fn timescaledb_float_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Avg => "AVG(value)",
         Aggregation::Min => "MIN(value)",
@@ -531,7 +552,7 @@ fn timescaledb_float_expression(aggregation: Aggregation) -> &'static str {
     }
 }
 
-fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'static str {
+pub(super) fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Avg => "AVG(value)",
         Aggregation::Min => "MIN(value)",
@@ -1373,6 +1394,23 @@ impl StorageInstance for TimeScaleDBStorage {
             start_time,
             end_time,
             numeric_only,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
+    async fn query_selector_aggregated(
+        &self,
+        matchers: &[super::LabelMatcher],
+        options: &super::SensorDataQueryOptions,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<super::SelectorRead> {
+        crate::storage::selector::read_aggregated_selector_in_bulk(
+            self,
+            matchers,
+            options,
             max_series,
             max_samples,
         )
