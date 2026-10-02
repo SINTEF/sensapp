@@ -82,6 +82,13 @@ Databases created by earlier builds are refused at startup with a clear message 
 
 No known data-correctness bug, failures reported with the right status and recovering without a restart, a documented backup and restore that was practised, documentation of what is and is not guaranteed, and evidence from a real service instead of mocks. That is met for the code. What remains of the release plan is evidence from a real environment: staging the image and the chart, exercising operations there, and publishing (steps 2 to 4 of `docs/PREPRODUCTION_RELEASE_PLAN.md`), plus a green CI run.
 
+## Closed (2 Oct 2026)
+
+Merged to `main` with PR 44, and the CI/CD Pipeline is green on the merge commit (backend matrix, frontend,
+Python SDK, audit, Helm, Docker smoke, live Prometheus compatibility): step 1 of the release plan has its
+evidence. What is left is not code: staging, operations drills and the release itself (steps 2 to 4 of
+`docs/PREPRODUCTION_RELEASE_PLAN.md`), plus the frontend generator upgrade (step 5).
+
 ## Notes
 
 - Keep tests generic where practical, but accept backend-specific validation where operational behavior differs.
