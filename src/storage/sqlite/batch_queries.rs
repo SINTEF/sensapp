@@ -22,6 +22,11 @@ impl SqliteStorage {
     /// This fetches samples for all provided sensors in optimized batch queries,
     /// one query per sensor type. Due to SQLite limitations, we use IN clauses
     /// with dynamic parameter binding.
+    ///
+    /// `limit` is a number of samples **per sensor**, the oldest first, as
+    /// `query_sensors_by_labels` promises: it is applied row by row after the query, which has no
+    /// SQL `LIMIT`. It is not the shared budget of the selector reads, which is global to all the
+    /// sensors of a type (`selector.rs`, `read_numeric_samples`): the two must not be merged.
     pub(super) async fn batch_query_samples(
         &self,
         sensors: &[(i64, Sensor)],

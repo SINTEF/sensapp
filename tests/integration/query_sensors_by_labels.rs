@@ -734,6 +734,50 @@ async fn test_query_with_limit() -> Result<()> {
     Ok(())
 }
 
+/// The limit is a number of samples per sensor, the oldest first, not a total for the whole
+/// query. The selector reads have a shared budget of their own (`query_selector`); this one is
+/// the per-sensor limit of the trait, and the same on every backend.
+#[tokio::test]
+#[serial]
+async fn test_query_limit_is_per_sensor() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let group = Uuid::new_v4().to_string();
+    let sensors = (0..3)
+        .map(|index| {
+            let sensor = create_sensor_with_labels(
+                &format!("limit_per_sensor_{index}"),
+                SensorType::Float,
+                vec![("group".to_string(), group.clone())],
+            );
+            (sensor, create_float_samples(5))
+        })
+        .collect();
+    publish_test_sensors(&storage, sensors).await?;
+
+    let matchers = vec![LabelMatcher::eq("group", group)];
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, Some(2), false)
+        .await?;
+
+    assert_eq!(results.len(), 3, "Should find the three sensors");
+    for result in &results {
+        let TypedSamples::Float(samples) = &result.samples else {
+            panic!("Expected float samples");
+        };
+        let values: Vec<f64> = samples.iter().map(|sample| sample.value).collect();
+        assert_eq!(
+            values,
+            vec![20.0, 21.0],
+            "{}: the two oldest samples",
+            result.sensor.name
+        );
+    }
+    Ok(())
+}
+
 // ============================================================================
 // Different Sensor Types
 // ============================================================================

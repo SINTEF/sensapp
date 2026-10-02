@@ -19,7 +19,7 @@ commit per point.
 | M5 | `StdDev` / `Variance` removed | False premise: they never existed. Nothing breaks | done (no change) |
 | M6 | `MAX_SELECTOR_SERIES = 256` blocks aggregated selectors | Maintainer: major if true | |
 | M7 | SQLite aggregated path: per-series `LIMIT/OFFSET` | Premise wrong (global `LIMIT`, no `OFFSET`); test module note added | done |
-| M8 | `batch_query_samples` global `LIMIT` comment | | |
+| M8 | `batch_query_samples` global `LIMIT` comment | Premise inverted: the limit is per sensor. Comments and a multi-sensor test added | done |
 | L1 | Dedicated counter for shed requests | Maintainer: true | |
 | L2 | ClickHouse selector: bind an array instead of interpolating ids | Maintainer: true | |
 
@@ -154,3 +154,15 @@ commit per point.
   `storage_query_helpers.rs` is the single-series read. The sequential read shares one budget too.
 - The caveat of the review about the tests is right: they compare a backend with the portable read on itself.
   Done: both module docs say it, and state the shared contract (global limits).
+
+### M8. `batch_query_samples` and its `LIMIT`
+
+- The review says the `LIMIT $4` is global across the sensors of a type. It is per sensor: PostgreSQL runs it
+  inside a `CROSS JOIN LATERAL` for each id, and SQLite applies the limit per sensor in Rust (it has no SQL
+  `LIMIT` there). The trait documents "maximum number of samples per sensor". The global limit the reviewer
+  describes is the one of `read_numeric_samples` (selector reads), which is documented.
+- The review's worry is still right: the only test of the limit had one sensor, so it could not tell per-sensor
+  from global. Done: comments on both `batch_query_samples` spell out the two semantics and say not to merge
+  them, and `test_query_limit_is_per_sensor` (three sensors, limit 2) pins it.
+- Side finding, not fixed: SQLite reads every row of the window for all the sensors before truncating per
+  sensor. See the notes at the end.
