@@ -86,7 +86,7 @@ SensApp sheds load instead of queueing it. When all slots are taken, a new write
 
 `Retry-After` is a whole number of seconds, picked at random (full jitter) between 1 and twice the moving average of how long recent writes held their slot, at most 30. Clients rejected together therefore come back spread over the time it takes the slots to turn over, and the hint grows when the database gets slower. Before the first write it is 1 or 2 seconds.
 
-The header also means "this request was not processed", so it can be resent safely. The other `503` SensApp sends, `Database unavailable`, has no `Retry-After` and may follow a partial write.
+The header also means "this request was not processed", so it can be resent safely. The other `503` SensApp sends, `Database unavailable`, has no `Retry-After` and may follow a partial write. On the SQL backends it means that the database cannot be reached: the connection pool timed out or was closed, the connection was refused or cut, or PostgreSQL reported a connection failure, a shutdown or too many connections. A statement that is merely slow (a statement timeout, a cancelled query) or a misconfiguration (an SQLite file that cannot be opened) is a `500`, which clients do not retry, so that a slow database is not hit by a retry storm.
 
 Rejections show up in `sensapp_http_requests_total{status="503"}` on the write paths. A steady stream of them means the database is the bottleneck (or the limit is too low for it): look at storage latency before raising the limit. As a starting point keep the limit close to the database connection pool (`SENSAPP_PG_POOL_MAX_CONNECTIONS` for PostgreSQL); a limit far above the pool only moves the waiting from the HTTP layer to the pool.
 

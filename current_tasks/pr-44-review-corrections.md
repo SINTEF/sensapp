@@ -7,7 +7,7 @@ commit per point.
 | # | Point | Verdict | Status |
 |---|-------|---------|--------|
 | 1 | PG: label changes on existing sensors dropped | Not a regression: labels are in the UUID hash and `main` also returned early. Documented and pinned by a test | done |
-| 2 | `storage_error_is_unavailable` too broad | | |
+| 2 | `storage_error_is_unavailable` too broad | Confirmed, and worse: sqlx errors through `anyhow` were never classified | done |
 | 3 | At-least-once writes, retries, manual dedup | Maintainer: describe vacuum as not automatic, no scheduler | |
 | 4 | DuckDB legacy `timestamp_ms` column | Maintainer: no deployments exist, nothing to do | |
 | 5 | `find_selector_sensors` without `LIMIT` | | |
@@ -36,3 +36,16 @@ commit per point.
   ClickHouse, DuckDB) keep the labels of the first publish.
 - Done: `docs/DATAMODEL.md` says so, and `publish_robustness::labels_are_written_when_the_sensor_is_created`
   pins it on every backend.
+
+### 2. "Unavailable" classification
+
+- Confirmed: bare `"timed out"` and `"no such file or directory"` made a slow statement or a bad SQLite
+  path a retryable 503.
+- Worse than the review says: `StorageError::Database` is never built explicitly, and sqlx errors travel
+  through `?` as plain `anyhow`, where only ClickHouse errors were downcast. A PG pool timeout reached the
+  anonymous 500 path and the string matcher saw almost nothing.
+- `OperationFailed` is only built by the ClickHouse classifier for errors it already judged not transient,
+  so it is now always a 500.
+- Done: `sqlx_error_is_unavailable` matches `PoolTimedOut`, `PoolClosed`, `WorkerCrashed`, `Io` and the
+  PostgreSQL SQLSTATEs `08*`, `53300`, `57P01`, `57P02`, `57P03`, in both the `StorageError` path and the
+  `anyhow` chain. No text matching is left. `57014` (statement timeout) is a 500.
