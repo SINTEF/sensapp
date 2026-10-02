@@ -27,10 +27,10 @@ features, and has no promise.
 | Values of every type | yes | yes | yes | yes | yes | numeric data points | yes |
 | Delete a series or its samples | yes | yes | yes | yes | yes | no | no |
 | Aggregations (`step`) in the database | yes | yes | yes | yes | yes | no | no |
-| Remove duplicate samples (vacuum) | yes | yes | yes | yes | not yet | no | no |
+| Remove duplicate samples (vacuum) | yes | yes | yes | yes | yes | no | no |
 | Registration of many new series per write in bulk | yes | yes | yes | one by one, fast locally | one by one | no | no |
-| A selector reads its series with a few queries | yes | yes | yes | yes | one series at a time | one series at a time | one series at a time |
-| Prometheus remote read with a `step` aggregates its series with a few queries | yes | yes | yes | yes | one series at a time | one series at a time | one series at a time |
+| A selector reads its series with a few queries | yes | yes | yes | yes | yes (numeric series; aggregated ones one at a time) | one series at a time | one series at a time |
+| Prometheus remote read with a `step` aggregates its series with a few queries | yes | yes | yes | yes | one series at a time (each aggregation is a single query) | one series at a time | one series at a time |
 | Replication | not created by SensApp | the database's own | the database's own | no | no | no | managed |
 
 The last two rows are a consequence of how the code is written, not of the databases: a backend that reads
@@ -46,7 +46,8 @@ or writes series one by one still works, it costs more round trips with many ser
 - **TimescaleDB**: the same schema as PostgreSQL with a `time` column and hypertables.
 - **SQLite**: one writer at a time; units keep their name but not their description.
 - **DuckDB**: timestamps are stored with a millisecond precision, unlike the other backends (microseconds).
-- **RRDCached**: data is consolidated according to the chosen preset, old precision is lost by design. Details:
+- **RRDCached**: only its dedicated integration module runs against a real `rrdcached` (the backend-generic
+  suite does not apply: no labels, no deletion, consolidated data). Data is consolidated according to the chosen preset, old precision is lost by design. Details:
   [RRDCACHED.md](RRDCACHED.md).
 - **BigQuery**: needs Google Cloud credentials and is only compiled in CI.
 
