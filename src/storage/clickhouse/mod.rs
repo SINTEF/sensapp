@@ -1150,6 +1150,23 @@ impl StorageInstance for ClickHouseStorage {
         .await
     }
 
+    async fn query_selector_aggregated(
+        &self,
+        matchers: &[super::LabelMatcher],
+        options: &super::SensorDataQueryOptions,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<super::SelectorRead> {
+        crate::storage::selector::read_aggregated_selector_in_bulk(
+            self,
+            matchers,
+            options,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
     /// Health check for ClickHouse storage
     /// Executes a simple SELECT 1 query to verify database connectivity
     async fn health_check(&self) -> Result<()> {

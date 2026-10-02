@@ -7,8 +7,8 @@ use super::clickhouse_utilities::{
 };
 use crate::datamodel::{Sample, SensAppDateTime, Sensor, SensorType, TypedSamples};
 use crate::storage::LabelMatcher;
-use crate::storage::selector::{BulkSelectorBackend, empty_samples};
-use anyhow::Result;
+use crate::storage::selector::{AggregatedRead, BulkSelectorBackend, empty_samples};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::collections::HashMap;
 
@@ -25,6 +25,17 @@ impl BulkSelectorBackend for ClickHouseStorage {
             .iter()
             .partition(|matcher| matcher.is_name_matcher());
         self.find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
+            .await
+    }
+
+    async fn read_aggregated_samples(
+        &self,
+        sensor_type: SensorType,
+        sensor_ids: &[u64],
+        read: &AggregatedRead,
+        limit: usize,
+    ) -> Result<HashMap<u64, TypedSamples>> {
+        self.read_aggregated_bulk(sensor_type, sensor_ids, read, limit)
             .await
     }
 
@@ -133,5 +144,99 @@ impl BulkSelectorBackend for ClickHouseStorage {
     ) -> Result<TypedSamples> {
         self.query_samples_by_type(sensor_id, &sensor.sensor_type, start_time, end_time, limit)
             .await
+    }
+}
+
+impl ClickHouseStorage {
+    /// The aggregated buckets of many sensors of one numeric type, with one query: the SQL of the
+    /// read of a single sensor, over many sensors, grouped by sensor and bucket.
+    pub(super) async fn read_aggregated_bulk(
+        &self,
+        sensor_type: SensorType,
+        sensor_ids: &[u64],
+        read: &AggregatedRead,
+        limit: usize,
+    ) -> Result<HashMap<u64, TypedSamples>> {
+        use super::{
+            AggregatedSamplesQuery, clickhouse_float_expression, clickhouse_integer_expression,
+            clickhouse_numeric_expression, clickhouse_time_where,
+        };
+        use crate::storage::Aggregation;
+        use crate::storage::selector::{AggregatedKind, aggregated_kind};
+
+        let table = match sensor_type {
+            SensorType::Integer => "integer_values",
+            SensorType::Numeric => "numeric_values",
+            SensorType::Float => "float_values",
+            other => anyhow::bail!("{other} is not a numeric type"),
+        };
+        let expression = match (sensor_type, read.aggregation) {
+            (_, Aggregation::Count) => "toInt64(count())",
+            (SensorType::Integer, Aggregation::Avg) => "avg(value)",
+            (SensorType::Integer, aggregation) => clickhouse_integer_expression(aggregation),
+            (SensorType::Float, aggregation) => clickhouse_float_expression(aggregation),
+            (_, aggregation) => clickhouse_numeric_expression(aggregation),
+        };
+        let step_us = read
+            .step_ms
+            .checked_mul(1000)
+            .context("step is too large")?;
+        let bucket_expr = Self::aggregated_bucket_expr(&AggregatedSamplesQuery {
+            sensor_id: 0,
+            start_time_us: read.start_us,
+            end_time_us: read.end_us,
+            step_us,
+            origin_us: read.start_us.unwrap_or(0),
+            aggregation: read.aggregation,
+            limit: None,
+        });
+        let where_clause = clickhouse_time_where(read.start_us, read.end_us);
+        // The ids are numbers: written into the statement, they cannot inject anything
+        let ids = sensor_ids
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT sensor_id, {bucket_expr} AS timestamp_us, {expression} AS value \
+             FROM {table} WHERE sensor_id IN ({ids}){where_clause} \
+             GROUP BY sensor_id, timestamp_us \
+             ORDER BY sensor_id ASC, timestamp_us ASC LIMIT {limit}"
+        );
+
+        macro_rules! fetch {
+            ($value:ty, $variant:ident, $convert:expr) => {{
+                let mut query = self.client.query(&sql);
+                if let Some(start_us) = read.start_us {
+                    query = query.bind(start_us);
+                }
+                if let Some(end_us) = read.end_us {
+                    query = query.bind(end_us);
+                }
+                let mut cursor = query
+                    .fetch::<(u64, i64, $value)>()
+                    .map_err(|e| map_clickhouse_error(e, None, None))?;
+                let mut result: HashMap<u64, TypedSamples> = HashMap::new();
+                while let Some((sensor_id, timestamp_us, value)) = cursor.next().await? {
+                    if let TypedSamples::$variant(samples) = result
+                        .entry(sensor_id)
+                        .or_insert_with(|| empty_samples(SensorType::$variant))
+                    {
+                        let convert: fn($value) -> _ = $convert;
+                        samples.push(Sample {
+                            datetime: micros_to_datetime(timestamp_us),
+                            value: convert(value),
+                        });
+                    }
+                }
+                result
+            }};
+        }
+
+        Ok(match aggregated_kind(sensor_type, read.aggregation) {
+            AggregatedKind::Integer => fetch!(i64, Integer, |value| value),
+            AggregatedKind::Float => fetch!(f64, Float, |value| value),
+            AggregatedKind::Numeric => fetch!(i128, Numeric, decimal_from_clickhouse_raw),
+        })
     }
 }
