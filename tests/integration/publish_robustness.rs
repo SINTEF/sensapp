@@ -544,3 +544,65 @@ async fn windows_and_limits_select_the_right_samples() -> Result<()> {
     }
     Ok(())
 }
+
+/// A sensor is identified by its UUID, and its labels are written once, when the sensor is
+/// created. Publishing the same UUID again with other labels adds the samples and leaves the
+/// labels alone, the same way on every backend.
+///
+/// The UUID that SensApp derives from a name, a type, a unit and labels covers the labels: a
+/// Prometheus or InfluxDB series with a changed label is another sensor. Only a client that
+/// chooses its UUIDs (an Arrow stream, SenML) can reach this case.
+#[tokio::test]
+#[serial]
+async fn labels_are_written_when_the_sensor_is_created() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let uuid = Uuid::new_v4();
+    let name = format!("labels_are_written_once_{uuid}");
+    let publish = |room: &'static str, value: f64| {
+        let storage = storage.clone();
+        let name = name.clone();
+        async move {
+            let labels: SensAppLabels = [("room".to_string(), room.to_string())]
+                .into_iter()
+                .collect();
+            let sensor = Arc::new(Sensor::new(
+                uuid,
+                name,
+                SensorType::Float,
+                None,
+                Some(labels),
+            ));
+            let samples = TypedSamples::Float(
+                vec![Sample {
+                    datetime: hifitime::Epoch::from_unix_seconds(YEAR_2000 + value),
+                    value,
+                }]
+                .into(),
+            );
+            let mut batch_builder = BatchBuilder::new()?;
+            batch_builder.add(sensor, samples).await?;
+            batch_builder.send_what_is_left(storage).await?;
+            anyhow::Ok(())
+        }
+    };
+    publish("kitchen", 1.0).await?;
+    publish("garage", 2.0).await?;
+
+    let data = storage
+        .query_sensor_data(&uuid.to_string(), None, None, None)
+        .await?
+        .expect("the series should exist");
+    assert_eq!(
+        data.sensor.labels.to_vec(),
+        vec![("room".to_string(), "kitchen".to_string())],
+        "the labels of the first publish stay"
+    );
+    let TypedSamples::Float(samples) = &data.samples else {
+        panic!("expected float samples");
+    };
+    assert_eq!(samples.len(), 2, "both publishes add their sample");
+    Ok(())
+}

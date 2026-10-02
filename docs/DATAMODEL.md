@@ -8,6 +8,8 @@ Each sensor contains only one type of data. If your sensor measures more than on
 
 Sensors can have labels attached to them, which are key-value pairs. Those are not tracked over time. They are used to add metadata to the sensors. If you wish to track labels, you should create a sensor for each label and use the sensor value to store the label value.
 
+Labels are part of the identity of a sensor. The UUID that SensApp derives from a name, a type, a unit and labels covers them, so a Prometheus or InfluxDB series whose label changes is another sensor, with its own history. The labels of a sensor are written when it is created and never updated: publishing again a UUID that exists, which only a client that chooses its own UUIDs can do (an Arrow stream, SenML), adds the samples and keeps the labels it was created with. This is the same on every backend.
+
 SensApp distinguises between:
 
  - **Integer** values, which are 64 bits integers.
