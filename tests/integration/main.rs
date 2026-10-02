@@ -5,6 +5,7 @@
 mod common;
 
 mod advanced_backend_queries;
+mod aggregated_windows;
 mod arrow_integration;
 mod batched_inserts;
 mod clickhouse_http_lifecycle;

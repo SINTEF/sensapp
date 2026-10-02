@@ -76,6 +76,9 @@ impl std::fmt::Debug for ClickHouseStorage {
 }
 
 impl ClickHouseStorage {
+    /// The start of the bucket of a sample. Select it under another name than `timestamp_us`
+    /// (`AS bucket_us`): ClickHouse resolves an alias in `WHERE`, so `timestamp_us >= ?` would test
+    /// the bucket instead of the sample, and the samples outside of the window would be counted.
     fn aggregated_bucket_expr(query: &AggregatedSamplesQuery) -> String {
         format!(
             "{} + intDiv(timestamp_us - {}, {}) * {}",
@@ -1203,12 +1206,12 @@ impl ClickHouseStorage {
             Aggregation::Avg => {
                 #[derive(clickhouse::Row, serde::Deserialize)]
                 struct Row {
-                    timestamp_us: i64,
+                    bucket_us: i64,
                     value: f64,
                 }
 
                 let sql = format!(
-                    "SELECT {bucket_expr} AS timestamp_us, avg(value) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, avg(value) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1223,7 +1226,7 @@ impl ClickHouseStorage {
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
                     samples.push(Sample {
-                        datetime: micros_to_datetime(row.timestamp_us),
+                        datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
                     });
                 }
@@ -1232,12 +1235,12 @@ impl ClickHouseStorage {
             Aggregation::Count => {
                 #[derive(clickhouse::Row, serde::Deserialize)]
                 struct Row {
-                    timestamp_us: i64,
+                    bucket_us: i64,
                     value: i64,
                 }
 
                 let sql = format!(
-                    "SELECT {bucket_expr} AS timestamp_us, toInt64(count()) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, toInt64(count()) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1252,7 +1255,7 @@ impl ClickHouseStorage {
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
                     samples.push(Sample {
-                        datetime: micros_to_datetime(row.timestamp_us),
+                        datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
                     });
                 }
@@ -1261,13 +1264,13 @@ impl ClickHouseStorage {
             _ => {
                 #[derive(clickhouse::Row, serde::Deserialize)]
                 struct Row {
-                    timestamp_us: i64,
+                    bucket_us: i64,
                     value: i64,
                 }
 
                 let expression = clickhouse_integer_expression(query.aggregation);
                 let sql = format!(
-                    "SELECT {bucket_expr} AS timestamp_us, {expression} AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, {expression} AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1282,7 +1285,7 @@ impl ClickHouseStorage {
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
                     samples.push(Sample {
-                        datetime: micros_to_datetime(row.timestamp_us),
+                        datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
                     });
                 }
@@ -1303,12 +1306,12 @@ impl ClickHouseStorage {
             Aggregation::Count => {
                 #[derive(clickhouse::Row, serde::Deserialize)]
                 struct Row {
-                    timestamp_us: i64,
+                    bucket_us: i64,
                     value: i64,
                 }
 
                 let sql = format!(
-                    "SELECT {bucket_expr} AS timestamp_us, toInt64(count()) AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, toInt64(count()) AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1323,7 +1326,7 @@ impl ClickHouseStorage {
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
                     samples.push(Sample {
-                        datetime: micros_to_datetime(row.timestamp_us),
+                        datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
                     });
                 }
@@ -1332,13 +1335,13 @@ impl ClickHouseStorage {
             _ => {
                 #[derive(clickhouse::Row, serde::Deserialize)]
                 struct Row {
-                    timestamp_us: i64,
+                    bucket_us: i64,
                     value: f64,
                 }
 
                 let expression = clickhouse_float_expression(query.aggregation);
                 let sql = format!(
-                    "SELECT {bucket_expr} AS timestamp_us, {expression} AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, {expression} AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1353,7 +1356,7 @@ impl ClickHouseStorage {
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
                     samples.push(Sample {
-                        datetime: micros_to_datetime(row.timestamp_us),
+                        datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
                     });
                 }
@@ -1374,12 +1377,12 @@ impl ClickHouseStorage {
             Aggregation::Count => {
                 #[derive(clickhouse::Row, serde::Deserialize)]
                 struct Row {
-                    timestamp_us: i64,
+                    bucket_us: i64,
                     value: i64,
                 }
 
                 let sql = format!(
-                    "SELECT {bucket_expr} AS timestamp_us, toInt64(count()) AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, toInt64(count()) AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1394,7 +1397,7 @@ impl ClickHouseStorage {
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
                     samples.push(Sample {
-                        datetime: micros_to_datetime(row.timestamp_us),
+                        datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
                     });
                 }
@@ -1403,13 +1406,13 @@ impl ClickHouseStorage {
             _ => {
                 #[derive(clickhouse::Row, serde::Deserialize)]
                 struct Row {
-                    timestamp_us: i64,
+                    bucket_us: i64,
                     value: i128,
                 }
 
                 let expression = clickhouse_numeric_expression(query.aggregation);
                 let sql = format!(
-                    "SELECT {bucket_expr} AS timestamp_us, {expression} AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY timestamp_us ORDER BY timestamp_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, {expression} AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1424,7 +1427,7 @@ impl ClickHouseStorage {
                 let mut samples = smallvec::smallvec![];
                 while let Some(row) = rows_cursor.next().await? {
                     samples.push(Sample {
-                        datetime: micros_to_datetime(row.timestamp_us),
+                        datetime: micros_to_datetime(row.bucket_us),
                         value: decimal_from_clickhouse_raw(row.value),
                     });
                 }

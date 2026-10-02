@@ -189,10 +189,10 @@ impl ClickHouseStorage {
         });
         let where_clause = clickhouse_time_where(read.start_us, read.end_us);
         let sql = format!(
-            "SELECT sensor_id, {bucket_expr} AS timestamp_us, {expression} AS value \
+            "SELECT sensor_id, {bucket_expr} AS bucket_us, {expression} AS value \
              FROM {table} WHERE sensor_id IN {{ids:Array(UInt64)}}{where_clause} \
-             GROUP BY sensor_id, timestamp_us \
-             ORDER BY sensor_id ASC, timestamp_us ASC LIMIT {limit}"
+             GROUP BY sensor_id, bucket_us \
+             ORDER BY sensor_id ASC, bucket_us ASC LIMIT {limit}"
         );
 
         macro_rules! fetch {
