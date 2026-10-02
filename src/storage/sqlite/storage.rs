@@ -807,7 +807,7 @@ impl StorageInstance for SqliteStorage {
 
         // Find matching sensors with full metadata
         let sensors = self
-            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
+            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only, None)
             .await?;
 
         if sensors.is_empty() {

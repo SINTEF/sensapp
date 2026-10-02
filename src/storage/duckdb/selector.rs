@@ -61,6 +61,7 @@ fn find_sensors(
     connection: &Connection,
     matchers: &[LabelMatcher],
     numeric_only: bool,
+    limit: Option<usize>,
 ) -> Result<Vec<(i64, Sensor)>> {
     let mut conditions: Vec<String> = Vec::new();
     let mut params: Vec<String> = Vec::new();
@@ -107,6 +108,10 @@ fn find_sensors(
         write!(sql, " WHERE {}", conditions.join(" AND "))?;
     }
     sql.push_str(" ORDER BY s.sensor_id");
+    if let Some(limit) = limit {
+        // A number, never text from a caller
+        write!(sql, " LIMIT {limit}")?;
+    }
 
     let mut statement = connection.prepare(&sql)?;
     let mut rows = statement.query(duckdb::params_from_iter(params.iter()))?;
@@ -219,12 +224,13 @@ impl BulkSelectorBackend for DuckDBStorage {
         &self,
         matchers: &[LabelMatcher],
         numeric_only: bool,
+        limit: Option<usize>,
     ) -> Result<Vec<(i64, Sensor)>> {
         let connection = std::sync::Arc::clone(&self.connection);
         let matchers = matchers.to_vec();
         spawn_blocking(move || {
             let connection = connection.blocking_lock();
-            find_sensors(&connection, &matchers, numeric_only)
+            find_sensors(&connection, &matchers, numeric_only, limit)
         })
         .await?
     }

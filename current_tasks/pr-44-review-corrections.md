@@ -10,7 +10,7 @@ commit per point.
 | 2 | `storage_error_is_unavailable` too broad | Confirmed, and worse: sqlx errors through `anyhow` were never classified | done |
 | 3 | At-least-once writes, retries, manual dedup | Maintainer: describe vacuum as not automatic, no scheduler. Docs only | done |
 | 4 | DuckDB legacy `timestamp_ms` column | Maintainer: no deployments exist, no guard | done (decision) |
-| 5 | `find_selector_sensors` without `LIMIT` | | |
+| 5 | `find_selector_sensors` without `LIMIT` | Confirmed on all five lookups | done |
 | 6 | `admin/vacuum` unbounded | Maintainer: slow is expected, keep it simple | |
 | M1 | Measure `register_sensors` on single-sample publishes | Maintainer: worth measuring | |
 | M2 | Misleading BRIN comment in `postgresql/selector.rs` | | |
@@ -67,3 +67,29 @@ commit per point.
 - Maintainer decision: breaking changes are fine, there is no existing deployment, so no
   `reject_legacy_metadata_tables()` equivalent. A `.duckdb` file from before this branch fails with a
   missing-column error: delete it.
+
+### 5. `LIMIT` on the sensor lookup of a selector
+
+- Confirmed: the bulk read looked up every matching sensor and all their labels, then compared with
+  `max_series`. The shape is not a CTE as the review says, but a first query for the sensors (already
+  `ORDER BY sensor_id`) and a second for the labels of the ids it returned, so a `LIMIT` on the first bounds
+  both.
+- On SQLite the labels query binds one variable per sensor, so the lookup relied on a small result for
+  SQLite's variable limit. The limit now guarantees it (the failure itself was not reproduced).
+- Done: `find_selector_sensors` takes `limit: Option<usize>`; the two bulk readers pass `max_series + 1`,
+  which is enough to report `Series`. Five lookups changed: PostgreSQL, TimescaleDB (its own copy of the
+  query), SQLite, ClickHouse, DuckDB. The label-query callers pass `None`.
+- Not covered: the sequential fallback (RRDCached, token-filtered reads) goes through
+  `query_sensors_by_labels`, where `limit` is a per-series sample limit. It reads series one by one and is
+  not the "bulk" path of the review.
+- Measured: TimescaleDB, release build, 30 000 series of 3 samples, `GET /api/v1/query` with a selector
+  that exceeds the cap of 256 series (HTTP 400), five warm runs each, two rounds alternating the binaries:
+
+  | Selector | before | after |
+  |----------|--------|-------|
+  | `{__name__=~".+"}` | 175 to 210 ms | 7 to 12 ms |
+  | `{__name__="cpu usage",dc=~"d.*"}` | 290 to 310 ms | about 82 ms |
+
+  The remaining 82 ms of the second one is the label sub-query scan, which a `LIMIT` on the outer query
+  cannot shorten. The first measurement of this change compared a binary with itself (the shared target
+  directory did not rebuild the second one): the binaries were compared by hash before the numbers above.

@@ -51,6 +51,7 @@ impl ClickHouseStorage {
         name_matchers: &[&LabelMatcher],
         label_matchers: &[&LabelMatcher],
         numeric_only: bool,
+        limit: Option<usize>,
     ) -> Result<Vec<(u64, Sensor)>> {
         let mut sql = String::from(
             r#"SELECT DISTINCT s.sensor_id, s.uuid, s.name, s.type,
@@ -135,6 +136,10 @@ impl ClickHouseStorage {
             sql.push_str(&where_clauses.join(" AND "));
         }
         sql.push_str(" ORDER BY s.sensor_id ASC");
+        if let Some(limit) = limit {
+            // A number, never text from a caller
+            sql.push_str(&format!(" LIMIT {limit}"));
+        }
 
         #[derive(clickhouse::Row, serde::Deserialize)]
         struct SensorRow {

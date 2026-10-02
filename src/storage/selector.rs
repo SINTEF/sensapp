@@ -145,11 +145,15 @@ pub trait BulkSelectorBackend: StorageInstance {
     /// How the backend designates a sensor in its value tables
     type SensorKey: Copy + Eq + Hash + Send + Sync;
 
-    /// The sensors matching the matchers (a non-empty list), with their labels and units.
+    /// The sensors matching the matchers (a non-empty list), with their labels and units, by
+    /// increasing id. With a `limit`, only the first `limit` sensors are looked up and read: the
+    /// readers ask for one more than the series they accept, which is enough to see that the cap
+    /// is exceeded without reading every series of a selector that matches a whole database.
     async fn find_selector_sensors(
         &self,
         matchers: &[LabelMatcher],
         numeric_only: bool,
+        limit: Option<usize>,
     ) -> Result<Vec<(Self::SensorKey, Sensor)>>;
 
     /// The samples of many sensors of one numeric type (`Integer`, `Numeric` or `Float`),
@@ -241,7 +245,7 @@ pub async fn read_selector_in_bulk<B: BulkSelectorBackend>(
         return Ok(Ok(Vec::new()));
     }
     let sensors = backend
-        .find_selector_sensors(matchers, numeric_only)
+        .find_selector_sensors(matchers, numeric_only, Some(max_series.saturating_add(1)))
         .await?;
     if sensors.len() > max_series {
         return Ok(Err(SelectorLimitExceeded::Series));
@@ -328,7 +332,9 @@ pub async fn read_aggregated_selector_in_bulk<B: BulkSelectorBackend>(
     if matchers.is_empty() {
         return Ok(Ok(Vec::new()));
     }
-    let sensors = backend.find_selector_sensors(matchers, true).await?;
+    let sensors = backend
+        .find_selector_sensors(matchers, true, Some(max_series.saturating_add(1)))
+        .await?;
     if sensors.len() > max_series {
         return Ok(Err(SelectorLimitExceeded::Series));
     }

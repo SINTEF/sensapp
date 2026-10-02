@@ -1108,7 +1108,7 @@ impl StorageInstance for ClickHouseStorage {
             .partition(|matcher| matcher.is_name_matcher());
 
         let sensors = self
-            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
+            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only, None)
             .await?;
 
         if sensors.is_empty() {

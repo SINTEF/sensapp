@@ -898,6 +898,7 @@ impl StorageInstance for DuckDBStorage {
                 self,
                 matchers,
                 numeric_only,
+                None,
             )
             .await?
             .into_iter()

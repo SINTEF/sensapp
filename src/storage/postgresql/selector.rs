@@ -18,11 +18,12 @@ impl BulkSelectorBackend for PostgresStorage {
         &self,
         matchers: &[LabelMatcher],
         numeric_only: bool,
+        limit: Option<usize>,
     ) -> Result<Vec<(i64, Sensor)>> {
         let (name_matchers, label_matchers): (Vec<_>, Vec<_>) = matchers
             .iter()
             .partition(|matcher| matcher.is_name_matcher());
-        self.find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
+        self.find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only, limit)
             .await
     }
 

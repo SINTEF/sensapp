@@ -70,6 +70,7 @@ impl TimeScaleDBStorage {
         name_matchers: &[&super::LabelMatcher],
         label_matchers: &[&super::LabelMatcher],
         numeric_only: bool,
+        limit: Option<usize>,
     ) -> Result<Vec<(i64, Sensor)>> {
         let mut sql = String::from(
             r#"SELECT DISTINCT s.sensor_id, s.uuid, s.name, s.type,
@@ -190,6 +191,10 @@ impl TimeScaleDBStorage {
             sql.push_str(&where_clauses.join(" AND "));
         }
         sql.push_str(" ORDER BY s.sensor_id");
+        if let Some(limit) = limit {
+            // A number, never text from a caller
+            sql.push_str(&format!(" LIMIT {limit}"));
+        }
 
         #[derive(sqlx::FromRow)]
         struct SensorRow {
@@ -1326,7 +1331,7 @@ impl StorageInstance for TimeScaleDBStorage {
             .partition(|matcher| matcher.is_name_matcher());
 
         let sensors = self
-            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
+            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only, None)
             .await?;
 
         if sensors.is_empty() {
