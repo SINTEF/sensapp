@@ -6,9 +6,11 @@ use crate::common::TestDb;
 use anyhow::Result;
 use sensapp::config::load_configuration_for_tests;
 use sensapp::datamodel::batch_builder::BatchBuilder;
+use sensapp::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use sensapp::datamodel::sensapp_vec::SensAppLabels;
 use sensapp::datamodel::{Sample, SensAppDateTime, Sensor, SensorType, TypedSamples};
 use sensapp::storage::StorageInstance;
+use sensapp::storage::common::datetime_to_micros;
 use serial_test::serial;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -333,6 +335,13 @@ async fn a_series_written_again_after_its_deletion_is_registered_again() -> Resu
     assert_single_series_with_its_labels(&storage, &sensor, 1).await
 }
 
+/// Microseconds of the sample `position` of the series `index` in the request `request`: whole
+/// milliseconds, a millisecond apart, exact on every backend (DuckDB reads milliseconds back through
+/// a float conversion, which must not matter here).
+fn string_sample_micros(request: usize, position: usize, index: usize) -> i64 {
+    1_704_067_200_000_000 + ((request * 100 + position) * 1_000 + index) as i64 * 1_000
+}
+
 /// Strings are stored through a dictionary on some backends: whatever their content, and however
 /// many series and requests share them, they must read back exactly.
 #[tokio::test]
@@ -354,6 +363,18 @@ async fn string_samples_round_trip_whatever_their_content() -> Result<()> {
         "plain".into(), // repeated within a series
         long,
     ];
+    // What the sample `position` of a request holds: the second request changes the first one
+    let value_of = |request: usize, position: usize| {
+        format!(
+            "{}{}",
+            strings[position],
+            if request == 1 && position == 0 {
+                "!"
+            } else {
+                ""
+            }
+        )
+    };
 
     // Three series that share their strings, written in two requests
     let sensors: Vec<Arc<Sensor>> = (0..3)
@@ -370,21 +391,12 @@ async fn string_samples_round_trip_whatever_their_content() -> Result<()> {
     for request in 0..2 {
         let mut batch_builder = BatchBuilder::new()?;
         for (index, sensor) in sensors.iter().enumerate() {
-            let samples: Vec<Sample<String>> = strings
-                .iter()
-                .enumerate()
-                .map(|(position, value)| Sample {
-                    datetime: hifitime::Epoch::from_unix_seconds(
-                        1_704_067_200.0 + (request * 100 + position) as f64 + index as f64 * 0.001,
-                    ),
-                    value: format!(
-                        "{value}{}",
-                        if request == 1 && position == 0 {
-                            "!"
-                        } else {
-                            ""
-                        }
-                    ),
+            let samples: Vec<Sample<String>> = (0..strings.len())
+                .map(|position| Sample {
+                    datetime: SensAppDateTime::from_unix_microseconds_i64(string_sample_micros(
+                        request, position, index,
+                    )),
+                    value: value_of(request, position),
                 })
                 .collect();
             batch_builder
@@ -404,30 +416,18 @@ async fn string_samples_round_trip_whatever_their_content() -> Result<()> {
         };
         let mut stored: Vec<(i64, String)> = stored
             .iter()
-            .map(|sample| {
+            .map(|sample| (datetime_to_micros(&sample.datetime), sample.value.clone()))
+            .collect();
+        stored.sort();
+        let mut expected: Vec<(i64, String)> = (0..2)
+            .flat_map(|request| (0..strings.len()).map(move |position| (request, position)))
+            .map(|(request, position)| {
                 (
-                    (sample.datetime.to_unix_seconds() * 1e6).round() as i64,
-                    sample.value.clone(),
+                    string_sample_micros(request, position, index),
+                    value_of(request, position),
                 )
             })
             .collect();
-        stored.sort();
-        let mut expected: Vec<(i64, String)> = Vec::new();
-        for request in 0..2 {
-            for (position, value) in strings.iter().enumerate() {
-                let time =
-                    1_704_067_200.0 + (request * 100 + position) as f64 + index as f64 * 0.001;
-                let value = format!(
-                    "{value}{}",
-                    if request == 1 && position == 0 {
-                        "!"
-                    } else {
-                        ""
-                    }
-                );
-                expected.push(((time * 1e6).round() as i64, value));
-            }
-        }
         expected.sort();
         assert_eq!(stored.len(), expected.len(), "series {index}");
         assert_eq!(stored, expected, "series {index}");

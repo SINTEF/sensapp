@@ -1628,7 +1628,6 @@ fn duckdb_query_numeric_samples_aggregated(
                 sensor_id,
                 start_time_us,
                 end_time_us,
-                step_ms,
                 origin_us,
                 limit
             ])?;
@@ -1665,7 +1664,6 @@ fn duckdb_query_numeric_samples_aggregated(
                 sensor_id,
                 start_time_us,
                 end_time_us,
-                step_ms,
                 origin_us,
                 limit
             ])?;
