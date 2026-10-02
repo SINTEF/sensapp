@@ -2,6 +2,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use prometheus_client::metrics::counter::Counter;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -20,6 +21,9 @@ pub struct WriteLimiter {
     slots: Arc<Semaphore>,
     /// Exponential moving average of the write duration in milliseconds, 0 until the first write.
     average_write_millis: Arc<AtomicU64>,
+    /// Counts the writes turned away, so that shedding can be told from a storage outage (both
+    /// are a 503 in `sensapp_http_requests_total`)
+    shed: Counter,
 }
 
 impl WriteLimiter {
@@ -33,7 +37,14 @@ impl WriteLimiter {
         Self {
             slots: Arc::new(Semaphore::new(permits)),
             average_write_millis: Arc::new(AtomicU64::new(0)),
+            shed: Counter::default(),
         }
+    }
+
+    /// Count the writes turned away in `counter` (the one of the metrics registry).
+    pub fn with_shed_counter(mut self, counter: Counter) -> Self {
+        self.shed = counter;
+        self
     }
 
     fn record_write(&self, duration: Duration) {
@@ -76,6 +87,7 @@ pub async fn limit_concurrent_writes(
     next: Next,
 ) -> Response {
     let Ok(_permit) = limiter.slots.clone().try_acquire_owned() else {
+        limiter.shed.inc();
         let mut response = (
             StatusCode::SERVICE_UNAVAILABLE,
             "SensApp is busy writing data, retry later",

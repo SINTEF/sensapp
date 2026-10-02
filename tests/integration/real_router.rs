@@ -289,8 +289,12 @@ async fn the_write_limit_sheds_writes_and_spares_everything_else() -> Result<()>
     let (status, _, _) = send(&router, write_request(None)).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    // The rejection is counted
+    // The rejection is counted, and told apart from the other 503s by its own counter
     let (_, _, metrics) = send(&router, get_request("/prometheus/metrics")).await;
+    assert!(
+        metrics.contains("sensapp_http_writes_shed_total 1"),
+        "{metrics}"
+    );
     assert!(
         metrics.contains(
             "sensapp_http_requests_total{method=\"POST\",path=\"/api/v2/write\",status=\"503\"} 1"

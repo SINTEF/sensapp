@@ -20,7 +20,7 @@ commit per point.
 | M6 | `MAX_SELECTOR_SERIES = 256` blocks aggregated selectors | Maintainer: major if true | |
 | M7 | SQLite aggregated path: per-series `LIMIT/OFFSET` | Premise wrong (global `LIMIT`, no `OFFSET`); test module note added | done |
 | M8 | `batch_query_samples` global `LIMIT` comment | Premise inverted: the limit is per sensor. Comments and a multi-sensor test added | done |
-| L1 | Dedicated counter for shed requests | Maintainer: true | |
+| L1 | Dedicated counter for shed requests | Maintainer: true | done |
 | L2 | ClickHouse selector: bind an array instead of interpolating ids | Maintainer: true | |
 
 ## Notes per point
@@ -166,3 +166,10 @@ commit per point.
   them, and `test_query_limit_is_per_sensor` (three sensors, limit 2) pins it.
 - Side finding, not fixed: SQLite reads every row of the window for all the sensors before truncating per
   sensor. See the notes at the end.
+
+### L1. A counter for shed writes
+
+- Done: `sensapp_http_writes_shed_total`, incremented by the write limiter only when it turns a write away. The
+  limiter holds a clone of the counter that the metrics registry owns (`WriteLimiter::with_shed_counter`), so
+  the middleware keeps its own state type. `CONFIGURATION.md` says how to use it next to the 503 counter.
+  `real_router::the_write_limit_sheds_writes_and_spares_everything_else` checks the count after a rejection.

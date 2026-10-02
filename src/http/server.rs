@@ -106,7 +106,8 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
     let max_body_layer =
         axum::middleware::from_fn_with_state(max_body_bytes, enforce_request_body_limit);
     let bytes_body_layer = DefaultBodyLimit::max(max_body_bytes);
-    let write_limiter = WriteLimiter::new(settings.max_concurrent_writes);
+    let write_limiter = WriteLimiter::new(settings.max_concurrent_writes)
+        .with_shed_counter(state.metrics.writes_shed_counter());
 
     // Initialize tracing
     // Note: tracing subscriber is initialized in main.rs
