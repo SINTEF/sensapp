@@ -12,7 +12,7 @@ mature. This page says which ones to rely on, and what each one is for.
 | PostgreSQL | **Maintained**, main development backend | yes | Small and medium deployments, development |
 | TimescaleDB | **Maintained** | yes | PostgreSQL deployments that want hypertables and compression |
 | SQLite | **Maintained** | yes | Tests, demos, single-node edge devices, one writer |
-| DuckDB | Compatibility path, **less mature** | yes | Local analysis of a dataset, notebooks. Stores millisecond timestamps |
+| DuckDB | Compatibility path, **less mature** | yes | Local analysis of a dataset, notebooks. Writes are bulk (3000 new series in 0.2 s) |
 | RRDCached | **Experimental** | yes (its own job) | Fixed-size round-robin storage, monitoring-style data; no deletion |
 | BigQuery | **Experimental, parked** | compile only | Nothing yet: it has not been brought back in line with the current storage interface (see `ideas/bigquery-backend-reconciliation.md`) |
 
@@ -52,7 +52,7 @@ or writes series one by one still works, it costs more round trips with many ser
   returned wrong rows after a chunk changed state, and the aggregated `count` is written `COUNT(value)`,
   because `COUNT(*)` failed to plan over many chunks. Details: `done/timescaledb-compressed-chunks.md`.
 - **SQLite**: one writer at a time; units keep their name but not their description.
-- **DuckDB**: timestamps are stored with a millisecond precision, unlike the other backends (microseconds).
+- **DuckDB**: timestamps are stored with a microsecond precision, like the other backends. One process owns the database file; a batch is one transaction, registered and written with a few statements whatever the number of series.
 - **RRDCached**: only its dedicated integration module runs against a real `rrdcached` (the backend-generic
   suite does not apply: no labels, no deletion, consolidated data). Data is consolidated according to the chosen preset, old precision is lost by design. Details:
   [RRDCACHED.md](RRDCACHED.md).
