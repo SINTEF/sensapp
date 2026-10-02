@@ -16,7 +16,7 @@ commit per point.
 | M2 | Misleading BRIN comment in `postgresql/selector.rs` | | |
 | M3 | ClickHouse reads without `FINAL`: one sentence in `CLICKHOUSE.md` | | |
 | M4 | ClickHouse `deduplicate_samples()` count under load | | |
-| M5 | `StdDev` / `Variance` removed | Maintainer asks what this breaks | |
+| M5 | `StdDev` / `Variance` removed | False premise: they never existed. Nothing breaks | done (no change) |
 | M6 | `MAX_SELECTOR_SERIES = 256` blocks aggregated selectors | Maintainer: major if true | |
 | M7 | SQLite aggregated path: per-series `LIMIT/OFFSET` | | |
 | M8 | `batch_query_samples` global `LIMIT` comment | | |
@@ -107,3 +107,13 @@ commit per point.
   vacuums. Left to the maintainer: a guard would have to outlive the request (a timed-out request drops its
   future while the statement runs on), so it means running the vacuum in a spawned task. `DATA_LIFECYCLE.md`
   tells operators not to start a second one.
+
+### M5. `StdDev` / `Variance`
+
+- The maintainer asked what this breaks. Nothing: `git log -S"StdDev"` and `-S"Variance"` over `src/` find no
+  commit, so `Aggregation` never had these variants, on `main` or before.
+- The only trace is `stddev(...)` on the PromQL endpoint, which answers "Aggregation 'stddev' is not
+  supported" (400) identically on `main` and on this branch (`tests/integration/simple_promql.rs`).
+- The `unreachable!("handled separately")` arms are for `Avg` and `Count` in the ClickHouse aggregation
+  helpers, unrelated.
+- If `stddev` should exist, it is a new feature: see `ideas/promql-rate-and-arithmetic.md`.
