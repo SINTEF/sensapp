@@ -41,3 +41,7 @@ q "selector, 100 series (host=h7)  " '{__name__="cpu usage",host="h7"}'
 q "selector, 100 series, again     " '{__name__="cpu usage",host="h7"}'
 q "selector, 300 series (rejected) " '{__name__="cpu usage",host=~"h1.*"}'
 q "sum over 100 series             " 'sum({__name__="cpu usage",host="h7"})'
+rr() { echo "$1: $(python3 "$(dirname "$0")/remote_read.py" "http://localhost:$PORT" "cpu usage" "$2" "$3" "${4:-60}" 3)"; }
+rr "remote read, step, 1 series        " core c7
+rr "remote read, step, 10 series       " core "~c70[0-9]"
+rr "remote read, step, 100 series      " host h7
