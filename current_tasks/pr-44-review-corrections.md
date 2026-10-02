@@ -8,7 +8,7 @@ commit per point.
 |---|-------|---------|--------|
 | 1 | PG: label changes on existing sensors dropped | Not a regression: labels are in the UUID hash and `main` also returned early. Documented and pinned by a test | done |
 | 2 | `storage_error_is_unavailable` too broad | Confirmed, and worse: sqlx errors through `anyhow` were never classified | done |
-| 3 | At-least-once writes, retries, manual dedup | Maintainer: describe vacuum as not automatic, no scheduler | |
+| 3 | At-least-once writes, retries, manual dedup | Maintainer: describe vacuum as not automatic, no scheduler. Docs only | done |
 | 4 | DuckDB legacy `timestamp_ms` column | Maintainer: no deployments exist, nothing to do | |
 | 5 | `find_selector_sensors` without `LIMIT` | | |
 | 6 | `admin/vacuum` unbounded | Maintainer: slow is expected, keep it simple | |
@@ -49,3 +49,13 @@ commit per point.
 - Done: `sqlx_error_is_unavailable` matches `PoolTimedOut`, `PoolClosed`, `WorkerCrashed`, `Io` and the
   PostgreSQL SQLSTATEs `08*`, `53300`, `57P01`, `57P02`, `57P03`, in both the `StorageError` path and the
   `anyhow` chain. No text matching is left. `57014` (statement timeout) is a 500.
+
+### 3. At-least-once writes and manual deduplication
+
+- Maintainer decision: no scheduler, describe the vacuum as not automatic.
+- Done: `DATA_LIFECYCLE.md` states in bold that nothing removes duplicates, what the reader sees until
+  then (`count`/`avg` count twice, the values list the sample twice) and when to run the vacuum. The SDK,
+  CONFIGURATION and CLICKHOUSE pages that said "the vacuum removes them afterwards" now say "when it is
+  run, nothing runs it automatically".
+- Not done on purpose: a duplicate-count metric. Counting duplicates is a scan of every value table, the
+  cost of the vacuum itself, so it does not belong on `/metrics`.

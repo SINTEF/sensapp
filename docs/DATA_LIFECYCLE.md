@@ -98,6 +98,8 @@ Each deletion is logged at `INFO` level with the series UUID, the token subject,
 
 SensApp does not reject a sample that already exists: a unique index on every insert would cost ingestion speed. A retried write (the Python SDK retries timeouts), a client that sends a sample twice or a crash in the middle of a request can therefore leave duplicates.
 
+**Nothing removes them automatically.** There is no scheduler and no vacuum after a write: a duplicate stays in the database until someone runs the vacuum operation, and until then every read sees it. `count` and `avg` count a duplicated sample twice, and the values of a series list it twice. Run the vacuum after an incident that may have produced duplicates (a retried write that had timed out, a crash during a large import), or from your own scheduler (a cron job calling the endpoint) if you want it regularly.
+
 `POST /api/v1/admin/vacuum` removes them, then cleans up the database as the backend supports. It needs the `delete` scope, on a token without a sensor allow list, and answers with the number of samples it removed:
 
 ```json
