@@ -27,5 +27,6 @@ mod query_sensors_by_labels;
 mod real_router;
 mod regex_matchers;
 mod rrdcached_integration;
+mod selector_aggregated;
 mod selector_reads;
 mod simple_promql;

@@ -216,6 +216,30 @@ impl StorageInstance for AuthorizedStorage {
         .await
     }
 
+    async fn query_selector_aggregated(
+        &self,
+        matchers: &[LabelMatcher],
+        options: &SensorDataQueryOptions,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<SelectorRead> {
+        if self.access.sensor_allow_list.is_none() {
+            return self
+                .inner
+                .query_selector_aggregated(matchers, options, max_series, max_samples)
+                .await;
+        }
+        // Only the sensors the token sees count for the limits: read through the filtered methods
+        crate::storage::selector::query_selector_aggregated_sequential(
+            self,
+            matchers,
+            options,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
     async fn health_check(&self) -> Result<()> {
         self.inner.health_check().await
     }

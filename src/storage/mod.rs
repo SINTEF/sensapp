@@ -210,6 +210,31 @@ pub trait StorageInstance: Send + Sync + Debug {
         .await
     }
 
+    /// Read the numeric series matching `matchers` aggregated by `options.step_ms` buckets with
+    /// `options.aggregation`, within `max_series` series and `max_samples` buckets in total. The
+    /// series without a sample in the window are left out. This is the read behind Prometheus
+    /// remote read requests that carry a step.
+    ///
+    /// The default implementation reads the series one after the other
+    /// (`selector::query_selector_aggregated_sequential`); backends override it to aggregate all the
+    /// series with a few queries, with the same results and limits.
+    async fn query_selector_aggregated(
+        &self,
+        matchers: &[LabelMatcher],
+        options: &SensorDataQueryOptions,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<SelectorRead> {
+        selector::query_selector_aggregated_sequential(
+            self,
+            matchers,
+            options,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
     /// Health check for the storage backend
     /// Returns Ok(()) if the storage is healthy and can accept connections
     /// Returns Err if the storage is unhealthy

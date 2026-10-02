@@ -11,7 +11,7 @@ use crate::parsing::prometheus::remote_read_parser::{
 use crate::parsing::prometheus::remote_write_models::Sample as PromSample;
 use crate::parsing::prometheus::stream_writer::StreamWriter;
 use crate::storage::query::LabelMatcher;
-use crate::storage::{Aggregation, SensorDataQueryOptions};
+use crate::storage::{Aggregation, SelectorLimitExceeded, SensorDataQueryOptions};
 
 use super::{app_error::AppError, state::HttpServerState};
 use axum::{
@@ -67,61 +67,38 @@ async fn query_sensor_data_for_prometheus(
     let start_time = SensAppDateTime::from_unix_milliseconds_i64(query.start_timestamp_ms);
     let end_time = SensAppDateTime::from_unix_milliseconds_i64(query.end_timestamp_ms);
 
-    if let Some(mut options) = query_options_from_read_hints(query) {
-        let discovered = state
-            .storage
-            .query_sensors_by_labels(&matchers, Some(start_time), Some(end_time), Some(1), true)
-            .await
-            .map_err(|e| {
-                AppError::internal_server_error(anyhow::anyhow!(
-                    "Storage query failed during discovery: {}",
-                    e
-                ))
-            })?;
-
-        if discovered.len() > crate::http::limits::MAX_SELECTOR_SERIES {
-            return Err(AppError::bad_request(anyhow::anyhow!(
-                "Remote read exceeds {} series; narrow the selector",
-                crate::http::limits::MAX_SELECTOR_SERIES
-            )));
-        }
-
+    if let Some(options) = query_options_from_read_hints(query) {
         if let Some(hints) = &query.hints {
             info!(
-                "Prometheus remote read: applying hints func='{}' step={}ms to {} discovered series",
-                hints.func,
-                hints.step_ms,
-                discovered.len()
+                "Prometheus remote read: applying hints func='{}' step={}ms",
+                hints.func, hints.step_ms
             );
         }
 
-        let mut aggregated = Vec::with_capacity(discovered.len());
-        let mut remaining = crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL;
-        for sensor_data in discovered {
-            let sensor_uuid = sensor_data.sensor.uuid.to_string();
-            options.limit = Some(remaining + 1);
-            if let Some(sensor_data) = state
-                .storage
-                .query_sensor_data_advanced(&sensor_uuid, &options)
-                .await
-                .map_err(|e| {
-                    AppError::internal_server_error(anyhow::anyhow!(
-                        "Advanced storage query failed: {}",
-                        e
-                    ))
-                })?
-                && !sensor_data.samples.is_empty()
-            {
-                if sensor_data.samples.len() > remaining {
-                    return Err(AppError::bad_request(anyhow::anyhow!(
-                        "Remote read exceeds {} samples in total",
-                        crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL
-                    )));
-                }
-                remaining -= sensor_data.samples.len();
-                aggregated.push(sensor_data);
+        let aggregated = state
+            .storage
+            .query_selector_aggregated(
+                &matchers,
+                &options,
+                crate::http::limits::MAX_SELECTOR_SERIES,
+                crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL,
+            )
+            .await?;
+        let aggregated = match aggregated {
+            Ok(aggregated) => aggregated,
+            Err(SelectorLimitExceeded::Series) => {
+                return Err(AppError::bad_request(anyhow::anyhow!(
+                    "Remote read exceeds {} series; narrow the selector",
+                    crate::http::limits::MAX_SELECTOR_SERIES
+                )));
             }
-        }
+            Err(SelectorLimitExceeded::Samples) => {
+                return Err(AppError::bad_request(anyhow::anyhow!(
+                    "Remote read exceeds {} samples in total",
+                    crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL
+                )));
+            }
+        };
 
         crate::http::limits::validate_selector_result(&aggregated)?;
         return Ok(aggregated);
