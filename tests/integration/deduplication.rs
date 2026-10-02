@@ -243,3 +243,80 @@ async fn deduplicating_a_database_without_duplicates_changes_nothing() -> Result
     assert_eq!(deduplicate(&storage).await?, Some(0));
     Ok(())
 }
+
+/// TimescaleDB compresses the chunks older than a week with a background policy, and a chunk of
+/// the test data is that old. Duplicates in compressed chunks are removed like the others, whether
+/// the policy already ran or not. This test compresses the chunks itself so that it does not wait
+/// for the policy.
+#[cfg(feature = "timescaledb")]
+#[tokio::test]
+#[serial]
+async fn duplicates_in_compressed_chunks_are_removed() -> Result<()> {
+    use crate::common::DatabaseType;
+
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if test_db.db_type != DatabaseType::TimescaleDB {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let run = Uuid::new_v4();
+
+    let mut sensors = Vec::new();
+    for sensor_type in ALL_TYPES {
+        let sensor = sensor(&format!("dedup_compressed_{sensor_type}"), sensor_type, run)?;
+        // The same three samples written twice: 3 duplicates
+        for _ in 0..2 {
+            publish(&storage, &sensor, samples(sensor_type)).await?;
+        }
+        sensors.push((sensor_type, sensor));
+    }
+    // A series without duplicates, in the same chunks
+    let clean = sensor("dedup_compressed_clean", SensorType::Float, run)?;
+    publish(&storage, &clean, samples(SensorType::Float)).await?;
+
+    let pool = sqlx::PgPool::connect(&test_db.connection_string.replacen(
+        "timescaledb://",
+        "postgres://",
+        1,
+    ))
+    .await?;
+    for table in sensapp::storage::common::VALUE_TABLES {
+        let compressed: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(compress_chunk(chunk, if_not_compressed => true)) \
+             FROM show_chunks('{table}') chunk"
+        )))
+        .fetch_one(&pool)
+        .await?;
+        assert!(compressed > 0, "{table} has a chunk to compress");
+    }
+
+    let removed = deduplicate(&storage)
+        .await?
+        .expect("TimescaleDB deduplicates");
+    assert!(removed >= 3 * ALL_TYPES.len() as u64, "removed {removed}");
+    for (sensor_type, sensor) in &sensors {
+        assert_eq!(count(&storage, sensor).await?, 3, "{sensor_type} after");
+    }
+    assert_eq!(
+        count(&storage, &clean).await?,
+        3,
+        "the clean series is untouched"
+    );
+
+    // The chunks are compressed again, as they were found
+    for table in sensapp::storage::common::VALUE_TABLES {
+        let decompressed: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM timescaledb_information.chunks \
+             WHERE hypertable_name = $1 AND NOT is_compressed",
+        )
+        .bind(table)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(decompressed, 0, "{table}: every chunk is compressed again");
+    }
+
+    // Nothing is left to remove
+    assert_eq!(deduplicate(&storage).await?, Some(0));
+    Ok(())
+}

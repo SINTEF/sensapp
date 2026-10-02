@@ -597,26 +597,61 @@ impl StorageInstance for TimeScaleDBStorage {
     }
 
     async fn deduplicate_samples(&self) -> Result<u64> {
-        // One statement per table, each atomic: a table that is done stays done if a later one
-        // fails. Within a group of equal samples the first one written is kept. `(tableoid, ctid)`
-        // identifies a row of a partitioned table; the table names and the columns come from
-        // static lists.
+        // The duplicates of a sample are in the same chunk (same series, same time). A compressed
+        // chunk cannot be read through `ctid`, which is how a row is told from its twin, so the
+        // chunks that hold duplicates are decompressed, deduplicated, and compressed again if they
+        // were compressed. Each chunk is one transaction: a chunk that is done stays done if a
+        // later one fails, and a chunk is never left in another state than it was found in.
+        // Within a group of equal samples the first one written is kept. The table names and the
+        // columns come from static lists, and the chunk names from the catalog.
         let mut removed = 0;
         for table in VALUE_TABLES {
             let columns = crate::storage::common::duplicate_key_columns(table, "time");
-            let sql = format!(
-                "DELETE FROM {table} WHERE (tableoid, ctid) IN (\
-                   SELECT tableoid, ctid FROM (\
-                     SELECT tableoid, ctid, \
-                            row_number() OVER (PARTITION BY {columns} ORDER BY ctid) AS duplicate_rank \
-                     FROM {table}) ranked \
-                   WHERE duplicate_rank > 1)"
-            );
-            removed += sqlx::query(sqlx::AssertSqlSafe(sql))
-                .execute(&self.pool)
+            // `tableoid` is the one system column that transparent decompression supports
+            let chunks: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT DISTINCT tableoid::regclass::text FROM (\
+                   SELECT tableoid, row_number() OVER (PARTITION BY {columns}) AS duplicate_rank \
+                   FROM {table}) ranked \
+                 WHERE duplicate_rank > 1"
+            )))
+            .fetch_all(&self.pool)
+            .await
+            .with_context(|| format!("Failed to look for the duplicate samples of {table}"))?;
+
+            for chunk in chunks {
+                let mut transaction = self.pool.begin().await?;
+                // NULL when the chunk was not compressed
+                let was_compressed: bool = sqlx::query_scalar(
+                    "SELECT decompress_chunk($1::text::regclass, if_compressed => true) IS NOT NULL",
+                )
+                .bind(&chunk)
+                .fetch_one(&mut *transaction)
                 .await
-                .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
-                .rows_affected();
+                .with_context(|| format!("Failed to decompress {chunk}"))?;
+
+                let sql = format!(
+                    "DELETE FROM {chunk} WHERE ctid IN (\
+                       SELECT ctid FROM (\
+                         SELECT ctid, \
+                                row_number() OVER (PARTITION BY {columns} ORDER BY ctid) AS duplicate_rank \
+                         FROM {chunk}) ranked \
+                       WHERE duplicate_rank > 1)"
+                );
+                removed += sqlx::query(sqlx::AssertSqlSafe(sql))
+                    .execute(&mut *transaction)
+                    .await
+                    .with_context(|| format!("Failed to remove the duplicate samples of {chunk}"))?
+                    .rows_affected();
+
+                if was_compressed {
+                    sqlx::query("SELECT compress_chunk($1::text::regclass)")
+                        .bind(&chunk)
+                        .execute(&mut *transaction)
+                        .await
+                        .with_context(|| format!("Failed to compress {chunk} again"))?;
+                }
+                transaction.commit().await?;
+            }
         }
         Ok(removed)
     }

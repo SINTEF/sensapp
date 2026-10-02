@@ -114,7 +114,7 @@ Only exact duplicates go: the same series, the same timestamp and the same value
 |---|---|---|---|---|
 | PostgreSQL | yes | yes | yes | Space is reused by autovacuum, run `POST /api/v1/admin/vacuum` to compact (and to remove duplicate samples) |
 | SQLite | yes | yes | yes | `VACUUM` shrinks the file |
-| TimescaleDB | yes | yes | yes | Tested on uncompressed chunks. TimescaleDB supports `DELETE` on compressed chunks too, but it has to decompress them first, which is slower |
+| TimescaleDB | yes | yes | yes | Works on compressed chunks. `DELETE` on a compressed chunk decompresses what it touches first, which is slower. The vacuum decompresses only the chunks that hold duplicates, removes them and compresses those chunks again |
 | DuckDB | yes | yes | yes | Exact duplicates are found with `rowid` |
 | ClickHouse | yes | yes | yes | Lightweight `DELETE`: rows disappear from queries at once and are physically removed by later merges. The sample count is taken just before the delete |
 | BigQuery | no | no | no | Returns `501 Not Implemented` |
