@@ -11,7 +11,6 @@ use duckdb::{Connection, OptionalExt};
 use duckdb_publishers::*;
 use duckdb_utilities::{forget_sensor_id, get_sensor_id_or_create_sensor};
 use geo::Point;
-use regex::Regex;
 use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
 use smallvec::smallvec;
@@ -28,6 +27,7 @@ use super::{
 
 mod duckdb_publishers;
 mod duckdb_utilities;
+mod selector;
 
 #[derive(Debug)]
 pub struct DuckDBStorage {
@@ -286,22 +286,11 @@ impl StorageInstance for DuckDBStorage {
                 (false, false) => statement.query(duckdb::params![fetch_limit])?,
             };
 
-            let mut label_statement = connection.prepare(
-                r#"
-                SELECT lnd.name, ldd.description
-                FROM labels l
-                JOIN labels_name_dictionary lnd ON l.name = lnd.id
-                JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                WHERE l.sensor_id = ?
-                "#,
-            )?;
-
-            let mut sensors = Vec::new();
-            let mut last_sensor_id = None;
+            let mut found = Vec::new();
             let mut has_more = false;
 
             while let Some(row) = rows.next()? {
-                if sensors.len() == effective_limit {
+                if found.len() == effective_limit {
                     has_more = true;
                     break;
                 }
@@ -331,25 +320,22 @@ impl StorageInstance for DuckDBStorage {
                 })?;
 
                 let unit = unit_name.map(|unit_name| Unit::new(unit_name, unit_description.clone()));
-
-                let mut label_rows = label_statement.query([sensor_id])?;
-                let mut labels: SensAppLabels = smallvec![];
-                while let Some(label_row) = label_rows.next()? {
-                    let label_name: String = label_row.get(0)?;
-                    let label_value: String = label_row.get(1)?;
-                    labels.push((label_name, label_value));
-                }
-
-                sensors.push(Sensor::new(
-                    sensor_uuid,
-                    sensor_name,
-                    sensor_type,
-                    unit,
-                    Some(labels),
-                ));
-
-                last_sensor_id = Some(sensor_id);
+                found.push((sensor_id, sensor_uuid, sensor_name, sensor_type, unit));
             }
+            drop(rows);
+            drop(statement);
+
+            // One query for the labels of the whole page
+            let ids: Vec<i64> = found.iter().map(|sensor| sensor.0).collect();
+            let mut labels = selector::labels_of(&connection, &ids)?;
+            let last_sensor_id = ids.last().copied();
+            let sensors: Vec<Sensor> = found
+                .into_iter()
+                .map(|(sensor_id, uuid, name, sensor_type, unit)| {
+                    let labels = labels.remove(&sensor_id).unwrap_or_else(|| smallvec![]);
+                    Sensor::new(uuid, name, sensor_type, unit, Some(labels))
+                })
+                .collect();
 
             let next_bookmark = if has_more {
                 last_sensor_id.map(|value| value.to_string())
@@ -903,95 +889,20 @@ impl StorageInstance for DuckDBStorage {
         limit: Option<usize>,
         numeric_only: bool,
     ) -> Result<Vec<crate::datamodel::SensorData>> {
-        use crate::storage::MatcherType;
-
         if matchers.is_empty() {
             return Ok(Vec::new());
         }
 
-        fn matches_value(
-            actual: Option<&str>,
-            expected: &str,
-            matcher_type: MatcherType,
-        ) -> Result<bool> {
-            Ok(match matcher_type {
-                MatcherType::Equal => actual == Some(expected),
-                MatcherType::NotEqual => actual != Some(expected),
-                MatcherType::RegexMatch => {
-                    if let Some(value) = actual {
-                        Regex::new(expected)?.is_match(value)
-                    } else {
-                        false
-                    }
-                }
-                MatcherType::RegexNotMatch => {
-                    if let Some(value) = actual {
-                        !Regex::new(expected)?.is_match(value)
-                    } else {
-                        true
-                    }
-                }
-            })
-        }
-
-        fn sensor_matches(sensor: &Sensor, matchers: &[super::LabelMatcher]) -> Result<bool> {
-            for matcher in matchers {
-                if matcher.is_name_matcher() {
-                    if !matches_value(Some(&sensor.name), &matcher.value, matcher.matcher_type)? {
-                        return Ok(false);
-                    }
-                    continue;
-                }
-
-                let actual = sensor
-                    .labels
-                    .iter()
-                    .find(|(name, _)| name == &matcher.name)
-                    .map(|(_, value)| value.as_str());
-
-                if !matches_value(actual, &matcher.value, matcher.matcher_type)? {
-                    return Ok(false);
-                }
-            }
-
-            Ok(true)
-        }
-
-        fn is_numeric_sensor_type(sensor_type: SensorType) -> bool {
-            matches!(
-                sensor_type,
-                SensorType::Integer | SensorType::Numeric | SensorType::Float
+        let matching_sensors: Vec<Sensor> =
+            crate::storage::selector::BulkSelectorBackend::find_selector_sensors(
+                self,
+                matchers,
+                numeric_only,
             )
-        }
-
-        let mut matching_sensors = Vec::new();
-        let mut bookmark = None;
-
-        loop {
-            let page = self
-                .list_series(
-                    None,
-                    Some(crate::storage::MAX_LIST_SERIES_LIMIT),
-                    bookmark.as_deref(),
-                )
-                .await?;
-
-            for sensor in page.series {
-                if numeric_only && !is_numeric_sensor_type(sensor.sensor_type) {
-                    continue;
-                }
-
-                if sensor_matches(&sensor, matchers)? {
-                    matching_sensors.push(sensor);
-                }
-            }
-
-            if page.bookmark.is_none() {
-                break;
-            }
-
-            bookmark = page.bookmark;
-        }
+            .await?
+            .into_iter()
+            .map(|(_, sensor)| sensor)
+            .collect();
 
         let mut results = Vec::new();
         for sensor in matching_sensors {
@@ -1008,6 +919,27 @@ impl StorageInstance for DuckDBStorage {
 
     /// Health check for DuckDB storage
     /// Executes a simple SELECT 1 query to verify database connectivity
+    async fn query_selector(
+        &self,
+        matchers: &[super::LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        numeric_only: bool,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<super::SelectorRead> {
+        super::selector::read_selector_in_bulk(
+            self,
+            matchers,
+            start_time,
+            end_time,
+            numeric_only,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
     async fn health_check(&self) -> Result<()> {
         let connection = self.connection.lock().await;
         connection
