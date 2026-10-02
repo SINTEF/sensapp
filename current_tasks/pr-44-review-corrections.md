@@ -9,7 +9,7 @@ commit per point.
 | 1 | PG: label changes on existing sensors dropped | Not a regression: labels are in the UUID hash and `main` also returned early. Documented and pinned by a test | done |
 | 2 | `storage_error_is_unavailable` too broad | Confirmed, and worse: sqlx errors through `anyhow` were never classified | done |
 | 3 | At-least-once writes, retries, manual dedup | Maintainer: describe vacuum as not automatic, no scheduler. Docs only | done |
-| 4 | DuckDB legacy `timestamp_ms` column | Maintainer: no deployments exist, nothing to do | |
+| 4 | DuckDB legacy `timestamp_ms` column | Maintainer: no deployments exist, no guard | done (decision) |
 | 5 | `find_selector_sensors` without `LIMIT` | | |
 | 6 | `admin/vacuum` unbounded | Maintainer: slow is expected, keep it simple | |
 | M1 | Measure `register_sensors` on single-sample publishes | Maintainer: worth measuring | |
@@ -59,3 +59,11 @@ commit per point.
   run, nothing runs it automatically".
 - Not done on purpose: a duplicate-count metric. Counting duplicates is a scan of every value table, the
   cost of the vacuum itself, so it does not belong on `/metrics`.
+
+### 4. DuckDB legacy column
+
+- Premise confirmed: the DuckDB init migration was edited in place (`timestamp_ms TIMESTAMP_MS` became
+  `timestamp_us TIMESTAMP`) and the runner is a plain `CREATE TABLE IF NOT EXISTS` batch.
+- Maintainer decision: breaking changes are fine, there is no existing deployment, so no
+  `reject_legacy_metadata_tables()` equivalent. A `.duckdb` file from before this branch fails with a
+  missing-column error: delete it.
