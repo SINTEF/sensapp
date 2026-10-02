@@ -83,7 +83,7 @@ impl StorageInstance for DuckDBStorage {
         transaction.execute(
             r#"
             DELETE FROM integer_values WHERE rowid NOT IN (
-                SELECT MIN(rowid) FROM integer_values GROUP BY sensor_id, timestamp_ms, value
+                SELECT MIN(rowid) FROM integer_values GROUP BY sensor_id, timestamp_us, value
             )
             "#,
             [],
@@ -139,9 +139,9 @@ impl StorageInstance for DuckDBStorage {
         let sensor_uuid = Uuid::from_str(sensor_uuid)
             .context("Failed to parse sensor UUID")?
             .to_string();
-        // DuckDB stores millisecond timestamps
-        let start_time_ms = start_time.to_unix_milliseconds().floor() as i64;
-        let end_time_ms = end_time.to_unix_milliseconds().floor() as i64;
+        // DuckDB stores microsecond timestamps
+        let start_time_us = start_time.to_unix(hifitime::Unit::Microsecond).floor() as i64;
+        let end_time_us = end_time.to_unix(hifitime::Unit::Microsecond).floor() as i64;
 
         spawn_blocking(move || -> Result<Option<u64>> {
             let connection = connection.blocking_lock();
@@ -173,9 +173,9 @@ impl StorageInstance for DuckDBStorage {
             };
             let deleted = connection.execute(
                 &format!(
-                    "DELETE FROM {table} WHERE sensor_id = ? AND epoch_ms(timestamp_ms) BETWEEN ? AND ?"
+                    "DELETE FROM {table} WHERE sensor_id = ? AND epoch_us(timestamp_us) BETWEEN ? AND ?"
                 ),
-                duckdb::params![sensor_id, start_time_ms, end_time_ms],
+                duckdb::params![sensor_id, start_time_us, end_time_us],
             )?;
             Ok(Some(deleted as u64))
         })
@@ -413,8 +413,10 @@ impl StorageInstance for DuckDBStorage {
     ) -> Result<Option<crate::datamodel::SensorData>> {
         let connection = Arc::clone(&self.connection);
         let sensor_uuid = sensor_uuid.to_string();
-        let start_time_ms = start_time.map(|time| time.to_unix_milliseconds().floor() as i64);
-        let end_time_ms = end_time.map(|time| time.to_unix_milliseconds().floor() as i64);
+        let start_time_us =
+            start_time.map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
+        let end_time_us =
+            end_time.map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
 
         spawn_blocking(move || -> Result<Option<SensorData>> {
             let connection = connection.blocking_lock();
@@ -477,31 +479,31 @@ impl StorageInstance for DuckDBStorage {
 
             let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
 
-            fn is_in_range(timestamp_ms: i64, start: Option<i64>, end: Option<i64>) -> bool {
-                start.is_none_or(|value| timestamp_ms >= value)
-                    && end.is_none_or(|value| timestamp_ms <= value)
+            fn is_in_range(timestamp_us: i64, start: Option<i64>, end: Option<i64>) -> bool {
+                start.is_none_or(|value| timestamp_us >= value)
+                    && end.is_none_or(|value| timestamp_us <= value)
             }
 
             let samples = match sensor.sensor_type {
                 SensorType::Integer => {
                     let mut statement = connection.prepare(
                         r#"
-                        SELECT epoch_ms(timestamp_ms), value
+                        SELECT epoch_us(timestamp_us), value
                         FROM integer_values
                         WHERE sensor_id = ?
-                        ORDER BY timestamp_ms ASC
+                        ORDER BY timestamp_us ASC
                         "#,
                     )?;
                     let mut rows = statement.query([sensor_id])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
-                        let timestamp_ms: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_ms, start_time_ms, end_time_ms) {
+                        let timestamp_us: i64 = row.get(0)?;
+                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
                             continue;
                         }
                         let value: i64 = row.get(1)?;
                         samples.push(Sample {
-                            datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                            datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value,
                         });
                         if limit.is_some_and(|max| samples.len() >= max) {
@@ -513,22 +515,22 @@ impl StorageInstance for DuckDBStorage {
                 SensorType::Numeric => {
                     let mut statement = connection.prepare(
                         r#"
-                        SELECT epoch_ms(timestamp_ms), CAST(value AS VARCHAR)
+                        SELECT epoch_us(timestamp_us), CAST(value AS VARCHAR)
                         FROM numeric_values
                         WHERE sensor_id = ?
-                        ORDER BY timestamp_ms ASC
+                        ORDER BY timestamp_us ASC
                         "#,
                     )?;
                     let mut rows = statement.query([sensor_id])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
-                        let timestamp_ms: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_ms, start_time_ms, end_time_ms) {
+                        let timestamp_us: i64 = row.get(0)?;
+                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
                             continue;
                         }
                         let value: String = row.get(1)?;
                         samples.push(Sample {
-                            datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                            datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value: Decimal::from_str(&value)
                                 .context("Failed to parse DuckDB numeric value")?,
                         });
@@ -541,22 +543,22 @@ impl StorageInstance for DuckDBStorage {
                 SensorType::Float => {
                     let mut statement = connection.prepare(
                         r#"
-                        SELECT epoch_ms(timestamp_ms), value
+                        SELECT epoch_us(timestamp_us), value
                         FROM float_values
                         WHERE sensor_id = ?
-                        ORDER BY timestamp_ms ASC
+                        ORDER BY timestamp_us ASC
                         "#,
                     )?;
                     let mut rows = statement.query([sensor_id])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
-                        let timestamp_ms: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_ms, start_time_ms, end_time_ms) {
+                        let timestamp_us: i64 = row.get(0)?;
+                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
                             continue;
                         }
                         let value: f64 = row.get(1)?;
                         samples.push(Sample {
-                            datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                            datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value,
                         });
                         if limit.is_some_and(|max| samples.len() >= max) {
@@ -568,23 +570,23 @@ impl StorageInstance for DuckDBStorage {
                 SensorType::String => {
                     let mut statement = connection.prepare(
                         r#"
-                        SELECT epoch_ms(sv.timestamp_ms), svd.value
+                        SELECT epoch_us(sv.timestamp_us), svd.value
                         FROM string_values sv
                         JOIN strings_values_dictionary svd ON sv.value = svd.id
                         WHERE sv.sensor_id = ?
-                        ORDER BY sv.timestamp_ms ASC
+                        ORDER BY sv.timestamp_us ASC
                         "#,
                     )?;
                     let mut rows = statement.query([sensor_id])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
-                        let timestamp_ms: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_ms, start_time_ms, end_time_ms) {
+                        let timestamp_us: i64 = row.get(0)?;
+                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
                             continue;
                         }
                         let value: String = row.get(1)?;
                         samples.push(Sample {
-                            datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                            datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value,
                         });
                         if limit.is_some_and(|max| samples.len() >= max) {
@@ -596,22 +598,22 @@ impl StorageInstance for DuckDBStorage {
                 SensorType::Boolean => {
                     let mut statement = connection.prepare(
                         r#"
-                        SELECT epoch_ms(timestamp_ms), value
+                        SELECT epoch_us(timestamp_us), value
                         FROM boolean_values
                         WHERE sensor_id = ?
-                        ORDER BY timestamp_ms ASC
+                        ORDER BY timestamp_us ASC
                         "#,
                     )?;
                     let mut rows = statement.query([sensor_id])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
-                        let timestamp_ms: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_ms, start_time_ms, end_time_ms) {
+                        let timestamp_us: i64 = row.get(0)?;
+                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
                             continue;
                         }
                         let value: bool = row.get(1)?;
                         samples.push(Sample {
-                            datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                            datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value,
                         });
                         if limit.is_some_and(|max| samples.len() >= max) {
@@ -623,23 +625,23 @@ impl StorageInstance for DuckDBStorage {
                 SensorType::Location => {
                     let mut statement = connection.prepare(
                         r#"
-                        SELECT epoch_ms(timestamp_ms), latitude, longitude
+                        SELECT epoch_us(timestamp_us), latitude, longitude
                         FROM location_values
                         WHERE sensor_id = ?
-                        ORDER BY timestamp_ms ASC
+                        ORDER BY timestamp_us ASC
                         "#,
                     )?;
                     let mut rows = statement.query([sensor_id])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
-                        let timestamp_ms: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_ms, start_time_ms, end_time_ms) {
+                        let timestamp_us: i64 = row.get(0)?;
+                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
                             continue;
                         }
                         let latitude: f64 = row.get(1)?;
                         let longitude: f64 = row.get(2)?;
                         samples.push(Sample {
-                            datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                            datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value: Point::new(longitude, latitude),
                         });
                         if limit.is_some_and(|max| samples.len() >= max) {
@@ -651,22 +653,22 @@ impl StorageInstance for DuckDBStorage {
                 SensorType::Json => {
                     let mut statement = connection.prepare(
                         r#"
-                        SELECT epoch_ms(timestamp_ms), CAST(value AS VARCHAR)
+                        SELECT epoch_us(timestamp_us), CAST(value AS VARCHAR)
                         FROM json_values
                         WHERE sensor_id = ?
-                        ORDER BY timestamp_ms ASC
+                        ORDER BY timestamp_us ASC
                         "#,
                     )?;
                     let mut rows = statement.query([sensor_id])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
-                        let timestamp_ms: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_ms, start_time_ms, end_time_ms) {
+                        let timestamp_us: i64 = row.get(0)?;
+                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
                             continue;
                         }
                         let value: String = row.get(1)?;
                         samples.push(Sample {
-                            datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                            datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value: serde_json::from_str::<JsonValue>(&value)
                                 .context("Failed to parse DuckDB JSON value")?,
                         });
@@ -679,22 +681,22 @@ impl StorageInstance for DuckDBStorage {
                 SensorType::Blob => {
                     let mut statement = connection.prepare(
                         r#"
-                        SELECT epoch_ms(timestamp_ms), value
+                        SELECT epoch_us(timestamp_us), value
                         FROM blob_values
                         WHERE sensor_id = ?
-                        ORDER BY timestamp_ms ASC
+                        ORDER BY timestamp_us ASC
                         "#,
                     )?;
                     let mut rows = statement.query([sensor_id])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
-                        let timestamp_ms: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_ms, start_time_ms, end_time_ms) {
+                        let timestamp_us: i64 = row.get(0)?;
+                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
                             continue;
                         }
                         let value: Vec<u8> = row.get(1)?;
                         samples.push(Sample {
-                            datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(timestamp_ms),
+                            datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value,
                         });
                         if limit.is_some_and(|max| samples.len() >= max) {
@@ -731,42 +733,42 @@ impl StorageInstance for DuckDBStorage {
                     return Ok(None);
                 };
 
-                let start_time_ms = options
+                let start_time_us = options
                     .start_time
-                    .map(|time| time.to_unix_milliseconds().floor() as i64);
-                let end_time_ms = options
+                    .map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
+                let end_time_us = options
                     .end_time
-                    .map(|time| time.to_unix_milliseconds().floor() as i64);
-                let origin_ms = start_time_ms.unwrap_or(0);
+                    .map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
+                let origin_us = start_time_us.unwrap_or(0);
 
                 let samples = match sensor.sensor_type {
                     SensorType::Integer => duckdb_query_integer_samples_aggregated(
                         &connection,
                         sensor_id,
-                        start_time_ms,
-                        end_time_ms,
+                        start_time_us,
+                        end_time_us,
                         step_ms,
-                        origin_ms,
+                        origin_us,
                         aggregation,
                         options.limit,
                     )?,
                     SensorType::Numeric => duckdb_query_numeric_samples_aggregated(
                         &connection,
                         sensor_id,
-                        start_time_ms,
-                        end_time_ms,
+                        start_time_us,
+                        end_time_us,
                         step_ms,
-                        origin_ms,
+                        origin_us,
                         aggregation,
                         options.limit,
                     )?,
                     SensorType::Float => duckdb_query_float_samples_aggregated(
                         &connection,
                         sensor_id,
-                        start_time_ms,
-                        end_time_ms,
+                        start_time_us,
+                        end_time_us,
                         step_ms,
-                        origin_ms,
+                        origin_us,
                         aggregation,
                         options.limit,
                     )?,
@@ -827,10 +829,12 @@ impl StorageInstance for DuckDBStorage {
     ) -> Result<Option<SensorData>> {
         let connection = Arc::clone(&self.connection);
         let sensor_uuid_owned = sensor_uuid.to_string();
-        let start_time_ms = start_time.map(|time| time.to_unix_milliseconds().floor() as i64);
-        let end_time_ms = end_time.map(|time| time.to_unix_milliseconds().floor() as i64);
+        let start_time_us =
+            start_time.map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
+        let end_time_us =
+            end_time.map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
 
-        let latest_timestamp_ms = spawn_blocking(move || -> Result<Option<i64>> {
+        let latest_timestamp_us = spawn_blocking(move || -> Result<Option<i64>> {
             let connection = connection.blocking_lock();
             let Some((sensor_id, sensor)) =
                 duckdb_get_sensor_metadata(&connection, &sensor_uuid_owned)?
@@ -838,27 +842,27 @@ impl StorageInstance for DuckDBStorage {
                 return Ok(None);
             };
 
-            duckdb_query_latest_timestamp_ms(
+            duckdb_query_latest_timestamp_us(
                 &connection,
                 duckdb_sensor_table_name(sensor.sensor_type),
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
+                start_time_us,
+                end_time_us,
             )
         })
         .await??;
 
-        let Some(latest_timestamp_ms) = latest_timestamp_ms else {
+        let Some(latest_timestamp_us) = latest_timestamp_us else {
             return Ok(None);
         };
 
         self.query_sensor_data(
             sensor_uuid,
-            Some(SensAppDateTime::from_unix_milliseconds_i64(
-                latest_timestamp_ms,
+            Some(SensAppDateTime::from_unix_microseconds_i64(
+                latest_timestamp_us,
             )),
-            Some(SensAppDateTime::from_unix_milliseconds_i64(
-                latest_timestamp_ms,
+            Some(SensAppDateTime::from_unix_microseconds_i64(
+                latest_timestamp_us,
             )),
             Some(1),
         )
@@ -874,8 +878,8 @@ impl StorageInstance for DuckDBStorage {
     ) -> Result<Option<SensorAvailabilitySummary>> {
         let connection = Arc::clone(&self.connection);
         let sensor_uuid_owned = sensor_uuid.to_string();
-        let start_time_ms = start_time.to_unix_milliseconds().floor() as i64;
-        let end_time_ms = end_time.to_unix_milliseconds().floor() as i64;
+        let start_time_us = start_time.to_unix(hifitime::Unit::Microsecond).floor() as i64;
+        let end_time_us = end_time.to_unix(hifitime::Unit::Microsecond).floor() as i64;
 
         spawn_blocking(move || -> Result<Option<SensorAvailabilitySummary>> {
             let connection = connection.blocking_lock();
@@ -890,8 +894,8 @@ impl StorageInstance for DuckDBStorage {
                 duckdb_sensor_table_name(sensor.sensor_type),
                 sensor_id,
                 sensor,
-                start_time_ms,
-                end_time_ms,
+                start_time_us,
+                end_time_us,
                 step_ms,
             )?;
 
@@ -1190,26 +1194,26 @@ fn duckdb_sensor_table_name(sensor_type: SensorType) -> &'static str {
     }
 }
 
-fn duckdb_query_latest_timestamp_ms(
+fn duckdb_query_latest_timestamp_us(
     connection: &Connection,
     table_name: &str,
     sensor_id: i64,
-    start_time_ms: Option<i64>,
-    end_time_ms: Option<i64>,
+    start_time_us: Option<i64>,
+    end_time_us: Option<i64>,
 ) -> Result<Option<i64>> {
     let sql = format!(
         r#"
-        SELECT epoch_ms(MAX(timestamp_ms))
+        SELECT epoch_us(MAX(timestamp_us))
         FROM {table_name}
         WHERE sensor_id = ?1
-          AND (?2 IS NULL OR timestamp_ms >= epoch_ms(?2))
-          AND (?3 IS NULL OR timestamp_ms <= epoch_ms(?3))
+          AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
+          AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
         "#
     );
 
     let mut statement = connection.prepare(&sql)?;
     let value: Option<i64> = statement.query_row(
-        duckdb::params![sensor_id, start_time_ms, end_time_ms],
+        duckdb::params![sensor_id, start_time_us, end_time_us],
         |row| row.get(0),
     )?;
 
@@ -1221,8 +1225,8 @@ fn duckdb_query_availability_summary(
     table_name: &str,
     sensor_id: i64,
     sensor: Sensor,
-    start_time_ms: i64,
-    end_time_ms: i64,
+    start_time_us: i64,
+    end_time_us: i64,
     step_ms: Option<i64>,
 ) -> Result<SensorAvailabilitySummary> {
     let (sql, params): (String, Vec<i64>) = if let Some(step_ms) = step_ms {
@@ -1231,16 +1235,16 @@ fn duckdb_query_availability_summary(
                 r#"
                 SELECT
                     COUNT(*) AS sample_count,
-                    epoch_ms(MIN(timestamp_ms)) AS first_sample_at,
-                    epoch_ms(MAX(timestamp_ms)) AS last_sample_at,
-                                        COUNT(DISTINCT time_bucket(INTERVAL '{step_ms} milliseconds', timestamp_ms, epoch_ms(?2))) AS covered_buckets
+                    epoch_us(MIN(timestamp_us)) AS first_sample_at,
+                    epoch_us(MAX(timestamp_us)) AS last_sample_at,
+                                        COUNT(DISTINCT time_bucket(INTERVAL '{step_ms} milliseconds', timestamp_us, make_timestamp(?2))) AS covered_buckets
                 FROM {table_name}
                 WHERE sensor_id = ?1
-                  AND timestamp_ms >= epoch_ms(?2)
-                                    AND timestamp_ms <= epoch_ms(?3)
+                  AND timestamp_us >= make_timestamp(?2)
+                                    AND timestamp_us <= make_timestamp(?3)
                 "#
             ),
-            vec![sensor_id, start_time_ms, end_time_ms],
+            vec![sensor_id, start_time_us, end_time_us],
         )
     } else {
         (
@@ -1248,16 +1252,16 @@ fn duckdb_query_availability_summary(
                 r#"
                 SELECT
                     COUNT(*) AS sample_count,
-                    epoch_ms(MIN(timestamp_ms)) AS first_sample_at,
-                    epoch_ms(MAX(timestamp_ms)) AS last_sample_at,
+                    epoch_us(MIN(timestamp_us)) AS first_sample_at,
+                    epoch_us(MAX(timestamp_us)) AS last_sample_at,
                     NULL AS covered_buckets
                 FROM {table_name}
                 WHERE sensor_id = ?1
-                  AND timestamp_ms >= epoch_ms(?2)
-                  AND timestamp_ms <= epoch_ms(?3)
+                  AND timestamp_us >= make_timestamp(?2)
+                  AND timestamp_us <= make_timestamp(?3)
                 "#
             ),
-            vec![sensor_id, start_time_ms, end_time_ms],
+            vec![sensor_id, start_time_us, end_time_us],
         )
     };
 
@@ -1274,8 +1278,8 @@ fn duckdb_query_availability_summary(
     Ok(SensorAvailabilitySummary {
         sensor,
         sample_count: row.0.max(0) as usize,
-        first_sample_at: row.1.map(SensAppDateTime::from_unix_milliseconds_i64),
-        last_sample_at: row.2.map(SensAppDateTime::from_unix_milliseconds_i64),
+        first_sample_at: row.1.map(SensAppDateTime::from_unix_microseconds_i64),
+        last_sample_at: row.2.map(SensAppDateTime::from_unix_microseconds_i64),
         covered_buckets: row.3.map(|value| value.max(0) as usize),
     })
 }
@@ -1285,13 +1289,13 @@ fn duckdb_bucketed_cte(table_name: &str, step_ms: i64) -> String {
         r#"
         WITH bucketed AS (
             SELECT
-                time_bucket(INTERVAL '{step_ms} milliseconds', timestamp_ms, epoch_ms(?4)) AS bucket_ts,
-                timestamp_ms,
+                time_bucket(INTERVAL '{step_ms} milliseconds', timestamp_us, make_timestamp(?4)) AS bucket_ts,
+                timestamp_us,
                 value
             FROM {table_name}
             WHERE sensor_id = ?1
-              AND (?2 IS NULL OR timestamp_ms >= epoch_ms(?2))
-              AND (?3 IS NULL OR timestamp_ms <= epoch_ms(?3))
+              AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
+              AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
         )
         "#
     )
@@ -1317,22 +1321,22 @@ fn duckdb_first_last_query(
         r#"
         WITH bucketed AS (
             SELECT
-                time_bucket(INTERVAL '{step_ms} milliseconds', timestamp_ms, epoch_ms(?4)) AS bucket_ts,
-                timestamp_ms,
+                time_bucket(INTERVAL '{step_ms} milliseconds', timestamp_us, make_timestamp(?4)) AS bucket_ts,
+                timestamp_us,
                 {value_expression} AS value
             FROM {table_name}
             WHERE sensor_id = ?1
-              AND (?2 IS NULL OR timestamp_ms >= epoch_ms(?2))
-              AND (?3 IS NULL OR timestamp_ms <= epoch_ms(?3))
+              AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
+              AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
         ),
         ranked AS (
             SELECT
                 bucket_ts,
                 value,
-                ROW_NUMBER() OVER (PARTITION BY bucket_ts ORDER BY timestamp_ms {direction}) AS row_num
+                ROW_NUMBER() OVER (PARTITION BY bucket_ts ORDER BY timestamp_us {direction}) AS row_num
             FROM bucketed
         )
-        SELECT epoch_ms(bucket_ts) AS timestamp_ms, value
+        SELECT epoch_us(bucket_ts) AS timestamp_us, value
         FROM ranked
         WHERE row_num = 1
         ORDER BY bucket_ts ASC
@@ -1345,10 +1349,10 @@ fn duckdb_first_last_query(
 fn duckdb_query_integer_samples_aggregated(
     connection: &Connection,
     sensor_id: i64,
-    start_time_ms: Option<i64>,
-    end_time_ms: Option<i64>,
+    start_time_us: Option<i64>,
+    end_time_us: Option<i64>,
     step_ms: i64,
-    origin_ms: i64,
+    origin_us: i64,
     aggregation: Aggregation,
     limit: Option<usize>,
 ) -> Result<TypedSamples> {
@@ -1357,25 +1361,25 @@ fn duckdb_query_integer_samples_aggregated(
     match aggregation {
         Aggregation::Avg => {
             let sql = format!(
-                "{} SELECT epoch_ms(bucket_ts) AS timestamp_ms, AVG(value) AS value {}",
+                "{} SELECT epoch_us(bucket_ts) AS timestamp_us, AVG(value) AS value {}",
                 duckdb_bucketed_cte("integer_values", step_ms),
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
-                origin_ms,
+                start_time_us,
+                end_time_us,
+                origin_us,
                 limit
             ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
-                let timestamp_ms: i64 = row.get(0)?;
+                let timestamp_us: i64 = row.get(0)?;
                 let value: f64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
-                        timestamp_ms,
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
+                        timestamp_us,
                     ),
                     value,
                 });
@@ -1384,25 +1388,25 @@ fn duckdb_query_integer_samples_aggregated(
         }
         Aggregation::Count => {
             let sql = format!(
-                "{} SELECT epoch_ms(bucket_ts) AS timestamp_ms, COUNT(*) AS value {}",
+                "{} SELECT epoch_us(bucket_ts) AS timestamp_us, COUNT(*) AS value {}",
                 duckdb_bucketed_cte("integer_values", step_ms),
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
-                origin_ms,
+                start_time_us,
+                end_time_us,
+                origin_us,
                 limit
             ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
-                let timestamp_ms: i64 = row.get(0)?;
+                let timestamp_us: i64 = row.get(0)?;
                 let value: i64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
-                        timestamp_ms,
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
+                        timestamp_us,
                     ),
                     value,
                 });
@@ -1414,18 +1418,18 @@ fn duckdb_query_integer_samples_aggregated(
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
-                origin_ms,
+                start_time_us,
+                end_time_us,
+                origin_us,
                 limit
             ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
-                let timestamp_ms: i64 = row.get(0)?;
+                let timestamp_us: i64 = row.get(0)?;
                 let value: i64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
-                        timestamp_ms,
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
+                        timestamp_us,
                     ),
                     value,
                 });
@@ -1440,7 +1444,7 @@ fn duckdb_query_integer_samples_aggregated(
                 _ => unreachable!("handled separately"),
             };
             let sql = format!(
-                "{} SELECT epoch_ms(bucket_ts) AS timestamp_ms, {} AS value {}",
+                "{} SELECT epoch_us(bucket_ts) AS timestamp_us, {} AS value {}",
                 duckdb_bucketed_cte("integer_values", step_ms),
                 expression,
                 duckdb_group_by_clause()
@@ -1448,18 +1452,18 @@ fn duckdb_query_integer_samples_aggregated(
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
-                origin_ms,
+                start_time_us,
+                end_time_us,
+                origin_us,
                 limit
             ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
-                let timestamp_ms: i64 = row.get(0)?;
+                let timestamp_us: i64 = row.get(0)?;
                 let value: i64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
-                        timestamp_ms,
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
+                        timestamp_us,
                     ),
                     value,
                 });
@@ -1473,10 +1477,10 @@ fn duckdb_query_integer_samples_aggregated(
 fn duckdb_query_float_samples_aggregated(
     connection: &Connection,
     sensor_id: i64,
-    start_time_ms: Option<i64>,
-    end_time_ms: Option<i64>,
+    start_time_us: Option<i64>,
+    end_time_us: Option<i64>,
     step_ms: i64,
-    origin_ms: i64,
+    origin_us: i64,
     aggregation: Aggregation,
     limit: Option<usize>,
 ) -> Result<TypedSamples> {
@@ -1485,25 +1489,25 @@ fn duckdb_query_float_samples_aggregated(
     match aggregation {
         Aggregation::Count => {
             let sql = format!(
-                "{} SELECT epoch_ms(bucket_ts) AS timestamp_ms, COUNT(*) AS value {}",
+                "{} SELECT epoch_us(bucket_ts) AS timestamp_us, COUNT(*) AS value {}",
                 duckdb_bucketed_cte("float_values", step_ms),
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
-                origin_ms,
+                start_time_us,
+                end_time_us,
+                origin_us,
                 limit
             ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
-                let timestamp_ms: i64 = row.get(0)?;
+                let timestamp_us: i64 = row.get(0)?;
                 let value: i64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
-                        timestamp_ms,
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
+                        timestamp_us,
                     ),
                     value,
                 });
@@ -1515,18 +1519,18 @@ fn duckdb_query_float_samples_aggregated(
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
-                origin_ms,
+                start_time_us,
+                end_time_us,
+                origin_us,
                 limit
             ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
-                let timestamp_ms: i64 = row.get(0)?;
+                let timestamp_us: i64 = row.get(0)?;
                 let value: f64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
-                        timestamp_ms,
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
+                        timestamp_us,
                     ),
                     value,
                 });
@@ -1542,7 +1546,7 @@ fn duckdb_query_float_samples_aggregated(
                 _ => unreachable!("handled separately"),
             };
             let sql = format!(
-                "{} SELECT epoch_ms(bucket_ts) AS timestamp_ms, {} AS value {}",
+                "{} SELECT epoch_us(bucket_ts) AS timestamp_us, {} AS value {}",
                 duckdb_bucketed_cte("float_values", step_ms),
                 expression,
                 duckdb_group_by_clause()
@@ -1550,18 +1554,18 @@ fn duckdb_query_float_samples_aggregated(
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
-                origin_ms,
+                start_time_us,
+                end_time_us,
+                origin_us,
                 limit
             ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
-                let timestamp_ms: i64 = row.get(0)?;
+                let timestamp_us: i64 = row.get(0)?;
                 let value: f64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
-                        timestamp_ms,
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
+                        timestamp_us,
                     ),
                     value,
                 });
@@ -1575,10 +1579,10 @@ fn duckdb_query_float_samples_aggregated(
 fn duckdb_query_numeric_samples_aggregated(
     connection: &Connection,
     sensor_id: i64,
-    start_time_ms: Option<i64>,
-    end_time_ms: Option<i64>,
+    start_time_us: Option<i64>,
+    end_time_us: Option<i64>,
     step_ms: i64,
-    origin_ms: i64,
+    origin_us: i64,
     aggregation: Aggregation,
     limit: Option<usize>,
 ) -> Result<TypedSamples> {
@@ -1587,25 +1591,25 @@ fn duckdb_query_numeric_samples_aggregated(
     match aggregation {
         Aggregation::Count => {
             let sql = format!(
-                "{} SELECT epoch_ms(bucket_ts) AS timestamp_ms, COUNT(*) AS value {}",
+                "{} SELECT epoch_us(bucket_ts) AS timestamp_us, COUNT(*) AS value {}",
                 duckdb_bucketed_cte("numeric_values", step_ms),
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
-                origin_ms,
+                start_time_us,
+                end_time_us,
+                origin_us,
                 limit
             ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
-                let timestamp_ms: i64 = row.get(0)?;
+                let timestamp_us: i64 = row.get(0)?;
                 let value: i64 = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
-                        timestamp_ms,
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
+                        timestamp_us,
                     ),
                     value,
                 });
@@ -1622,19 +1626,19 @@ fn duckdb_query_numeric_samples_aggregated(
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
+                start_time_us,
+                end_time_us,
                 step_ms,
-                origin_ms,
+                origin_us,
                 limit
             ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
-                let timestamp_ms: i64 = row.get(0)?;
+                let timestamp_us: i64 = row.get(0)?;
                 let value: String = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
-                        timestamp_ms,
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
+                        timestamp_us,
                     ),
                     value: Decimal::from_str(&value)
                         .context("Failed to parse DuckDB aggregated numeric value")?,
@@ -1651,7 +1655,7 @@ fn duckdb_query_numeric_samples_aggregated(
                 _ => unreachable!("handled separately"),
             };
             let sql = format!(
-                "{} SELECT epoch_ms(bucket_ts) AS timestamp_ms, {} AS value {}",
+                "{} SELECT epoch_us(bucket_ts) AS timestamp_us, {} AS value {}",
                 duckdb_bucketed_cte("numeric_values", step_ms),
                 expression,
                 duckdb_group_by_clause()
@@ -1659,19 +1663,19 @@ fn duckdb_query_numeric_samples_aggregated(
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
                 sensor_id,
-                start_time_ms,
-                end_time_ms,
+                start_time_us,
+                end_time_us,
                 step_ms,
-                origin_ms,
+                origin_us,
                 limit
             ])?;
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
-                let timestamp_ms: i64 = row.get(0)?;
+                let timestamp_us: i64 = row.get(0)?;
                 let value: String = row.get(1)?;
                 samples.push(Sample {
-                    datetime: crate::datamodel::SensAppDateTime::from_unix_milliseconds_i64(
-                        timestamp_ms,
+                    datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
+                        timestamp_us,
                     ),
                     value: Decimal::from_str(&value)
                         .context("Failed to parse DuckDB aggregated numeric value")?,

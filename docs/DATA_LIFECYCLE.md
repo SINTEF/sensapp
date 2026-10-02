@@ -26,7 +26,7 @@ curl -X DELETE \
   parameter cannot wipe a whole series. `start` equal to `end` deletes the samples at one exact timestamp.
 - The series itself, and its labels, are kept.
 - `deleted_samples: 0` means the window matched nothing. Check the timestamps and their precision:
-  SensApp stores microseconds, DuckDB stores milliseconds.
+  SensApp stores microseconds.
 - `404` when the series does not exist, `400` for an invalid UUID, missing bounds, or `start > end`.
 
 ### Delete a whole series
