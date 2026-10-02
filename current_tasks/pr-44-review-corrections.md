@@ -18,7 +18,7 @@ commit per point.
 | M4 | ClickHouse `deduplicate_samples()` count under load | Confirmed for ClickHouse only; docs were wrong both ways | done |
 | M5 | `StdDev` / `Variance` removed | False premise: they never existed. Nothing breaks | done (no change) |
 | M6 | `MAX_SELECTOR_SERIES = 256` blocks aggregated selectors | Maintainer: major if true | |
-| M7 | SQLite aggregated path: per-series `LIMIT/OFFSET` | | |
+| M7 | SQLite aggregated path: per-series `LIMIT/OFFSET` | Premise wrong (global `LIMIT`, no `OFFSET`); test module note added | done |
 | M8 | `batch_query_samples` global `LIMIT` comment | | |
 | L1 | Dedicated counter for shed requests | Maintainer: true | |
 | L2 | ClickHouse selector: bind an array instead of interpolating ids | Maintainer: true | |
@@ -145,3 +145,12 @@ commit per point.
 - Done: the doc says which is which. The algorithm is unchanged: an exact count needs a duplicate scan of
   every table on top of the merge. The full-merge cost of `OPTIMIZE .. FINAL` is already documented in
   `CLICKHOUSE.md` and in the code.
+
+### M7. SQLite aggregated limits
+
+- The review says SQLite uses a per-series `LIMIT/OFFSET` where PostgreSQL and ClickHouse use a global
+  budget. `read_aggregated_bulk` in `src/storage/sqlite/selector.rs` is one statement over all the sensors
+  with a single `LIMIT ?5`, and there is no `OFFSET` anywhere in `src/storage/sqlite`. The `LIMIT ?6` of
+  `storage_query_helpers.rs` is the single-series read. The sequential read shares one budget too.
+- The caveat of the review about the tests is right: they compare a backend with the portable read on itself.
+  Done: both module docs say it, and state the shared contract (global limits).

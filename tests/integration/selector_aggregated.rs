@@ -2,6 +2,11 @@
 //! whatever a backend does to make it cheaper: same buckets, same values and value types, same
 //! series left out, same limits at their exact boundaries. These tests run on the backend
 //! selected by `TEST_DATABASE_URL`.
+//!
+//! Each backend is compared with the portable read **on itself**. That proves a fast path does
+//! not change the answer of its own backend; it is not a proof that the backends agree with each
+//! other. What they share is the contract of the shared reader: the limits are global to the
+//! selector (a series cap, and one budget of buckets for all the series together), never per series.
 
 use crate::common::TestDb;
 use anyhow::Result;
