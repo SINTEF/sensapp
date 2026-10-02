@@ -490,10 +490,9 @@ impl StorageInstance for DuckDBStorage {
 
             let sensor = Sensor::new(sensor_uuid, sensor_name, sensor_type, unit, Some(labels));
 
-            fn is_in_range(timestamp_us: i64, start: Option<i64>, end: Option<i64>) -> bool {
-                start.is_none_or(|value| timestamp_us >= value)
-                    && end.is_none_or(|value| timestamp_us <= value)
-            }
+            // The window and the limit are applied by the query: a narrow window of a long series
+            // does not read the whole series
+            let limit_value = limit.map_or(i64::MAX, |limit| i64::try_from(limit).unwrap_or(i64::MAX));
 
             let samples = match sensor.sensor_type {
                 SensorType::Integer => {
@@ -501,25 +500,22 @@ impl StorageInstance for DuckDBStorage {
                         r#"
                         SELECT epoch_us(timestamp_us), value
                         FROM integer_values
-                        WHERE sensor_id = ?
+                        WHERE sensor_id = ?1
+                        AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
+                        AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
                         ORDER BY timestamp_us ASC
+                        LIMIT ?4
                         "#,
                     )?;
-                    let mut rows = statement.query([sensor_id])?;
+                    let mut rows = statement.query(duckdb::params![sensor_id, start_time_us, end_time_us, limit_value])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
                         let timestamp_us: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
-                            continue;
-                        }
                         let value: i64 = row.get(1)?;
                         samples.push(Sample {
                             datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value,
                         });
-                        if limit.is_some_and(|max| samples.len() >= max) {
-                            break;
-                        }
                     }
                     TypedSamples::Integer(samples)
                 }
@@ -528,26 +524,23 @@ impl StorageInstance for DuckDBStorage {
                         r#"
                         SELECT epoch_us(timestamp_us), CAST(value AS VARCHAR)
                         FROM numeric_values
-                        WHERE sensor_id = ?
+                        WHERE sensor_id = ?1
+                        AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
+                        AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
                         ORDER BY timestamp_us ASC
+                        LIMIT ?4
                         "#,
                     )?;
-                    let mut rows = statement.query([sensor_id])?;
+                    let mut rows = statement.query(duckdb::params![sensor_id, start_time_us, end_time_us, limit_value])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
                         let timestamp_us: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
-                            continue;
-                        }
                         let value: String = row.get(1)?;
                         samples.push(Sample {
                             datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value: Decimal::from_str(&value)
                                 .context("Failed to parse DuckDB numeric value")?,
                         });
-                        if limit.is_some_and(|max| samples.len() >= max) {
-                            break;
-                        }
                     }
                     TypedSamples::Numeric(samples)
                 }
@@ -556,25 +549,22 @@ impl StorageInstance for DuckDBStorage {
                         r#"
                         SELECT epoch_us(timestamp_us), value
                         FROM float_values
-                        WHERE sensor_id = ?
+                        WHERE sensor_id = ?1
+                        AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
+                        AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
                         ORDER BY timestamp_us ASC
+                        LIMIT ?4
                         "#,
                     )?;
-                    let mut rows = statement.query([sensor_id])?;
+                    let mut rows = statement.query(duckdb::params![sensor_id, start_time_us, end_time_us, limit_value])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
                         let timestamp_us: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
-                            continue;
-                        }
                         let value: f64 = row.get(1)?;
                         samples.push(Sample {
                             datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value,
                         });
-                        if limit.is_some_and(|max| samples.len() >= max) {
-                            break;
-                        }
                     }
                     TypedSamples::Float(samples)
                 }
@@ -584,25 +574,27 @@ impl StorageInstance for DuckDBStorage {
                         SELECT epoch_us(sv.timestamp_us), svd.value
                         FROM string_values sv
                         JOIN strings_values_dictionary svd ON sv.value = svd.id
-                        WHERE sv.sensor_id = ?
+                        WHERE sv.sensor_id = ?1
+                        AND (?2 IS NULL OR sv.timestamp_us >= make_timestamp(?2))
+                        AND (?3 IS NULL OR sv.timestamp_us <= make_timestamp(?3))
                         ORDER BY sv.timestamp_us ASC
+                        LIMIT ?4
                         "#,
                     )?;
-                    let mut rows = statement.query([sensor_id])?;
+                    let mut rows = statement.query(duckdb::params![
+                        sensor_id,
+                        start_time_us,
+                        end_time_us,
+                        limit_value
+                    ])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
                         let timestamp_us: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
-                            continue;
-                        }
                         let value: String = row.get(1)?;
                         samples.push(Sample {
                             datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value,
                         });
-                        if limit.is_some_and(|max| samples.len() >= max) {
-                            break;
-                        }
                     }
                     TypedSamples::String(samples)
                 }
@@ -611,25 +603,22 @@ impl StorageInstance for DuckDBStorage {
                         r#"
                         SELECT epoch_us(timestamp_us), value
                         FROM boolean_values
-                        WHERE sensor_id = ?
+                        WHERE sensor_id = ?1
+                        AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
+                        AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
                         ORDER BY timestamp_us ASC
+                        LIMIT ?4
                         "#,
                     )?;
-                    let mut rows = statement.query([sensor_id])?;
+                    let mut rows = statement.query(duckdb::params![sensor_id, start_time_us, end_time_us, limit_value])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
                         let timestamp_us: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
-                            continue;
-                        }
                         let value: bool = row.get(1)?;
                         samples.push(Sample {
                             datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value,
                         });
-                        if limit.is_some_and(|max| samples.len() >= max) {
-                            break;
-                        }
                     }
                     TypedSamples::Boolean(samples)
                 }
@@ -638,26 +627,23 @@ impl StorageInstance for DuckDBStorage {
                         r#"
                         SELECT epoch_us(timestamp_us), latitude, longitude
                         FROM location_values
-                        WHERE sensor_id = ?
+                        WHERE sensor_id = ?1
+                        AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
+                        AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
                         ORDER BY timestamp_us ASC
+                        LIMIT ?4
                         "#,
                     )?;
-                    let mut rows = statement.query([sensor_id])?;
+                    let mut rows = statement.query(duckdb::params![sensor_id, start_time_us, end_time_us, limit_value])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
                         let timestamp_us: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
-                            continue;
-                        }
                         let latitude: f64 = row.get(1)?;
                         let longitude: f64 = row.get(2)?;
                         samples.push(Sample {
                             datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value: Point::new(longitude, latitude),
                         });
-                        if limit.is_some_and(|max| samples.len() >= max) {
-                            break;
-                        }
                     }
                     TypedSamples::Location(samples)
                 }
@@ -666,26 +652,23 @@ impl StorageInstance for DuckDBStorage {
                         r#"
                         SELECT epoch_us(timestamp_us), CAST(value AS VARCHAR)
                         FROM json_values
-                        WHERE sensor_id = ?
+                        WHERE sensor_id = ?1
+                        AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
+                        AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
                         ORDER BY timestamp_us ASC
+                        LIMIT ?4
                         "#,
                     )?;
-                    let mut rows = statement.query([sensor_id])?;
+                    let mut rows = statement.query(duckdb::params![sensor_id, start_time_us, end_time_us, limit_value])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
                         let timestamp_us: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
-                            continue;
-                        }
                         let value: String = row.get(1)?;
                         samples.push(Sample {
                             datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value: serde_json::from_str::<JsonValue>(&value)
                                 .context("Failed to parse DuckDB JSON value")?,
                         });
-                        if limit.is_some_and(|max| samples.len() >= max) {
-                            break;
-                        }
                     }
                     TypedSamples::Json(samples)
                 }
@@ -694,25 +677,22 @@ impl StorageInstance for DuckDBStorage {
                         r#"
                         SELECT epoch_us(timestamp_us), value
                         FROM blob_values
-                        WHERE sensor_id = ?
+                        WHERE sensor_id = ?1
+                        AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
+                        AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
                         ORDER BY timestamp_us ASC
+                        LIMIT ?4
                         "#,
                     )?;
-                    let mut rows = statement.query([sensor_id])?;
+                    let mut rows = statement.query(duckdb::params![sensor_id, start_time_us, end_time_us, limit_value])?;
                     let mut samples = smallvec![];
                     while let Some(row) = rows.next()? {
                         let timestamp_us: i64 = row.get(0)?;
-                        if !is_in_range(timestamp_us, start_time_us, end_time_us) {
-                            continue;
-                        }
                         let value: Vec<u8> = row.get(1)?;
                         samples.push(Sample {
                             datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(timestamp_us),
                             value,
                         });
-                        if limit.is_some_and(|max| samples.len() >= max) {
-                            break;
-                        }
                     }
                     TypedSamples::Blob(samples)
                 }

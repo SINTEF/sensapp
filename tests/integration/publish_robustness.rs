@@ -434,3 +434,113 @@ async fn string_samples_round_trip_whatever_their_content() -> Result<()> {
     }
     Ok(())
 }
+
+/// A window is inclusive at both ends, a limit keeps the oldest samples of the window, whatever
+/// the type and wherever a backend applies them.
+#[tokio::test]
+#[serial]
+async fn windows_and_limits_select_the_right_samples() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let run = Uuid::new_v4();
+    let second = |index: i64| 1_704_067_200_000_000 + index * 1_000_000;
+    let at = |index: i64| SensAppDateTime::from_unix_microseconds_i64(second(index));
+
+    // 100 samples, one per second, of three types
+    let make = |name: &str, sensor_type: SensorType, samples: TypedSamples| -> Result<_> {
+        let sensor = Arc::new(Sensor::new_without_uuid(
+            format!("{name}_{run}"),
+            sensor_type,
+            None,
+            None,
+        )?);
+        Ok((sensor, samples))
+    };
+    let floats: Vec<Sample<f64>> = (0..100)
+        .map(|i| Sample {
+            datetime: at(i),
+            value: i as f64,
+        })
+        .collect();
+    let integers: Vec<Sample<i64>> = (0..100)
+        .map(|i| Sample {
+            datetime: at(i),
+            value: i,
+        })
+        .collect();
+    let strings: Vec<Sample<String>> = (0..100)
+        .map(|i| Sample {
+            datetime: at(i),
+            value: format!("s{i}"),
+        })
+        .collect();
+    let series = [
+        make(
+            "window_float",
+            SensorType::Float,
+            TypedSamples::Float(floats.into()),
+        )?,
+        make(
+            "window_integer",
+            SensorType::Integer,
+            TypedSamples::Integer(integers.into()),
+        )?,
+        make(
+            "window_string",
+            SensorType::String,
+            TypedSamples::String(strings.into()),
+        )?,
+    ];
+    let mut batch_builder = BatchBuilder::new()?;
+    let mut sensors = Vec::new();
+    for (sensor, samples) in series {
+        sensors.push(sensor.clone());
+        batch_builder.add(sensor, samples).await?;
+    }
+    batch_builder.send_what_is_left(storage.clone()).await?;
+
+    // (start, end, limit) -> the indexes that must come back, oldest first
+    type WindowCase = (
+        Option<i64>,
+        Option<i64>,
+        Option<usize>,
+        std::ops::RangeInclusive<i64>,
+    );
+    let cases: [WindowCase; 7] = [
+        (None, None, None, 0..=99),
+        (Some(10), Some(19), None, 10..=19), // both bounds are inclusive
+        (Some(10), None, None, 10..=99),
+        (None, Some(4), None, 0..=4),
+        (Some(10), Some(50), Some(5), 10..=14), // the limit keeps the oldest of the window
+        (None, None, Some(3), 0..=2),
+        (Some(98), Some(500), Some(10), 98..=99),
+    ];
+    for sensor in &sensors {
+        for (start, end, limit, expected) in &cases {
+            let data = storage
+                .query_sensor_data(&sensor.uuid.to_string(), start.map(at), end.map(at), *limit)
+                .await?
+                .expect("the series exists");
+            let mut indexes: Vec<i64> = match &data.samples {
+                TypedSamples::Float(s) => s.iter().map(|x| x.value as i64).collect(),
+                TypedSamples::Integer(s) => s.iter().map(|x| x.value).collect(),
+                TypedSamples::String(s) => {
+                    s.iter().map(|x| x.value[1..].parse().unwrap()).collect()
+                }
+                other => panic!("unexpected {other:?}"),
+            };
+            // The order the backend returns is the order of the time
+            let in_order = indexes.windows(2).all(|pair| pair[0] < pair[1]);
+            indexes.sort();
+            assert_eq!(
+                indexes,
+                expected.clone().collect::<Vec<_>>(),
+                "{} window {start:?}..{end:?} limit {limit:?}",
+                sensor.name
+            );
+            assert!(in_order, "{} must be ordered by time", sensor.name);
+        }
+    }
+    Ok(())
+}
