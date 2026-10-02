@@ -36,7 +36,12 @@ impl BulkSelectorBackend for PostgresStorage {
         limit: usize,
     ) -> Result<HashMap<i64, TypedSamples>> {
         // One statement per type, written out: the table is chosen here, never by the caller.
-        // The ordered scan of (sensor_id, timestamp_us) stops after `limit` rows in total.
+        // The value tables have BRIN indexes on (sensor_id, timestamp_us), which cannot return
+        // rows in order. PostgreSQL scans the pages that may hold the sensors (a bitmap heap
+        // scan), sorts, and the LIMIT only trims the sorted output: it bounds what is returned and
+        // the memory of the sort (top-N), not what is read. With 2 000 interleaved series,
+        // `LIMIT 10` on three sensors still read 6 448 blocks. The cost follows the pages of the
+        // candidate sensors in the window; the time window is what narrows it.
         macro_rules! read {
             ($table:literal, $value:ty, $variant:ident) => {{
                 #[derive(sqlx::FromRow)]

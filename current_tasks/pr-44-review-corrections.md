@@ -13,7 +13,7 @@ commit per point.
 | 5 | `find_selector_sensors` without `LIMIT` | Confirmed on all five lookups | done |
 | 6 | `admin/vacuum` unbounded | Maintainer: slow is expected, keep it simple. Longer timeout of its own | done |
 | M1 | Measure `register_sensors` on single-sample publishes | Maintainer: worth measuring | |
-| M2 | Misleading BRIN comment in `postgresql/selector.rs` | | |
+| M2 | Misleading BRIN comment in `postgresql/selector.rs` | Confirmed with `EXPLAIN` | done |
 | M3 | ClickHouse reads without `FINAL`: one sentence in `CLICKHOUSE.md` | | |
 | M4 | ClickHouse `deduplicate_samples()` count under load | | |
 | M5 | `StdDev` / `Variance` removed | False premise: they never existed. Nothing breaks | done (no change) |
@@ -117,3 +117,12 @@ commit per point.
 - The `unreachable!("handled separately")` arms are for `Avg` and `Count` in the ClickHouse aggregation
   helpers, unrelated.
 - If `stddev` should exist, it is a new feature: see `ideas/promql-rate-and-arithmetic.md`.
+
+### M2. The BRIN comment
+
+- Confirmed on a plain PostgreSQL table with the same DDL (2 000 interleaved series, 2 million rows):
+  `ORDER BY sensor_id, timestamp_us LIMIT 10` on three sensors is a parallel bitmap heap scan of 6 448 lossy
+  blocks (14 587 buffers, 665 667 rows rechecked) followed by a top-N sort. The `LIMIT` trims the output only.
+- Only the PostgreSQL file made the claim. Done: the comment says what the plan does. No query change: the
+  statements are correct, and series written in long runs make BRIN much tighter than this interleaved
+  worst case.
