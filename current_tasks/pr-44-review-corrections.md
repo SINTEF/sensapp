@@ -15,7 +15,7 @@ commit per point.
 | M1 | Measure `register_sensors` on single-sample publishes | Maintainer: worth measuring | |
 | M2 | Misleading BRIN comment in `postgresql/selector.rs` | Confirmed with `EXPLAIN` | done |
 | M3 | ClickHouse reads without `FINAL`: one sentence in `CLICKHOUSE.md` | Premise wrong (value tables are `MergeTree`), sentence still useful | done |
-| M4 | ClickHouse `deduplicate_samples()` count under load | | |
+| M4 | ClickHouse `deduplicate_samples()` count under load | Confirmed for ClickHouse only; docs were wrong both ways | done |
 | M5 | `StdDev` / `Variance` removed | False premise: they never existed. Nothing breaks | done (no change) |
 | M6 | `MAX_SELECTOR_SERIES = 256` blocks aggregated selectors | Maintainer: major if true | |
 | M7 | SQLite aggregated path: per-series `LIMIT/OFFSET` | | |
@@ -134,3 +134,14 @@ commit per point.
   no background deduplication and no "worse than PostgreSQL" window: duplicates stay until the vacuum, as on
   every backend.
 - Done: one bullet in `CLICKHOUSE.md` states that reads do not hide duplicates, and why.
+
+### M4. The duplicate count on ClickHouse
+
+- Confirmed for ClickHouse: `count()` before and after `OPTIMIZE .. FINAL DEDUPLICATE BY`, so a concurrent
+  insert lowers the result (floored at 0 by `saturating_sub`) and a concurrent delete raises it.
+- `DATA_LIFECYCLE.md` said "exact unless writes happen at the same time" for every backend. On PostgreSQL,
+  TimescaleDB, SQLite and DuckDB the number is the rows affected by the `DELETE`, which is exact whatever else
+  is written.
+- Done: the doc says which is which. The algorithm is unchanged: an exact count needs a duplicate scan of
+  every table on top of the merge. The full-merge cost of `OPTIMIZE .. FINAL` is already documented in
+  `CLICKHOUSE.md` and in the code.

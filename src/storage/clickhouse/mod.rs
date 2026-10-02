@@ -494,7 +494,9 @@ impl StorageInstance for ClickHouseStorage {
     }
 
     async fn deduplicate_samples(&self) -> Result<u64> {
-        // ClickHouse does not say how many rows a merge dropped: count before and after. This
+        // ClickHouse does not say how many rows a merge dropped: count before and after. The
+        // result is an estimate when other statements write or delete meanwhile (inserts lower
+        // it, deletes raise it, `saturating_sub` floors it at 0). This
         // rewrites the data of every table (OPTIMIZE .. FINAL), so it costs what a full merge
         // costs, and a request that waits for it can time out while ClickHouse carries on.
         let mut removed = 0;
