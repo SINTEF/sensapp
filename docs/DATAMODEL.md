@@ -122,6 +122,14 @@ erDiagram
 
 ```
 
+## Label Selectors
+
+Selectors (`/api/v1/query`, `/series?selector=`, Prometheus remote read) use the Prometheus operators `=`, `!=`, `=~` and `!~` on labels, and on the metric name with `__name__`.
+
+A regular expression matches the **whole** value, as in Prometheus: `region=~"eu"` selects the series whose region is exactly `eu`, not `eu-west` nor `europe`. Use `eu.*` for a prefix, `.*west.*` for a part, and `eu|us` for alternatives (the alternation is anchored as a whole). SensApp anchors the pattern as `^(?:pattern)$` when it reads the selector, so every backend behaves the same. Case-insensitive matching works with a leading flag, `region=~"(?i)EU.*"`.
+
+Before 2 October 2026 the patterns were not anchored on any backend and matched anywhere in the value, so `region=~"eu"` also selected `eu-west`: selectors written for that behaviour need a `.*` on each side.
+
 ## Virtual Composite Sensors
 
 SensApp can compose sensors together. For example if you have a sensor that measures the temperature and another one that measures the humidity, you can create a virtual sensor that will consist of both the temperature and humidity sensors.

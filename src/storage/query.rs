@@ -82,23 +82,58 @@ pub struct LabelMatcher {
     /// Use `__name__` to filter by metric/sensor name.
     pub name: String,
 
-    /// Value to match (literal string or regex pattern depending on `matcher_type`).
+    /// Value to match: a literal string, or for the regex types the pattern **fully anchored**
+    /// (`^(?:pattern)$`), as `LabelMatcher::new` makes it. A regex matcher matches the whole
+    /// value, never a part of it, like in Prometheus: `region=~"eu"` matches `eu`, not `eu-west`.
     pub value: String,
 
     /// Type of matching operation to perform.
     pub matcher_type: MatcherType,
 }
 
+/// The pattern of a regex matcher, anchored on both ends as Prometheus does: `^(?:pattern)$`.
+///
+/// Leading flag groups such as `(?i)` stay in front of the anchors: PostgreSQL only accepts
+/// embedded flags at the very start of a regular expression, and the others accept them there
+/// too.
+pub fn anchor_regex(pattern: &str) -> String {
+    let mut flags_end = 0;
+    let mut rest = pattern;
+    while let Some(after) = rest.strip_prefix("(?") {
+        match after.find(')') {
+            Some(close)
+                if close > 0
+                    && after[..close]
+                        .chars()
+                        .all(|c| c.is_ascii_alphabetic() || c == '-') =>
+            {
+                flags_end += 2 + close + 1;
+                rest = &after[close + 1..];
+            }
+            _ => break,
+        }
+    }
+    let (flags, body) = pattern.split_at(flags_end);
+    format!("{flags}^(?:{body})$")
+}
+
 impl LabelMatcher {
-    /// Creates a new label matcher.
+    /// Creates a new label matcher. The pattern of a regex matcher is anchored, see
+    /// [`anchor_regex`].
     pub fn new(
         name: impl Into<String>,
         value: impl Into<String>,
         matcher_type: MatcherType,
     ) -> Self {
+        let value = value.into();
+        let value = if matcher_type.is_regex() {
+            anchor_regex(&value)
+        } else {
+            value
+        };
         Self {
             name: name.into(),
-            value: value.into(),
+            value,
             matcher_type,
         }
     }
@@ -168,11 +203,7 @@ impl From<&crate::parsing::prometheus::remote_read_models::LabelMatcher> for Lab
             Err(_) => MatcherType::Equal,
         };
 
-        Self {
-            name: m.name.clone(),
-            value: m.value.clone(),
-            matcher_type,
-        }
+        Self::new(m.name.clone(), m.value.clone(), matcher_type)
     }
 }
 
@@ -226,14 +257,52 @@ mod tests {
     fn test_label_matcher_display() {
         assert_eq!(LabelMatcher::eq("foo", "bar").to_string(), "foo=\"bar\"");
         assert_eq!(LabelMatcher::neq("foo", "bar").to_string(), "foo!=\"bar\"");
+        // The pattern shown is the one that is evaluated: anchored
         assert_eq!(
             LabelMatcher::regex("foo", "bar.*").to_string(),
-            "foo=~\"bar.*\""
+            "foo=~\"^(?:bar.*)$\""
         );
         assert_eq!(
             LabelMatcher::not_regex("foo", "bar.*").to_string(),
-            "foo!~\"bar.*\""
+            "foo!~\"^(?:bar.*)$\""
         );
+    }
+
+    #[test]
+    fn regex_matchers_are_anchored_and_literals_are_not() {
+        assert_eq!(LabelMatcher::regex("a", "b").value, "^(?:b)$");
+        assert_eq!(LabelMatcher::not_regex("a", "b|c").value, "^(?:b|c)$");
+        assert_eq!(LabelMatcher::eq("a", "b").value, "b");
+        assert_eq!(LabelMatcher::neq("a", "b.*").value, "b.*");
+        assert_eq!(LabelMatcher::regex("a", "").value, "^(?:)$");
+    }
+
+    #[test]
+    fn leading_regex_flags_stay_in_front_of_the_anchors() {
+        assert_eq!(anchor_regex("(?i)abc"), "(?i)^(?:abc)$");
+        assert_eq!(anchor_regex("(?i)(?s)a.c"), "(?i)(?s)^(?:a.c)$");
+        assert_eq!(anchor_regex("(?-i)abc"), "(?-i)^(?:abc)$");
+        // Groups that are not flags are part of the pattern
+        assert_eq!(anchor_regex("(?:ab)c"), "^(?:(?:ab)c)$");
+        assert_eq!(anchor_regex("(ab)c"), "^(?:(ab)c)$");
+        assert_eq!(anchor_regex("(?P<name>ab)"), "^(?:(?P<name>ab))$");
+        // A flag group in the middle is left alone
+        assert_eq!(anchor_regex("a(?i)b"), "^(?:a(?i)b)$");
+        assert_eq!(anchor_regex("(?i"), "^(?:(?i)$");
+    }
+
+    #[test]
+    fn remote_read_matchers_are_anchored_too() {
+        use crate::parsing::prometheus::remote_read_models::{
+            LabelMatcher as Remote, label_matcher::Type,
+        };
+        let matcher = LabelMatcher::from(&Remote {
+            r#type: Type::Re as i32,
+            name: "region".to_string(),
+            value: "eu-.*".to_string(),
+        });
+        assert_eq!(matcher.matcher_type, MatcherType::RegexMatch);
+        assert_eq!(matcher.value, "^(?:eu-.*)$");
     }
 
     #[test]
