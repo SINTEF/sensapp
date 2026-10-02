@@ -29,14 +29,14 @@ Done: Prometheus scrape endpoint with HTTP request count, duration and in-flight
 ### 3. Documentation
 
 - [x] Configuration reference: `docs/CONFIGURATION.md`
-- [ ] Document backend trade-offs clearly, and which backends are maintained versus experimental. The release plan already positions ClickHouse as the reference, the other backends as tested compatibility paths, and BigQuery and RRDCached as experimental
-- [ ] Document which features are production-oriented and which remain research-oriented
+- [x] Document backend trade-offs clearly, and which backends are maintained versus experimental. The release plan already positions ClickHouse as the reference, the other backends as tested compatibility paths, and BigQuery and RRDCached as experimental
+- [x] Document which features are production-oriented and which remain research-oriented
 
 ### 4. Codebase cleanup
 
-- [ ] Remove the module duplication between the library crate (`src/lib.rs`) and the binary crate (`src/main.rs` declares the same modules again)
+- [x] Remove the module duplication between the library crate (`src/lib.rs`) and the binary crate (`src/main.rs` declares the same modules again)
 - [ ] Keep module boundaries simple and avoid reintroducing architectural complexity
-- [ ] Drop the unused `migrate-*` and `setup-dev` cargo-make tasks (`ideas/ci-followups.md`)
+- [x] Drop the unused `migrate-*` and `setup-dev` cargo-make tasks (`ideas/ci-followups.md`)
 
 ## Deferred Work
 

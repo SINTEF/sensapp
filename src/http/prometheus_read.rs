@@ -214,6 +214,8 @@ fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
         (status = 200, description = "Read Response", content_type = "application/x-protobuf"),
         (status = 400, description = "Bad Request", body = AppError),
         (status = 500, description = "Internal Server Error", body = AppError),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 #[debug_handler]

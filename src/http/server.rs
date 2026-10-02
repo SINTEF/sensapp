@@ -334,6 +334,12 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
         (status = 200, description = "Data ingested successfully", body = String),
         (status = 400, description = "Bad Request - invalid data format", body = AppError),
         (status = 500, description = "Internal Server Error", body = AppError),
+        (
+            status = 503,
+            description = "The storage backend is unavailable, or SensApp is busy writing and sheds the write. A `Retry-After` header (seconds, randomised) means the request was not processed at all and can be sent again after that delay",
+            headers(("Retry-After" = u32, description = "Seconds to wait before sending the write again"))
+        ),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 async fn publish_sensors_data(
@@ -484,7 +490,13 @@ pub async fn publish_senml_data(
     tag = "Admin",
     responses(
         (status = 200, description = "Database vacuum completed successfully", body = String),
-        (status = 500, description = "Failed to vacuum database", body = String)
+        (status = 500, description = "Failed to vacuum database", body = String),
+        (
+            status = 503,
+            description = "The storage backend is unavailable, or SensApp is busy writing and sheds the write. A `Retry-After` header (seconds, randomised) means the request was not processed at all and can be sent again after that delay",
+            headers(("Retry-After" = u32, description = "Seconds to wait before sending the write again"))
+        ),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 async fn vacuum_database(
@@ -525,6 +537,50 @@ mod tests {
             "/api/v1/query",
             "/health/live",
         ] {
+            assert!(paths.contains_key(path), "missing OpenAPI path: {path}");
+        }
+    }
+
+    #[test]
+    fn data_endpoints_document_overload_and_timeout_answers() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI document");
+        let paths = document["paths"].as_object().expect("OpenAPI paths");
+        let not_data = [
+            "/",
+            "/prometheus/metrics",
+            "/health/live",
+            "/health/ready",
+            "/docs",
+        ];
+        let writes = [
+            ("/publish", "post"),
+            ("/api/v2/write", "post"),
+            ("/api/v1/prometheus_remote_write", "post"),
+            ("/api/v1/admin/vacuum", "post"),
+        ];
+
+        for (path, operations) in paths {
+            if not_data.contains(&path.as_str()) {
+                continue;
+            }
+            for (method, operation) in operations.as_object().expect("operations") {
+                let responses = &operation["responses"];
+                for status in ["503", "504"] {
+                    assert!(
+                        responses.get(status).is_some(),
+                        "{method} {path} does not document {status}"
+                    );
+                }
+                let is_write = writes.contains(&(path.as_str(), method.as_str()));
+                let has_retry_after = responses["503"]["headers"].get("Retry-After").is_some();
+                assert_eq!(
+                    has_retry_after, is_write,
+                    "{method} {path}: Retry-After is documented on writes only"
+                );
+            }
+        }
+        // The endpoints that are written to are among the documented ones
+        for (path, _) in writes {
             assert!(paths.contains_key(path), "missing OpenAPI path: {path}");
         }
     }

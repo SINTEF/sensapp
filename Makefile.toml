@@ -428,6 +428,14 @@ description = "Release preparation pipeline"
 dependencies = ["ci-extended", "security-audit"]
 
 # Utility tasks
+[tasks.clean-test-databases]
+description = "Drop the sensapp-test-* databases that the TimescaleDB test runs leave in the local container"
+script = '''
+for database in $(docker exec sensapp-timescaledb psql -U postgres -tAc "SELECT datname FROM pg_database WHERE datname LIKE 'sensapp-test-%'"); do
+  docker exec sensapp-timescaledb psql -U postgres -tAc "DROP DATABASE \"$database\"" > /dev/null
+done
+'''
+
 [tasks.clean]
 description = "Clean all build artifacts and test databases"
 script = '''

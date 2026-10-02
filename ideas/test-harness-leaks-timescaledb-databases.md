@@ -1,11 +1,17 @@
 # The TimescaleDB test harness leaks a database per run
 
-`DatabaseType::TimescaleDB` (`tests/integration/common/mod.rs`) uses `isolate_test_database_url` to
-give every test run its own `sensapp-test-NNNN` database, created by `ensure_test_database_exists`, and
-nothing ever drops them (`TestDb::cleanup` is empty). About thirty runs left about thirty databases
-on the local TimescaleDB container (1 Oct 2026); in CI the service container is thrown away, so it
-only shows locally.
+Decision (2 Oct 2026): **left as it is**, not worth teardown code.
 
-Fix idea: drop the isolated database when the `TestDb` goes away (a `Drop` that spawns a short
-runtime, or an explicit async `cleanup()` that the tests call), or drop the stale ones at the start
-of a run.
+`DatabaseType::TimescaleDB` (`tests/integration/common/mod.rs`) gives every test run its own
+`sensapp-test-NNNN` database and nothing drops it. In CI the service container is thrown away, so only a
+local TimescaleDB container accumulates them (about thirty after a day of runs). Isolation per run is what
+makes concurrent runs safe, and a reliable teardown from a synchronous `Drop` is awkward.
+
+To clean a local container, run `cargo make clean-test-databases` (it drops every `sensapp-test-*` database
+of the `sensapp-timescaledb` container of `compose.test-services.yml`), or:
+
+```bash
+docker exec sensapp-timescaledb psql -U postgres -tAc \
+  "SELECT 'DROP DATABASE \"' || datname || '\"' FROM pg_database WHERE datname LIKE 'sensapp-test-%'" \
+  | docker exec -i sensapp-timescaledb psql -U postgres
+```

@@ -381,7 +381,9 @@ fn last_sample_json(samples: &crate::datamodel::TypedSamples) -> Option<(String,
         ("type" = Option<String>, Query, description = "Filter metrics by sensor type (float, integer, string, boolean, location, json, blob, numeric)")
     ),
     responses(
-        (status = 200, description = "Metrics catalog in DCAT format", body = Value)
+        (status = 200, description = "Metrics catalog in DCAT format", body = Value),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn list_metrics(
@@ -624,7 +626,9 @@ async fn list_filtered_series(
         ("selector" = Option<String>, Query, description = "PromQL-style label selector (e.g., '{env=\"prod\",region=~\"us.*\"}')")
     ),
     responses(
-        (status = 200, description = "Time series catalog in DCAT format", body = Value)
+        (status = 200, description = "Time series catalog in DCAT format", body = Value),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn list_series(
@@ -839,7 +843,9 @@ pub async fn list_series(
     responses(
         (status = 200, description = "Series data in requested format", body = Value),
         (status = 404, description = "Series not found"),
-        (status = 400, description = "Invalid format")
+        (status = 400, description = "Invalid format"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn get_series_data(
@@ -1039,7 +1045,9 @@ pub async fn get_series_data(
     responses(
         (status = 200, description = "Latest sample for the requested series", body = Value),
         (status = 404, description = "Series not found or no sample matched the requested window"),
-        (status = 400, description = "Invalid query parameters")
+        (status = 400, description = "Invalid query parameters"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn get_series_last_sample(
@@ -1119,7 +1127,9 @@ pub async fn get_series_last_sample(
         (status = 400, description = "Invalid UUID"),
         (status = 403, description = "The token does not have the delete scope"),
         (status = 404, description = "Series not found"),
-        (status = 501, description = "The storage backend does not support deletion")
+        (status = 501, description = "The storage backend does not support deletion"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn delete_series(
@@ -1187,7 +1197,9 @@ pub async fn delete_series(
         (status = 400, description = "Invalid UUID, or missing or invalid time bounds"),
         (status = 403, description = "The token does not have the delete scope"),
         (status = 404, description = "Series not found"),
-        (status = 501, description = "The storage backend does not support deletion")
+        (status = 501, description = "The storage backend does not support deletion"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn delete_series_samples(
@@ -1273,7 +1285,9 @@ pub async fn delete_series_samples(
     responses(
         (status = 200, description = "Availability information for the requested series and window", body = Value),
         (status = 404, description = "Series not found"),
-        (status = 400, description = "Invalid query parameters")
+        (status = 400, description = "Invalid query parameters"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn get_series_availability(

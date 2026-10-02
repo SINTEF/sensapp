@@ -76,7 +76,7 @@ The scheme of `SENSAPP_STORAGE_CONNECTION_STRING` picks the backend. A backend o
 | `rrdcached://host:42217?preset=munin` | RRDCached | Experimental, see [RRDCACHED.md](RRDCACHED.md). |
 | `bigquery://key.json?project_id=P&dataset_id=D` | BigQuery | Experimental, not in sync with the current storage interface. |
 
-Backends create and migrate their own schema at startup.
+Backends create and migrate their own schema at startup. [BACKENDS.md](BACKENDS.md) says which ones are maintained and which are experimental, and what each is good for.
 
 ## Backpressure
 

@@ -251,7 +251,9 @@ fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
     responses(
         (status = 200, description = "Query results in requested format", body = Value),
         (status = 400, description = "Invalid or unsupported PromQL query"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal server error"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn simple_promql_query(

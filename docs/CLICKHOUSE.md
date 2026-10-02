@@ -40,7 +40,7 @@ Notes:
 
 ### TLS and private certificate authorities
 
-`clickhouses://` trusts the system certificate store, like most Unix tools. For a ClickHouse behind a private CA, point `SSL_CERT_FILE` (a PEM bundle) or `SSL_CERT_DIR` at your CA, or add it to the system store of the image. The official image ships `ca-certificates`. A certificate that no trusted CA signed is refused at startup (`invalid peer certificate: UnknownIssuer`). The server name in the URL must be in the certificate (a DNS or IP subject alternative name).
+`clickhouses://` trusts the system certificate store, like most Unix tools. For a ClickHouse behind a private CA, point `SSL_CERT_FILE` (a PEM bundle) or `SSL_CERT_DIR` at your CA, or add it to the system store of the image. The official image ships `ca-certificates`. This was verified by hand against a ClickHouse container serving HTTPS with a private CA: there is no TLS integration test in CI, on purpose. A certificate that no trusted CA signed is refused at startup (`invalid peer certificate: UnknownIssuer`). The server name in the URL must be in the certificate (a DNS or IP subject alternative name).
 
 ## Schema And Guarantees
 
