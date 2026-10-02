@@ -858,6 +858,23 @@ impl StorageInstance for SqliteStorage {
         .await
     }
 
+    async fn query_selector_aggregated(
+        &self,
+        matchers: &[crate::storage::LabelMatcher],
+        options: &crate::storage::SensorDataQueryOptions,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<crate::storage::SelectorRead> {
+        crate::storage::selector::read_aggregated_selector_in_bulk(
+            self,
+            matchers,
+            options,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
     /// Health check for SQLite storage
     /// Executes a simple SELECT 1 query to verify database connectivity
     async fn health_check(&self) -> Result<()> {
