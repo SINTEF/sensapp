@@ -117,11 +117,13 @@ impl TimeScaleDBStorage {
 
         let (table, expression): (&'static str, String) = match (sensor_type, read.aggregation) {
             (SensorType::Integer, Aggregation::Count) => {
-                ("integer_values", "COUNT(*)::bigint".into())
+                ("integer_values", "COUNT(value)::bigint".into())
             }
-            (SensorType::Float, Aggregation::Count) => ("float_values", "COUNT(*)::bigint".into()),
+            (SensorType::Float, Aggregation::Count) => {
+                ("float_values", "COUNT(value)::bigint".into())
+            }
             (SensorType::Numeric, Aggregation::Count) => {
-                ("numeric_values", "COUNT(*)::bigint".into())
+                ("numeric_values", "COUNT(value)::bigint".into())
             }
             (SensorType::Integer, Aggregation::Avg) => {
                 ("integer_values", "AVG(value)::double precision".into())

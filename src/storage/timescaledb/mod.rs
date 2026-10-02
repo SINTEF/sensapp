@@ -58,6 +58,19 @@ impl TimeScaleDBStorage {
 
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
+            // Plan every statement with its parameters. sqlx prepares statements and PostgreSQL
+            // reuses a generic plan after five executions, but TimescaleDB does not invalidate
+            // such a plan when a chunk is compressed or receives a late write: a long-lived
+            // connection then returns wrong results (16 samples out of 140 in the tests). A custom
+            // plan also excludes the chunks outside of the time window at planning time.
+            .after_connect(|connection, _metadata| {
+                Box::pin(async move {
+                    sqlx::query("SET plan_cache_mode = force_custom_plan")
+                        .execute(connection)
+                        .await?;
+                    Ok(())
+                })
+            })
             .connect_with(connect_options)
             .await
             .context("Failed to create timescaledb pool")?;
@@ -493,6 +506,11 @@ fn timescaledb_bucketed_cte(table_name: &'static str) -> String {
 
 /// The buckets of the samples of one sensor (`sensor_id = $1`) or of many (`sensor_id = ANY($1)`,
 /// with the sensor in the rows).
+/// The count of an aggregated read is `COUNT(value)` and not `COUNT(*)`. They are the same number,
+/// since the values are `NOT NULL`, but TimescaleDB 2.17 fails to plan `COUNT(*)` (and `COUNT(time)`)
+/// over a `time_bucket` grouping across many chunks with "MergeAppend child's targetlist doesn't
+/// match MergeAppend", while a count of the `value` column plans like `sum` and `avg`. The tests
+/// of `timescale_compressed`, run after the 150 chunks of `publish_robustness`, reproduce it.
 pub(super) fn timescaledb_bucketed_cte_for(table_name: &'static str, many_sensors: bool) -> String {
     let (sensor_column, sensor_filter) = if many_sensors {
         ("sensor_id,", "sensor_id = ANY($1)")
@@ -1663,7 +1681,7 @@ impl TimeScaleDBStorage {
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
+                    "{} SELECT bucket_time, COUNT(value)::bigint AS value {}",
                     timescaledb_bucketed_cte("integer_values"),
                     timescaledb_group_by_clause()
                 )))
@@ -1743,7 +1761,7 @@ impl TimeScaleDBStorage {
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
+                    "{} SELECT bucket_time, COUNT(value)::bigint AS value {}",
                     timescaledb_bucketed_cte("float_values"),
                     timescaledb_group_by_clause()
                 )))
@@ -1823,7 +1841,7 @@ impl TimeScaleDBStorage {
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
+                    "{} SELECT bucket_time, COUNT(value)::bigint AS value {}",
                     timescaledb_bucketed_cte("numeric_values"),
                     timescaledb_group_by_clause()
                 )))

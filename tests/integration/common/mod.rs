@@ -136,6 +136,14 @@ impl TestDb {
             .await
             .map_err(|e| anyhow!("Failed to run migrations for {}: {}", connection_string, e))?;
 
+        // TimescaleDB compresses the chunks older than a week with a background policy, at a time
+        // nobody controls, and a test must not depend on it. The policies are removed from the
+        // test database; the tests that care about compressed chunks compress them themselves.
+        #[cfg(feature = "timescaledb")]
+        if db_type == DatabaseType::TimescaleDB {
+            remove_compression_policies(&connection_string).await?;
+        }
+
         // Clean up any existing test data to ensure test isolation
         #[cfg(any(test, feature = "test-utils"))]
         storage.cleanup_test_data().await.map_err(|e| {
@@ -176,6 +184,22 @@ impl TestDb {
     pub fn storage(&self) -> Arc<dyn StorageInstance> {
         self.storage.clone()
     }
+}
+
+/// Remove the compression policy of every value table of a TimescaleDB test database.
+#[cfg(feature = "timescaledb")]
+async fn remove_compression_policies(connection_string: &str) -> Result<()> {
+    use sqlx::Executor;
+
+    let pool =
+        sqlx::PgPool::connect(&connection_string.replacen("timescaledb://", "postgres://", 1))
+            .await?;
+    for table in sensapp::storage::common::VALUE_TABLES {
+        let sql = format!("SELECT remove_compression_policy('{table}', if_exists => true)");
+        pool.execute(sqlx::AssertSqlSafe(sql)).await?;
+    }
+    pool.close().await;
+    Ok(())
 }
 
 /// Helper trait for easier testing
