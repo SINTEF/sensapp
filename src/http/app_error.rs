@@ -7,18 +7,28 @@ use serde_json::json;
 use tracing::error;
 use utoipa::ToSchema;
 
-fn storage_error_is_unavailable(storage_error: &StorageError) -> bool {
-    let details = storage_error.to_string().to_ascii_lowercase();
+/// PostgreSQL error codes of a database that cannot serve the request now but may later: the
+/// connection exception class (`08`), too many connections, and the shutdown family (admin
+/// shutdown, crash shutdown, cannot connect now). A statement timeout (`57014`) is not one of
+/// them: the database is up, the query is slow, and retrying it only adds load.
+fn sqlstate_is_unavailable(code: &str) -> bool {
+    code.starts_with("08") || matches!(code, "53300" | "57P01" | "57P02" | "57P03")
+}
 
-    details.contains("connection refused")
-        || details.contains("failed to connect")
-        || details.contains("pool timed out")
-        || details.contains("timed out")
-        || details.contains("connection closed")
-        || details.contains("connection reset")
-        || details.contains("broken pipe")
-        || details.contains("no such file or directory")
-        || details.contains("database is unavailable")
+/// Whether a sqlx error means that the database cannot be reached or is out of connections.
+/// Everything else (a slow or cancelled statement, a constraint, a missing file, a bad
+/// configuration) is a failure of the operation, reported as a 500 that clients do not retry.
+fn sqlx_error_is_unavailable(error: &sqlx::Error) -> bool {
+    match error {
+        sqlx::Error::PoolTimedOut
+        | sqlx::Error::PoolClosed
+        | sqlx::Error::WorkerCrashed
+        | sqlx::Error::Io(_) => true,
+        sqlx::Error::Database(error) => error
+            .code()
+            .is_some_and(|code| sqlstate_is_unavailable(&code)),
+        _ => false,
+    }
 }
 
 // Anyhow error handling with axum
@@ -81,20 +91,29 @@ impl IntoResponse for AppError {
                         "Storage configuration error".to_string(),
                     )
                 }
+                StorageError::Unavailable(_) => {
+                    error!("Storage backend unavailable: {}", storage_error);
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Database unavailable".to_string(),
+                    )
+                }
+                StorageError::Database(error) if sqlx_error_is_unavailable(error) => {
+                    error!("Storage backend unavailable: {}", storage_error);
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Database unavailable".to_string(),
+                    )
+                }
+                // The backends sort their own errors before building an `OperationFailed`
+                // (ClickHouse sends the transient ones to `Unavailable`), so what is left is a
+                // failure of the operation whatever the words in its message.
                 StorageError::Database(_) | StorageError::OperationFailed { .. } => {
-                    if storage_error_is_unavailable(&storage_error) {
-                        error!("Storage backend unavailable: {}", storage_error);
-                        (
-                            StatusCode::SERVICE_UNAVAILABLE,
-                            "Database unavailable".to_string(),
-                        )
-                    } else {
-                        error!("Storage operation failed: {}", storage_error);
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Storage operation failed".to_string(),
-                        )
-                    }
+                    error!("Storage operation failed: {}", storage_error);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Storage operation failed".to_string(),
+                    )
                 }
             },
         };
@@ -114,6 +133,21 @@ impl From<anyhow::Error> for AppError {
     fn from(err: anyhow::Error) -> Self {
         if err.is::<crate::http::authorized_storage::SensorAccessDenied>() {
             return Self::Forbidden(err.to_string());
+        }
+        // Errors of the ClickHouse client travel inside `anyhow` through `?`: classify them here
+        // so that an outage is a 503 and not an anonymous 500.
+        #[cfg(feature = "clickhouse")]
+        if let Some(error) = err.downcast_ref::<clickhouse::error::Error>() {
+            return Self::Storage(crate::storage::clickhouse::classify_clickhouse_error(error));
+        }
+        // The same for the sqlx errors that come through `?`: a pool that times out or a
+        // refused connection is a 503, not an anonymous 500.
+        if err.chain().any(|cause| {
+            cause
+                .downcast_ref::<sqlx::Error>()
+                .is_some_and(sqlx_error_is_unavailable)
+        }) {
+            return Self::Storage(StorageError::Unavailable(format!("{err:#}")));
         }
         match err.downcast::<StorageError>() {
             Ok(storage_error) => Self::Storage(storage_error),
@@ -139,16 +173,21 @@ impl AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use axum::body::to_bytes;
+
+    async fn status_of(error: anyhow::Error) -> StatusCode {
+        AppError::internal_server_error(error)
+            .into_response()
+            .status()
+    }
 
     #[tokio::test]
     async fn test_internal_server_error_preserves_storage_error_category() {
-        let response =
-            AppError::internal_server_error(anyhow::Error::new(StorageError::OperationFailed {
-                operation: "publish batch".to_string(),
-                details: "connection refused".to_string(),
-            }))
-            .into_response();
+        let response = AppError::internal_server_error(anyhow::Error::new(
+            StorageError::Unavailable("connection refused".to_string()),
+        ))
+        .into_response();
 
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 
@@ -157,5 +196,94 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
             json!({ "error": "Database unavailable" })
         );
+    }
+
+    #[tokio::test]
+    async fn test_unreachable_database_is_a_503_whatever_the_wrapping() {
+        let refused = || std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+
+        // Through `?` in a function that returns `anyhow`, with and without context
+        assert_eq!(
+            status_of(sqlx::Error::PoolTimedOut.into()).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let with_context: anyhow::Result<()> =
+            Err(anyhow::Error::new(sqlx::Error::Io(refused()))).context("while publishing");
+        assert_eq!(
+            status_of(with_context.unwrap_err()).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        // Through the storage error
+        assert_eq!(
+            status_of(StorageError::Database(sqlx::Error::PoolClosed).into()).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[tokio::test]
+    async fn test_slow_or_failing_operations_are_not_a_503() {
+        // The words of a message do not make a database unavailable
+        for details in [
+            "statement timed out",
+            "canceling statement due to statement timeout",
+            "no such file or directory",
+            "connection refused",
+        ] {
+            let error = StorageError::OperationFailed {
+                operation: "query".to_string(),
+                details: details.to_string(),
+            };
+            assert_eq!(
+                status_of(error.into()).await,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "{details}"
+            );
+        }
+        // Nor does an error of the driver that is not about the connection
+        assert_eq!(
+            status_of(StorageError::Database(sqlx::Error::RowNotFound).into()).await,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            status_of(sqlx::Error::Protocol("timed out".to_string()).into()).await,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn test_sqlstates_of_an_unavailable_database() {
+        for code in [
+            "08000", "08006", "08001", "53300", "57P01", "57P02", "57P03",
+        ] {
+            assert!(sqlstate_is_unavailable(code), "{code}");
+        }
+        // A statement timeout (query canceled), a deadlock, a constraint, and the SQLite codes
+        for code in ["57014", "40P01", "23505", "42P01", "5", "14", ""] {
+            assert!(!sqlstate_is_unavailable(code), "{code}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_unavailable_storage_is_a_503() {
+        let response = AppError::from(StorageError::Unavailable("timeout expired".to_string()))
+            .into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[cfg(feature = "clickhouse")]
+    #[tokio::test]
+    async fn test_clickhouse_client_errors_are_classified_through_anyhow() {
+        use anyhow::Context;
+
+        let timed_out: anyhow::Result<()> =
+            Err(clickhouse::error::Error::TimedOut).context("while counting samples");
+        let response = AppError::from(timed_out.unwrap_err()).into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let broken: anyhow::Error =
+            clickhouse::error::Error::BadResponse("Code: 62. DB::Exception: Syntax error".into())
+                .into();
+        let response = AppError::from(broken).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

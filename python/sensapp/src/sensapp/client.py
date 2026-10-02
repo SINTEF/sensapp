@@ -29,6 +29,7 @@ from ._models import (
     parse_metrics_catalog,
     parse_series_catalog,
 )
+from ._retry import DEFAULT_RETRY, NO_RETRY, RetryPolicy, send_with_retry
 
 _ARROW_CONTENT_TYPE = "application/vnd.apache.arrow.stream"
 
@@ -50,9 +51,16 @@ class SensAppClient:
         *,
         token: str | None = None,
         timeout: float = 10.0,
+        retry: RetryPolicy | None = DEFAULT_RETRY,
     ) -> None:
+        """Create a client.
+
+        ``retry`` controls how overload answers (``503``/``429``) are retried, see
+        `RetryPolicy`. Pass ``None`` to never retry.
+        """
         self._base_url = base_url.rstrip("/")
         self._token = token
+        self._retry = retry or NO_RETRY
         self._session = niquests.AsyncSession(timeout=timeout)
 
     @classmethod
@@ -231,15 +239,23 @@ class SensAppClient:
         params: dict[str, Any] | None = None,
     ) -> niquests.Response:
         url = f"{self._base_url}{path}"
+        # The server only accepts lowercase `true` / `false`, not Python's `True`.
         clean_params = (
-            {key: value for key, value in params.items() if value is not None}
+            {
+                key: str(value).lower() if isinstance(value, bool) else value
+                for key, value in params.items()
+                if value is not None
+            }
             if params
             else None
         )
-        response = await self._session.get(
-            url,
-            params=clean_params,
-            headers=self._auth_headers(),
+        response = await send_with_retry(
+            lambda: self._session.get(
+                url,
+                params=clean_params,
+                headers=self._auth_headers(),
+            ),
+            self._retry,
         )
         _check_response(response)
         return response  # type: ignore[return-value]
@@ -254,11 +270,14 @@ class SensAppClient:
     ) -> niquests.Response:
         url = f"{self._base_url}{path}"
         merged_headers = {**self._auth_headers(), **(headers or {})}
-        response = await self._session.post(
-            url,
-            data=data,
-            json=json_body,
-            headers=merged_headers,
+        response = await send_with_retry(
+            lambda: self._session.post(
+                url,
+                data=data,
+                json=json_body,
+                headers=merged_headers,
+            ),
+            self._retry,
         )
         _check_response(response)
         return response  # type: ignore[return-value]

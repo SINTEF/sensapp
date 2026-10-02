@@ -14,7 +14,6 @@ use std::collections::BTreeSet;
 ///
 /// The PostgreSQL-based backends use it to detect a cached sensor id whose sensor was
 /// deleted, possibly by another SensApp instance or by hand.
-#[allow(dead_code)] // Used by the PostgreSQL-based backends when enabled
 pub fn is_foreign_key_violation(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause
@@ -25,7 +24,6 @@ pub fn is_foreign_key_violation(error: &anyhow::Error) -> bool {
 }
 
 /// Names of the per-type sample tables, shared by the SQL backends for bulk deletes.
-#[allow(dead_code)] // Used by the SQL backends when enabled
 pub const VALUE_TABLES: [&str; 8] = [
     "blob_values",
     "json_values",
@@ -37,8 +35,16 @@ pub const VALUE_TABLES: [&str; 8] = [
     "integer_values",
 ];
 
+/// The columns that make two samples of a table the same sample: the series, the time and the value
+/// (the coordinates for locations). `time_column` is the name the backend gives the timestamp.
+pub fn duplicate_key_columns(table: &str, time_column: &str) -> String {
+    match table {
+        "location_values" => format!("sensor_id, {time_column}, latitude, longitude"),
+        _ => format!("sensor_id, {time_column}, value"),
+    }
+}
+
 /// Convert SensAppDateTime to Unix microseconds for database storage
-#[allow(dead_code)] // Used by SQLite backend when enabled
 pub fn datetime_to_micros(datetime: &SensAppDateTime) -> i64 {
     // Use to_unix with Microsecond unit to get a f64 in microseconds,
     // then convert to i64. This properly handles the Unix time reference.
@@ -186,7 +192,7 @@ fn aggregate_sensor_data(
     Ok(sensor_data)
 }
 
-fn simplify_sensor_data(
+pub fn simplify_sensor_data(
     mut sensor_data: SensorData,
     options: SimplifyOptions,
 ) -> Result<SensorData> {

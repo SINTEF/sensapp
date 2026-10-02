@@ -381,7 +381,9 @@ fn last_sample_json(samples: &crate::datamodel::TypedSamples) -> Option<(String,
         ("type" = Option<String>, Query, description = "Filter metrics by sensor type (float, integer, string, boolean, location, json, blob, numeric)")
     ),
     responses(
-        (status = 200, description = "Metrics catalog in DCAT format", body = Value)
+        (status = 200, description = "Metrics catalog in DCAT format", body = Value),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn list_metrics(
@@ -624,7 +626,9 @@ async fn list_filtered_series(
         ("selector" = Option<String>, Query, description = "PromQL-style label selector (e.g., '{env=\"prod\",region=~\"us.*\"}')")
     ),
     responses(
-        (status = 200, description = "Time series catalog in DCAT format", body = Value)
+        (status = 200, description = "Time series catalog in DCAT format", body = Value),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn list_series(
@@ -829,17 +833,19 @@ pub async fn list_series(
         ("format" = Option<String>, Query, description = "Output format: senml, csv, or jsonl (default: senml)"),
         ("start" = Option<String>, Query, description = "Start datetime in ISO 8601 format (e.g., '2024-01-15T10:30:00Z')"),
         ("end" = Option<String>, Query, description = "End datetime in ISO 8601 format (e.g., '2024-01-15T11:00:00Z')"),
-        ("limit" = Option<usize>, Query, description = "Maximum number of samples (at most 100,000)"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of samples (at most 100,000). Returns the oldest N samples of the window, in time order, and silently drops the rest. With simplify, it bounds the rows read before simplification"),
         ("step" = Option<String>, Query, description = "Bucket width using Prometheus duration syntax (e.g., '1h', '5m', '1d')"),
         ("aggregation" = Option<String>, Query, description = "Aggregation function: avg, min, max, sum, count, first, last"),
-        ("simplify" = Option<bool>, Query, description = "Explicitly enable simplify-based point reduction"),
+        ("simplify" = Option<bool>, Query, description = "Explicitly enable simplify-based point reduction. Applied to the rows read for the window (after bucketing when step is set); more than 100,000 rows to simplify is rejected with HTTP 400 instead of being truncated, so use step/aggregation or a narrower start/end"),
         ("simplify_tolerance" = Option<f64>, Query, description = "Dimensionless simplify tolerance on normalized time/value coordinates"),
         ("simplify_high_quality" = Option<bool>, Query, description = "Use Douglas-Peucker only when simplifying")
     ),
     responses(
         (status = 200, description = "Series data in requested format", body = Value),
         (status = 404, description = "Series not found"),
-        (status = 400, description = "Invalid format")
+        (status = 400, description = "Invalid format"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn get_series_data(
@@ -941,9 +947,16 @@ pub async fn get_series_data(
 
         query_options.validate().map_err(AppError::bad_request)?;
 
+        // Simplify runs here, after the sample cap check, so that a read cut at the cap
+        // is rejected instead of being simplified into a result that looks complete.
+        let storage_options = SensorDataQueryOptions {
+            simplify: None,
+            ..query_options
+        };
+
         let series_data = state
             .storage
-            .query_sensor_data_advanced(&series_uuid, &query_options)
+            .query_sensor_data_advanced(&series_uuid, &storage_options)
             .await?;
 
         let series_data = match series_data {
@@ -957,6 +970,13 @@ pub async fn get_series_data(
         };
 
         crate::http::limits::validate_direct_sample_count(series_data.samples.len())?;
+
+        let series_data = match query_options.simplify {
+            Some(simplify_options) => {
+                crate::storage::common::simplify_sensor_data(series_data, simplify_options)?
+            }
+            None => series_data,
+        };
 
         let sample_count = series_data.samples.len();
 
@@ -1025,7 +1045,9 @@ pub async fn get_series_data(
     responses(
         (status = 200, description = "Latest sample for the requested series", body = Value),
         (status = 404, description = "Series not found or no sample matched the requested window"),
-        (status = 400, description = "Invalid query parameters")
+        (status = 400, description = "Invalid query parameters"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn get_series_last_sample(
@@ -1105,7 +1127,9 @@ pub async fn get_series_last_sample(
         (status = 400, description = "Invalid UUID"),
         (status = 403, description = "The token does not have the delete scope"),
         (status = 404, description = "Series not found"),
-        (status = 501, description = "The storage backend does not support deletion")
+        (status = 501, description = "The storage backend does not support deletion"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn delete_series(
@@ -1173,7 +1197,9 @@ pub async fn delete_series(
         (status = 400, description = "Invalid UUID, or missing or invalid time bounds"),
         (status = 403, description = "The token does not have the delete scope"),
         (status = 404, description = "Series not found"),
-        (status = 501, description = "The storage backend does not support deletion")
+        (status = 501, description = "The storage backend does not support deletion"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn delete_series_samples(
@@ -1259,7 +1285,9 @@ pub async fn delete_series_samples(
     responses(
         (status = 200, description = "Availability information for the requested series and window", body = Value),
         (status = 404, description = "Series not found"),
-        (status = 400, description = "Invalid query parameters")
+        (status = 400, description = "Invalid query parameters"),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 pub async fn get_series_availability(

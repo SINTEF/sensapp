@@ -44,6 +44,19 @@ mod clickhouse_tests {
         TypedSamples::Float(samples)
     }
 
+    /// A client for administrative statements (creating throwaway databases, inspecting
+    /// `system` tables), built from the test connection string.
+    fn admin_client(url: &url::Url) -> clickhouse::Client {
+        clickhouse::Client::default()
+            .with_url(format!(
+                "http://{}:{}",
+                url.host_str().expect("host"),
+                url.port().unwrap_or(8123)
+            ))
+            .with_user(url.username())
+            .with_password(url.password().unwrap_or_default())
+    }
+
     async fn publish_test_sensors(
         storage: &Arc<dyn sensapp::storage::StorageInstance>,
         sensors_with_samples: Vec<(Sensor, TypedSamples)>,
@@ -343,6 +356,120 @@ mod clickhouse_tests {
         let error = storage.list_series(None, Some(2), Some("invalid")).await;
         assert!(error.is_err(), "invalid bookmark should be rejected");
 
+        Ok(())
+    }
+    /// Databases created before the metadata tables became `ReplacingMergeTree` cannot be read
+    /// with `FINAL`: startup must say so instead of failing on the first query.
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_rejects_databases_with_plain_merge_tree_metadata() -> Result<()> {
+        ensure_config();
+        let connection_string = DatabaseType::ClickHouse.default_connection_string();
+        let mut url = url::Url::parse(&connection_string)?;
+        let admin = admin_client(&url);
+
+        admin
+            .query("DROP DATABASE IF EXISTS sensapp_legacy_test")
+            .execute()
+            .await?;
+        admin
+            .query("CREATE DATABASE sensapp_legacy_test")
+            .execute()
+            .await?;
+        admin
+            .query(
+                "CREATE TABLE sensapp_legacy_test.sensors (sensor_id UInt64) \
+                 ENGINE = MergeTree() ORDER BY sensor_id",
+            )
+            .execute()
+            .await?;
+
+        url.set_path("/sensapp_legacy_test");
+        let storage =
+            sensapp::storage::storage_factory::create_storage_from_connection_string(url.as_str())
+                .await?;
+        let result = storage.create_or_migrate().await;
+
+        admin
+            .query("DROP DATABASE IF EXISTS sensapp_legacy_test")
+            .execute()
+            .await?;
+
+        let error = result.expect_err("a legacy database must be rejected");
+        assert!(
+            format!("{error:#}").contains("older SensApp"),
+            "unexpected error: {error:#}"
+        );
+        Ok(())
+    }
+
+    /// Database names such as `sensapp-prod` need quoting, and credentials are percent-decoded.
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_hyphenated_database_and_percent_encoded_password() -> Result<()> {
+        ensure_config();
+        let connection_string = DatabaseType::ClickHouse.default_connection_string();
+        let mut url = url::Url::parse(&connection_string)?;
+        let password = url.password().unwrap_or_default().to_string();
+        let admin = admin_client(&url);
+
+        // Every byte of the password written as %XX
+        let encoded: String = password
+            .bytes()
+            .map(|byte| format!("%{byte:02X}"))
+            .collect();
+        url.set_password(Some(&encoded)).expect("password");
+        url.set_path("/sensapp-hyphen-test");
+
+        admin
+            .query("DROP DATABASE IF EXISTS `sensapp-hyphen-test`")
+            .execute()
+            .await?;
+        let result = async {
+            let storage = sensapp::storage::storage_factory::create_storage_from_connection_string(
+                url.as_str(),
+            )
+            .await?;
+            storage.create_or_migrate().await?;
+            storage.health_check().await?;
+            publish_test_sensors(
+                &storage,
+                vec![(
+                    create_sensor_with_labels("hyphen", SensorType::Float, vec![]),
+                    create_float_samples(3),
+                )],
+            )
+            .await?;
+            let listed = storage.list_series(Some("hyphen"), None, None).await?;
+            assert_eq!(listed.series.len(), 1);
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        admin
+            .query("DROP DATABASE IF EXISTS `sensapp-hyphen-test`")
+            .execute()
+            .await?;
+        result
+    }
+    /// The backend reads the base tables directly: no materialized view should be kept up to
+    /// date on every write for nothing.
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_schema_has_no_unused_views() -> Result<()> {
+        ensure_config();
+        let _test_db = TestDb::new_with_type(DatabaseType::ClickHouse).await?;
+        let url = url::Url::parse(&DatabaseType::ClickHouse.default_connection_string())?;
+        let database = url.path().trim_start_matches('/');
+
+        let views: u64 = admin_client(&url)
+            .query(
+                "SELECT count() FROM system.tables \
+                 WHERE database = ? AND engine = 'MaterializedView'",
+            )
+            .bind(database)
+            .fetch_one()
+            .await?;
+        assert_eq!(views, 0);
         Ok(())
     }
 }

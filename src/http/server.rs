@@ -1,5 +1,6 @@
 use super::app_error::AppError;
 use super::auth::{require_delete_auth, require_read_auth, require_write_auth};
+use super::backpressure::{WriteLimiter, limit_concurrent_writes};
 use super::crud::{
     delete_series, delete_series_samples, get_series_availability, get_series_data,
     get_series_last_sample, list_metrics, list_series,
@@ -39,15 +40,18 @@ use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
 use futures::TryStreamExt;
+use serde::Serialize;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
+use tower_http::classify::ServerErrorsFailureClass;
+use tower_http::request_id::MakeRequestUuid;
 use tower_http::trace;
 use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::Level;
-use utoipa::OpenApi;
+use utoipa::{OpenApi, ToSchema};
 use utoipa_scalar::{Scalar, Servable as ScalarServable};
 
 #[derive(OpenApi)]
@@ -64,13 +68,46 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
 )]
 struct ApiDoc;
 
-pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
-    let config = config::get()?;
-    let max_body_bytes = config.parse_http_body_limit()?;
+/// The settings of the layers that protect the server.
+#[derive(Clone, Debug)]
+pub struct RouterSettings {
+    /// Largest accepted request body, in bytes
+    pub max_body_bytes: usize,
+    /// Time a request may take before it is answered with a 504
+    pub request_timeout: Duration,
+    /// Time the maintenance request (the vacuum) may take before it is answered with a 504
+    pub maintenance_timeout: Duration,
+    /// Write requests handled at the same time, 0 for no limit
+    pub max_concurrent_writes: usize,
+}
+
+impl RouterSettings {
+    pub fn from_config(config: &config::SensAppConfig) -> Result<Self> {
+        Ok(Self {
+            max_body_bytes: config.parse_http_body_limit()?,
+            request_timeout: Duration::from_secs(config.http_server_timeout_seconds),
+            maintenance_timeout: Duration::from_secs(config.http_maintenance_timeout_seconds),
+            max_concurrent_writes: config.http_max_concurrent_writes,
+        })
+    }
+}
+
+/// Answer with a 504 when a request takes longer than `duration`. The server was too slow (a hung
+/// database, usually), not the client: 5xx is what Prometheus, Telegraf and friends retry, 408 is
+/// not.
+fn timeout_layer(duration: Duration) -> TimeoutLayer {
+    TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, duration)
+}
+
+/// The routes and the layers of the HTTP server, without a socket: the real thing, that the
+/// tests run as well.
+pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router {
+    let max_body_bytes = settings.max_body_bytes;
     let max_body_layer =
         axum::middleware::from_fn_with_state(max_body_bytes, enforce_request_body_limit);
     let bytes_body_layer = DefaultBodyLimit::max(max_body_bytes);
-    let timeout_seconds = config.http_server_timeout_seconds;
+    let write_limiter = WriteLimiter::new(settings.max_concurrent_writes)
+        .with_shed_counter(state.metrics.writes_shed_counter());
 
     // Initialize tracing
     // Note: tracing subscriber is initialized in main.rs
@@ -79,18 +116,33 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
     let sensitive_headers: Arc<[_]> = vec![header::AUTHORIZATION, header::COOKIE].into();
 
     // Middleware creation
+    // Every request gets an `x-request-id` (kept when the client or a proxy already sent one).
+    // It is part of the request's log span and is echoed in the response headers, errors included.
     let middleware = ServiceBuilder::new()
+        .set_x_request_id(MakeRequestUuid)
+        .propagate_x_request_id()
         .sensitive_request_headers(sensitive_headers.clone())
         .layer(
             TraceLayer::new_for_http()
-                .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
-                .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
+                .make_span_with(|request: &Request| {
+                    let request_id = request
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or_default();
+                    tracing::span!(
+                        Level::INFO,
+                        "request",
+                        method = %request.method(),
+                        uri = %request.uri(),
+                        version = ?request.version(),
+                        request_id = %request_id,
+                    )
+                })
+                .on_response(trace::DefaultOnResponse::new().level(Level::INFO))
+                .on_failure(log_failed_response),
         )
         .sensitive_response_headers(sensitive_headers)
-        .layer(TimeoutLayer::with_status_code(
-            StatusCode::REQUEST_TIMEOUT,
-            Duration::from_secs(timeout_seconds),
-        ))
         .compression()
         .into_inner();
 
@@ -144,7 +196,13 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
                 .layer(bytes_body_layer)
                 .layer(max_body_layer),
         )
-        .route("/api/v1/admin/vacuum", post(vacuum_database))
+        // Layers added later run first: authenticate, then take a write slot, then (per route)
+        // buffer the body. Only authenticated writers hold slots, and nothing is buffered
+        // before a slot is free.
+        .route_layer(axum::middleware::from_fn_with_state(
+            write_limiter,
+            limit_concurrent_writes,
+        ))
         .route_layer(axum::middleware::from_fn_with_state(
             state.auth.clone(),
             require_write_auth,
@@ -163,16 +221,33 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
             require_delete_auth,
         ));
 
-    let app = public_routes
+    // The maintenance route is as protected as the delete routes, but it is expected to be slow:
+    // removing duplicates scans every value table, so it has a timeout of its own.
+    let maintenance_routes = Router::new()
+        .route("/api/v1/admin/vacuum", post(vacuum_database))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.auth.clone(),
+            require_delete_auth,
+        ))
+        .layer(timeout_layer(settings.maintenance_timeout));
+
+    public_routes
         .merge(read_routes)
         .merge(write_routes)
         .merge(delete_routes)
+        .layer(timeout_layer(settings.request_timeout))
+        .merge(maintenance_routes)
         .layer(axum::middleware::from_fn_with_state(
             state.metrics.clone(),
             track_http_metrics,
         ))
         .layer(middleware)
-        .with_state(state);
+        .with_state(state)
+}
+
+pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
+    let settings = RouterSettings::from_config(&*config::get()?)?;
+    let app = build_router(state, &settings);
 
     // Bind to the address with improved error handling
     let listener = match tokio::net::TcpListener::bind(address).await {
@@ -192,6 +267,29 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .await?;
 
     Ok(())
+}
+
+/// Log a 5xx response, at the level that fits it. The default logs every one of them as an
+/// error: under overload that is one error line per rejected write.
+fn log_failed_response(
+    failure: ServerErrorsFailureClass,
+    latency: Duration,
+    _span: &tracing::Span,
+) {
+    let latency_ms = latency.as_millis();
+    match failure {
+        // Load shedding is counted in `sensapp_http_requests_total{status="503"}`, and a
+        // storage outage is logged as an error where it is detected
+        ServerErrorsFailureClass::StatusCode(StatusCode::SERVICE_UNAVAILABLE) => {
+            tracing::debug!(latency_ms, "service unavailable");
+        }
+        ServerErrorsFailureClass::StatusCode(StatusCode::GATEWAY_TIMEOUT) => {
+            tracing::warn!(latency_ms, "request timed out");
+        }
+        failure => {
+            tracing::error!(classification = %failure, latency_ms, "response failed");
+        }
+    }
 }
 
 async fn shutdown_signal() {
@@ -253,6 +351,12 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
         (status = 200, description = "Data ingested successfully", body = String),
         (status = 400, description = "Bad Request - invalid data format", body = AppError),
         (status = 500, description = "Internal Server Error", body = AppError),
+        (
+            status = 503,
+            description = "The storage backend is unavailable, or SensApp is busy writing and sheds the write. A `Retry-After` header (seconds, randomised) means the request was not processed at all and can be sent again after that delay",
+            headers(("Retry-After" = u32, description = "Seconds to wait before sending the write again"))
+        ),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 async fn publish_sensors_data(
@@ -393,30 +497,60 @@ pub async fn publish_senml_data(
     Ok(crate::importers::IngestionStats::new(series, samples))
 }
 
+/// What a vacuum did.
+#[derive(Debug, Serialize, ToSchema)]
+struct VacuumResponse {
+    /// `ok` when the maintenance completed
+    status: &'static str,
+    /// Number of duplicate samples removed (same series, same timestamp, same value, the first
+    /// one written is kept), or `null` when the storage backend cannot remove duplicates
+    duplicates_removed: Option<u64>,
+}
+
 /// Database Vacuuming
 ///
-/// Cleans up and optimizes the database by removing unused data and reclaiming space.
-/// (only if supported by the underlying storage engine).
+/// Removes the duplicate samples (a retried write, a client that sends twice, a crash in the middle
+/// of a request leave some), then cleans up and optimizes the database and reclaims space, as far as
+/// the storage backend supports it. Only exact duplicates go: two different values at the same
+/// timestamp are both kept. Requires the `delete` scope, and a token without a sensor allow list.
 #[utoipa::path(
     post,
     path = "/api/v1/admin/vacuum",
     tag = "Admin",
     responses(
-        (status = 200, description = "Database vacuum completed successfully", body = String),
-        (status = 500, description = "Failed to vacuum database", body = String)
+        (status = 200, description = "Maintenance completed, with the number of duplicate samples removed", body = VacuumResponse),
+        (status = 403, description = "The token does not have the delete scope, or has a sensor allow list"),
+        (status = 500, description = "Failed to vacuum database", body = String),
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS (one hour by default), and the storage backend may carry on after the answer")
     )
 )]
 async fn vacuum_database(
     State(state): State<HttpServerState>,
     access: Option<axum::Extension<crate::http::auth::AccessContext>>,
-) -> Result<Json<String>, AppError> {
+) -> Result<Json<VacuumResponse>, AppError> {
     if access.is_some_and(|extension| extension.0.sensor_allow_list.is_some()) {
         return Err(AppError::Forbidden(
             "Sensor-scoped tokens cannot run database-wide maintenance".into(),
         ));
     }
+    let duplicates_removed = match state.storage.deduplicate_samples().await {
+        Ok(removed) => Some(removed),
+        Err(error)
+            if matches!(
+                error.downcast_ref::<crate::storage::StorageError>(),
+                Some(crate::storage::StorageError::Unsupported(_))
+            ) =>
+        {
+            None
+        }
+        Err(error) => return Err(error.into()),
+    };
     state.storage.vacuum().await?;
-    Ok(Json("Database vacuum completed successfully".to_string()))
+    Ok(Json(VacuumResponse {
+        status: "ok",
+        duplicates_removed,
+    }))
 }
 
 #[cfg(test)]
@@ -444,6 +578,49 @@ mod tests {
             "/api/v1/query",
             "/health/live",
         ] {
+            assert!(paths.contains_key(path), "missing OpenAPI path: {path}");
+        }
+    }
+
+    #[test]
+    fn data_endpoints_document_overload_and_timeout_answers() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI document");
+        let paths = document["paths"].as_object().expect("OpenAPI paths");
+        let not_data = [
+            "/",
+            "/prometheus/metrics",
+            "/health/live",
+            "/health/ready",
+            "/docs",
+        ];
+        let writes = [
+            ("/publish", "post"),
+            ("/api/v2/write", "post"),
+            ("/api/v1/prometheus_remote_write", "post"),
+        ];
+
+        for (path, operations) in paths {
+            if not_data.contains(&path.as_str()) {
+                continue;
+            }
+            for (method, operation) in operations.as_object().expect("operations") {
+                let responses = &operation["responses"];
+                for status in ["503", "504"] {
+                    assert!(
+                        responses.get(status).is_some(),
+                        "{method} {path} does not document {status}"
+                    );
+                }
+                let is_write = writes.contains(&(path.as_str(), method.as_str()));
+                let has_retry_after = responses["503"]["headers"].get("Retry-After").is_some();
+                assert_eq!(
+                    has_retry_after, is_write,
+                    "{method} {path}: Retry-After is documented on writes only"
+                );
+            }
+        }
+        // The endpoints that are written to are among the documented ones
+        for (path, _) in writes {
             assert!(paths.contains_key(path), "missing OpenAPI path: {path}");
         }
     }

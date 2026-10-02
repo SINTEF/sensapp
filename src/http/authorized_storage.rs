@@ -1,8 +1,8 @@
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{Metric, SensAppDateTime, SensorData};
 use crate::storage::{
-    LabelMatcher, ListSeriesResult, SensorAvailabilitySummary, SensorDataQueryOptions,
-    StorageInstance,
+    LabelMatcher, ListSeriesResult, SelectorRead, SensorAvailabilitySummary,
+    SensorDataQueryOptions, StorageInstance,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -177,6 +177,67 @@ impl StorageInstance for AuthorizedStorage {
             .await?;
         result.retain(|data| self.allows(&data.sensor.name));
         Ok(result)
+    }
+
+    async fn query_selector(
+        &self,
+        matchers: &[LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        numeric_only: bool,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<SelectorRead> {
+        if self.access.sensor_allow_list.is_none() {
+            // The token sees every sensor: the backend's own read applies as is
+            return self
+                .inner
+                .query_selector(
+                    matchers,
+                    start_time,
+                    end_time,
+                    numeric_only,
+                    max_series,
+                    max_samples,
+                )
+                .await;
+        }
+        // Otherwise the limits only count the sensors the token sees: read through the
+        // filtered methods of this wrapper
+        crate::storage::selector::query_selector_sequential(
+            self,
+            matchers,
+            start_time,
+            end_time,
+            numeric_only,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
+    async fn query_selector_aggregated(
+        &self,
+        matchers: &[LabelMatcher],
+        options: &SensorDataQueryOptions,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<SelectorRead> {
+        if self.access.sensor_allow_list.is_none() {
+            return self
+                .inner
+                .query_selector_aggregated(matchers, options, max_series, max_samples)
+                .await;
+        }
+        // Only the sensors the token sees count for the limits: read through the filtered methods
+        crate::storage::selector::query_selector_aggregated_sequential(
+            self,
+            matchers,
+            options,
+            max_series,
+            max_samples,
+        )
+        .await
     }
 
     async fn health_check(&self) -> Result<()> {

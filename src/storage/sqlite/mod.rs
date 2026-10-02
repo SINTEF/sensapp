@@ -1,5 +1,6 @@
 mod batch_queries;
 mod matchers;
+mod selector;
 pub mod sqlite_publishers;
 pub mod sqlite_utilities;
 mod storage;

@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS strings_values_dictionary (
 -- Create the 'integer_values' table
 CREATE TABLE IF NOT EXISTS integer_values (
     sensor_id BIGINT NOT NULL,
-    timestamp_ms TIMESTAMP_MS NOT NULL,
+    timestamp_us TIMESTAMP NOT NULL,
     value BIGINT NOT NULL,
     --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS integer_values (
 -- Create the 'numeric_values' table
 CREATE TABLE IF NOT EXISTS numeric_values (
     sensor_id BIGINT NOT NULL,
-    timestamp_ms TIMESTAMP_MS NOT NULL,
+    timestamp_us TIMESTAMP NOT NULL,
     value DECIMAL(38,9) NOT NULL,
     --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS numeric_values (
 -- Create the 'float_values' table
 CREATE TABLE IF NOT EXISTS float_values (
     sensor_id BIGINT NOT NULL,
-    timestamp_ms TIMESTAMP_MS NOT NULL,
+    timestamp_us TIMESTAMP NOT NULL,
     value DOUBLE NOT NULL,
     --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS float_values (
 -- Create the 'string_values' table
 CREATE TABLE IF NOT EXISTS string_values (
     sensor_id BIGINT NOT NULL,
-    timestamp_ms TIMESTAMP_MS NOT NULL,
+    timestamp_us TIMESTAMP NOT NULL,
     value BIGINT NOT NULL,
     --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS string_values (
 -- Create the 'boolean_values' table
 CREATE TABLE IF NOT EXISTS boolean_values (
     sensor_id BIGINT NOT NULL,
-    timestamp_ms TIMESTAMP_MS NOT NULL,
+    timestamp_us TIMESTAMP NOT NULL,
     value BOOLEAN NOT NULL,
     --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS boolean_values (
 -- Create the 'location_values' table
 CREATE TABLE IF NOT EXISTS location_values (
     sensor_id BIGINT NOT NULL,
-    timestamp_ms TIMESTAMP_MS NOT NULL,
+    timestamp_us TIMESTAMP NOT NULL,
     latitude DOUBLE NOT NULL,
     longitude DOUBLE NOT NULL,
     --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS location_values (
 -- Create the 'json_values' table
 CREATE TABLE IF NOT EXISTS json_values (
     sensor_id BIGINT NOT NULL,
-    timestamp_ms TIMESTAMP_MS NOT NULL,
+    timestamp_us TIMESTAMP NOT NULL,
     value JSON NOT NULL,
     --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );
@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS json_values (
 -- Create the 'blob_values' table
 CREATE TABLE IF NOT EXISTS blob_values (
     sensor_id BIGINT NOT NULL,
-    timestamp_ms TIMESTAMP_MS NOT NULL,
+    timestamp_us TIMESTAMP NOT NULL,
     value BLOB NOT NULL,
     --FOREIGN KEY (sensor_id) REFERENCES sensors(sensor_id)
 );

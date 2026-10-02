@@ -23,8 +23,18 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS", default = 30)]
     pub http_server_timeout_seconds: u64,
 
+    /// Time the maintenance request (`POST /api/v1/admin/vacuum`) may take before it is answered
+    /// with a 504. Removing duplicates scans every value table, so it is much longer than the
+    /// timeout of the other requests.
+    #[config(env = "SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS", default = 3600)]
+    pub http_maintenance_timeout_seconds: u64,
+
+    /// Maximum number of write requests handled at the same time (`/publish`, InfluxDB and
+    /// Prometheus writes, admin). Extra writes get `503` with `Retry-After`. `0` disables the limit.
+    #[config(env = "SENSAPP_HTTP_MAX_CONCURRENT_WRITES", default = 16)]
+    pub http_max_concurrent_writes: usize,
+
     #[config(env = "SENSAPP_MAX_INFERENCES_ROWS", default = 128)]
-    #[allow(dead_code)]
     pub max_inference_rows: usize,
 
     #[config(env = "SENSAPP_BATCH_SIZE", default = 8192)]
@@ -99,12 +109,10 @@ pub fn load_configuration() -> Result<(), Error> {
 use std::sync::Mutex;
 
 // Used by integration tests - must be always available for test compilation
-#[allow(dead_code)] // Used by integration tests, not visible in cargo check
 static TEST_CONFIG_INIT: Mutex<()> = Mutex::new(());
 
 /// Test-only function to ensure configuration is loaded exactly once per test run
 /// Available for both unit tests and integration tests
-#[allow(dead_code)] // Used by integration tests, not visible in cargo check
 pub fn load_configuration_for_tests() -> Result<(), Error> {
     let _guard = TEST_CONFIG_INIT.lock().unwrap();
 

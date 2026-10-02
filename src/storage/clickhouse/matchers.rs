@@ -1,27 +1,64 @@
 use super::ClickHouseStorage;
+use super::clickhouse_utilities::map_clickhouse_error;
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::unit::Unit;
 use crate::datamodel::{Sensor, SensorType};
 use crate::storage::{LabelMatcher, MatcherType, StorageError};
 use anyhow::Result;
-use smallvec::smallvec;
 use std::collections::HashMap;
 use std::str::FromStr;
 use uuid::Uuid;
 
+/// Sensor ids sent to ClickHouse in one query: keeps the statement a reasonable size.
+const LABEL_LOOKUP_CHUNK: usize = 2000;
+
 impl ClickHouseStorage {
+    /// The labels of many sensors, with one query per chunk of ids instead of one per sensor.
+    pub(super) async fn labels_of_sensors(
+        &self,
+        sensor_ids: &[u64],
+    ) -> Result<HashMap<u64, SensAppLabels>> {
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct LabelRow {
+            sensor_id: u64,
+            name: String,
+            description: String,
+        }
+
+        let mut labels: HashMap<u64, SensAppLabels> = HashMap::new();
+        for chunk in sensor_ids.chunks(LABEL_LOOKUP_CHUNK) {
+            let mut cursor = self
+                .client
+                .query(
+                    "SELECT sensor_id, name, COALESCE(description, '') AS description \
+                     FROM labels FINAL WHERE has(?, sensor_id) ORDER BY sensor_id, name",
+                )
+                .bind(chunk)
+                .fetch::<LabelRow>()
+                .map_err(|e| map_clickhouse_error(e, None, None))?;
+            while let Some(row) = cursor.next().await? {
+                labels
+                    .entry(row.sensor_id)
+                    .or_default()
+                    .push((row.name, row.description));
+            }
+        }
+        Ok(labels)
+    }
+
     pub(super) async fn find_sensors_by_matchers(
         &self,
         name_matchers: &[&LabelMatcher],
         label_matchers: &[&LabelMatcher],
         numeric_only: bool,
+        limit: Option<usize>,
     ) -> Result<Vec<(u64, Sensor)>> {
         let mut sql = String::from(
             r#"SELECT DISTINCT s.sensor_id, s.uuid, s.name, s.type,
                       COALESCE(u.name, '') AS unit_name,
                       COALESCE(u.description, '') AS unit_description
-               FROM sensors s
-               LEFT JOIN units u ON s.unit = u.id"#,
+               FROM sensors s FINAL
+               LEFT JOIN units u FINAL ON s.unit = u.id"#,
         );
         let mut where_clauses: Vec<String> = Vec::new();
         let mut params: Vec<String> = Vec::new();
@@ -99,6 +136,10 @@ impl ClickHouseStorage {
             sql.push_str(&where_clauses.join(" AND "));
         }
         sql.push_str(" ORDER BY s.sensor_id ASC");
+        if let Some(limit) = limit {
+            // A number, never text from a caller
+            sql.push_str(&format!(" LIMIT {limit}"));
+        }
 
         #[derive(clickhouse::Row, serde::Deserialize)]
         struct SensorRow {
@@ -130,32 +171,7 @@ impl ClickHouseStorage {
         }
 
         let sensor_ids: Vec<u64> = sensor_rows.iter().map(|row| row.sensor_id).collect();
-        let mut labels_map: HashMap<u64, SensAppLabels> = HashMap::new();
-
-        #[derive(clickhouse::Row, serde::Deserialize)]
-        struct LabelRow {
-            sensor_id: u64,
-            name: String,
-            description: String,
-        }
-
-        for sensor_id in sensor_ids {
-            let mut labels_cursor = self
-                .client
-                .query(
-                    "SELECT sensor_id, name, COALESCE(description, '') AS description FROM labels WHERE sensor_id = ? ORDER BY name ASC",
-                )
-                .bind(sensor_id)
-                .fetch::<LabelRow>()
-                .map_err(|e| StorageError::invalid_data_format(&e.to_string(), None, None))?;
-
-            while let Some(row) = labels_cursor.next().await? {
-                labels_map
-                    .entry(row.sensor_id)
-                    .or_insert_with(|| smallvec![])
-                    .push((row.name, row.description));
-            }
-        }
+        let mut labels_map = self.labels_of_sensors(&sensor_ids).await?;
 
         let mut results = Vec::with_capacity(sensor_rows.len());
         for row in sensor_rows {

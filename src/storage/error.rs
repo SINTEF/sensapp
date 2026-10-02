@@ -20,7 +20,6 @@ pub enum StorageError {
 
     /// Invalid data format in database
     #[error("Invalid data format: {message} for sensor {sensor_context}")]
-    #[allow(dead_code)] // Part of the shared storage error API across backend feature sets
     InvalidDataFormat {
         message: String,
         sensor_context: String,
@@ -28,27 +27,27 @@ pub enum StorageError {
 
     /// Sensor not found
     #[error("Sensor not found: {sensor_id}")]
-    #[allow(dead_code)] // Part of error API, will be used for sensor operations
     SensorNotFound { sensor_id: String },
 
     /// Metric not found
     #[error("Metric not found: {metric_name}")]
-    #[allow(dead_code)] // Part of error API, will be used for metric operations
     MetricNotFound { metric_name: String },
 
     /// Configuration error
     #[error("Configuration error: {0}")]
-    #[allow(dead_code)] // Part of error API, will be used for storage config errors
     Configuration(String),
 
     /// The storage backend does not implement this operation
     #[error("Operation not supported by this storage backend: {0}")]
-    #[allow(dead_code)] // Only used by backends that cannot implement every operation
     Unsupported(String),
+
+    /// The storage backend cannot be reached, timed out, or is overloaded: the operation may
+    /// succeed later
+    #[error("Storage backend unavailable: {0}")]
+    Unavailable(String),
 
     /// Generic storage operation error with context
     #[error("Storage operation failed: {operation} - {details}")]
-    #[allow(dead_code)] // Part of error API, will be used for generic storage operations
     OperationFailed { operation: String, details: String },
 }
 
@@ -79,7 +78,6 @@ impl StorageError {
     }
 
     /// Create an invalid data format error with sensor context
-    #[allow(dead_code)] // Part of the shared storage error API across backend feature sets
     pub fn invalid_data_format(
         message: &str,
         sensor_uuid: Option<Uuid>,

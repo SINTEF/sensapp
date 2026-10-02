@@ -1,8 +1,9 @@
+mod selector;
 pub mod timescaledb_publishers;
-pub mod timescaledb_utilities;
 
 use self::timescaledb_publishers::*;
-use self::timescaledb_utilities::{forget_sensor_id, get_sensor_id_or_create_sensor};
+use super::pg_sensor_registration::register_sensors;
+use super::pg_strings::ensure_string_ids;
 use super::{
     Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT,
     SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
@@ -57,6 +58,20 @@ impl TimeScaleDBStorage {
 
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
+            // Plan every statement with its parameters. sqlx prepares statements and PostgreSQL
+            // reuses a generic plan after five executions, but TimescaleDB 2.17 (fixed by 2.30)
+            // does not invalidate such a plan when a chunk is compressed or receives a late write:
+            // a long-lived connection then returns wrong results (16 samples out of 140 in the
+            // tests). A custom plan also excludes the chunks outside of the time window at
+            // planning time.
+            .after_connect(|connection, _metadata| {
+                Box::pin(async move {
+                    sqlx::query("SET plan_cache_mode = force_custom_plan")
+                        .execute(connection)
+                        .await?;
+                    Ok(())
+                })
+            })
             .connect_with(connect_options)
             .await
             .context("Failed to create timescaledb pool")?;
@@ -69,6 +84,7 @@ impl TimeScaleDBStorage {
         name_matchers: &[&super::LabelMatcher],
         label_matchers: &[&super::LabelMatcher],
         numeric_only: bool,
+        limit: Option<usize>,
     ) -> Result<Vec<(i64, Sensor)>> {
         let mut sql = String::from(
             r#"SELECT DISTINCT s.sensor_id, s.uuid, s.name, s.type,
@@ -189,6 +205,10 @@ impl TimeScaleDBStorage {
             sql.push_str(&where_clauses.join(" AND "));
         }
         sql.push_str(" ORDER BY s.sensor_id");
+        if let Some(limit) = limit {
+            // A number, never text from a caller
+            sql.push_str(&format!(" LIMIT {limit}"));
+        }
 
         #[derive(sqlx::FromRow)]
         struct SensorRow {
@@ -482,11 +502,28 @@ impl TimeScaleDBStorage {
 }
 
 fn timescaledb_bucketed_cte(table_name: &'static str) -> String {
+    timescaledb_bucketed_cte_for(table_name, false)
+}
+
+/// The buckets of the samples of one sensor (`sensor_id = $1`) or of many (`sensor_id = ANY($1)`,
+/// with the sensor in the rows).
+/// The count of an aggregated read is `COUNT(value)` and not `COUNT(*)`. They are the same number,
+/// since the values are `NOT NULL`, but TimescaleDB 2.17 (fixed by 2.30) fails to plan `COUNT(*)` (and `COUNT(time)`)
+/// over a `time_bucket` grouping across many chunks with "MergeAppend child's targetlist doesn't
+/// match MergeAppend", while a count of the `value` column plans like `sum` and `avg`. The tests
+/// of `timescale_compressed`, run after the 150 chunks of `publish_robustness`, reproduce it.
+pub(super) fn timescaledb_bucketed_cte_for(table_name: &'static str, many_sensors: bool) -> String {
+    let (sensor_column, sensor_filter) = if many_sensors {
+        ("sensor_id,", "sensor_id = ANY($1)")
+    } else {
+        ("", "sensor_id = $1")
+    };
     // Callers pass fixed sensor-type table names, never request text.
     format!(
         r#"
         WITH bucketed AS (
             SELECT
+                {sensor_column}
                 time_bucket(
                     $4::bigint * INTERVAL '1 millisecond',
                     time,
@@ -495,7 +532,7 @@ fn timescaledb_bucketed_cte(table_name: &'static str) -> String {
                 time,
                 value
             FROM {table_name}
-            WHERE sensor_id = $1
+            WHERE {sensor_filter}
               AND ($2::TIMESTAMPTZ IS NULL OR time >= $2)
               AND ($3::TIMESTAMPTZ IS NULL OR time <= $3)
         )
@@ -507,18 +544,27 @@ fn timescaledb_group_by_clause() -> &'static str {
     "FROM bucketed GROUP BY 1 ORDER BY 1 ASC LIMIT $6"
 }
 
-fn timescaledb_integer_expression(aggregation: Aggregation) -> &'static str {
+pub(super) fn timescaledb_group_by_clause_for(many_sensors: bool) -> &'static str {
+    if many_sensors {
+        "FROM bucketed GROUP BY sensor_id, bucket_time ORDER BY sensor_id, bucket_time ASC LIMIT $6"
+    } else {
+        timescaledb_group_by_clause()
+    }
+}
+
+pub(super) fn timescaledb_integer_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Min => "MIN(value)",
         Aggregation::Max => "MAX(value)",
-        Aggregation::Sum => "SUM(value)",
+        // The sum of bigints is a numeric in PostgreSQL: it does not decode as an i64
+        Aggregation::Sum => "SUM(value)::bigint",
         Aggregation::First => "first(value, time)",
         Aggregation::Last => "last(value, time)",
         Aggregation::Avg | Aggregation::Count => unreachable!("handled separately"),
     }
 }
 
-fn timescaledb_float_expression(aggregation: Aggregation) -> &'static str {
+pub(super) fn timescaledb_float_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Avg => "AVG(value)",
         Aggregation::Min => "MIN(value)",
@@ -530,7 +576,7 @@ fn timescaledb_float_expression(aggregation: Aggregation) -> &'static str {
     }
 }
 
-fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'static str {
+pub(super) fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Avg => "AVG(value)",
         Aggregation::Min => "MIN(value)",
@@ -555,12 +601,9 @@ impl StorageInstance for TimeScaleDBStorage {
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         match self.publish_once(&batch).await {
             Err(error) if is_foreign_key_violation(&error) => {
-                // A cached sensor id points to a sensor deleted since it was cached, for
-                // example by another SensApp instance. The transaction was rolled back, so
-                // forget the ids and try again, which recreates the sensors.
-                for single_sensor_batch in batch.sensors.as_ref() {
-                    forget_sensor_id(&single_sensor_batch.sensor.uuid).await;
-                }
+                // Another SensApp instance deleted a sensor between its registration and the
+                // insert of its samples. The transaction was rolled back: try again, which
+                // registers the sensors again.
                 self.publish_once(&batch).await
             }
             result => result,
@@ -570,6 +613,66 @@ impl StorageInstance for TimeScaleDBStorage {
     async fn vacuum(&self) -> Result<()> {
         self.vacuum().await?;
         Ok(())
+    }
+
+    async fn deduplicate_samples(&self) -> Result<u64> {
+        // The duplicates of a sample are in the same chunk (same series, same time). A compressed
+        // chunk cannot be read through `ctid`, which is how a row is told from its twin, so the
+        // chunks that hold duplicates are decompressed, deduplicated, and compressed again if they
+        // were compressed. Each chunk is one transaction: a chunk that is done stays done if a
+        // later one fails, and a chunk is never left in another state than it was found in.
+        // Within a group of equal samples the first one written is kept. The table names and the
+        // columns come from static lists, and the chunk names from the catalog.
+        let mut removed = 0;
+        for table in VALUE_TABLES {
+            let columns = crate::storage::common::duplicate_key_columns(table, "time");
+            // `tableoid` is the one system column that transparent decompression supports
+            let chunks: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT DISTINCT tableoid::regclass::text FROM (\
+                   SELECT tableoid, row_number() OVER (PARTITION BY {columns}) AS duplicate_rank \
+                   FROM {table}) ranked \
+                 WHERE duplicate_rank > 1"
+            )))
+            .fetch_all(&self.pool)
+            .await
+            .with_context(|| format!("Failed to look for the duplicate samples of {table}"))?;
+
+            for chunk in chunks {
+                let mut transaction = self.pool.begin().await?;
+                // NULL when the chunk was not compressed
+                let was_compressed: bool = sqlx::query_scalar(
+                    "SELECT decompress_chunk($1::text::regclass, if_compressed => true) IS NOT NULL",
+                )
+                .bind(&chunk)
+                .fetch_one(&mut *transaction)
+                .await
+                .with_context(|| format!("Failed to decompress {chunk}"))?;
+
+                let sql = format!(
+                    "DELETE FROM {chunk} WHERE ctid IN (\
+                       SELECT ctid FROM (\
+                         SELECT ctid, \
+                                row_number() OVER (PARTITION BY {columns} ORDER BY ctid) AS duplicate_rank \
+                         FROM {chunk}) ranked \
+                       WHERE duplicate_rank > 1)"
+                );
+                removed += sqlx::query(sqlx::AssertSqlSafe(sql))
+                    .execute(&mut *transaction)
+                    .await
+                    .with_context(|| format!("Failed to remove the duplicate samples of {chunk}"))?
+                    .rows_affected();
+
+                if was_compressed {
+                    sqlx::query("SELECT compress_chunk($1::text::regclass)")
+                        .bind(&chunk)
+                        .execute(&mut *transaction)
+                        .await
+                        .with_context(|| format!("Failed to compress {chunk} again"))?;
+                }
+                transaction.commit().await?;
+            }
+        }
+        Ok(removed)
     }
 
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
@@ -604,7 +707,6 @@ impl StorageInstance for TimeScaleDBStorage {
             .await?;
 
         transaction.commit().await?;
-        forget_sensor_id(&parsed_uuid).await;
         Ok(true)
     }
 
@@ -1283,7 +1385,7 @@ impl StorageInstance for TimeScaleDBStorage {
             .partition(|matcher| matcher.is_name_matcher());
 
         let sensors = self
-            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
+            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only, None)
             .await?;
 
         if sensors.is_empty() {
@@ -1334,6 +1436,44 @@ impl StorageInstance for TimeScaleDBStorage {
         }
 
         Ok(results)
+    }
+
+    async fn query_selector(
+        &self,
+        matchers: &[super::LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        numeric_only: bool,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<super::SelectorRead> {
+        crate::storage::selector::read_selector_in_bulk(
+            self,
+            matchers,
+            start_time,
+            end_time,
+            numeric_only,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
+    async fn query_selector_aggregated(
+        &self,
+        matchers: &[super::LabelMatcher],
+        options: &super::SensorDataQueryOptions,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<super::SelectorRead> {
+        crate::storage::selector::read_aggregated_selector_in_bulk(
+            self,
+            matchers,
+            options,
+            max_series,
+            max_samples,
+        )
+        .await
     }
 
     /// Health check for TimescaleDB storage
@@ -1401,30 +1541,6 @@ impl StorageInstance for TimeScaleDBStorage {
             .await
             .context("Failed to commit test data cleanup transaction")?;
 
-        // Step 5: Clear all cached function caches
-        // The cached macro generates cache variables named after the function in uppercase
-        use cached::Cached;
-        timescaledb_utilities::GET_LABEL_NAME_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        timescaledb_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        timescaledb_utilities::GET_UNIT_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        timescaledb_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
-            .write()
-            .await
-            .cache_clear();
-        timescaledb_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-
         Ok(())
     }
 }
@@ -1432,36 +1548,60 @@ impl StorageInstance for TimeScaleDBStorage {
 impl TimeScaleDBStorage {
     async fn publish_once(&self, batch: &Batch) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
+        let sensors: Vec<&crate::datamodel::Sensor> = batch
+            .sensors
+            .iter()
+            .map(|single_sensor_batch| single_sensor_batch.sensor.as_ref())
+            .collect();
+        let sensor_ids = register_sensors(&mut transaction, &sensors).await?;
+
+        let mut guards = Vec::with_capacity(batch.sensors.len());
         for single_sensor_batch in batch.sensors.as_ref() {
-            self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
+            guards.push((
+                sensor_ids[&single_sensor_batch.sensor.uuid],
+                single_sensor_batch.samples.read().await,
+            ));
+        }
+        let samples: Vec<(i64, &TypedSamples)> = guards
+            .iter()
+            .map(|(sensor_id, guard)| (*sensor_id, &**guard))
+            .collect();
+
+        // The ids of all the distinct strings of the batch, then all the samples, in bulk
+        let strings: std::collections::BTreeSet<&str> = samples
+            .iter()
+            .filter_map(|(_, samples)| match samples {
+                TypedSamples::String(values) => Some(values),
+                _ => None,
+            })
+            .flatten()
+            .map(|sample| sample.value.as_str())
+            .collect();
+        let string_ids = ensure_string_ids(&mut transaction, strings).await?;
+
+        publish_numeric_samples(&mut transaction, &samples).await?;
+        publish_string_samples(&mut transaction, &samples, &string_ids).await?;
+        for (sensor_id, samples) in samples {
+            self.publish_other_values(&mut transaction, sensor_id, samples)
                 .await?;
         }
         transaction.commit().await?;
         Ok(())
     }
 
-    async fn publish_single_sensor_batch(
+    /// The types that are not written in bulk: booleans, locations, json and blobs. The numeric
+    /// types and the strings were written by `publish_numeric_samples` and `publish_string_samples`.
+    async fn publish_other_values(
         &self,
         transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        single_sensor_batch: &crate::datamodel::batch::SingleSensorBatch,
+        sensor_id: i64,
+        samples: &TypedSamples,
     ) -> Result<()> {
-        let sensor_id =
-            get_sensor_id_or_create_sensor(transaction, &single_sensor_batch.sensor).await?;
-
-        let samples_guard = single_sensor_batch.samples.read().await;
-        match &*samples_guard {
-            TypedSamples::Integer(values) => {
-                publish_integer_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::Numeric(values) => {
-                publish_numeric_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::Float(values) => {
-                publish_float_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::String(values) => {
-                publish_string_values(transaction, sensor_id, values).await?;
-            }
+        match samples {
+            TypedSamples::Integer(_)
+            | TypedSamples::Numeric(_)
+            | TypedSamples::Float(_)
+            | TypedSamples::String(_) => {}
             TypedSamples::Boolean(values) => {
                 publish_boolean_values(transaction, sensor_id, values).await?;
             }
@@ -1542,7 +1682,7 @@ impl TimeScaleDBStorage {
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
+                    "{} SELECT bucket_time, COUNT(value)::bigint AS value {}",
                     timescaledb_bucketed_cte("integer_values"),
                     timescaledb_group_by_clause()
                 )))
@@ -1622,7 +1762,7 @@ impl TimeScaleDBStorage {
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
+                    "{} SELECT bucket_time, COUNT(value)::bigint AS value {}",
                     timescaledb_bucketed_cte("float_values"),
                     timescaledb_group_by_clause()
                 )))
@@ -1702,7 +1842,7 @@ impl TimeScaleDBStorage {
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_time, COUNT(*)::bigint AS value {}",
+                    "{} SELECT bucket_time, COUNT(value)::bigint AS value {}",
                     timescaledb_bucketed_cte("numeric_values"),
                     timescaledb_group_by_clause()
                 )))

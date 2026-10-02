@@ -191,7 +191,7 @@ jobs:
           - 8123:8123
           - 9000:9000
       timescaledb:
-        image: timescale/timescaledb:2.17.2-pg16
+        image: timescale/timescaledb:2.30.2-pg16
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -491,12 +491,6 @@ jobs:
   #         if ! command -v cargo-make &> /dev/null; then
   #           cargo install cargo-make
   #         fi
-
-  #     - name: Install sqlx-cli
-  #       run: cargo install sqlx-cli --no-default-features --features postgres,sqlite
-
-  #     - name: Set up development environment
-  #       run: cargo make setup-dev
 
   #     - name: Generate test coverage
   #       run: cargo llvm-cov --features postgres,sqlite --no-default-features --verbose --lcov --output-path lcov.info

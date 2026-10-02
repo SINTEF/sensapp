@@ -11,14 +11,15 @@ pub mod common;
 pub mod cross_series;
 pub mod data_query;
 pub mod query;
+pub mod selector;
 
 pub use data_query::{Aggregation, SensorDataQueryOptions, SimplifyOptions};
 #[allow(unused_imports)]
 pub use query::{LabelMatcher, MatcherType};
+pub use selector::{SelectorLimitExceeded, SelectorRead};
 
 /// Default limit for timeseries queries when no limit is specified
 /// Set to 10 million records - appropriate for timeseries data
-#[allow(dead_code)]
 pub const DEFAULT_QUERY_LIMIT: usize = 10_000_000;
 
 /// Default limit for list_series when no limit is specified
@@ -52,6 +53,18 @@ pub trait StorageInstance: Send + Sync + Debug {
     async fn publish(&self, batch: std::sync::Arc<crate::datamodel::batch::Batch>) -> Result<()>;
 
     async fn vacuum(&self) -> Result<()>;
+
+    /// Remove the duplicate samples and return how many were removed.
+    ///
+    /// Samples are stored at least once: a retried write, a client that sends a sample twice or a
+    /// crash in the middle of a request leave duplicates. Only exact duplicates go (same series,
+    /// same timestamp, same value, the first one written is kept): two different values at the
+    /// same timestamp are both kept. The count is exact unless writes happen at the same time.
+    ///
+    /// Not every backend can do it: the default says so with `StorageError::Unsupported`.
+    async fn deduplicate_samples(&self) -> Result<u64> {
+        Err(StorageError::Unsupported("removing duplicate samples".to_string()).into())
+    }
 
     /// Delete a series: all its samples, its labels and the sensor itself.
     ///
@@ -169,6 +182,59 @@ pub trait StorageInstance: Send + Sync + Debug {
         numeric_only: bool,
     ) -> Result<Vec<crate::datamodel::SensorData>>;
 
+    /// Read the series matching `matchers` within `max_series` series and `max_samples` samples
+    /// in total, or say which limit was exceeded. Series without a sample in the window are
+    /// returned with an empty sample set.
+    ///
+    /// This is the read behind the selector endpoints. The default implementation reads the
+    /// series one after the other (`selector::query_selector_sequential`); backends override it
+    /// to read all the series with a few queries, keeping the same results and limits.
+    async fn query_selector(
+        &self,
+        matchers: &[LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        numeric_only: bool,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<SelectorRead> {
+        selector::query_selector_sequential(
+            self,
+            matchers,
+            start_time,
+            end_time,
+            numeric_only,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
+    /// Read the numeric series matching `matchers` aggregated by `options.step_ms` buckets with
+    /// `options.aggregation`, within `max_series` series and `max_samples` buckets in total. The
+    /// series without a sample in the window are left out. This is the read behind Prometheus
+    /// remote read requests that carry a step.
+    ///
+    /// The default implementation reads the series one after the other
+    /// (`selector::query_selector_aggregated_sequential`); backends override it to aggregate all the
+    /// series with a few queries, with the same results and limits.
+    async fn query_selector_aggregated(
+        &self,
+        matchers: &[LabelMatcher],
+        options: &SensorDataQueryOptions,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<SelectorRead> {
+        selector::query_selector_aggregated_sequential(
+            self,
+            matchers,
+            options,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
     /// Health check for the storage backend
     /// Returns Ok(()) if the storage is healthy and can accept connections
     /// Returns Err if the storage is unhealthy
@@ -177,11 +243,16 @@ pub trait StorageInstance: Send + Sync + Debug {
     /// Clean up all test data from the database
     /// This method is intended for testing purposes only
     #[cfg(any(test, feature = "test-utils"))]
-    #[allow(dead_code)]
     async fn cleanup_test_data(&self) -> Result<()>;
 }
 
 pub mod storage_factory;
+
+// Sensor registration shared by the backends that use PostgreSQL's SQL dialect and schema
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+pub mod pg_sensor_registration;
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+pub mod pg_strings;
 
 // Storage backends - conditionally compiled based on features
 #[cfg(feature = "postgres")]

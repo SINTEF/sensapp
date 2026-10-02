@@ -428,85 +428,17 @@ description = "Release preparation pipeline"
 dependencies = ["ci-extended", "security-audit"]
 
 # Utility tasks
+[tasks.clean-test-databases]
+description = "Drop the sensapp-test-* databases that the TimescaleDB test runs leave in the local container"
+script = '''
+for database in $(docker exec sensapp-timescaledb psql -U postgres -tAc "SELECT datname FROM pg_database WHERE datname LIKE 'sensapp-test-%'"); do
+  docker exec sensapp-timescaledb psql -U postgres -tAc "DROP DATABASE \"$database\"" > /dev/null
+done
+'''
+
 [tasks.clean]
 description = "Clean all build artifacts and test databases"
 script = '''
 cargo clean
 rm -f test.db test.db-shm test.db-wal
 '''
-
-[tasks.setup-dev]
-description = "Set up development environment"
-dependencies = ["migrate-postgres", "migrate-sqlite"]
-
-# Migration tasks
-[tasks.migrate-sqlite]
-description = "Run SQLite migrations"
-env = { "DATABASE_URL" = "${TEST_DATABASE_URL_SQLITE}" }
-script = '''
-sqlx database create
-sqlx migrate run --source src/storage/sqlite/migrations
-'''
-
-[tasks.migrate-postgres]
-description = "Run PostgreSQL migrations"
-env = { "DATABASE_URL" = "${DATABASE_URL}" }
-script = '''
-sqlx migrate run --source src/storage/postgresql/migrations
-'''
-
-[tasks.migrate-timescaledb]
-description = "Run TimescaleDB migrations"
-script_runner = "@shell"
-script = '''
-# sqlx CLI doesn't understand timescaledb:// scheme, so convert to postgres://
-export DATABASE_URL=$(echo "$TEST_DATABASE_URL_TIMESCALEDB" | sed 's|^timescaledb://|postgres://|')
-sqlx migrate run --source src/storage/postgresql/migrations
-'''
-
-[tasks.migrate-clickhouse]
-description = "Run ClickHouse migrations"
-env = { "DATABASE_URL" = "${TEST_DATABASE_URL_CLICKHOUSE}" }
-script = '''
-sqlx migrate run --source src/storage/clickhouse/migrations
-'''
-
-# SQLx prepare tasks
-[tasks.prepare-sqlite]
-description = "Prepare SQLx for SQLite"
-env = { "DATABASE_URL" = "${TEST_DATABASE_URL_SQLITE}" }
-command = "cargo"
-args = [
-  "sqlx",
-  "prepare",
-  "--",
-  "--features",
-  "sqlite",
-  "--no-default-features",
-]
-
-[tasks.prepare-postgres]
-description = "Prepare SQLx for PostgreSQL"
-env = { "DATABASE_URL" = "${DATABASE_URL}" }
-command = "cargo"
-args = [
-  "sqlx",
-  "prepare",
-  "--",
-  "--features",
-  "postgres",
-  "--no-default-features",
-]
-
-[tasks.prepare-clickhouse]
-description = "Prepare SQLx for ClickHouse"
-env = { "DATABASE_URL" = "${TEST_DATABASE_URL_CLICKHOUSE}" }
-command = "cargo"
-args = [
-  "sqlx",
-  "prepare",
-  "--",
-  "--features",
-  "clickhouse",
-  "--no-default-features",
-]

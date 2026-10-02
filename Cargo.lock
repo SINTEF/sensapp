@@ -4638,6 +4638,7 @@ dependencies = [
  "confique",
  "csv-async",
  "duckdb",
+ "fastrand",
  "flate2",
  "futures",
  "gcp-bigquery-client",

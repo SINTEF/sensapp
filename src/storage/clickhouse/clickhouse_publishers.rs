@@ -1,7 +1,6 @@
 use crate::datamodel::{Sample, TypedSamples, batch::SingleSensorBatch};
 use crate::storage::clickhouse::clickhouse_utilities::{
-    datetime_to_micros, decimal_to_clickhouse_raw, get_sensor_id_or_create_sensor,
-    map_clickhouse_error,
+    datetime_to_micros, decimal_to_clickhouse_raw, map_clickhouse_error, uuid_to_sensor_id,
 };
 use anyhow::Result;
 use base64::prelude::*;
@@ -66,13 +65,6 @@ struct BlobValueRow {
     value: String, // Base64 encoded
 }
 
-#[derive(Serialize, clickhouse::Row)]
-struct LabelRow {
-    sensor_id: u64,
-    name: String,
-    description: Option<String>,
-}
-
 /// Publisher for single sensor batch to ClickHouse with stateful inserters
 pub struct ClickHousePublisher<'a> {
     client: &'a Client,
@@ -85,7 +77,6 @@ pub struct ClickHousePublisher<'a> {
     location_inserter: Option<Inserter<LocationValueRow>>,
     json_inserter: Option<Inserter<JsonValueRow>>,
     blob_inserter: Option<Inserter<BlobValueRow>>,
-    label_inserter: Option<Inserter<LabelRow>>,
 }
 
 impl<'a> ClickHousePublisher<'a> {
@@ -100,63 +91,17 @@ impl<'a> ClickHousePublisher<'a> {
             location_inserter: None,
             json_inserter: None,
             blob_inserter: None,
-            label_inserter: None,
         }
     }
 
-    /// Publish a single sensor batch to ClickHouse
+    /// Publish the samples of a single sensor batch to ClickHouse. The sensor must have been
+    /// registered with `register_sensors` first.
     pub async fn publish_single_sensor_batch(&mut self, batch: &SingleSensorBatch) -> Result<()> {
-        // Get or create sensor_id
-        let sensor_id = get_sensor_id_or_create_sensor(
-            self.client,
-            &batch.sensor.uuid,
-            &batch.sensor.name,
-            &batch.sensor.sensor_type,
-            batch.sensor.unit.as_ref(),
-        )
-        .await?;
-
-        // Publish labels if any
-        // Convert labels to the expected format
-        let labels: Vec<(String, String)> = batch
-            .sensor
-            .labels
-            .iter()
-            .map(|(name, description)| (name.clone(), description.clone()))
-            .collect();
-        self.publish_labels(sensor_id, &labels).await?;
+        let sensor_id = uuid_to_sensor_id(&batch.sensor.uuid);
 
         // Publish samples - need to acquire read lock first
         let samples_guard = batch.samples.read().await;
         self.publish_samples(sensor_id, &samples_guard).await?;
-
-        Ok(())
-    }
-
-    /// Publish labels for a sensor
-    async fn publish_labels(&mut self, sensor_id: u64, labels: &[(String, String)]) -> Result<()> {
-        if labels.is_empty() {
-            return Ok(());
-        }
-
-        // Get or create the label inserter
-        if self.label_inserter.is_none() {
-            self.label_inserter = Some(self.client.inserter("labels"));
-        }
-
-        let inserter = self.label_inserter.as_mut().unwrap();
-
-        for (name, description) in labels {
-            let row = LabelRow {
-                sensor_id,
-                name: name.clone(),
-                description: Some(description.clone()),
-            };
-            inserter
-                .write(&row)
-                .await
-                .map_err(|e| map_clickhouse_error(e, None, None))?;
-        }
 
         Ok(())
     }
@@ -519,15 +464,6 @@ impl<'a> ClickHousePublisher<'a> {
         }
 
         if let Some(inserter) = self.blob_inserter.take() {
-            tasks.push(tokio::spawn(async move {
-                inserter
-                    .end()
-                    .await
-                    .map_err(|e| map_clickhouse_error(e, None, None))
-            }));
-        }
-
-        if let Some(inserter) = self.label_inserter.take() {
             tasks.push(tokio::spawn(async move {
                 inserter
                     .end()

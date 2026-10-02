@@ -34,6 +34,17 @@ fn read_arrow_stream_batches(bytes: &[u8]) -> Result<Vec<RecordBatch>> {
         .collect()
 }
 
+fn timestamps_of(batch: &RecordBatch) -> Vec<i64> {
+    batch
+        .column_by_name("timestamp")
+        .expect("timestamp column")
+        .as_any()
+        .downcast_ref::<arrow::array::TimestampMicrosecondArray>()
+        .expect("timestamp column is a microsecond timestamp")
+        .values()
+        .to_vec()
+}
+
 /// Test Arrow data export functionality
 #[cfg(not(feature = "rrdcached"))]
 mod export_tests {
@@ -153,6 +164,95 @@ mod export_tests {
         let body_bytes = response.body_bytes();
         let batches = read_arrow_stream_batches(body_bytes)?;
         assert_eq!(batches.len(), 1);
+
+        Ok(())
+    }
+
+    /// Regression test: Arrow timestamps used to be shifted by the TAI - UTC
+    /// offset (37 s in 2024). They must match the other export formats.
+    #[tokio::test]
+    #[serial]
+    async fn test_export_arrow_timestamps_match_written_timestamps() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        // 2024-02-13T09:15:26Z and 2024-02-13T11:00:00.123456Z, in microseconds
+        let expected_us: [i64; 2] = [1_707_815_726_000_000, 1_707_822_000_123_456];
+        let influx_data = format!("m value=1 {}\nm value=2 {}", expected_us[0], expected_us[1]);
+        app.post_influxdb(
+            "/api/v2/write?bucket=test&org=sensapp&precision=us",
+            &influx_data,
+        )
+        .await?
+        .assert_status(StatusCode::NO_CONTENT);
+
+        let sensor = DbHelpers::get_sensor_by_name(&storage, "m value")
+            .await?
+            .expect("sensor should exist");
+
+        let arrow = app
+            .get(&format!("/series/{}?format=arrow", sensor.uuid))
+            .await?;
+        arrow.assert_status(StatusCode::OK);
+        let batches = read_arrow_stream_batches(arrow.body_bytes())?;
+        assert_eq!(batches.len(), 1);
+        assert_eq!(timestamps_of(&batches[0]), expected_us);
+
+        // The CSV export of the same series agrees.
+        let csv = app
+            .get(&format!("/series/{}?format=csv", sensor.uuid))
+            .await?;
+        csv.assert_status(StatusCode::OK);
+        csv.assert_body_contains("2024-02-13T09:15:26");
+        csv.assert_body_contains("2024-02-13T11:00:00.123456");
+
+        // The multi-series endpoint goes through the other Arrow code path.
+        // A range selector reaches back far enough to cover the 2024 samples.
+        let query = app
+            .get("/api/v1/query?query=%7B__name__%3D%22m%20value%22%7D%5B10y%5D&format=arrow")
+            .await?;
+        query.assert_status(StatusCode::OK);
+        let batches = read_arrow_stream_batches(query.body_bytes())?;
+        let mut timestamps: Vec<i64> = batches.iter().flat_map(timestamps_of).collect();
+        timestamps.sort_unstable();
+        assert_eq!(timestamps, expected_us);
+
+        Ok(())
+    }
+
+    /// Daily buckets must start at midnight UTC, not 00:00:37.
+    #[tokio::test]
+    #[serial]
+    async fn test_export_arrow_aggregated_buckets_are_aligned() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let influx_data = "m value=1 1707815726000000\nm value=3 1707822000000000";
+        app.post_influxdb(
+            "/api/v2/write?bucket=test&org=sensapp&precision=us",
+            influx_data,
+        )
+        .await?
+        .assert_status(StatusCode::NO_CONTENT);
+
+        let sensor = DbHelpers::get_sensor_by_name(&storage, "m value")
+            .await?
+            .expect("sensor should exist");
+
+        let arrow = app
+            .get(&format!(
+                "/series/{}?format=arrow&step=1d&aggregation=avg",
+                sensor.uuid
+            ))
+            .await?;
+        arrow.assert_status(StatusCode::OK);
+        let batches = read_arrow_stream_batches(arrow.body_bytes())?;
+        // 2024-02-13T00:00:00Z
+        assert_eq!(timestamps_of(&batches[0]), [1_707_782_400_000_000]);
 
         Ok(())
     }

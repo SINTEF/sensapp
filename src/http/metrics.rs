@@ -73,6 +73,7 @@ pub struct HttpMetrics {
     samples_processed_total: Family<DataVolumeLabels, Counter>,
     series_processed_total: Family<DataVolumeLabels, Counter>,
     http_requests_in_flight: Gauge,
+    writes_shed_total: Counter,
     uptime_seconds: Gauge,
     storage_ready: Gauge,
     start_time: Instant,
@@ -151,6 +152,13 @@ impl HttpMetrics {
             http_requests_in_flight.clone(),
         );
 
+        let writes_shed_total = Counter::default();
+        registry.register(
+            "sensapp_http_writes_shed",
+            "Write requests turned away with a 503 and a Retry-After because every write slot was taken",
+            writes_shed_total.clone(),
+        );
+
         let uptime_seconds = Gauge::default();
         registry.register(
             "sensapp_uptime_seconds",
@@ -174,10 +182,16 @@ impl HttpMetrics {
             samples_processed_total,
             series_processed_total,
             http_requests_in_flight,
+            writes_shed_total,
             uptime_seconds,
             storage_ready,
             start_time: Instant::now(),
         }
+    }
+
+    /// The counter of the writes the limiter turned away. Clones share the same count.
+    pub fn writes_shed_counter(&self) -> Counter {
+        self.writes_shed_total.clone()
     }
 
     pub fn observe_http_request(

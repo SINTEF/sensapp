@@ -2,7 +2,8 @@
 //!
 //! This module contains optimized batch query methods that fetch samples
 //! for multiple sensors. Unlike PostgreSQL, SQLite doesn't support LATERAL
-//! joins or array parameters, so we use simpler query patterns with IN clauses.
+//! joins, so the per-sensor limit is a correlated subquery that reads the index of each sensor and
+//! stops after `limit` rows.
 //!
 //! Used primarily by `query_sensors_by_labels` for efficient multi-sensor queries.
 
@@ -22,6 +23,11 @@ impl SqliteStorage {
     /// This fetches samples for all provided sensors in optimized batch queries,
     /// one query per sensor type. Due to SQLite limitations, we use IN clauses
     /// with dynamic parameter binding.
+    ///
+    /// `limit` is a number of samples **per sensor**, the oldest first, as
+    /// `query_sensors_by_labels` promises: it is applied row by row after the query, which has no
+    /// SQL `LIMIT`. It is not the shared budget of the selector reads, which is global to all the
+    /// sensors of a type (`selector.rs`, `read_numeric_samples`): the two must not be merged.
     pub(super) async fn batch_query_samples(
         &self,
         sensors: &[(i64, Sensor)],
@@ -115,14 +121,6 @@ impl SqliteStorage {
         Ok(results)
     }
 
-    /// Build IN clause placeholders for dynamic binding
-    fn build_in_placeholders(count: usize, start_idx: usize) -> String {
-        (start_idx..start_idx + count)
-            .map(|i| format!("?{}", i))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
     async fn batch_query_integer_samples(
         &self,
         sensor_ids: &[i64],
@@ -144,48 +142,31 @@ impl SqliteStorage {
             results.insert(*sensor_id, TypedSamples::Integer(smallvec![]));
         }
 
-        // Build query with dynamic IN clause
-        // We need to use a subquery with row_number to get per-sensor limits
-        // SQLite approach: query all matching and filter/limit in Rust
-        let placeholders = Self::build_in_placeholders(sensor_ids.len(), 1);
-        let sql = format!(
-            r#"
-            SELECT sensor_id, timestamp_us, value
-            FROM integer_values
-            WHERE sensor_id IN ({})
-            AND (?{} IS NULL OR timestamp_us >= ?{})
-            AND (?{} IS NULL OR timestamp_us <= ?{})
-            ORDER BY sensor_id, timestamp_us ASC
-            "#,
-            placeholders,
-            sensor_ids.len() + 1,
-            sensor_ids.len() + 2,
-            sensor_ids.len() + 3,
-            sensor_ids.len() + 4
-        );
-
-        // The IN list contains generated placeholders only; sensor IDs and time bounds are bound below.
-        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
-        for sensor_id in sensor_ids {
-            query = query.bind(sensor_id);
-        }
-        query = query
-            .bind(start_time)
+        // One statement, bounded by the index of each sensor: for every id, the subquery reads the
+        // first `limit` rows of the sensor in the order of the `(sensor_id, timestamp_us)` index and
+        // stops. Reading every sample of the window to keep a few per sensor costs far more.
+        let sql = r#"
+            SELECT v.sensor_id, v.timestamp_us, v.value
+            FROM json_each(?1) ids
+            JOIN integer_values v ON v.rowid IN (
+                SELECT w.rowid FROM integer_values w
+                WHERE w.sensor_id = ids.value
+                AND (?2 IS NULL OR w.timestamp_us >= ?2)
+                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                ORDER BY w.timestamp_us ASC
+                LIMIT ?4
+            )
+            ORDER BY v.sensor_id, v.timestamp_us ASC
+            "#;
+        let rows: Vec<Row> = sqlx::query_as::<_, Row>(sql)
+            .bind(serde_json::to_string(sensor_ids)?)
             .bind(start_time)
             .bind(end_time)
-            .bind(end_time);
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
-        let rows = query.fetch_all(&self.pool).await?;
-
-        // Group results and apply per-sensor limit
-        let mut counts: HashMap<i64, usize> = HashMap::new();
         for row in rows {
-            let count = counts.entry(row.sensor_id).or_insert(0);
-            if *count >= limit as usize {
-                continue;
-            }
-            *count += 1;
-
             if let Some(TypedSamples::Integer(samples)) = results.get_mut(&row.sensor_id) {
                 samples.push(Sample {
                     datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
@@ -217,43 +198,31 @@ impl SqliteStorage {
             results.insert(*sensor_id, TypedSamples::Numeric(smallvec![]));
         }
 
-        let placeholders = Self::build_in_placeholders(sensor_ids.len(), 1);
-        let sql = format!(
-            r#"
-            SELECT sensor_id, timestamp_us, value
-            FROM numeric_values
-            WHERE sensor_id IN ({})
-            AND (?{} IS NULL OR timestamp_us >= ?{})
-            AND (?{} IS NULL OR timestamp_us <= ?{})
-            ORDER BY sensor_id, timestamp_us ASC
-            "#,
-            placeholders,
-            sensor_ids.len() + 1,
-            sensor_ids.len() + 2,
-            sensor_ids.len() + 3,
-            sensor_ids.len() + 4
-        );
-
-        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
-        for sensor_id in sensor_ids {
-            query = query.bind(sensor_id);
-        }
-        query = query
-            .bind(start_time)
+        // One statement, bounded by the index of each sensor: for every id, the subquery reads the
+        // first `limit` rows of the sensor in the order of the `(sensor_id, timestamp_us)` index and
+        // stops. Reading every sample of the window to keep a few per sensor costs far more.
+        let sql = r#"
+            SELECT v.sensor_id, v.timestamp_us, v.value
+            FROM json_each(?1) ids
+            JOIN numeric_values v ON v.rowid IN (
+                SELECT w.rowid FROM numeric_values w
+                WHERE w.sensor_id = ids.value
+                AND (?2 IS NULL OR w.timestamp_us >= ?2)
+                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                ORDER BY w.timestamp_us ASC
+                LIMIT ?4
+            )
+            ORDER BY v.sensor_id, v.timestamp_us ASC
+            "#;
+        let rows: Vec<Row> = sqlx::query_as::<_, Row>(sql)
+            .bind(serde_json::to_string(sensor_ids)?)
             .bind(start_time)
             .bind(end_time)
-            .bind(end_time);
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
-        let rows = query.fetch_all(&self.pool).await?;
-
-        let mut counts: HashMap<i64, usize> = HashMap::new();
         for row in rows {
-            let count = counts.entry(row.sensor_id).or_insert(0);
-            if *count >= limit as usize {
-                continue;
-            }
-            *count += 1;
-
             if let Some(TypedSamples::Numeric(samples)) = results.get_mut(&row.sensor_id) {
                 let value = rust_decimal::Decimal::from_str_exact(&row.value)
                     .context("Failed to parse decimal value")?;
@@ -287,43 +256,31 @@ impl SqliteStorage {
             results.insert(*sensor_id, TypedSamples::Float(smallvec![]));
         }
 
-        let placeholders = Self::build_in_placeholders(sensor_ids.len(), 1);
-        let sql = format!(
-            r#"
-            SELECT sensor_id, timestamp_us, value
-            FROM float_values
-            WHERE sensor_id IN ({})
-            AND (?{} IS NULL OR timestamp_us >= ?{})
-            AND (?{} IS NULL OR timestamp_us <= ?{})
-            ORDER BY sensor_id, timestamp_us ASC
-            "#,
-            placeholders,
-            sensor_ids.len() + 1,
-            sensor_ids.len() + 2,
-            sensor_ids.len() + 3,
-            sensor_ids.len() + 4
-        );
-
-        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
-        for sensor_id in sensor_ids {
-            query = query.bind(sensor_id);
-        }
-        query = query
-            .bind(start_time)
+        // One statement, bounded by the index of each sensor: for every id, the subquery reads the
+        // first `limit` rows of the sensor in the order of the `(sensor_id, timestamp_us)` index and
+        // stops. Reading every sample of the window to keep a few per sensor costs far more.
+        let sql = r#"
+            SELECT v.sensor_id, v.timestamp_us, v.value
+            FROM json_each(?1) ids
+            JOIN float_values v ON v.rowid IN (
+                SELECT w.rowid FROM float_values w
+                WHERE w.sensor_id = ids.value
+                AND (?2 IS NULL OR w.timestamp_us >= ?2)
+                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                ORDER BY w.timestamp_us ASC
+                LIMIT ?4
+            )
+            ORDER BY v.sensor_id, v.timestamp_us ASC
+            "#;
+        let rows: Vec<Row> = sqlx::query_as::<_, Row>(sql)
+            .bind(serde_json::to_string(sensor_ids)?)
             .bind(start_time)
             .bind(end_time)
-            .bind(end_time);
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
-        let rows = query.fetch_all(&self.pool).await?;
-
-        let mut counts: HashMap<i64, usize> = HashMap::new();
         for row in rows {
-            let count = counts.entry(row.sensor_id).or_insert(0);
-            if *count >= limit as usize {
-                continue;
-            }
-            *count += 1;
-
             if let Some(TypedSamples::Float(samples)) = results.get_mut(&row.sensor_id) {
                 samples.push(Sample {
                     datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
@@ -355,44 +312,32 @@ impl SqliteStorage {
             results.insert(*sensor_id, TypedSamples::String(smallvec![]));
         }
 
-        let placeholders = Self::build_in_placeholders(sensor_ids.len(), 1);
-        let sql = format!(
-            r#"
-            SELECT sv.sensor_id, sv.timestamp_us, svd.value as string_value
-            FROM string_values sv
-            JOIN strings_values_dictionary svd ON sv.value = svd.id
-            WHERE sv.sensor_id IN ({})
-            AND (?{} IS NULL OR sv.timestamp_us >= ?{})
-            AND (?{} IS NULL OR sv.timestamp_us <= ?{})
-            ORDER BY sv.sensor_id, sv.timestamp_us ASC
-            "#,
-            placeholders,
-            sensor_ids.len() + 1,
-            sensor_ids.len() + 2,
-            sensor_ids.len() + 3,
-            sensor_ids.len() + 4
-        );
-
-        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
-        for sensor_id in sensor_ids {
-            query = query.bind(sensor_id);
-        }
-        query = query
-            .bind(start_time)
+        // One statement, bounded by the index of each sensor: for every id, the subquery reads the
+        // first `limit` rows of the sensor in the order of the `(sensor_id, timestamp_us)` index and
+        // stops. Reading every sample of the window to keep a few per sensor costs far more.
+        let sql = r#"
+            SELECT v.sensor_id, v.timestamp_us, svd.value as string_value
+            FROM json_each(?1) ids
+            JOIN string_values v ON v.rowid IN (
+                SELECT w.rowid FROM string_values w
+                WHERE w.sensor_id = ids.value
+                AND (?2 IS NULL OR w.timestamp_us >= ?2)
+                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                ORDER BY w.timestamp_us ASC
+                LIMIT ?4
+            )
+            JOIN strings_values_dictionary svd ON v.value = svd.id
+            ORDER BY v.sensor_id, v.timestamp_us ASC
+            "#;
+        let rows: Vec<Row> = sqlx::query_as::<_, Row>(sql)
+            .bind(serde_json::to_string(sensor_ids)?)
             .bind(start_time)
             .bind(end_time)
-            .bind(end_time);
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
-        let rows = query.fetch_all(&self.pool).await?;
-
-        let mut counts: HashMap<i64, usize> = HashMap::new();
         for row in rows {
-            let count = counts.entry(row.sensor_id).or_insert(0);
-            if *count >= limit as usize {
-                continue;
-            }
-            *count += 1;
-
             if let Some(TypedSamples::String(samples)) = results.get_mut(&row.sensor_id) {
                 samples.push(Sample {
                     datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
@@ -424,43 +369,31 @@ impl SqliteStorage {
             results.insert(*sensor_id, TypedSamples::Boolean(smallvec![]));
         }
 
-        let placeholders = Self::build_in_placeholders(sensor_ids.len(), 1);
-        let sql = format!(
-            r#"
-            SELECT sensor_id, timestamp_us, value
-            FROM boolean_values
-            WHERE sensor_id IN ({})
-            AND (?{} IS NULL OR timestamp_us >= ?{})
-            AND (?{} IS NULL OR timestamp_us <= ?{})
-            ORDER BY sensor_id, timestamp_us ASC
-            "#,
-            placeholders,
-            sensor_ids.len() + 1,
-            sensor_ids.len() + 2,
-            sensor_ids.len() + 3,
-            sensor_ids.len() + 4
-        );
-
-        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
-        for sensor_id in sensor_ids {
-            query = query.bind(sensor_id);
-        }
-        query = query
-            .bind(start_time)
+        // One statement, bounded by the index of each sensor: for every id, the subquery reads the
+        // first `limit` rows of the sensor in the order of the `(sensor_id, timestamp_us)` index and
+        // stops. Reading every sample of the window to keep a few per sensor costs far more.
+        let sql = r#"
+            SELECT v.sensor_id, v.timestamp_us, v.value
+            FROM json_each(?1) ids
+            JOIN boolean_values v ON v.rowid IN (
+                SELECT w.rowid FROM boolean_values w
+                WHERE w.sensor_id = ids.value
+                AND (?2 IS NULL OR w.timestamp_us >= ?2)
+                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                ORDER BY w.timestamp_us ASC
+                LIMIT ?4
+            )
+            ORDER BY v.sensor_id, v.timestamp_us ASC
+            "#;
+        let rows: Vec<Row> = sqlx::query_as::<_, Row>(sql)
+            .bind(serde_json::to_string(sensor_ids)?)
             .bind(start_time)
             .bind(end_time)
-            .bind(end_time);
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
-        let rows = query.fetch_all(&self.pool).await?;
-
-        let mut counts: HashMap<i64, usize> = HashMap::new();
         for row in rows {
-            let count = counts.entry(row.sensor_id).or_insert(0);
-            if *count >= limit as usize {
-                continue;
-            }
-            *count += 1;
-
             if let Some(TypedSamples::Boolean(samples)) = results.get_mut(&row.sensor_id) {
                 samples.push(Sample {
                     datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
@@ -493,43 +426,31 @@ impl SqliteStorage {
             results.insert(*sensor_id, TypedSamples::Location(smallvec![]));
         }
 
-        let placeholders = Self::build_in_placeholders(sensor_ids.len(), 1);
-        let sql = format!(
-            r#"
-            SELECT sensor_id, timestamp_us, latitude, longitude
-            FROM location_values
-            WHERE sensor_id IN ({})
-            AND (?{} IS NULL OR timestamp_us >= ?{})
-            AND (?{} IS NULL OR timestamp_us <= ?{})
-            ORDER BY sensor_id, timestamp_us ASC
-            "#,
-            placeholders,
-            sensor_ids.len() + 1,
-            sensor_ids.len() + 2,
-            sensor_ids.len() + 3,
-            sensor_ids.len() + 4
-        );
-
-        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
-        for sensor_id in sensor_ids {
-            query = query.bind(sensor_id);
-        }
-        query = query
-            .bind(start_time)
+        // One statement, bounded by the index of each sensor: for every id, the subquery reads the
+        // first `limit` rows of the sensor in the order of the `(sensor_id, timestamp_us)` index and
+        // stops. Reading every sample of the window to keep a few per sensor costs far more.
+        let sql = r#"
+            SELECT v.sensor_id, v.timestamp_us, v.latitude, v.longitude
+            FROM json_each(?1) ids
+            JOIN location_values v ON v.rowid IN (
+                SELECT w.rowid FROM location_values w
+                WHERE w.sensor_id = ids.value
+                AND (?2 IS NULL OR w.timestamp_us >= ?2)
+                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                ORDER BY w.timestamp_us ASC
+                LIMIT ?4
+            )
+            ORDER BY v.sensor_id, v.timestamp_us ASC
+            "#;
+        let rows: Vec<Row> = sqlx::query_as::<_, Row>(sql)
+            .bind(serde_json::to_string(sensor_ids)?)
             .bind(start_time)
             .bind(end_time)
-            .bind(end_time);
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
-        let rows = query.fetch_all(&self.pool).await?;
-
-        let mut counts: HashMap<i64, usize> = HashMap::new();
         for row in rows {
-            let count = counts.entry(row.sensor_id).or_insert(0);
-            if *count >= limit as usize {
-                continue;
-            }
-            *count += 1;
-
             if let Some(TypedSamples::Location(samples)) = results.get_mut(&row.sensor_id) {
                 samples.push(Sample {
                     datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
@@ -561,43 +482,31 @@ impl SqliteStorage {
             results.insert(*sensor_id, TypedSamples::Json(smallvec![]));
         }
 
-        let placeholders = Self::build_in_placeholders(sensor_ids.len(), 1);
-        let sql = format!(
-            r#"
-            SELECT sensor_id, timestamp_us, value
-            FROM json_values
-            WHERE sensor_id IN ({})
-            AND (?{} IS NULL OR timestamp_us >= ?{})
-            AND (?{} IS NULL OR timestamp_us <= ?{})
-            ORDER BY sensor_id, timestamp_us ASC
-            "#,
-            placeholders,
-            sensor_ids.len() + 1,
-            sensor_ids.len() + 2,
-            sensor_ids.len() + 3,
-            sensor_ids.len() + 4
-        );
-
-        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
-        for sensor_id in sensor_ids {
-            query = query.bind(sensor_id);
-        }
-        query = query
-            .bind(start_time)
+        // One statement, bounded by the index of each sensor: for every id, the subquery reads the
+        // first `limit` rows of the sensor in the order of the `(sensor_id, timestamp_us)` index and
+        // stops. Reading every sample of the window to keep a few per sensor costs far more.
+        let sql = r#"
+            SELECT v.sensor_id, v.timestamp_us, v.value
+            FROM json_each(?1) ids
+            JOIN json_values v ON v.rowid IN (
+                SELECT w.rowid FROM json_values w
+                WHERE w.sensor_id = ids.value
+                AND (?2 IS NULL OR w.timestamp_us >= ?2)
+                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                ORDER BY w.timestamp_us ASC
+                LIMIT ?4
+            )
+            ORDER BY v.sensor_id, v.timestamp_us ASC
+            "#;
+        let rows: Vec<Row> = sqlx::query_as::<_, Row>(sql)
+            .bind(serde_json::to_string(sensor_ids)?)
             .bind(start_time)
             .bind(end_time)
-            .bind(end_time);
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
-        let rows = query.fetch_all(&self.pool).await?;
-
-        let mut counts: HashMap<i64, usize> = HashMap::new();
         for row in rows {
-            let count = counts.entry(row.sensor_id).or_insert(0);
-            if *count >= limit as usize {
-                continue;
-            }
-            *count += 1;
-
             if let Some(TypedSamples::Json(samples)) = results.get_mut(&row.sensor_id) {
                 let value: JsonValue =
                     serde_json::from_slice(&row.value).context("Failed to parse JSON value")?;
@@ -631,43 +540,31 @@ impl SqliteStorage {
             results.insert(*sensor_id, TypedSamples::Blob(smallvec![]));
         }
 
-        let placeholders = Self::build_in_placeholders(sensor_ids.len(), 1);
-        let sql = format!(
-            r#"
-            SELECT sensor_id, timestamp_us, value
-            FROM blob_values
-            WHERE sensor_id IN ({})
-            AND (?{} IS NULL OR timestamp_us >= ?{})
-            AND (?{} IS NULL OR timestamp_us <= ?{})
-            ORDER BY sensor_id, timestamp_us ASC
-            "#,
-            placeholders,
-            sensor_ids.len() + 1,
-            sensor_ids.len() + 2,
-            sensor_ids.len() + 3,
-            sensor_ids.len() + 4
-        );
-
-        let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
-        for sensor_id in sensor_ids {
-            query = query.bind(sensor_id);
-        }
-        query = query
-            .bind(start_time)
+        // One statement, bounded by the index of each sensor: for every id, the subquery reads the
+        // first `limit` rows of the sensor in the order of the `(sensor_id, timestamp_us)` index and
+        // stops. Reading every sample of the window to keep a few per sensor costs far more.
+        let sql = r#"
+            SELECT v.sensor_id, v.timestamp_us, v.value
+            FROM json_each(?1) ids
+            JOIN blob_values v ON v.rowid IN (
+                SELECT w.rowid FROM blob_values w
+                WHERE w.sensor_id = ids.value
+                AND (?2 IS NULL OR w.timestamp_us >= ?2)
+                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                ORDER BY w.timestamp_us ASC
+                LIMIT ?4
+            )
+            ORDER BY v.sensor_id, v.timestamp_us ASC
+            "#;
+        let rows: Vec<Row> = sqlx::query_as::<_, Row>(sql)
+            .bind(serde_json::to_string(sensor_ids)?)
             .bind(start_time)
             .bind(end_time)
-            .bind(end_time);
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
 
-        let rows = query.fetch_all(&self.pool).await?;
-
-        let mut counts: HashMap<i64, usize> = HashMap::new();
         for row in rows {
-            let count = counts.entry(row.sensor_id).or_insert(0);
-            if *count >= limit as usize {
-                continue;
-            }
-            *count += 1;
-
             if let Some(TypedSamples::Blob(samples)) = results.get_mut(&row.sensor_id) {
                 samples.push(Sample {
                     datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),

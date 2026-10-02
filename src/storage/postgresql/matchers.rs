@@ -29,6 +29,7 @@ impl PostgresStorage {
         name_matchers: &[&LabelMatcher],
         label_matchers: &[&LabelMatcher],
         numeric_only: bool,
+        limit: Option<usize>,
     ) -> Result<Vec<(i64, Sensor)>> {
         // Build the base query to find matching sensor IDs with their metadata
         let mut sql = String::from(
@@ -156,6 +157,10 @@ impl PostgresStorage {
             sql.push_str(&where_clauses.join(" AND "));
         }
         sql.push_str(" ORDER BY s.sensor_id");
+        if let Some(limit) = limit {
+            // A number, never text from a caller
+            sql.push_str(&format!(" LIMIT {limit}"));
+        }
 
         // Execute the dynamic query to get sensor metadata
         #[derive(sqlx::FromRow)]

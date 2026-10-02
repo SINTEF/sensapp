@@ -1,23 +1,15 @@
 #![forbid(unsafe_code)]
-use crate::config::load_configuration;
-use crate::http::auth::AuthConfig;
-use crate::http::metrics::HttpMetrics;
-use crate::http::server::run_http_server;
-use crate::http::state::HttpServerState;
 use anyhow::{Context, Result};
+use sensapp::config::{self, load_configuration};
+use sensapp::http::auth::AuthConfig;
+use sensapp::http::metrics::HttpMetrics;
+use sensapp::http::server::run_http_server;
+use sensapp::http::state::HttpServerState;
+use sensapp::storage::storage_factory::create_storage_from_connection_string;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use storage::storage_factory::create_storage_from_connection_string;
 use tracing::Level;
 use tracing::event;
-mod config;
-mod datamodel;
-mod exporters;
-mod http;
-mod importers;
-mod infer;
-mod parsing;
-mod storage;
 
 fn main() -> Result<()> {
     // Handle `generate-token` subcommand before any server setup

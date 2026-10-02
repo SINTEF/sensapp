@@ -19,6 +19,11 @@ impl PostgresStorage {
     /// This fetches samples for all provided sensors in optimized batch queries,
     /// one query per sensor type, instead of N queries for N sensors.
     /// Queries for different sensor types are executed concurrently.
+    ///
+    /// `limit` is a number of samples **per sensor** (the `LIMIT` sits inside a `LATERAL`
+    /// subquery run for each id), the oldest first, as `query_sensors_by_labels` promises. It is
+    /// not the shared budget of the selector reads, whose `LIMIT` is global to all the sensors of a
+    /// type (`selector.rs`, `read_numeric_samples`): the two must not be merged.
     pub(super) async fn batch_query_samples(
         &self,
         sensors: &[(i64, Sensor)],

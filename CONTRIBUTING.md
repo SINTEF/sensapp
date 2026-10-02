@@ -94,6 +94,5 @@ cargo make check-all        # working features (postgres + sqlite)
 cargo make check-all-storage # all storage backends
 cargo make check-local-matrix # all local backends via Docker Compose (no BigQuery)
 
-# Setup (runs migrations)
-cargo make setup-dev
+# Nothing to set up: every backend creates and migrates its schema at startup
 ```

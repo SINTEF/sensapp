@@ -6,7 +6,10 @@
 //! - `batch_queries.rs`: Optimized batch query methods for multiple sensors
 //! - `matchers.rs`: Label matcher query building for Prometheus-style queries
 //! - `postgresql_publishers.rs`: Value publishing functions
-//! - `postgresql_utilities.rs`: Helper functions for sensor/label/unit creation
+//! - `selector.rs`: Bulk read of the series of a selector
+//!
+//! The registration of sensors (`storage::pg_sensor_registration`) and the dictionary of strings
+//! (`storage::pg_strings`) are shared with the TimescaleDB backend.
 
 use super::{
     DEFAULT_QUERY_LIMIT, SensorAvailabilitySummary, StorageError, StorageInstance,
@@ -32,12 +35,13 @@ use uuid::Uuid;
 mod batch_queries;
 mod matchers;
 mod queries;
+mod selector;
 
 pub mod postgresql_publishers;
-pub mod postgresql_utilities;
 
+use super::pg_sensor_registration::register_sensors;
+use super::pg_strings::ensure_string_ids;
 use postgresql_publishers::*;
-use postgresql_utilities::{forget_sensor_id, get_sensor_id_or_create_sensor};
 
 #[derive(Debug)]
 pub struct PostgresStorage {
@@ -294,12 +298,9 @@ impl StorageInstance for PostgresStorage {
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         match self.publish_once(&batch).await {
             Err(error) if is_foreign_key_violation(&error) => {
-                // A cached sensor id points to a sensor deleted since it was cached, for
-                // example by another SensApp instance. The transaction was rolled back, so
-                // forget the ids and try again, which recreates the sensors.
-                for single_sensor_batch in batch.sensors.as_ref() {
-                    forget_sensor_id(&single_sensor_batch.sensor.uuid).await;
-                }
+                // Another SensApp instance deleted a sensor between its registration and the
+                // insert of its samples. The transaction was rolled back: try again, which
+                // registers the sensors again.
                 self.publish_once(&batch).await
             }
             result => result,
@@ -313,6 +314,31 @@ impl StorageInstance for PostgresStorage {
             .context("Failed to vacuum database")?;
 
         Ok(())
+    }
+
+    async fn deduplicate_samples(&self) -> Result<u64> {
+        // One statement per table, each atomic: a table that is done stays done if a later one
+        // fails. Within a group of equal samples the first one written is kept. `(tableoid, ctid)`
+        // identifies a row of a partitioned table; the table names and the columns come from
+        // static lists.
+        let mut removed = 0;
+        for table in VALUE_TABLES {
+            let columns = crate::storage::common::duplicate_key_columns(table, "timestamp_us");
+            let sql = format!(
+                "DELETE FROM {table} WHERE (tableoid, ctid) IN (\
+                   SELECT tableoid, ctid FROM (\
+                     SELECT tableoid, ctid, \
+                            row_number() OVER (PARTITION BY {columns} ORDER BY ctid) AS duplicate_rank \
+                     FROM {table}) ranked \
+                   WHERE duplicate_rank > 1)"
+            );
+            removed += sqlx::query(sqlx::AssertSqlSafe(sql))
+                .execute(&self.pool)
+                .await
+                .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
+                .rows_affected();
+        }
+        Ok(removed)
     }
 
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
@@ -347,7 +373,6 @@ impl StorageInstance for PostgresStorage {
             .await?;
 
         transaction.commit().await?;
-        forget_sensor_id(&parsed_uuid).await;
         Ok(true)
     }
 
@@ -880,7 +905,7 @@ impl StorageInstance for PostgresStorage {
 
         // Find matching sensors with full metadata (optimized: 2 queries instead of N+1)
         let sensors = self
-            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only)
+            .find_sensors_by_matchers(&name_matchers, &label_matchers, numeric_only, None)
             .await?;
 
         if sensors.is_empty() {
@@ -908,6 +933,44 @@ impl StorageInstance for PostgresStorage {
             .collect();
 
         Ok(results)
+    }
+
+    async fn query_selector(
+        &self,
+        matchers: &[super::LabelMatcher],
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+        numeric_only: bool,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<super::SelectorRead> {
+        crate::storage::selector::read_selector_in_bulk(
+            self,
+            matchers,
+            start_time,
+            end_time,
+            numeric_only,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
+    async fn query_selector_aggregated(
+        &self,
+        matchers: &[super::LabelMatcher],
+        options: &super::SensorDataQueryOptions,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<super::SelectorRead> {
+        crate::storage::selector::read_aggregated_selector_in_bulk(
+            self,
+            matchers,
+            options,
+            max_series,
+            max_samples,
+        )
+        .await
     }
 
     /// Health check for PostgreSQL storage
@@ -1002,30 +1065,6 @@ impl StorageInstance for PostgresStorage {
             .await
             .context("Failed to commit test data cleanup transaction")?;
 
-        // Step 5: Clear all cached function caches
-        // The cached macro generates cache variables named after the function in uppercase
-        use cached::Cached;
-        postgresql_utilities::GET_LABEL_NAME_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        postgresql_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        postgresql_utilities::GET_UNIT_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        postgresql_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
-            .write()
-            .await
-            .cache_clear();
-        postgresql_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-
         Ok(())
     }
 }
@@ -1033,36 +1072,60 @@ impl StorageInstance for PostgresStorage {
 impl PostgresStorage {
     async fn publish_once(&self, batch: &Batch) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
+        let sensors: Vec<&crate::datamodel::Sensor> = batch
+            .sensors
+            .iter()
+            .map(|single_sensor_batch| single_sensor_batch.sensor.as_ref())
+            .collect();
+        let sensor_ids = register_sensors(&mut transaction, &sensors).await?;
+
+        let mut guards = Vec::with_capacity(batch.sensors.len());
         for single_sensor_batch in batch.sensors.as_ref() {
-            self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
+            guards.push((
+                sensor_ids[&single_sensor_batch.sensor.uuid],
+                single_sensor_batch.samples.read().await,
+            ));
+        }
+        let samples: Vec<(i64, &TypedSamples)> = guards
+            .iter()
+            .map(|(sensor_id, guard)| (*sensor_id, &**guard))
+            .collect();
+
+        // The ids of all the distinct strings of the batch, then all the samples, in bulk
+        let strings: std::collections::BTreeSet<&str> = samples
+            .iter()
+            .filter_map(|(_, samples)| match samples {
+                TypedSamples::String(values) => Some(values),
+                _ => None,
+            })
+            .flatten()
+            .map(|sample| sample.value.as_str())
+            .collect();
+        let string_ids = ensure_string_ids(&mut transaction, strings).await?;
+
+        publish_numeric_samples(&mut transaction, &samples).await?;
+        publish_string_samples(&mut transaction, &samples, &string_ids).await?;
+        for (sensor_id, samples) in samples {
+            self.publish_other_values(&mut transaction, sensor_id, samples)
                 .await?;
         }
         transaction.commit().await?;
         Ok(())
     }
 
-    async fn publish_single_sensor_batch(
+    /// The types that are not written in bulk: booleans, locations, json and blobs. The numeric
+    /// types and the strings were written by `publish_numeric_samples` and `publish_string_samples`.
+    async fn publish_other_values(
         &self,
         transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        single_sensor_batch: &crate::datamodel::batch::SingleSensorBatch,
+        sensor_id: i64,
+        samples: &TypedSamples,
     ) -> Result<()> {
-        let sensor_id =
-            get_sensor_id_or_create_sensor(transaction, &single_sensor_batch.sensor).await?;
-
-        let samples_guard = single_sensor_batch.samples.read().await;
-        match &*samples_guard {
-            TypedSamples::Integer(values) => {
-                publish_integer_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::Numeric(values) => {
-                publish_numeric_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::Float(values) => {
-                publish_float_values(transaction, sensor_id, values).await?;
-            }
-            TypedSamples::String(values) => {
-                publish_string_values(transaction, sensor_id, values).await?;
-            }
+        match samples {
+            TypedSamples::Integer(_)
+            | TypedSamples::Numeric(_)
+            | TypedSamples::Float(_)
+            | TypedSamples::String(_) => {}
             TypedSamples::Boolean(values) => {
                 publish_boolean_values(transaction, sensor_id, values).await?;
             }

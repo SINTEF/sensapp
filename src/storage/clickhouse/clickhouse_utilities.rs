@@ -1,22 +1,33 @@
 use crate::datamodel::SensAppDateTime;
-use crate::datamodel::{SensorType, sensapp_datetime::SensAppDateTimeExt, unit::Unit};
+use crate::datamodel::{Sensor, sensapp_datetime::SensAppDateTimeExt, unit::Unit};
 use crate::storage::StorageError;
 use anyhow::Result;
 use clickhouse::Row;
 use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 pub const CLICKHOUSE_NUMERIC_SCALE: u32 = 8;
 
-/// Convert UUID to UInt64 using a deterministic hash function
-/// We use the standard library's DefaultHasher which is typically xxHash64
+/// Convert a UUID to the `UInt64` key used by every ClickHouse table.
+///
+/// The ids are stored, so this function is part of the on-disk format and must never change:
+/// the XOR of the two big-endian 64-bit halves of the UUID. Sensor UUIDs are hashes, so the
+/// result is uniformly distributed. Do not use `std`'s `DefaultHasher` here, its algorithm is
+/// explicitly allowed to change between Rust releases, which would orphan every stored sample.
 pub fn uuid_to_sensor_id(uuid: &Uuid) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    uuid.hash(&mut hasher);
-    hasher.finish()
+    let value = uuid.as_u128();
+    ((value >> 64) as u64) ^ (value as u64)
+}
+
+/// Id of a unit in the `units` table: the first 8 bytes of the BLAKE3 hash of its name,
+/// read as a little-endian integer. Part of the on-disk format, like [`uuid_to_sensor_id`].
+pub fn unit_name_to_id(name: &str) -> u64 {
+    let hash = blake3::hash(name.as_bytes());
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&hash.as_bytes()[..8]);
+    u64::from_le_bytes(bytes)
 }
 
 /// Convert SensAppDateTime to microseconds timestamp - using common implementation
@@ -44,36 +55,133 @@ pub fn decimal_from_clickhouse_raw(raw: i128) -> Decimal {
     Decimal::from_i128_with_scale(raw, CLICKHOUSE_NUMERIC_SCALE)
 }
 
-/// Get sensor_id for a given UUID, creating the sensor if it doesn't exist
-pub async fn get_sensor_id_or_create_sensor(
+/// Ids sent to ClickHouse in one query: a few thousand keeps the statement small.
+const ID_LOOKUP_CHUNK: usize = 2000;
+
+/// The ids among `ids` that exist in `table`, with one query per chunk of ids.
+async fn existing_ids(
     client: &clickhouse::Client,
-    uuid: &Uuid,
-    name: &str,
-    sensor_type: &SensorType,
-    unit: Option<&Unit>,
-) -> Result<u64> {
-    let sensor_id = uuid_to_sensor_id(uuid);
+    table: &str,
+    id_column: &str,
+    ids: &[u64],
+) -> Result<HashSet<u64>> {
+    let mut existing = HashSet::new();
+    for chunk in ids.chunks(ID_LOOKUP_CHUNK) {
+        let mut cursor = client
+            .query(&format!(
+                "SELECT {id_column} FROM {table} WHERE has(?, {id_column})"
+            ))
+            .bind(chunk)
+            .fetch::<u64>()
+            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        while let Some(id) = cursor.next().await? {
+            existing.insert(id);
+        }
+    }
+    Ok(existing)
+}
 
-    // First, try to find existing sensor
-    let existing_query = "SELECT sensor_id FROM sensors WHERE sensor_id = ? LIMIT 1";
-    let mut cursor = client
-        .query(existing_query)
-        .bind(sensor_id)
-        .fetch::<u64>()
-        .map_err(|e| StorageError::invalid_data_format(&e.to_string(), Some(*uuid), Some(name)))?;
+/// Write `rows` to `table` with a single INSERT. Nothing is sent for an empty slice.
+async fn insert_rows<R>(client: &clickhouse::Client, table: &str, rows: &[R]) -> Result<()>
+where
+    R: clickhouse::RowOwned + clickhouse::RowWrite,
+{
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let mut insert = client
+        .insert::<R>(table)
+        .await
+        .map_err(|e| map_clickhouse_error(e, None, None))?;
+    for row in rows {
+        insert
+            .write(row)
+            .await
+            .map_err(|e| map_clickhouse_error(e, None, None))?;
+    }
+    insert
+        .end()
+        .await
+        .map_err(|e| map_clickhouse_error(e, None, None))?;
+    Ok(())
+}
 
-    if cursor.next().await?.is_some() {
-        return Ok(sensor_id);
+/// Make sure every sensor of a batch exists, with a handful of statements whatever the number
+/// of sensors: one lookup, then one INSERT for the new units, one for their labels and one for
+/// the new sensors. A Prometheus request carries thousands of series: doing this sensor by
+/// sensor took 4 ms per series for series that already existed, and 14 ms for new ones.
+///
+/// The sensor rows go last: a sensor row is what makes a sensor visible, so a failure in
+/// between leaves no sensor without its labels, and the retry starts again from here. Writers
+/// that register the same new sensor at the same time both insert it, which the
+/// `ReplacingMergeTree` tables collapse.
+///
+/// Labels are written only for new sensors: a sensor UUID is derived from its name, type, unit
+/// and labels, so they cannot change afterwards.
+pub async fn register_sensors(client: &clickhouse::Client, sensors: &[&Sensor]) -> Result<()> {
+    let mut by_id: HashMap<u64, &Sensor> = HashMap::with_capacity(sensors.len());
+    for sensor in sensors {
+        by_id
+            .entry(uuid_to_sensor_id(&sensor.uuid))
+            .or_insert(sensor);
+    }
+    let ids: Vec<u64> = by_id.keys().copied().collect();
+    let existing = existing_ids(client, "sensors", "sensor_id", &ids).await?;
+    let new_sensors: Vec<(u64, &Sensor)> = by_id
+        .into_iter()
+        .filter(|(sensor_id, _)| !existing.contains(sensor_id))
+        .collect();
+    if new_sensors.is_empty() {
+        return Ok(());
     }
 
-    // Sensor doesn't exist, create it
-    let unit_id = if let Some(unit) = unit {
-        Some(get_or_create_unit(client, unit).await?)
-    } else {
-        None
-    };
+    // Units
+    let mut units: HashMap<u64, &Unit> = HashMap::new();
+    for (_, sensor) in &new_sensors {
+        if let Some(unit) = &sensor.unit {
+            units.entry(unit_name_to_id(&unit.name)).or_insert(unit);
+        }
+    }
+    let unit_ids: Vec<u64> = units.keys().copied().collect();
+    let existing_units = existing_ids(client, "units", "id", &unit_ids).await?;
 
-    // Define Row struct for sensor insertion
+    #[derive(Row, Serialize)]
+    struct UnitRow {
+        id: u64,
+        name: String,
+        description: Option<String>,
+    }
+    let unit_rows: Vec<UnitRow> = units
+        .iter()
+        .filter(|(id, _)| !existing_units.contains(id))
+        .map(|(id, unit)| UnitRow {
+            id: *id,
+            name: unit.name.clone(),
+            description: unit.description.clone(),
+        })
+        .collect();
+    insert_rows(client, "units", &unit_rows).await?;
+
+    // Labels
+    #[derive(Row, Serialize)]
+    struct LabelRow {
+        sensor_id: u64,
+        name: String,
+        description: Option<String>,
+    }
+    let label_rows: Vec<LabelRow> = new_sensors
+        .iter()
+        .flat_map(|(sensor_id, sensor)| {
+            sensor.labels.iter().map(|(name, description)| LabelRow {
+                sensor_id: *sensor_id,
+                name: name.clone(),
+                description: Some(description.clone()),
+            })
+        })
+        .collect();
+    insert_rows(client, "labels", &label_rows).await?;
+
+    // Sensors, last
     #[derive(Row, Serialize)]
     struct SensorRow {
         sensor_id: u64,
@@ -83,86 +191,66 @@ pub async fn get_sensor_id_or_create_sensor(
         r#type: String,
         unit: Option<u64>,
     }
-
-    let type_str = sensor_type.to_string();
-    let sensor_row = SensorRow {
-        sensor_id,
-        uuid: *uuid,
-        name: name.to_string(),
-        r#type: type_str,
-        unit: unit_id,
-    };
-
-    let mut insert = client
-        .insert::<SensorRow>("sensors")
-        .await
-        .map_err(|e| StorageError::invalid_data_format(&e.to_string(), Some(*uuid), Some(name)))?;
-
-    insert
-        .write(&sensor_row)
-        .await
-        .map_err(|e| StorageError::invalid_data_format(&e.to_string(), Some(*uuid), Some(name)))?;
-
-    insert
-        .end()
-        .await
-        .map_err(|e| StorageError::invalid_data_format(&e.to_string(), Some(*uuid), Some(name)))?;
-
-    Ok(sensor_id)
+    let sensor_rows: Vec<SensorRow> = new_sensors
+        .iter()
+        .map(|(sensor_id, sensor)| SensorRow {
+            sensor_id: *sensor_id,
+            uuid: sensor.uuid,
+            name: sensor.name.clone(),
+            r#type: sensor.sensor_type.to_string(),
+            unit: sensor.unit.as_ref().map(|unit| unit_name_to_id(&unit.name)),
+        })
+        .collect();
+    insert_rows(client, "sensors", &sensor_rows).await
 }
 
-/// Get or create a unit in the units table
-async fn get_or_create_unit(client: &clickhouse::Client, unit: &Unit) -> Result<u64> {
-    // Use hash of unit name as ID for consistency
-    let unit_id = {
-        let mut hasher = DefaultHasher::new();
-        unit.name.hash(&mut hasher);
-        hasher.finish()
-    };
+/// ClickHouse server error codes that mean "try again later" rather than "this request is
+/// wrong": timeouts, network failures, overload and read-only or unavailable replicas.
+const TRANSIENT_SERVER_ERROR_CODES: [u32; 12] = [
+    159, // TIMEOUT_EXCEEDED
+    164, // READONLY
+    202, // TOO_MANY_SIMULTANEOUS_QUERIES
+    203, // NO_FREE_CONNECTION
+    209, // SOCKET_TIMEOUT
+    210, // NETWORK_ERROR
+    225, // NO_ZOOKEEPER
+    241, // MEMORY_LIMIT_EXCEEDED
+    242, // TABLE_IS_READ_ONLY
+    252, // TOO_MANY_PARTS: merges cannot keep up with the inserts
+    285, // TOO_FEW_LIVE_REPLICAS
+    319, // UNKNOWN_STATUS_OF_INSERT
+];
 
-    // Check if unit exists
-    let existing_query = "SELECT id FROM units WHERE id = ? LIMIT 1";
-    let mut cursor = client
-        .query(existing_query)
-        .bind(unit_id)
-        .fetch::<u64>()
-        .map_err(|e| StorageError::invalid_data_format(&e.to_string(), None, None))?;
+/// The code of a ClickHouse exception message: `Code: 252. DB::Exception: ...`.
+fn server_error_code(message: &str) -> Option<u32> {
+    let digits = message.trim_start().strip_prefix("Code: ")?;
+    let end = digits.find(|c: char| !c.is_ascii_digit())?;
+    digits[..end].parse().ok()
+}
 
-    if cursor.next().await?.is_some() {
-        return Ok(unit_id);
+/// Sort an error of the ClickHouse client into the categories SensApp reports over HTTP.
+///
+/// Network failures, timeouts and overload are `Unavailable` (503, the client may retry).
+/// Everything else the server rejects is a failure on our side (500): SensApp builds its
+/// own statements and rows, so ClickHouse refusing them is never the caller's data format.
+pub fn classify_clickhouse_error(error: &clickhouse::error::Error) -> StorageError {
+    use clickhouse::error::Error;
+
+    match error {
+        Error::Network(_) | Error::TimedOut | Error::Other(_) => {
+            StorageError::Unavailable(error.to_string())
+        }
+        Error::BadResponse(message)
+            if server_error_code(message)
+                .is_some_and(|code| TRANSIENT_SERVER_ERROR_CODES.contains(&code)) =>
+        {
+            StorageError::Unavailable(message.clone())
+        }
+        other => StorageError::OperationFailed {
+            operation: "ClickHouse request".to_string(),
+            details: other.to_string(),
+        },
     }
-
-    // Define Row struct for unit insertion
-    #[derive(Row, Serialize)]
-    struct UnitRow {
-        id: u64,
-        name: String,
-        description: Option<String>,
-    }
-
-    let unit_row = UnitRow {
-        id: unit_id,
-        name: unit.name.clone(),
-        description: unit.description.clone(),
-    };
-
-    // Unit doesn't exist, create it
-    let mut insert = client
-        .insert::<UnitRow>("units")
-        .await
-        .map_err(|e| StorageError::invalid_data_format(&e.to_string(), None, None))?;
-
-    insert
-        .write(&unit_row)
-        .await
-        .map_err(|e| StorageError::invalid_data_format(&e.to_string(), None, None))?;
-
-    insert
-        .end()
-        .await
-        .map_err(|e| StorageError::invalid_data_format(&e.to_string(), None, None))?;
-
-    Ok(unit_id)
 }
 
 /// Convert ClickHouse error to StorageError with context
@@ -171,7 +259,20 @@ pub fn map_clickhouse_error(
     uuid: Option<Uuid>,
     name: Option<&str>,
 ) -> anyhow::Error {
-    StorageError::invalid_data_format(&error.to_string(), uuid, name).into()
+    match classify_clickhouse_error(&error) {
+        StorageError::OperationFailed { details, .. } => StorageError::OperationFailed {
+            operation: format!(
+                "ClickHouse request for sensor {}",
+                name.map_or_else(
+                    || uuid.map_or_else(|| "unknown".to_string(), |u| u.to_string()),
+                    str::to_string
+                )
+            ),
+            details,
+        }
+        .into(),
+        classified => classified.into(),
+    }
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -206,4 +307,102 @@ pub mod test_utils {
 
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clickhouse::error::Error;
+
+    fn bad_response(code: u32) -> Error {
+        Error::BadResponse(format!(
+            "Code: {code}. DB::Exception: something (SOME_NAME)"
+        ))
+    }
+
+    #[test]
+    fn server_error_codes_are_read_from_the_message() {
+        assert_eq!(server_error_code("Code: 252. DB::Exception: x"), Some(252));
+        assert_eq!(server_error_code("  Code: 62. DB::Exception"), Some(62));
+        assert_eq!(server_error_code("<html>Bad Gateway</html>"), None);
+        assert_eq!(server_error_code("Code: abc."), None);
+    }
+
+    #[test]
+    fn outages_timeouts_and_overload_are_unavailable() {
+        assert!(matches!(
+            classify_clickhouse_error(&Error::TimedOut),
+            StorageError::Unavailable(_)
+        ));
+        assert!(matches!(
+            classify_clickhouse_error(&Error::Network("connection refused".into())),
+            StorageError::Unavailable(_)
+        ));
+        for code in TRANSIENT_SERVER_ERROR_CODES {
+            assert!(
+                matches!(
+                    classify_clickhouse_error(&bad_response(code)),
+                    StorageError::Unavailable(_)
+                ),
+                "code {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn other_server_errors_are_server_side_failures_not_bad_requests() {
+        // 62 SYNTAX_ERROR, 60 UNKNOWN_TABLE, 516 AUTHENTICATION_FAILED
+        for code in [62, 60, 516] {
+            assert!(
+                matches!(
+                    classify_clickhouse_error(&bad_response(code)),
+                    StorageError::OperationFailed { .. }
+                ),
+                "code {code}"
+            );
+        }
+        assert!(matches!(
+            classify_clickhouse_error(&Error::NotEnoughData),
+            StorageError::OperationFailed { .. }
+        ));
+    }
+
+    #[test]
+    fn sensor_context_is_kept_for_failures() {
+        let error = map_clickhouse_error(bad_response(62), None, Some("temperature"));
+        assert!(format!("{error}").contains("temperature"), "{error}");
+    }
+
+    // These values are stored in ClickHouse. If one of these tests fails, the on-disk format
+    // changed: existing data would no longer be found.
+    #[test]
+    fn sensor_ids_are_pinned() {
+        let id = |uuid: &str| uuid_to_sensor_id(&Uuid::parse_str(uuid).unwrap());
+        assert_eq!(
+            id("00000000-0000-4000-8000-000000000001"),
+            0x8000_0000_0000_4001
+        );
+        assert_eq!(id("00000000-0000-0000-0000-000000000000"), 0);
+        assert_eq!(id("ffffffff-ffff-ffff-ffff-ffffffffffff"), 0);
+        assert_eq!(
+            id("0123456789abcdeffedcba9876543210"),
+            0xffff_ffff_ffff_ffff
+        );
+        assert_eq!(
+            id("9d87123d-9b47-466d-9eda-001c2ecf9c54"),
+            0x9d87_123d_9b47_466d ^ 0x9eda_001c_2ecf_9c54
+        );
+    }
+
+    #[test]
+    fn unit_ids_are_pinned() {
+        assert_eq!(unit_name_to_id("°C"), UNIT_CELSIUS_ID);
+        assert_eq!(unit_name_to_id(""), UNIT_EMPTY_ID);
+        assert_ne!(unit_name_to_id("m"), unit_name_to_id("s"));
+    }
+
+    const UNIT_CELSIUS_ID: u64 = 14_058_937_354_730_164_320;
+    // First 8 bytes of the published BLAKE3 test vector for empty input
+    // (af1349b9f5f9a1a6...), read as little-endian.
+    const UNIT_EMPTY_ID: u64 = 0xa6a1_f9f5_b949_13af;
 }

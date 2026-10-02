@@ -8,6 +8,8 @@ Each sensor contains only one type of data. If your sensor measures more than on
 
 Sensors can have labels attached to them, which are key-value pairs. Those are not tracked over time. They are used to add metadata to the sensors. If you wish to track labels, you should create a sensor for each label and use the sensor value to store the label value.
 
+Labels are part of the identity of a sensor. The UUID that SensApp derives from a name, a type, a unit and labels covers them, so a Prometheus or InfluxDB series whose label changes is another sensor, with its own history. The labels of a sensor are written when it is created and never updated: publishing again a UUID that exists, which only a client that chooses its own UUIDs can do (an Arrow stream, SenML), adds the samples and keeps the labels it was created with. This is the same on every backend.
+
 SensApp distinguises between:
 
  - **Integer** values, which are 64 bits integers.
@@ -121,6 +123,27 @@ erDiagram
     SENSORS ||--o{ BLOB_VALUES : ""
 
 ```
+
+## Label Selectors
+
+Selectors (`/api/v1/query`, `/series?selector=`, Prometheus remote read) use the Prometheus operators `=`, `!=`, `=~` and `!~` on labels, and on the metric name with `__name__`.
+
+A regular expression matches the **whole** value, as in Prometheus: `region=~"eu"` selects the series whose region is exactly `eu`, not `eu-west` nor `europe`. Use `eu.*` for a prefix, `.*west.*` for a part, and `eu|us` for alternatives (the alternation is anchored as a whole). SensApp anchors the pattern as `^(?:pattern)$` when it reads the selector, so every backend behaves the same. Case-insensitive matching works with a leading flag, `region=~"(?i)EU.*"`.
+
+### Known differences from Prometheus
+
+In Prometheus a series without a label behaves as if the label were the empty string. SensApp does not do that for the matchers that select series: a series without the label is only selected by the negative operators `!=` and `!~` (which is the Prometheus result when the value is not empty). Checked on SQLite; the other SQL backends use the same query shape. For a label `zone` that some series lack:
+
+| Selector | In Prometheus | In SensApp |
+| --- | --- | --- |
+| `zone=""` | the series without `zone` | nothing |
+| `zone!=""` | only the series that have a non-empty `zone` | also the series without `zone` |
+| `zone=~".*"`, `zone=~"a\|"` (a pattern that matches the empty string) | also the series without `zone` | only the series that have `zone` |
+| `zone!~".*"` | nothing | the series without `zone` |
+
+`zone=~".+"` (has a `zone`) gives the Prometheus result, and is the reliable way to ask for "has this label". There is currently no way to select the series that lack a label. See `ideas/prometheus-missing-label-semantics.md`.
+
+Before 2 October 2026 the patterns were not anchored on any backend and matched anywhere in the value, so `region=~"eu"` also selected `eu-west`: selectors written for that behaviour need a `.*` on each side.
 
 ## Virtual Composite Sensors
 

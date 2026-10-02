@@ -23,17 +23,14 @@ impl Default for Batch {
 }
 
 impl Batch {
-    #[allow(dead_code)]
     pub fn new(sensors: SensAppVec<SingleSensorBatch>) -> Self {
         Self { sensors }
     }
 
-    #[allow(dead_code)]
     pub async fn is_empty(&self) -> bool {
         self.len().await == 0
     }
 
-    #[allow(dead_code)]
     pub async fn len(&self) -> usize {
         let sensors_len = self.sensors.len();
         if sensors_len == 0 {
@@ -93,7 +90,6 @@ impl SingleSensorBatch {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn is_empty(&self) -> bool {
         self.len().await == 0
     }

@@ -64,6 +64,7 @@ tower-http = { version = "0.6", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.18", features = ["serde"] }
+fastrand = "2"
 csv-async = "1.3"
 rust_decimal = "1.39"
 geo = "0.32"
@@ -107,7 +108,11 @@ clickhouse = { version = "0.15", features = [
   "uuid",
   "time",
   "inserter",
-  "rustls-tls",
+  # TLS with the system trust store (it honours SSL_CERT_FILE and SSL_CERT_DIR), so that a
+  # ClickHouse behind a private CA can be reached. The bundled Mozilla roots of the
+  # `rustls-tls` feature cannot be extended.
+  "rustls-tls-aws-lc",
+  "rustls-tls-native-roots",
 ], optional = true }
 jsonwebtoken = { version = "11", features = ["rust_crypto"] }
 rustls = "0.23"

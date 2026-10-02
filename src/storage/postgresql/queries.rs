@@ -622,56 +622,58 @@ impl PostgresStorage {
     }
 }
 
-fn integer_bucketed_cte() -> &'static str {
-    r#"
+/// The buckets of the samples of one sensor (`WHERE sensor_id = $1`) or of many
+/// (`WHERE sensor_id = ANY($1)`, with the sensor in the rows), $2 and $3 bounding the time, $4 the
+/// step in milliseconds and $5 the origin of the buckets in microseconds.
+pub(super) fn bucketed_cte(table: &str, many_sensors: bool) -> String {
+    let (sensor_column, sensor_filter) = if many_sensors {
+        ("sensor_id,", "sensor_id = ANY($1)")
+    } else {
+        ("", "sensor_id = $1")
+    };
+    format!(
+        r#"
     WITH bucketed AS (
         SELECT
+            {sensor_column}
             (EXTRACT(EPOCH FROM date_bin(($4::bigint * interval '1 millisecond'), to_timestamp(timestamp_us / 1000000.0), to_timestamp($5 / 1000000.0))) * 1000000)::bigint AS bucket_us,
             timestamp_us,
             value
-        FROM integer_values
-        WHERE sensor_id = $1
+        FROM {table}
+        WHERE {sensor_filter}
         AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
         AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
     )
     "#
+    )
 }
 
-fn float_bucketed_cte() -> &'static str {
-    r#"
-    WITH bucketed AS (
-        SELECT
-            (EXTRACT(EPOCH FROM date_bin(($4::bigint * interval '1 millisecond'), to_timestamp(timestamp_us / 1000000.0), to_timestamp($5 / 1000000.0))) * 1000000)::bigint AS bucket_us,
-            timestamp_us,
-            value
-        FROM float_values
-        WHERE sensor_id = $1
-        AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-        AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
-    )
-    "#
+fn integer_bucketed_cte() -> String {
+    bucketed_cte("integer_values", false)
 }
 
-fn numeric_bucketed_cte() -> &'static str {
-    r#"
-    WITH bucketed AS (
-        SELECT
-            (EXTRACT(EPOCH FROM date_bin(($4::bigint * interval '1 millisecond'), to_timestamp(timestamp_us / 1000000.0), to_timestamp($5 / 1000000.0))) * 1000000)::bigint AS bucket_us,
-            timestamp_us,
-            value
-        FROM numeric_values
-        WHERE sensor_id = $1
-        AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-        AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
-    )
-    "#
+fn float_bucketed_cte() -> String {
+    bucketed_cte("float_values", false)
+}
+
+fn numeric_bucketed_cte() -> String {
+    bucketed_cte("numeric_values", false)
 }
 
 fn integer_group_by_clause() -> &'static str {
-    "FROM bucketed GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT $6"
+    group_by_clause(false)
 }
 
-fn integer_aggregate_expression(aggregation: Aggregation) -> &'static str {
+/// Group by bucket (and sensor), ordered, $6 limiting the number of buckets in total.
+pub(super) fn group_by_clause(many_sensors: bool) -> &'static str {
+    if many_sensors {
+        "FROM bucketed GROUP BY sensor_id, bucket_us ORDER BY sensor_id, bucket_us ASC LIMIT $6"
+    } else {
+        "FROM bucketed GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT $6"
+    }
+}
+
+pub(super) fn integer_aggregate_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Min => "MIN(value)",
         Aggregation::Max => "MAX(value)",
@@ -682,7 +684,7 @@ fn integer_aggregate_expression(aggregation: Aggregation) -> &'static str {
     }
 }
 
-fn float_aggregate_expression(aggregation: Aggregation) -> &'static str {
+pub(super) fn float_aggregate_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Avg => "AVG(value)",
         Aggregation::Min => "MIN(value)",
@@ -694,7 +696,7 @@ fn float_aggregate_expression(aggregation: Aggregation) -> &'static str {
     }
 }
 
-fn numeric_aggregate_expression(aggregation: Aggregation) -> &'static str {
+pub(super) fn numeric_aggregate_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Avg => "AVG(value)",
         Aggregation::Min => "MIN(value)",

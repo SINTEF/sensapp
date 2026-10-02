@@ -181,6 +181,12 @@ impl FromStr for Precision {
         (status = 204, description = "No Content"),
         (status = 400, description = "Bad Request", body = AppError),
         (status = 500, description = "Internal Server Error", body = AppError),
+        (
+            status = 503,
+            description = "The storage backend is unavailable, or SensApp is busy writing and sheds the write. A `Retry-After` header (seconds, randomised) means the request was not processed at all and can be sent again after that delay",
+            headers(("Retry-After" = u32, description = "Seconds to wait before sending the write again"))
+        ),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )
 )]
 #[debug_handler]
