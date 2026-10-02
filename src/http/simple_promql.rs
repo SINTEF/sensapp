@@ -23,7 +23,7 @@ use crate::http::crud::promql_duration;
 use crate::http::state::HttpServerState;
 use crate::storage::Aggregation;
 use crate::storage::common::datetime_to_micros;
-use crate::storage::cross_series::{CrossSeriesQuery, Grouping, aggregate_across_series};
+use crate::storage::cross_series::{CrossSeriesQuery, Grouping};
 use crate::storage::query::{LabelMatcher, MatcherType};
 use axum::extract::{Query, State};
 use axum::response::Response;
@@ -286,26 +286,11 @@ pub async fn simple_promql_query(
                 None => None,
             };
 
-        // Prometheus series are numeric, so an aggregation only considers numeric sensors
-        let results = crate::http::limits::query_selector_bounded(
-            &state.storage,
-            &parsed.matchers,
-            parsed.start_time,
-            parsed.end_time,
-            parsed.aggregate.is_some(),
-        )
-        .await?;
-
-        let series = results.len();
-        let samples = results
-            .iter()
-            .map(|sensor_data| sensor_data.samples.len())
-            .sum();
-
-        let results = match parsed.aggregate {
-            Some(spec) => aggregate_across_series(
-                results,
-                &CrossSeriesQuery {
+        let (results, series, samples) = match parsed.aggregate {
+            // Prometheus series are numeric, so an aggregation only considers numeric sensors.
+            // The database aggregates the raw samples, only the buckets come back.
+            Some(spec) => {
+                let query = CrossSeriesQuery {
                     aggregation: spec.aggregation,
                     grouping: spec.grouping,
                     step_us,
@@ -314,10 +299,33 @@ pub async fn simple_promql_query(
                         .as_ref()
                         .map(datetime_to_micros)
                         .unwrap_or(0),
-                },
-            )
-            .map_err(AppError::bad_request)?,
-            None => results,
+                };
+                let (results, stats) = crate::http::limits::query_cross_series_bounded(
+                    &state.storage,
+                    &parsed.matchers,
+                    parsed.start_time,
+                    parsed.end_time,
+                    &query,
+                )
+                .await?;
+                (results, stats.series, stats.buckets)
+            }
+            None => {
+                let results = crate::http::limits::query_selector_bounded(
+                    &state.storage,
+                    &parsed.matchers,
+                    parsed.start_time,
+                    parsed.end_time,
+                    false,
+                )
+                .await?;
+                let series = results.len();
+                let samples = results
+                    .iter()
+                    .map(|sensor_data| sensor_data.samples.len())
+                    .sum();
+                (results, series, samples)
+            }
         };
 
         let format = match query.format.as_deref() {

@@ -17,7 +17,7 @@ commit per point.
 | M3 | ClickHouse reads without `FINAL`: one sentence in `CLICKHOUSE.md` | Premise wrong (value tables are `MergeTree`), sentence still useful | done |
 | M4 | ClickHouse `deduplicate_samples()` count under load | Confirmed for ClickHouse only; docs were wrong both ways | done |
 | M5 | `StdDev` / `Variance` removed | False premise: they never existed. Nothing breaks | done (no change) |
-| M6 | `MAX_SELECTOR_SERIES = 256` blocks aggregated selectors | Maintainer: major if true | |
+| M6 | `MAX_SELECTOR_SERIES = 256` blocks aggregated selectors | Confirmed. Maintainer chose the pushdown | done |
 | M7 | SQLite aggregated path: per-series `LIMIT/OFFSET` | Premise wrong (global `LIMIT`, no `OFFSET`); test module note added | done |
 | M8 | `batch_query_samples` global `LIMIT` comment | Premise inverted: the limit is per sensor. Comments and a multi-sensor test added | done |
 | L1 | Dedicated counter for shed requests | Maintainer: true | done |
@@ -216,3 +216,12 @@ commit per point.
 - Decision: no `Uuid -> (sensor_id, labels_hash)` LRU. It would win back part of 0.6 ms and bring back what the
   branch removed on purpose: a stale id after a rollback or a deletion by another instance. Revisit if
   somebody ingests mostly tiny requests at thousands per second. The script is the measure to repeat.
+
+### M6. The 256-series cap on cross-series aggregations
+
+- Confirmed, and a higher series cap alone would not have fixed it: the aggregation fetched raw samples, so the
+  100 000-sample budget also bound (300 series over 24 hours at one sample a minute are 432 000 samples).
+- Maintainer decision: push the aggregation down, by reusing the bulk aggregated reader. Delivered and measured
+  in `done/cross-series-aggregation-pushdown.md` (moved from `ideas/`).
+- Found on the way: a pre-existing ClickHouse bug that counted the samples outside of a window in aggregated
+  reads, fixed in its own commit.

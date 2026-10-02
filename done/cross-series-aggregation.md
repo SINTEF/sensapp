@@ -14,13 +14,12 @@ Answer "average temperature across a room" without a full PromQL engine: let `GE
 
 ## Known Limits
 
-- Raw samples are fetched, so the existing selector limits apply (256 series, 100k samples in total). Over the limit the request fails and asks to narrow the range. Documented in `README.md` and `docs/HTTP_LIMITS.md`.
+- Raw samples were fetched, so the selector limits applied (256 series, 100k samples in total). Superseded: the aggregation is pushed down to the database, see `done/cross-series-aggregation-pushdown.md` and `docs/HTTP_LIMITS.md`.
 - `first` and `last` are not defined across series and are not offered.
 
 ## Follow-Ups
 
-- Push down the per-series work to the database when the sample limit bites (nice to have, not needed yet).
-- Tracked as `ideas/cross-series-aggregation-pushdown.md`.
+- Done: `done/cross-series-aggregation-pushdown.md`.
 - See `ideas/promql-rate-and-arithmetic.md` and `ideas/composite-sensors.md` for what was deliberately not built.
 
 ## Validation

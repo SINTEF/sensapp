@@ -10,6 +10,7 @@ mod arrow_integration;
 mod batched_inserts;
 mod clickhouse_http_lifecycle;
 mod clickhouse_integration;
+mod cross_series_reads;
 mod crud_dcat_api;
 mod data_lifecycle;
 mod datamodel;
