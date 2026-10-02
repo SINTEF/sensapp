@@ -6,7 +6,10 @@
 //! - `batch_queries.rs`: Optimized batch query methods for multiple sensors
 //! - `matchers.rs`: Label matcher query building for Prometheus-style queries
 //! - `postgresql_publishers.rs`: Value publishing functions
-//! - `postgresql_utilities.rs`: Helper functions for sensor/label/unit creation
+//! - `selector.rs`: Bulk read of the series of a selector
+//!
+//! The registration of sensors (`storage::pg_sensor_registration`) and the dictionary of strings
+//! (`storage::pg_strings`) are shared with the TimescaleDB backend.
 
 use super::{
     DEFAULT_QUERY_LIMIT, SensorAvailabilitySummary, StorageError, StorageInstance,
@@ -35,9 +38,9 @@ mod queries;
 mod selector;
 
 pub mod postgresql_publishers;
-pub mod postgresql_utilities;
 
 use super::pg_sensor_registration::register_sensors;
+use super::pg_strings::ensure_string_ids;
 use postgresql_publishers::*;
 
 #[derive(Debug)]
@@ -1020,13 +1023,6 @@ impl StorageInstance for PostgresStorage {
             .await
             .context("Failed to commit test data cleanup transaction")?;
 
-        // Step 5: Clear the cache of string dictionary ids
-        use cached::Cached;
-        postgresql_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-
         Ok(())
     }
 }
@@ -1053,7 +1049,20 @@ impl PostgresStorage {
             .map(|(sensor_id, guard)| (*sensor_id, &**guard))
             .collect();
 
+        // The ids of all the distinct strings of the batch, then all the samples, in bulk
+        let strings: std::collections::BTreeSet<&str> = samples
+            .iter()
+            .filter_map(|(_, samples)| match samples {
+                TypedSamples::String(values) => Some(values),
+                _ => None,
+            })
+            .flatten()
+            .map(|sample| sample.value.as_str())
+            .collect();
+        let string_ids = ensure_string_ids(&mut transaction, strings).await?;
+
         publish_numeric_samples(&mut transaction, &samples).await?;
+        publish_string_samples(&mut transaction, &samples, &string_ids).await?;
         for (sensor_id, samples) in samples {
             self.publish_other_values(&mut transaction, sensor_id, samples)
                 .await?;
@@ -1062,8 +1071,8 @@ impl PostgresStorage {
         Ok(())
     }
 
-    /// The types that are not written in bulk: strings (dictionary), booleans, locations, json
-    /// and blobs. The numeric types were written by `publish_numeric_samples`.
+    /// The types that are not written in bulk: booleans, locations, json and blobs. The numeric
+    /// types and the strings were written by `publish_numeric_samples` and `publish_string_samples`.
     async fn publish_other_values(
         &self,
         transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -1071,10 +1080,10 @@ impl PostgresStorage {
         samples: &TypedSamples,
     ) -> Result<()> {
         match samples {
-            TypedSamples::Integer(_) | TypedSamples::Numeric(_) | TypedSamples::Float(_) => {}
-            TypedSamples::String(values) => {
-                publish_string_values(transaction, sensor_id, values).await?;
-            }
+            TypedSamples::Integer(_)
+            | TypedSamples::Numeric(_)
+            | TypedSamples::Float(_)
+            | TypedSamples::String(_) => {}
             TypedSamples::Boolean(values) => {
                 publish_boolean_values(transaction, sensor_id, values).await?;
             }

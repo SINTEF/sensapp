@@ -214,6 +214,8 @@ pub mod storage_factory;
 // Sensor registration shared by the backends that use PostgreSQL's SQL dialect and schema
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]
 pub mod pg_sensor_registration;
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+pub mod pg_strings;
 
 // Storage backends - conditionally compiled based on features
 #[cfg(feature = "postgres")]

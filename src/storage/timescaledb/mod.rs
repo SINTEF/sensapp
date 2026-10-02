@@ -1,9 +1,9 @@
 mod selector;
 pub mod timescaledb_publishers;
-pub mod timescaledb_utilities;
 
 use self::timescaledb_publishers::*;
 use super::pg_sensor_registration::register_sensors;
+use super::pg_strings::ensure_string_ids;
 use super::{
     Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT,
     SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
@@ -1419,13 +1419,6 @@ impl StorageInstance for TimeScaleDBStorage {
             .await
             .context("Failed to commit test data cleanup transaction")?;
 
-        // Step 5: Clear the cache of string dictionary ids
-        use cached::Cached;
-        timescaledb_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-
         Ok(())
     }
 }
@@ -1452,7 +1445,20 @@ impl TimeScaleDBStorage {
             .map(|(sensor_id, guard)| (*sensor_id, &**guard))
             .collect();
 
+        // The ids of all the distinct strings of the batch, then all the samples, in bulk
+        let strings: std::collections::BTreeSet<&str> = samples
+            .iter()
+            .filter_map(|(_, samples)| match samples {
+                TypedSamples::String(values) => Some(values),
+                _ => None,
+            })
+            .flatten()
+            .map(|sample| sample.value.as_str())
+            .collect();
+        let string_ids = ensure_string_ids(&mut transaction, strings).await?;
+
         publish_numeric_samples(&mut transaction, &samples).await?;
+        publish_string_samples(&mut transaction, &samples, &string_ids).await?;
         for (sensor_id, samples) in samples {
             self.publish_other_values(&mut transaction, sensor_id, samples)
                 .await?;
@@ -1461,8 +1467,8 @@ impl TimeScaleDBStorage {
         Ok(())
     }
 
-    /// The types that are not written in bulk: strings (dictionary), booleans, locations, json
-    /// and blobs. The numeric types were written by `publish_numeric_samples`.
+    /// The types that are not written in bulk: booleans, locations, json and blobs. The numeric
+    /// types and the strings were written by `publish_numeric_samples` and `publish_string_samples`.
     async fn publish_other_values(
         &self,
         transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -1470,10 +1476,10 @@ impl TimeScaleDBStorage {
         samples: &TypedSamples,
     ) -> Result<()> {
         match samples {
-            TypedSamples::Integer(_) | TypedSamples::Numeric(_) | TypedSamples::Float(_) => {}
-            TypedSamples::String(values) => {
-                publish_string_values(transaction, sensor_id, values).await?;
-            }
+            TypedSamples::Integer(_)
+            | TypedSamples::Numeric(_)
+            | TypedSamples::Float(_)
+            | TypedSamples::String(_) => {}
             TypedSamples::Boolean(values) => {
                 publish_boolean_values(transaction, sensor_id, values).await?;
             }

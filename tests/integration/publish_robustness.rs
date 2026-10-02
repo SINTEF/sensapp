@@ -332,3 +332,105 @@ async fn a_series_written_again_after_its_deletion_is_registered_again() -> Resu
     publish_one_sample(&storage, &sensor, 10).await?;
     assert_single_series_with_its_labels(&storage, &sensor, 1).await
 }
+
+/// Strings are stored through a dictionary on some backends: whatever their content, and however
+/// many series and requests share them, they must read back exactly.
+#[tokio::test]
+#[serial]
+async fn string_samples_round_trip_whatever_their_content() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let run = Uuid::new_v4();
+
+    let long = "long ".repeat(4_000);
+    let strings: Vec<String> = vec![
+        "plain".into(),
+        "".into(),
+        " leading and trailing ".into(),
+        "é ü ñ 日本語 🚀".into(),
+        "quote \" apostrophe ' backslash \\ percent % underscore _".into(),
+        "line\nbreak\ttab".into(),
+        "plain".into(), // repeated within a series
+        long,
+    ];
+
+    // Three series that share their strings, written in two requests
+    let sensors: Vec<Arc<Sensor>> = (0..3)
+        .map(|index| {
+            Sensor::new_without_uuid(
+                format!("strings_{run}_{index}"),
+                SensorType::String,
+                None,
+                None,
+            )
+            .map(Arc::new)
+        })
+        .collect::<Result<_, _>>()?;
+    for request in 0..2 {
+        let mut batch_builder = BatchBuilder::new()?;
+        for (index, sensor) in sensors.iter().enumerate() {
+            let samples: Vec<Sample<String>> = strings
+                .iter()
+                .enumerate()
+                .map(|(position, value)| Sample {
+                    datetime: hifitime::Epoch::from_unix_seconds(
+                        1_704_067_200.0 + (request * 100 + position) as f64 + index as f64 * 0.001,
+                    ),
+                    value: format!(
+                        "{value}{}",
+                        if request == 1 && position == 0 {
+                            "!"
+                        } else {
+                            ""
+                        }
+                    ),
+                })
+                .collect();
+            batch_builder
+                .add(sensor.clone(), TypedSamples::String(samples.into()))
+                .await?;
+        }
+        batch_builder.send_what_is_left(storage.clone()).await?;
+    }
+
+    for (index, sensor) in sensors.iter().enumerate() {
+        let data = storage
+            .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
+            .await?
+            .expect("the series should exist");
+        let TypedSamples::String(stored) = &data.samples else {
+            panic!("expected string samples");
+        };
+        let mut stored: Vec<(i64, String)> = stored
+            .iter()
+            .map(|sample| {
+                (
+                    (sample.datetime.to_unix_seconds() * 1e6).round() as i64,
+                    sample.value.clone(),
+                )
+            })
+            .collect();
+        stored.sort();
+        let mut expected: Vec<(i64, String)> = Vec::new();
+        for request in 0..2 {
+            for (position, value) in strings.iter().enumerate() {
+                let time =
+                    1_704_067_200.0 + (request * 100 + position) as f64 + index as f64 * 0.001;
+                let value = format!(
+                    "{value}{}",
+                    if request == 1 && position == 0 {
+                        "!"
+                    } else {
+                        ""
+                    }
+                );
+                expected.push(((time * 1e6).round() as i64, value));
+            }
+        }
+        expected.sort();
+        assert_eq!(stored.len(), expected.len(), "series {index}");
+        assert_eq!(stored, expected, "series {index}");
+    }
+    Ok(())
+}

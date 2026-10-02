@@ -1,10 +1,10 @@
-use super::timescaledb_utilities::get_string_value_id_or_create;
 use crate::datamodel::{
     Sample, TypedSamples, sensapp_datetime::sensapp_datetime_to_offset_datetime,
 };
 use anyhow::Result;
 use sqlx::types::time::OffsetDateTime;
 use sqlx::{Postgres, Transaction, prelude::*};
+use std::collections::HashMap;
 
 /*
 Each function sends the whole slice of samples as one statement, by binding
@@ -112,27 +112,37 @@ impl<T: Copy> Columns<T> {
     }
 }
 
-pub async fn publish_string_values(
+/// The string samples of all the sensors of a batch, with one statement. `string_ids` holds the
+/// dictionary id of every string of the batch (`pg_strings::ensure_string_ids`).
+pub async fn publish_string_samples(
     transaction: &mut Transaction<'_, Postgres>,
-    sensor_id: i64,
-    values: &[Sample<String>],
+    sensors: &[(i64, &TypedSamples)],
+    string_ids: &HashMap<String, i64>,
 ) -> Result<()> {
+    let mut sensor_ids = Vec::new();
+    let mut times = Vec::new();
+    let mut values = Vec::new();
+    for (sensor_id, samples) in sensors {
+        if let TypedSamples::String(samples) = samples {
+            for sample in samples {
+                sensor_ids.push(*sensor_id);
+                times.push(sensapp_datetime_to_offset_datetime(&sample.datetime)?);
+                values.push(string_ids[&sample.value]);
+            }
+        }
+    }
     if values.is_empty() {
         return Ok(());
-    }
-    let mut string_ids = Vec::with_capacity(values.len());
-    for value in values {
-        string_ids.push(get_string_value_id_or_create(transaction, &value.value).await?);
     }
     let query = sqlx::query(
         r#"
         INSERT INTO string_values (sensor_id, time, value)
-        SELECT $1, t, v FROM unnest($2::TIMESTAMPTZ[], $3::BIGINT[]) AS u(t, v)
+        SELECT * FROM unnest($1::BIGINT[], $2::TIMESTAMPTZ[], $3::BIGINT[])
         "#,
     )
-    .bind(sensor_id)
-    .bind(times(values)?)
-    .bind(string_ids);
+    .bind(sensor_ids)
+    .bind(times)
+    .bind(values);
     transaction.execute(query).await?;
     Ok(())
 }
