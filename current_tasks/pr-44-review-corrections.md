@@ -21,7 +21,7 @@ commit per point.
 | M7 | SQLite aggregated path: per-series `LIMIT/OFFSET` | Premise wrong (global `LIMIT`, no `OFFSET`); test module note added | done |
 | M8 | `batch_query_samples` global `LIMIT` comment | Premise inverted: the limit is per sensor. Comments and a multi-sensor test added | done |
 | L1 | Dedicated counter for shed requests | Maintainer: true | done |
-| L2 | ClickHouse selector: bind an array instead of interpolating ids | Maintainer: true | |
+| L2 | ClickHouse selector: bind an array instead of interpolating ids | Done as a server-side parameter, not `has()` | done |
 
 ## Notes per point
 
@@ -173,3 +173,24 @@ commit per point.
   limiter holds a clone of the counter that the metrics registry owns (`WriteLimiter::with_shed_counter`), so
   the middleware keeps its own state type. `CONFIGURATION.md` says how to use it next to the 503 counter.
   `real_router::the_write_limit_sheds_writes_and_spares_everything_else` checks the count after a rejection.
+
+### L2. ClickHouse sensor ids as a parameter
+
+- Checked on the ClickHouse container before changing anything (2 million rows, the real DDL,
+  `ORDER BY (sensor_id, timestamp_us)`, three ids out of 5 000):
+
+  | Form | Granules read |
+  |------|---------------|
+  | `sensor_id IN (7,1500,1999)` | 6 of 245 |
+  | `sensor_id IN [7,1500,1999]` | 6 of 245 |
+  | `has([7,1500,1999], sensor_id)` | 245 of 245 |
+  | `sensor_id IN {ids:Array(UInt64)}` with `param_ids` | 6 of 245 |
+
+  So binding the array as `has(?, sensor_id)`, as `labels_of_sensors` does, would have lost the primary key
+  on the value tables. That function reads the small `labels` table and is left as it is.
+- The crate's `bind` is client-side text substitution, so it would not change what the server sees. The
+  server-side `Query::param` does: the statement is the same whatever the ids, which is the point of the
+  review item.
+- Done: both bulk reads (`read_numeric_samples` and `read_aggregated_bulk`) use
+  `sensor_id IN {ids:Array(UInt64)}` with `.param("ids", sensor_ids)`. Chunks are at most 256 ids, so the URL
+  stays small. The selector, regex, PromQL, remote read, label and ClickHouse suites pass (100 tests).

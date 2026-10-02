@@ -54,12 +54,6 @@ impl BulkSelectorBackend for ClickHouseStorage {
             SensorType::Float => "float_values",
             other => anyhow::bail!("{other} is not a numeric type"),
         };
-        // The ids are numbers: written into the statement, they cannot inject anything
-        let ids = sensor_ids
-            .iter()
-            .map(u64::to_string)
-            .collect::<Vec<_>>()
-            .join(",");
         let mut time_where = String::new();
         if start_us.is_some() {
             time_where.push_str(" AND timestamp_us >= ?");
@@ -69,11 +63,13 @@ impl BulkSelectorBackend for ClickHouseStorage {
         }
         let sql = format!(
             "SELECT sensor_id, timestamp_us, value FROM {table} \
-             WHERE sensor_id IN ({ids}){time_where} \
+             WHERE sensor_id IN {{ids:Array(UInt64)}}{time_where} \
              ORDER BY sensor_id ASC, timestamp_us ASC LIMIT {limit}"
         );
 
-        let mut query = self.client.query(&sql);
+        // The ids are a server-side parameter: the statement is the same whatever the ids, and the
+        // primary key still narrows the read (checked with EXPLAIN: `has(?, sensor_id)` does not)
+        let mut query = self.client.query(&sql).param("ids", sensor_ids);
         if let Some(start_us) = start_us {
             query = query.bind(start_us);
         }
@@ -192,22 +188,16 @@ impl ClickHouseStorage {
             limit: None,
         });
         let where_clause = clickhouse_time_where(read.start_us, read.end_us);
-        // The ids are numbers: written into the statement, they cannot inject anything
-        let ids = sensor_ids
-            .iter()
-            .map(u64::to_string)
-            .collect::<Vec<_>>()
-            .join(",");
         let sql = format!(
             "SELECT sensor_id, {bucket_expr} AS timestamp_us, {expression} AS value \
-             FROM {table} WHERE sensor_id IN ({ids}){where_clause} \
+             FROM {table} WHERE sensor_id IN {{ids:Array(UInt64)}}{where_clause} \
              GROUP BY sensor_id, timestamp_us \
              ORDER BY sensor_id ASC, timestamp_us ASC LIMIT {limit}"
         );
 
         macro_rules! fetch {
             ($value:ty, $variant:ident, $convert:expr) => {{
-                let mut query = self.client.query(&sql);
+                let mut query = self.client.query(&sql).param("ids", sensor_ids);
                 if let Some(start_us) = read.start_us {
                     query = query.bind(start_us);
                 }
