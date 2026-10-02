@@ -33,8 +33,8 @@ fn ensure_config() {
 
 const SECRET: &str = "test-secret-0123456789abcdef012345";
 
-/// A storage that makes every write take `publish_delay` before it reaches the real one, or
-/// fail when `fail_publish` is set.
+/// A storage that makes every write, and the removal of duplicates, take `publish_delay` before
+/// it reaches the real one, or fail a write when `fail_publish` is set.
 #[derive(Debug)]
 struct SlowStorage {
     inner: Arc<dyn StorageInstance>,
@@ -58,6 +58,7 @@ impl StorageInstance for SlowStorage {
         self.inner.vacuum().await
     }
     async fn deduplicate_samples(&self) -> Result<u64> {
+        tokio::time::sleep(self.publish_delay).await;
         self.inner.deduplicate_samples().await
     }
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
@@ -120,6 +121,7 @@ fn settings() -> RouterSettings {
     RouterSettings {
         max_body_bytes: 64 * 1024 * 1024,
         request_timeout: Duration::from_secs(30),
+        maintenance_timeout: Duration::from_secs(3600),
         max_concurrent_writes: 16,
     }
 }
@@ -574,5 +576,34 @@ async fn vacuum_removes_the_duplicates_of_a_retried_write() -> Result<()> {
         // The backend cannot: the answer says so with null and nothing changes
         None => assert_eq!(samples(&after), 2),
     }
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn the_vacuum_has_a_timeout_of_its_own() -> Result<()> {
+    // Slower than the timeout of the other requests, faster than its own
+    let settings = RouterSettings {
+        request_timeout: Duration::from_millis(200),
+        maintenance_timeout: Duration::from_secs(10),
+        ..settings()
+    };
+    let (_db, router) = router(Duration::from_millis(600), None, settings).await?;
+
+    let (status, _, body) = send(&router, vacuum_request(None)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // The other requests keep the standard timeout
+    let (status, _, _) = send(&router, write_request(None)).await;
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+
+    // And the vacuum is not unbounded
+    let settings = RouterSettings {
+        request_timeout: Duration::from_secs(30),
+        maintenance_timeout: Duration::from_millis(200),
+        ..self::settings()
+    };
+    let (_db, router) = self::router(Duration::from_secs(2), None, settings).await?;
+    let (status, _, _) = send(&router, vacuum_request(None)).await;
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
     Ok(())
 }

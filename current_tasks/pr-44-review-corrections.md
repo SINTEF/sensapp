@@ -11,7 +11,7 @@ commit per point.
 | 3 | At-least-once writes, retries, manual dedup | Maintainer: describe vacuum as not automatic, no scheduler. Docs only | done |
 | 4 | DuckDB legacy `timestamp_ms` column | Maintainer: no deployments exist, no guard | done (decision) |
 | 5 | `find_selector_sensors` without `LIMIT` | Confirmed on all five lookups | done |
-| 6 | `admin/vacuum` unbounded | Maintainer: slow is expected, keep it simple | |
+| 6 | `admin/vacuum` unbounded | Maintainer: slow is expected, keep it simple. Longer timeout of its own | done |
 | M1 | Measure `register_sensors` on single-sample publishes | Maintainer: worth measuring | |
 | M2 | Misleading BRIN comment in `postgresql/selector.rs` | | |
 | M3 | ClickHouse reads without `FINAL`: one sentence in `CLICKHOUSE.md` | | |
@@ -93,3 +93,17 @@ commit per point.
   The remaining 82 ms of the second one is the label sub-query scan, which a `LIMIT` on the outer query
   cannot shorten. The first measurement of this change compared a binary with itself (the shared target
   directory did not rebuild the second one): the binaries were compared by hash before the numbers above.
+
+### 6. The vacuum
+
+- Maintainer direction: a slow vacuum is expected, extend the timeout, keep it simple.
+- The vacuum shared the 30 s request timeout, so on a large database the client got a `504` while the
+  database carried on, which invites a second call.
+- Done: `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS` (default 3600) applies to
+  `POST /api/v1/admin/vacuum` only. The route keeps the same authentication; the timeout layer of the
+  other routes no longer wraps it. `real_router::the_vacuum_has_a_timeout_of_its_own` covers both
+  directions.
+- Not done, on purpose: `statement_timeout`/`lock_timeout`, batches, and a guard against two concurrent
+  vacuums. Left to the maintainer: a guard would have to outlive the request (a timed-out request drops its
+  future while the statement runs on), so it means running the vacuum in a spawned task. `DATA_LIFECYCLE.md`
+  tells operators not to start a second one.

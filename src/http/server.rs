@@ -75,6 +75,8 @@ pub struct RouterSettings {
     pub max_body_bytes: usize,
     /// Time a request may take before it is answered with a 504
     pub request_timeout: Duration,
+    /// Time the maintenance request (the vacuum) may take before it is answered with a 504
+    pub maintenance_timeout: Duration,
     /// Write requests handled at the same time, 0 for no limit
     pub max_concurrent_writes: usize,
 }
@@ -84,9 +86,17 @@ impl RouterSettings {
         Ok(Self {
             max_body_bytes: config.parse_http_body_limit()?,
             request_timeout: Duration::from_secs(config.http_server_timeout_seconds),
+            maintenance_timeout: Duration::from_secs(config.http_maintenance_timeout_seconds),
             max_concurrent_writes: config.http_max_concurrent_writes,
         })
     }
+}
+
+/// Answer with a 504 when a request takes longer than `duration`. The server was too slow (a hung
+/// database, usually), not the client: 5xx is what Prometheus, Telegraf and friends retry, 408 is
+/// not.
+fn timeout_layer(duration: Duration) -> TimeoutLayer {
+    TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, duration)
 }
 
 /// The routes and the layers of the HTTP server, without a socket: the real thing, that the
@@ -132,12 +142,6 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
                 .on_failure(log_failed_response),
         )
         .sensitive_response_headers(sensitive_headers)
-        .layer(TimeoutLayer::with_status_code(
-            // The server was too slow (a hung database, usually), not the client: 5xx is what
-            // Prometheus, Telegraf and friends retry, 408 is not.
-            StatusCode::GATEWAY_TIMEOUT,
-            settings.request_timeout,
-        ))
         .compression()
         .into_inner();
 
@@ -211,16 +215,27 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
             "/series/{series_uuid}/samples",
             delete(delete_series_samples),
         )
-        .route("/api/v1/admin/vacuum", post(vacuum_database))
         .route_layer(axum::middleware::from_fn_with_state(
             state.auth.clone(),
             require_delete_auth,
         ));
 
+    // The maintenance route is as protected as the delete routes, but it is expected to be slow:
+    // removing duplicates scans every value table, so it has a timeout of its own.
+    let maintenance_routes = Router::new()
+        .route("/api/v1/admin/vacuum", post(vacuum_database))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.auth.clone(),
+            require_delete_auth,
+        ))
+        .layer(timeout_layer(settings.maintenance_timeout));
+
     public_routes
         .merge(read_routes)
         .merge(write_routes)
         .merge(delete_routes)
+        .layer(timeout_layer(settings.request_timeout))
+        .merge(maintenance_routes)
         .layer(axum::middleware::from_fn_with_state(
             state.metrics.clone(),
             track_http_metrics,
@@ -506,7 +521,7 @@ struct VacuumResponse {
         (status = 403, description = "The token does not have the delete scope, or has a sensor allow list"),
         (status = 500, description = "Failed to vacuum database", body = String),
         (status = 503, description = "The storage backend is unavailable: retry later"),
-        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS: on a large database the maintenance can take longer, and the storage backend may carry on after the answer")
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS (one hour by default), and the storage backend may carry on after the answer")
     )
 )]
 async fn vacuum_database(
