@@ -778,6 +778,115 @@ async fn test_query_limit_is_per_sensor() -> Result<()> {
     Ok(())
 }
 
+/// The same limit for every type of sample: the oldest `limit` samples of each sensor, and only
+/// those (SQLite applies it in the query, with a window function, one query per type).
+#[tokio::test]
+#[serial]
+async fn test_query_limit_applies_to_every_sample_type() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    fn samples_of<T>(
+        count: usize,
+        value: impl Fn(usize) -> T,
+    ) -> smallvec::SmallVec<[Sample<T>; 4]> {
+        (0..count)
+            .map(|i| Sample {
+                datetime: hifitime::Epoch::from_unix_seconds((1704067200 + i * 60) as f64),
+                value: value(i),
+            })
+            .collect()
+    }
+    let all_types = |count: usize| -> Vec<(SensorType, TypedSamples)> {
+        vec![
+            (
+                SensorType::Integer,
+                TypedSamples::Integer(samples_of(count, |i| i as i64)),
+            ),
+            (
+                SensorType::Numeric,
+                TypedSamples::Numeric(samples_of(count, |i| {
+                    rust_decimal::Decimal::new(i as i64, 1)
+                })),
+            ),
+            (
+                SensorType::Float,
+                TypedSamples::Float(samples_of(count, |i| i as f64)),
+            ),
+            (
+                SensorType::String,
+                TypedSamples::String(samples_of(count, |i| format!("s{i}"))),
+            ),
+            (
+                SensorType::Boolean,
+                TypedSamples::Boolean(samples_of(count, |i| i % 2 == 0)),
+            ),
+            (
+                SensorType::Location,
+                TypedSamples::Location(samples_of(count, |i| geo::Point::new(i as f64, 60.0))),
+            ),
+            (
+                SensorType::Json,
+                TypedSamples::Json(samples_of(count, |i| serde_json::json!({ "i": i }))),
+            ),
+            (
+                SensorType::Blob,
+                TypedSamples::Blob(samples_of(count, |i| vec![i as u8])),
+            ),
+        ]
+    };
+
+    let group = Uuid::new_v4().to_string();
+    let mut sensors = Vec::new();
+    for copy in 0..2 {
+        for (index, (sensor_type, samples)) in all_types(5).into_iter().enumerate() {
+            let sensor = create_sensor_with_labels(
+                &format!("limit_every_type_{index}_{copy}"),
+                sensor_type,
+                vec![("group".to_string(), group.clone())],
+            );
+            sensors.push((sensor, samples));
+        }
+    }
+    publish_test_sensors(&storage, sensors).await?;
+
+    let matchers = vec![LabelMatcher::eq("group", group)];
+    let results = storage
+        .query_sensors_by_labels(&matchers, None, None, Some(2), false)
+        .await?;
+    assert_eq!(results.len(), 16, "two sensors of each of the eight types");
+
+    let seconds_of = |samples: &TypedSamples| -> Vec<i64> {
+        fn seconds<T>(samples: &[Sample<T>]) -> Vec<i64> {
+            samples
+                .iter()
+                .map(|sample| sample.datetime.to_unix_seconds() as i64 - 1704067200)
+                .collect()
+        }
+        match samples {
+            TypedSamples::Integer(s) => seconds(s),
+            TypedSamples::Numeric(s) => seconds(s),
+            TypedSamples::Float(s) => seconds(s),
+            TypedSamples::String(s) => seconds(s),
+            TypedSamples::Boolean(s) => seconds(s),
+            TypedSamples::Location(s) => seconds(s),
+            TypedSamples::Json(s) => seconds(s),
+            TypedSamples::Blob(s) => seconds(s),
+        }
+    };
+    for result in &results {
+        assert_eq!(
+            seconds_of(&result.samples),
+            vec![0, 60],
+            "{} ({}): the two oldest samples",
+            result.sensor.name,
+            result.sensor.sensor_type
+        );
+    }
+    Ok(())
+}
+
 // ============================================================================
 // Different Sensor Types
 // ============================================================================

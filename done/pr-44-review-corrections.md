@@ -242,10 +242,8 @@ change was not worth it:
 
 ## Observed, not fixed
 
-- SQLite `batch_query_*_samples` (`src/storage/sqlite/batch_queries.rs`) have no SQL `LIMIT`: they read every
-  row of the window for the given sensors and truncate per sensor in Rust. Their only callers are the
-  sequential selector fallback (limit 1, to discover the series) and the label query, so it shows with a token
-  that has a sensor allow list on SQLite. Not part of this review.
+- SQLite `batch_query_*_samples` read the whole window before truncating per sensor. Fixed afterwards, see
+  `done/sqlite-batch-sample-limit.md` (765 ms down to 0.5 ms for a limit of 1 on 1 000 000 rows).
 - The sequential fallback (RRDCached, token-filtered reads) still looks up every matching sensor, as the
   `query_sensors_by_labels` limit means samples per series. Item 5 covers the bulk path only.
 - `README.md` was not touched, as AGENTS.md asks.
