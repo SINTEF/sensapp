@@ -34,7 +34,7 @@ Done 2 Oct 2026.
   generated frontend client.
 - TLS: `docs/CLICKHOUSE.md` states it was verified by hand with a private CA and that CI has no TLS test on
   purpose; saved to the assistant memory as well.
-- Test harness databases: decision recorded in `ideas/test-harness-leaks-timescaledb-databases.md` (left as
+- Test harness databases: decision recorded in `ideas/test-harness-leaks-databases.md` (left as
   it is), with `cargo make clean-test-databases` and the one-liner behind it (not run here: the local
   container also holds databases that predate this work).
 - `TODO.md`: backend and feature documentation, lib/bin duplication and cargo-make cleanup ticked.

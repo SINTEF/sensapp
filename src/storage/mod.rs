@@ -54,6 +54,18 @@ pub trait StorageInstance: Send + Sync + Debug {
 
     async fn vacuum(&self) -> Result<()>;
 
+    /// Remove the duplicate samples and return how many were removed.
+    ///
+    /// Samples are stored at least once: a retried write, a client that sends a sample twice or a
+    /// crash in the middle of a request leave duplicates. Only exact duplicates go (same series,
+    /// same timestamp, same value, the first one written is kept): two different values at the
+    /// same timestamp are both kept. The count is exact unless writes happen at the same time.
+    ///
+    /// Not every backend can do it: the default says so with `StorageError::Unsupported`.
+    async fn deduplicate_samples(&self) -> Result<u64> {
+        Err(StorageError::Unsupported("removing duplicate samples".to_string()).into())
+    }
+
     /// Delete a series: all its samples, its labels and the sensor itself.
     ///
     /// Returns `Ok(false)` when no series has this UUID. Publishing the same sensor

@@ -493,6 +493,38 @@ impl StorageInstance for ClickHouseStorage {
         Ok(())
     }
 
+    async fn deduplicate_samples(&self) -> Result<u64> {
+        // ClickHouse does not say how many rows a merge dropped: count before and after. This
+        // rewrites the data of every table (OPTIMIZE .. FINAL), so it costs what a full merge
+        // costs, and a request that waits for it can time out while ClickHouse carries on.
+        let mut removed = 0;
+        for table in VALUE_TABLES {
+            let count_sql = format!("SELECT count() FROM {table}");
+            let before: u64 = self
+                .client
+                .query(&count_sql)
+                .fetch_one()
+                .await
+                .with_context(|| format!("Failed to count the samples of {table}"))?;
+            let columns = crate::storage::common::duplicate_key_columns(table, "timestamp_us");
+            self.client
+                .query(&format!(
+                    "OPTIMIZE TABLE {table} FINAL DEDUPLICATE BY {columns}"
+                ))
+                .execute()
+                .await
+                .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?;
+            let after: u64 = self
+                .client
+                .query(&count_sql)
+                .fetch_one()
+                .await
+                .with_context(|| format!("Failed to count the samples of {table}"))?;
+            removed += before.saturating_sub(after);
+        }
+        Ok(removed)
+    }
+
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
         let uuid = Uuid::from_str(sensor_uuid).map_err(|e| {
             StorageError::invalid_data_format(

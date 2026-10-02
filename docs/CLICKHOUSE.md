@@ -53,10 +53,10 @@ SensApp creates its tables at startup (`CREATE TABLE IF NOT EXISTS`, safe to rep
 What to expect:
 
 - **The tables are not replicated.** They are plain `MergeTree` tables for a single ClickHouse server. A replicated or clustered deployment needs its own table definitions (`ReplicatedMergeTree`, `ON CLUSTER`), which SensApp does not create.
-- **Writes are at least once, not atomic.** A write touches several tables, and a failure in the middle (a crash, a timeout) can leave part of a request stored. A client that retries then stores some samples twice: SensApp does not deduplicate samples (see `ideas/sample-deduplication-in-maintenance.md`).
+- **Writes are at least once, not atomic.** A write touches several tables, and a failure in the middle (a crash, a timeout) can leave part of a request stored. A client that retries then stores some samples twice: SensApp does not reject duplicates when they are written, `POST /api/v1/admin/vacuum` removes them afterwards (see [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md#duplicate-samples)).
 - **One request may span any period** (up to 200 years): the limit of 100 partitions per insert is raised.
 - **Databases from before the first release are refused** at startup with a clear message: create a new database.
-- `POST /api/v1/admin/vacuum` runs `OPTIMIZE TABLE` on the value tables, which merges parts. It is not needed for normal operation.
+- `POST /api/v1/admin/vacuum` removes duplicate samples (`OPTIMIZE TABLE .. FINAL DEDUPLICATE BY` on every value table, which rewrites their data: it costs what a full merge costs, and an HTTP request that waits for it can time out while ClickHouse carries on). It is not needed for normal operation, run it after incidents that may have produced duplicates, such as a retried write that had timed out.
 
 Float values use `CODEC(Gorilla, ZSTD(1))` and timestamps `DoubleDelta`: on millions of samples that is between 1 and 7 bytes per float depending on how noisy the series is, and under 0.01 byte per regularly spaced timestamp.
 

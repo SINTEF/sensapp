@@ -316,6 +316,31 @@ impl StorageInstance for PostgresStorage {
         Ok(())
     }
 
+    async fn deduplicate_samples(&self) -> Result<u64> {
+        // One statement per table, each atomic: a table that is done stays done if a later one
+        // fails. Within a group of equal samples the first one written is kept. `(tableoid, ctid)`
+        // identifies a row of a partitioned table; the table names and the columns come from
+        // static lists.
+        let mut removed = 0;
+        for table in VALUE_TABLES {
+            let columns = crate::storage::common::duplicate_key_columns(table, "timestamp_us");
+            let sql = format!(
+                "DELETE FROM {table} WHERE (tableoid, ctid) IN (\
+                   SELECT tableoid, ctid FROM (\
+                     SELECT tableoid, ctid, \
+                            row_number() OVER (PARTITION BY {columns} ORDER BY ctid) AS duplicate_rank \
+                     FROM {table}) ranked \
+                   WHERE duplicate_rank > 1)"
+            );
+            removed += sqlx::query(sqlx::AssertSqlSafe(sql))
+                .execute(&self.pool)
+                .await
+                .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
+                .rows_affected();
+        }
+        Ok(removed)
+    }
+
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
         let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
         let mut transaction = self.pool.begin().await?;

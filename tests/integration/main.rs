@@ -12,6 +12,7 @@ mod clickhouse_integration;
 mod crud_dcat_api;
 mod data_lifecycle;
 mod datamodel;
+mod deduplication;
 mod health_check;
 mod influxdb_integration;
 mod ingestion;

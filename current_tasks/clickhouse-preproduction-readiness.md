@@ -73,7 +73,7 @@ Databases created by earlier builds are refused at startup with a clear message 
 ### Still open
 
 - ~~Selector queries read each series with its own queries~~: fixed, `done/bulk-selector-reads.md` (100 series: 1.3 s to 0.02 s).
-- Writes are at least once and not atomic across tables. A crash in the middle of a request can store part of it, and a retry then duplicates that part (see `ideas/sample-deduplication-in-maintenance.md`). In the kill drill nothing was stored, but a kill during the commit of the inserts could.
+- Writes are at least once and not atomic across tables. A crash in the middle of a request can store part of it, and a retry then duplicates that part, which the vacuum operation removes (`done/sample-deduplication-in-vacuum.md`). In the kill drill nothing was stored, but a kill during the commit of the inserts could.
 - Not tested: a replicated or clustered ClickHouse (SensApp does not create replicated tables), long soak runs, data volumes beyond millions of rows, a release build under load, a staging environment with real operations.
 - The test harness migrates and truncates 11 tables for every test, about 0.4 s each: the ClickHouse integration suite takes over a minute.
 - TLS and the new tests are not exercised by CI yet beyond what the existing ClickHouse job runs (the TLS check was manual).

@@ -27,6 +27,7 @@ features, and has no promise.
 | Values of every type | yes | yes | yes | yes | yes | numeric data points | yes |
 | Delete a series or its samples | yes | yes | yes | yes | yes | no | no |
 | Aggregations (`step`) in the database | yes | yes | yes | yes | yes | no | no |
+| Remove duplicate samples (vacuum) | yes | yes | yes | yes | not yet | no | no |
 | Registration of many new series per write in bulk | yes | yes | yes | one by one, fast locally | one by one | no | no |
 | A selector reads its series with a few queries | yes | yes | yes | yes | one series at a time | one series at a time | one series at a time |
 | Replication | not created by SensApp | the database's own | the database's own | no | no | no | managed |

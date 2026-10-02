@@ -1,9 +1,9 @@
-# The TimescaleDB test harness leaks a database per run
+# The PostgreSQL and TimescaleDB test harness leaks a database per run
 
 Decision (2 Oct 2026): **left as it is**, not worth teardown code.
 
-`DatabaseType::TimescaleDB` (`tests/integration/common/mod.rs`) gives every test run its own
-`sensapp-test-NNNN` database and nothing drops it. In CI the service container is thrown away, so only a
+The PostgreSQL and TimescaleDB test types (`tests/integration/common/mod.rs`) give every test run its own
+`<database name>-NNNN` database (`sensapp-test-NNNN` with the default URLs) and nothing drops it. In CI the service container is thrown away, so only a
 local TimescaleDB container accumulates them (about thirty after a day of runs). Isolation per run is what
 makes concurrent runs safe, and a reliable teardown from a synchronous `Drop` is awkward.
 

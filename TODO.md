@@ -46,7 +46,7 @@ These are valid tasks, but not the current focus. Most have a note in `ideas/`.
 - [ ] Add benchmark tooling for storage backend comparison (a first script exists: `tests/perf/scale.sh`, writes and selector reads of thousands of series through the HTTP API)
 - [ ] Add research-specific comparison endpoints and reporting helpers
 - [ ] Add storage-space and latency comparison reports across backends
-- [ ] Data retention (`ideas/data-retention.md`) and sample deduplication (`ideas/sample-deduplication-in-maintenance.md`)
+- [ ] Data retention (`ideas/data-retention.md`)
 - [ ] Cross-series aggregation pushdown, composite sensors, a minimal PromQL `rate()`
 
 ## Working Position

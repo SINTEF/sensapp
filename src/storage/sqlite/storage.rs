@@ -22,7 +22,7 @@ use geo::Point;
 use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
 use smallvec::smallvec;
-use sqlx::{Sqlite, Transaction, prelude::*};
+use sqlx::{Sqlite, Transaction};
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -89,6 +89,25 @@ impl StorageInstance for SqliteStorage {
             .await
             .context("Failed to vacuum database")?;
         Ok(())
+    }
+
+    async fn deduplicate_samples(&self) -> Result<u64> {
+        // One statement per table. The first row written (the smallest rowid) of each group of
+        // equal samples is kept. The table names and the columns come from static lists.
+        let mut removed = 0;
+        for table in VALUE_TABLES {
+            let columns = crate::storage::common::duplicate_key_columns(table, "timestamp_us");
+            let sql = format!(
+                "DELETE FROM {table} WHERE rowid NOT IN \
+                   (SELECT MIN(rowid) FROM {table} GROUP BY {columns})"
+            );
+            removed += sqlx::query(sqlx::AssertSqlSafe(sql))
+                .execute(&self.pool)
+                .await
+                .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
+                .rows_affected();
+        }
+        Ok(removed)
     }
 
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
@@ -1210,37 +1229,6 @@ impl SqliteStorage {
                 }
             }
         }
-        Ok(())
-    }
-
-    #[allow(dead_code)] // May be used for maintenance operations in the future
-    async fn deduplicate(&self) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
-        transaction
-            .execute(sqlx::query(
-                r#"
-            DELETE FROM integer_values WHERE rowid NOT IN (
-                SELECT MIN(rowid) FROM integer_values GROUP BY sensor_id, timestamp_us, value
-            )
-            "#,
-            ))
-            .await?;
-
-        transaction
-            .execute(sqlx::query(
-                r#"
-            DELETE FROM float_values WHERE rowid NOT IN (
-                SELECT MIN(rowid) FROM float_values GROUP BY sensor_id, timestamp_us, value
-            )
-            "#,
-            ))
-            .await?;
-
-        transaction.commit().await?;
-
-        let vacuum = sqlx::query("VACUUM");
-        vacuum.execute(&self.pool).await?;
-
         Ok(())
     }
 

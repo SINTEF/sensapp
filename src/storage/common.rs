@@ -35,6 +35,15 @@ pub const VALUE_TABLES: [&str; 8] = [
     "integer_values",
 ];
 
+/// The columns that make two samples of a table the same sample: the series, the time and the value
+/// (the coordinates for locations). `time_column` is the name the backend gives the timestamp.
+pub fn duplicate_key_columns(table: &str, time_column: &str) -> String {
+    match table {
+        "location_values" => format!("sensor_id, {time_column}, latitude, longitude"),
+        _ => format!("sensor_id, {time_column}, value"),
+    }
+}
+
 /// Convert SensAppDateTime to Unix microseconds for database storage
 pub fn datetime_to_micros(datetime: &SensAppDateTime) -> i64 {
     // Use to_unix with Microsecond unit to get a f64 in microseconds,

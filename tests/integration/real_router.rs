@@ -57,6 +57,9 @@ impl StorageInstance for SlowStorage {
     async fn vacuum(&self) -> Result<()> {
         self.inner.vacuum().await
     }
+    async fn deduplicate_samples(&self) -> Result<u64> {
+        self.inner.deduplicate_samples().await
+    }
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
         self.inner.delete_series(sensor_uuid).await
     }
@@ -157,15 +160,22 @@ struct Claims {
     sub: String,
     exp: u64,
     scope: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sensors: Option<Vec<String>>,
 }
 
 fn token(scope: &str) -> String {
+    token_for_sensors(scope, None)
+}
+
+fn token_for_sensors(scope: &str, sensors: Option<Vec<String>>) -> String {
     encode(
         &Header::default(),
         &Claims {
             sub: "test".into(),
             exp: 4_102_444_800,
             scope: scope.into(),
+            sensors,
         },
         &EncodingKey::from_secret(SECRET.as_bytes()),
     )
@@ -474,5 +484,95 @@ async fn real_server_errors_are_still_logged_as_errors() -> Result<()> {
             .any(|line| line.contains(" ERROR ") && line.contains("failing-id-9")),
         "an error with the request id was expected: {lines:#?}"
     );
+    Ok(())
+}
+
+fn vacuum_request(token: Option<&str>) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri("/api/v1/admin/vacuum");
+    if let Some(token) = token {
+        builder = builder.header("authorization", format!("Bearer {token}"));
+    }
+    builder.body(Body::empty()).unwrap()
+}
+
+#[tokio::test]
+#[serial]
+async fn vacuum_needs_the_delete_scope_and_no_sensor_allow_list() -> Result<()> {
+    let auth = Some(AuthConfig::from_secret(SECRET)?);
+    let (_db, router) = router(Duration::ZERO, auth, settings()).await?;
+
+    let (status, _, _) = send(&router, vacuum_request(None)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // It removes rows: reading and writing are not enough
+    for scope in ["read", "write", "read write"] {
+        let (status, _, _) = send(&router, vacuum_request(Some(&token(scope)))).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "scope {scope}");
+    }
+    // A sensor-scoped token cannot run a database-wide operation
+    let scoped = token_for_sensors("delete", Some(vec!["only_this".to_string()]));
+    let (status, _, _) = send(&router, vacuum_request(Some(&scoped))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _, body) = send(&router, vacuum_request(Some(&token("delete")))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let json: serde_json::Value = serde_json::from_str(&body)?;
+    assert_eq!(json["status"], "ok");
+    assert!(json.get("duplicates_removed").is_some(), "{body}");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn vacuum_removes_the_duplicates_of_a_retried_write() -> Result<()> {
+    let (_db, router) = router(Duration::ZERO, None, settings()).await?;
+    let run = uuid::Uuid::new_v4();
+    let line = format!("vacuum_{run} value=1.5 1700000000000000000");
+    let write = || {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v2/write?bucket=b&org=o")
+            .body(Body::from(line.clone()))
+            .unwrap()
+    };
+
+    // The same write, sent twice (a client that retried after a timeout)
+    for _ in 0..2 {
+        let (status, _, _) = send(&router, write()).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+    let selector =
+        urlencoding::encode(&format!("{{__name__=\"vacuum_{run} value\"}}[2000d]")).into_owned();
+    // The query answers with the records of the series: one per sample
+    let samples = |body: &str| -> usize {
+        let json: serde_json::Value = serde_json::from_str(body).expect("json");
+        json.as_array().expect("an array of records").len()
+    };
+    let (_, _, before) = send(
+        &router,
+        get_request(&format!("/api/v1/query?query={selector}")),
+    )
+    .await;
+
+    let (status, _, body) = send(&router, vacuum_request(None)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let json: serde_json::Value = serde_json::from_str(&body)?;
+    let (_, _, after) = send(
+        &router,
+        get_request(&format!("/api/v1/query?query={selector}")),
+    )
+    .await;
+
+    assert_eq!(samples(&before), 2, "both writes are stored: {before}");
+    match json["duplicates_removed"].as_u64() {
+        // The backend removes duplicates: one is gone
+        Some(removed) => {
+            assert!(removed >= 1, "{body}");
+            assert_eq!(samples(&after), 1, "{after}");
+        }
+        // The backend cannot: the answer says so with null and nothing changes
+        None => assert_eq!(samples(&after), 2),
+    }
     Ok(())
 }

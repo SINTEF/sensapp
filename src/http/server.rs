@@ -40,6 +40,7 @@ use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
 use futures::TryStreamExt;
+use serde::Serialize;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -50,7 +51,7 @@ use tower_http::request_id::MakeRequestUuid;
 use tower_http::trace;
 use tower_http::{ServiceBuilderExt, timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::Level;
-use utoipa::OpenApi;
+use utoipa::{OpenApi, ToSchema};
 use utoipa_scalar::{Scalar, Servable as ScalarServable};
 
 #[derive(OpenApi)]
@@ -190,7 +191,6 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
                 .layer(bytes_body_layer)
                 .layer(max_body_layer),
         )
-        .route("/api/v1/admin/vacuum", post(vacuum_database))
         // Layers added later run first: authenticate, then take a write slot, then (per route)
         // buffer the body. Only authenticated writers hold slots, and nothing is buffered
         // before a slot is free.
@@ -211,6 +211,7 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
             "/series/{series_uuid}/samples",
             delete(delete_series_samples),
         )
+        .route("/api/v1/admin/vacuum", post(vacuum_database))
         .route_layer(axum::middleware::from_fn_with_state(
             state.auth.clone(),
             require_delete_auth,
@@ -480,36 +481,60 @@ pub async fn publish_senml_data(
     Ok(crate::importers::IngestionStats::new(series, samples))
 }
 
+/// What a vacuum did.
+#[derive(Debug, Serialize, ToSchema)]
+struct VacuumResponse {
+    /// `ok` when the maintenance completed
+    status: &'static str,
+    /// Number of duplicate samples removed (same series, same timestamp, same value, the first
+    /// one written is kept), or `null` when the storage backend cannot remove duplicates
+    duplicates_removed: Option<u64>,
+}
+
 /// Database Vacuuming
 ///
-/// Cleans up and optimizes the database by removing unused data and reclaiming space.
-/// (only if supported by the underlying storage engine).
+/// Removes the duplicate samples (a retried write, a client that sends twice, a crash in the middle
+/// of a request leave some), then cleans up and optimizes the database and reclaims space, as far as
+/// the storage backend supports it. Only exact duplicates go: two different values at the same
+/// timestamp are both kept. Requires the `delete` scope, and a token without a sensor allow list.
 #[utoipa::path(
     post,
     path = "/api/v1/admin/vacuum",
     tag = "Admin",
     responses(
-        (status = 200, description = "Database vacuum completed successfully", body = String),
+        (status = 200, description = "Maintenance completed, with the number of duplicate samples removed", body = VacuumResponse),
+        (status = 403, description = "The token does not have the delete scope, or has a sensor allow list"),
         (status = 500, description = "Failed to vacuum database", body = String),
-        (
-            status = 503,
-            description = "The storage backend is unavailable, or SensApp is busy writing and sheds the write. A `Retry-After` header (seconds, randomised) means the request was not processed at all and can be sent again after that delay",
-            headers(("Retry-After" = u32, description = "Seconds to wait before sending the write again"))
-        ),
-        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
+        (status = 503, description = "The storage backend is unavailable: retry later"),
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS: on a large database the maintenance can take longer, and the storage backend may carry on after the answer")
     )
 )]
 async fn vacuum_database(
     State(state): State<HttpServerState>,
     access: Option<axum::Extension<crate::http::auth::AccessContext>>,
-) -> Result<Json<String>, AppError> {
+) -> Result<Json<VacuumResponse>, AppError> {
     if access.is_some_and(|extension| extension.0.sensor_allow_list.is_some()) {
         return Err(AppError::Forbidden(
             "Sensor-scoped tokens cannot run database-wide maintenance".into(),
         ));
     }
+    let duplicates_removed = match state.storage.deduplicate_samples().await {
+        Ok(removed) => Some(removed),
+        Err(error)
+            if matches!(
+                error.downcast_ref::<crate::storage::StorageError>(),
+                Some(crate::storage::StorageError::Unsupported(_))
+            ) =>
+        {
+            None
+        }
+        Err(error) => return Err(error.into()),
+    };
     state.storage.vacuum().await?;
-    Ok(Json("Database vacuum completed successfully".to_string()))
+    Ok(Json(VacuumResponse {
+        status: "ok",
+        duplicates_removed,
+    }))
 }
 
 #[cfg(test)]
@@ -556,7 +581,6 @@ mod tests {
             ("/publish", "post"),
             ("/api/v2/write", "post"),
             ("/api/v1/prometheus_remote_write", "post"),
-            ("/api/v1/admin/vacuum", "post"),
         ];
 
         for (path, operations) in paths {

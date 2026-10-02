@@ -66,7 +66,7 @@ Two importers also accept an explicit UUID, which then identifies the series:
 Writes are plain appends. Publishing a sample at a `(series, timestamp)` that already exists stores a second
 sample, it does not replace the first. This is by design, because enforcing uniqueness costs ingestion
 performance. It is why correcting means deleting first. Removing duplicates is a maintenance task,
-see `ideas/sample-deduplication-in-maintenance.md`.
+see [Duplicate samples](#duplicate-samples).
 
 ### Several SensApp instances
 
@@ -94,17 +94,29 @@ Without JWT authentication, like every other endpoint, deletes are open.
 
 Each deletion is logged at `INFO` level with the series UUID, the token subject, and the number of samples.
 
+## Duplicate samples
+
+SensApp does not reject a sample that already exists: a unique index on every insert would cost ingestion speed. A retried write (the Python SDK retries timeouts), a client that sends a sample twice or a crash in the middle of a request can therefore leave duplicates.
+
+`POST /api/v1/admin/vacuum` removes them, then cleans up the database as the backend supports. It needs the `delete` scope, on a token without a sensor allow list, and answers with the number of samples it removed:
+
+```json
+{"status": "ok", "duplicates_removed": 12}
+```
+
+Only exact duplicates go: the same series, the same timestamp and the same value (the same coordinates for a location), and the first one written is kept. Two different values at the same timestamp are both kept, there is no rule to choose one. Run it again and it removes nothing. `duplicates_removed` is `null` on a backend that cannot remove duplicates (see below); the count is exact unless writes happen at the same time. On a large database the operation scans every value table: it can take longer than the request timeout (`504`), and the database carries on.
+
 ## Backend support
 
-| Backend | Delete samples | Delete series | Notes |
-|---|---|---|---|
-| PostgreSQL | yes | yes | Space is reused by autovacuum, run `POST /api/v1/admin/vacuum` to compact |
-| SQLite | yes | yes | `VACUUM` shrinks the file |
-| TimescaleDB | yes | yes | Tested on uncompressed chunks. TimescaleDB supports `DELETE` on compressed chunks too, but it has to decompress them first, which is slower |
-| DuckDB | yes | yes | |
-| ClickHouse | yes | yes | Lightweight `DELETE`: rows disappear from queries at once and are physically removed by later merges. The sample count is taken just before the delete |
-| BigQuery | no | no | Returns `501 Not Implemented` |
-| RRDCached | no | no | Returns `501 Not Implemented` |
+| Backend | Delete samples | Delete series | Remove duplicates | Notes |
+|---|---|---|---|---|
+| PostgreSQL | yes | yes | yes | Space is reused by autovacuum, run `POST /api/v1/admin/vacuum` to compact (and to remove duplicate samples) |
+| SQLite | yes | yes | yes | `VACUUM` shrinks the file |
+| TimescaleDB | yes | yes | yes | Tested on uncompressed chunks. TimescaleDB supports `DELETE` on compressed chunks too, but it has to decompress them first, which is slower |
+| DuckDB | yes | yes | not yet |  |
+| ClickHouse | yes | yes | yes | Lightweight `DELETE`: rows disappear from queries at once and are physically removed by later merges. The sample count is taken just before the delete |
+| BigQuery | no | no | no | Returns `501 Not Implemented` |
+| RRDCached | no | no | no | Returns `501 Not Implemented` |
 
 ## How other systems do it
 

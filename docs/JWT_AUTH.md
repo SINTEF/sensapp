@@ -87,7 +87,7 @@ curl http://localhost:3000/metrics \
 | `POST /publish` | Yes | `write` |
 | `POST /api/v2/write` | Yes | `write` |
 | `POST /api/v1/prometheus_remote_write` | Yes | `write` |
-| `POST /api/v1/admin/vacuum` | Yes | `write` |
+| `POST /api/v1/admin/vacuum` | Yes | `delete` (it removes duplicate samples) |
 
 Health checks, documentation, and Prometheus scrape endpoints are always public so that orchestration tools (Kubernetes probes, Prometheus scraper) work without tokens.
 
