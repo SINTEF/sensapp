@@ -5,7 +5,7 @@ use super::PostgresStorage;
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{Sample, SensAppDateTime, Sensor, SensorType, TypedSamples};
 use crate::storage::LabelMatcher;
-use crate::storage::selector::{BulkSelectorBackend, empty_samples};
+use crate::storage::selector::{AggregatedRead, BulkSelectorBackend, empty_samples};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -82,4 +82,108 @@ impl BulkSelectorBackend for PostgresStorage {
             other => anyhow::bail!("{other} is not a numeric type"),
         })
     }
+
+    async fn read_aggregated_samples(
+        &self,
+        sensor_type: SensorType,
+        sensor_ids: &[i64],
+        read: &AggregatedRead,
+        limit: usize,
+    ) -> Result<HashMap<i64, TypedSamples>> {
+        self.read_aggregated_bulk(sensor_type, sensor_ids, read, limit)
+            .await
+    }
+}
+
+impl PostgresStorage {
+    /// The aggregated buckets of many sensors of one numeric type, with one query. The SQL is the
+    /// one of the read of a single sensor, over many sensors, grouped by sensor and bucket.
+    pub(super) async fn read_aggregated_bulk(
+        &self,
+        sensor_type: SensorType,
+        sensor_ids: &[i64],
+        read: &AggregatedRead,
+        limit: usize,
+    ) -> Result<HashMap<i64, TypedSamples>> {
+        use super::queries::{
+            bucketed_cte, float_aggregate_expression, group_by_clause,
+            integer_aggregate_expression, numeric_aggregate_expression,
+        };
+        use crate::storage::Aggregation;
+        use crate::storage::selector::{AggregatedKind, aggregated_kind};
+
+        let (table, expression) = match (sensor_type, read.aggregation) {
+            (_, Aggregation::Count) => (table_of(sensor_type)?, "COUNT(*)::bigint"),
+            (SensorType::Integer, Aggregation::Avg) => {
+                ("integer_values", "AVG(value)::double precision")
+            }
+            (SensorType::Integer, aggregation) => {
+                ("integer_values", integer_aggregate_expression(aggregation))
+            }
+            (SensorType::Float, aggregation) => {
+                ("float_values", float_aggregate_expression(aggregation))
+            }
+            (SensorType::Numeric, aggregation) => {
+                ("numeric_values", numeric_aggregate_expression(aggregation))
+            }
+            (other, _) => anyhow::bail!("{other} is not a numeric type"),
+        };
+        // The fragments are static, the table comes from the match above; the ids, the window,
+        // the step and the limit are bound.
+        let sql = format!(
+            "{} SELECT sensor_id, bucket_us AS timestamp_us, {expression} AS value {}",
+            bucketed_cte(table, true),
+            group_by_clause(true)
+        );
+        let origin_us = read.start_us.unwrap_or(0);
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+
+        macro_rules! fetch {
+            ($value:ty, $variant:ident) => {{
+                #[derive(sqlx::FromRow)]
+                struct Row {
+                    sensor_id: i64,
+                    timestamp_us: i64,
+                    value: $value,
+                }
+                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+                    .bind(sensor_ids)
+                    .bind(read.start_us)
+                    .bind(read.end_us)
+                    .bind(read.step_ms)
+                    .bind(origin_us)
+                    .bind(limit)
+                    .fetch_all(&self.pool)
+                    .await?;
+                let mut result: HashMap<i64, TypedSamples> = HashMap::new();
+                for row in rows {
+                    if let TypedSamples::$variant(samples) = result
+                        .entry(row.sensor_id)
+                        .or_insert_with(|| empty_samples(SensorType::$variant))
+                    {
+                        samples.push(Sample {
+                            datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
+                            value: row.value,
+                        });
+                    }
+                }
+                result
+            }};
+        }
+
+        Ok(match aggregated_kind(sensor_type, read.aggregation) {
+            AggregatedKind::Integer => fetch!(i64, Integer),
+            AggregatedKind::Float => fetch!(f64, Float),
+            AggregatedKind::Numeric => fetch!(rust_decimal::Decimal, Numeric),
+        })
+    }
+}
+
+fn table_of(sensor_type: SensorType) -> Result<&'static str> {
+    Ok(match sensor_type {
+        SensorType::Integer => "integer_values",
+        SensorType::Numeric => "numeric_values",
+        SensorType::Float => "float_values",
+        other => anyhow::bail!("{other} is not a numeric type"),
+    })
 }
