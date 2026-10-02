@@ -47,10 +47,10 @@ or writes series one by one still works, it costs more round trips with many ser
   by a hash of the sensor over two slices, so every week has two chunks. The chunks older than a week are
   compressed by a background policy; reads, writes, deletes and the vacuum give the same results on compressed
   chunks (tested by comparing every answer before and after compressing, also with partially compressed
-  chunks). Two things come from TimescaleDB 2.17, the version CI runs: SensApp sets `plan_cache_mode =
-  force_custom_plan` on its connections, because a cached generic plan returns wrong rows after a chunk
-  changes state, and the aggregated `count` is written `COUNT(value)`, because `COUNT(*)` fails to plan over
-  many chunks. Details: `done/timescaledb-compressed-chunks.md`.
+  chunks). CI runs TimescaleDB 2.30. Two workarounds stay for older versions, where they were needed (2.17):
+  SensApp sets `plan_cache_mode = force_custom_plan` on its connections, because a cached generic plan
+  returned wrong rows after a chunk changed state, and the aggregated `count` is written `COUNT(value)`,
+  because `COUNT(*)` failed to plan over many chunks. Details: `done/timescaledb-compressed-chunks.md`.
 - **SQLite**: one writer at a time; units keep their name but not their description.
 - **DuckDB**: timestamps are stored with a millisecond precision, unlike the other backends (microseconds).
 - **RRDCached**: only its dedicated integration module runs against a real `rrdcached` (the backend-generic

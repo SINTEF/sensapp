@@ -59,10 +59,11 @@ impl TimeScaleDBStorage {
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
             // Plan every statement with its parameters. sqlx prepares statements and PostgreSQL
-            // reuses a generic plan after five executions, but TimescaleDB does not invalidate
-            // such a plan when a chunk is compressed or receives a late write: a long-lived
-            // connection then returns wrong results (16 samples out of 140 in the tests). A custom
-            // plan also excludes the chunks outside of the time window at planning time.
+            // reuses a generic plan after five executions, but TimescaleDB 2.17 (fixed by 2.30)
+            // does not invalidate such a plan when a chunk is compressed or receives a late write:
+            // a long-lived connection then returns wrong results (16 samples out of 140 in the
+            // tests). A custom plan also excludes the chunks outside of the time window at
+            // planning time.
             .after_connect(|connection, _metadata| {
                 Box::pin(async move {
                     sqlx::query("SET plan_cache_mode = force_custom_plan")
@@ -507,7 +508,7 @@ fn timescaledb_bucketed_cte(table_name: &'static str) -> String {
 /// The buckets of the samples of one sensor (`sensor_id = $1`) or of many (`sensor_id = ANY($1)`,
 /// with the sensor in the rows).
 /// The count of an aggregated read is `COUNT(value)` and not `COUNT(*)`. They are the same number,
-/// since the values are `NOT NULL`, but TimescaleDB 2.17 fails to plan `COUNT(*)` (and `COUNT(time)`)
+/// since the values are `NOT NULL`, but TimescaleDB 2.17 (fixed by 2.30) fails to plan `COUNT(*)` (and `COUNT(time)`)
 /// over a `time_bucket` grouping across many chunks with "MergeAppend child's targetlist doesn't
 /// match MergeAppend", while a count of the `value` column plans like `sum` and `avg`. The tests
 /// of `timescale_compressed`, run after the 150 chunks of `publish_robustness`, reproduce it.

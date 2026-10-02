@@ -59,5 +59,11 @@ that showed three separate problems, none of them specific to the test data:
 
 - The second slice of the schema (`by_hash('sensor_id', 2)`) is why every week has two chunks that overlap in
   time. It was not changed.
-- CI keeps the pinned image `timescale/timescaledb:2.17.2-pg16`. A newer TimescaleDB may not need the two
-  workarounds; this was not tried.
+- The pinned image was `timescale/timescaledb:2.17.2-pg16` when this was found. It is now `2.30.2-pg16` (CI and
+  `compose.test-services.yml`). With the two workarounds switched off, `timescale_compressed` fails on 2.17.2
+  and passes on 2.30.2, so the stale plan and the `COUNT(*)` planner error are fixed upstream somewhere
+  between the two (which release was not bisected). The `ctid` limit of the vacuum is the same on both, so the
+  vacuum change is needed on any version.
+- The workarounds are kept: they are a connection setting and one word in six queries, they protect older
+  TimescaleDB versions, and `COUNT(value)` is the same number. No CI job covers the older version any more;
+  the full suite was run by hand on 2.17.2 and on 2.30.2, 280 tests each, green.
