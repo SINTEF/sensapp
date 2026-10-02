@@ -1,4 +1,4 @@
-use crate::datamodel::batch::{Batch, SingleSensorBatch};
+use crate::datamodel::batch::Batch;
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::unit::Unit;
@@ -8,8 +8,7 @@ use crate::datamodel::{
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use duckdb::{Connection, OptionalExt};
-use duckdb_publishers::*;
-use duckdb_utilities::{forget_sensor_id, get_sensor_id_or_create_sensor};
+use duckdb_publishers::publish_batch;
 use geo::Point;
 use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
@@ -26,7 +25,7 @@ use super::{
 };
 
 mod duckdb_publishers;
-mod duckdb_utilities;
+mod duckdb_registration;
 mod selector;
 
 #[derive(Debug)]
@@ -66,9 +65,7 @@ impl StorageInstance for DuckDBStorage {
         spawn_blocking(move || -> Result<()> {
             let mut connection = connection.blocking_lock();
             let transaction = connection.transaction()?;
-            for single_sensor_batch in bbatch.sensors.as_ref() {
-                publish_single_sensor_batch(&transaction, single_sensor_batch)?;
-            }
+            publish_batch(&transaction, bbatch.sensors.as_ref())?;
             transaction.commit()?;
             Ok(())
         })
@@ -134,7 +131,6 @@ impl StorageInstance for DuckDBStorage {
             transaction.commit()?;
 
             connection.execute("DELETE FROM sensors WHERE sensor_id = ?", [sensor_id])?;
-            forget_sensor_id(&parsed_uuid);
             Ok(true)
         })
         .await?
@@ -979,64 +975,8 @@ impl StorageInstance for DuckDBStorage {
             .ok();
         connection.execute("DELETE FROM units", []).ok();
 
-        // Step 2: Clear all cached function caches
-        // The cached macro generates cache variables named after the function in uppercase
-        use cached::Cached;
-        duckdb_utilities::GET_LABEL_NAME_ID_OR_CREATE
-            .write()
-            .cache_clear();
-        duckdb_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
-            .write()
-            .cache_clear();
-        duckdb_utilities::GET_UNIT_ID_OR_CREATE
-            .write()
-            .cache_clear();
-        duckdb_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
-            .write()
-            .cache_clear();
-        duckdb_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .write()
-            .cache_clear();
-
         Ok(())
     }
-}
-
-fn publish_single_sensor_batch(
-    transaction: &duckdb::Transaction,
-    single_sensor_batch: &SingleSensorBatch,
-) -> Result<()> {
-    let sensor_id = get_sensor_id_or_create_sensor(transaction, &single_sensor_batch.sensor)?;
-    {
-        let samples_guard = single_sensor_batch.samples.blocking_read();
-        match &*samples_guard {
-            TypedSamples::Integer(samples) => {
-                publish_integer_values(transaction, sensor_id, samples)?;
-            }
-            TypedSamples::Numeric(samples) => {
-                publish_numeric_values(transaction, sensor_id, samples)?;
-            }
-            TypedSamples::Float(samples) => {
-                publish_float_values(transaction, sensor_id, samples)?;
-            }
-            TypedSamples::String(samples) => {
-                publish_string_values(transaction, sensor_id, samples)?;
-            }
-            TypedSamples::Boolean(samples) => {
-                publish_boolean_values(transaction, sensor_id, samples)?;
-            }
-            TypedSamples::Location(samples) => {
-                publish_location_values(transaction, sensor_id, samples)?;
-            }
-            TypedSamples::Blob(samples) => {
-                publish_blob_values(transaction, sensor_id, samples)?;
-            }
-            TypedSamples::Json(samples) => {
-                publish_json_values(transaction, sensor_id, samples)?;
-            }
-        }
-    }
-    Ok(())
 }
 
 fn duckdb_get_sensor_metadata(
