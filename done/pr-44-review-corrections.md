@@ -22,6 +22,7 @@ commit per point.
 | M8 | `batch_query_samples` global `LIMIT` comment | Premise inverted: the limit is per sensor. Comments and a multi-sensor test added | done |
 | L1 | Dedicated counter for shed requests | Maintainer: true | done |
 | L2 | ClickHouse selector: bind an array instead of interpolating ids | Done as a server-side parameter, not `has()` | done |
+| + | ClickHouse aggregated reads counted samples outside the window | Not in the review: found by the M6 parity test, fixed on its own | done |
 
 ## Notes per point
 
@@ -225,3 +226,26 @@ commit per point.
   in `done/cross-series-aggregation-pushdown.md` (moved from `ideas/`).
 - Found on the way: a pre-existing ClickHouse bug that counted the samples outside of a window in aggregated
   reads, fixed in its own commit.
+
+## Performance of the commits of this task
+
+Measured on TimescaleDB with release builds (hashes checked to differ), or with `EXPLAIN` where a build per
+change was not worth it:
+
+| Commit | Effect |
+|--------|--------|
+| 5 `LIMIT max_series + 1` | Faster: 175 to 210 ms down to 7 to 12 ms for a selector over the cap, on 30 000 series |
+| M1 no sensor cache (already on the branch) | +0.6 ms per single-sample write, measured, no change made |
+| L2 ClickHouse ids as a parameter | None expected: `EXPLAIN` reads the same 6 of 245 granules as `IN (...)` |
+| M6 pushdown | `sum`/`count` unchanged, 100 series x 500 samples 88 down to 54 ms, 300 000 samples answered instead of refused. `avg` on a small query over a large table costs about 13 ms more (it reads the window twice) |
+| 2, 3, 4, 6, L1, M2 to M5, M7, M8 | No hot path touched (error mapping, a timeout layer on one route, an atomic increment only when shedding, docs, tests) |
+
+## Observed, not fixed
+
+- SQLite `batch_query_*_samples` (`src/storage/sqlite/batch_queries.rs`) have no SQL `LIMIT`: they read every
+  row of the window for the given sensors and truncate per sensor in Rust. Their only callers are the
+  sequential selector fallback (limit 1, to discover the series) and the label query, so it shows with a token
+  that has a sensor allow list on SQLite. Not part of this review.
+- The sequential fallback (RRDCached, token-filtered reads) still looks up every matching sensor, as the
+  `query_sensors_by_labels` limit means samples per series. Item 5 covers the bulk path only.
+- `README.md` was not touched, as AGENTS.md asks.
