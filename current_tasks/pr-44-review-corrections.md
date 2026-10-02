@@ -14,7 +14,7 @@ commit per point.
 | 6 | `admin/vacuum` unbounded | Maintainer: slow is expected, keep it simple. Longer timeout of its own | done |
 | M1 | Measure `register_sensors` on single-sample publishes | Maintainer: worth measuring | |
 | M2 | Misleading BRIN comment in `postgresql/selector.rs` | Confirmed with `EXPLAIN` | done |
-| M3 | ClickHouse reads without `FINAL`: one sentence in `CLICKHOUSE.md` | | |
+| M3 | ClickHouse reads without `FINAL`: one sentence in `CLICKHOUSE.md` | Premise wrong (value tables are `MergeTree`), sentence still useful | done |
 | M4 | ClickHouse `deduplicate_samples()` count under load | | |
 | M5 | `StdDev` / `Variance` removed | False premise: they never existed. Nothing breaks | done (no change) |
 | M6 | `MAX_SELECTOR_SERIES = 256` blocks aggregated selectors | Maintainer: major if true | |
@@ -126,3 +126,11 @@ commit per point.
 - Only the PostgreSQL file made the claim. Done: the comment says what the plan does. No query change: the
   statements are correct, and series written in long runs make BRIN much tighter than this interleaved
   worst case.
+
+### M3. ClickHouse reads and duplicates
+
+- The review says the value tables are `ReplacingMergeTree`. They are plain `MergeTree` (the init migration):
+  only `units`, `sensors` and `labels` are `ReplacingMergeTree`, and those are read with `FINAL`. So there is
+  no background deduplication and no "worse than PostgreSQL" window: duplicates stay until the vacuum, as on
+  every backend.
+- Done: one bullet in `CLICKHOUSE.md` states that reads do not hide duplicates, and why.
