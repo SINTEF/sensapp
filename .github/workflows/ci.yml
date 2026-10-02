@@ -492,12 +492,6 @@ jobs:
   #           cargo install cargo-make
   #         fi
 
-  #     - name: Install sqlx-cli
-  #       run: cargo install sqlx-cli --no-default-features --features postgres,sqlite
-
-  #     - name: Set up development environment
-  #       run: cargo make setup-dev
-
   #     - name: Generate test coverage
   #       run: cargo llvm-cov --features postgres,sqlite --no-default-features --verbose --lcov --output-path lcov.info
 
