@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from niquests import exceptions as http_errors
 
 from sensapp import RetryPolicy, SensAppClient, _retry
 from sensapp._exceptions import SensAppHTTPError
@@ -50,14 +51,104 @@ async def test_write_rejected_with_retry_after_is_resent_after_that_delay(
     assert sleeps == [2.0]
 
 
-async def test_bare_503_on_a_write_is_not_resent(sleeps: list[float]) -> None:
-    # No Retry-After: the storage may have been reached, SensApp keeps duplicates.
+async def test_bare_503_and_504_on_a_write_are_resent(
+    sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A write may have been stored in part: the duplicate it can create is accepted,
+    # the vacuum of the server removes duplicates.
+    monkeypatch.setattr(_retry.random, "uniform", lambda low, high: high)
     client, session = _client()
-    session.post.return_value = _busy(None)
+    gateway_timeout = MockResponse.error(504, "timeout")
+    session.post.side_effect = [
+        _busy(None),
+        gateway_timeout,
+        MockResponse.text_ok("ok"),
+    ]
 
-    with pytest.raises(SensAppHTTPError) as exc:
+    assert await client.publish("temperature", 21.5) == "ok"
+    assert session.post.await_count == 3
+    assert sleeps == [0.1, 0.2]
+
+
+async def test_connection_errors_and_timeouts_are_retried_for_reads_and_writes(
+    sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_retry.random, "uniform", lambda low, high: high)
+    for error in (
+        http_errors.ConnectionError("refused"),
+        http_errors.ConnectTimeout("connect"),
+        http_errors.ReadTimeout("read"),
+        http_errors.ChunkedEncodingError("cut"),
+    ):
+        sleeps.clear()
+        client, session = _client()
+        session.post.side_effect = [error, MockResponse.text_ok("ok")]
+        session.get.side_effect = [error, MockResponse.json_ok({"status": "ok"})]
+
+        assert await client.publish("temperature", 21.5) == "ok"
+        assert (await client.health_live()).status == "ok"
+        assert session.post.await_count == session.get.await_count == 2
+        assert sleeps == [0.1, 0.1]
+
+
+async def test_gives_up_on_connection_errors_by_raising_the_last_one(
+    sleeps: list[float],
+) -> None:
+    client, session = _client(RetryPolicy(max_attempts=3))
+    last = http_errors.ConnectionError("still down")
+    session.post.side_effect = [
+        http_errors.ConnectionError("down"),
+        http_errors.ReadTimeout("slow"),
+        last,
+    ]
+
+    with pytest.raises(http_errors.ConnectionError) as exc:
         await client.publish("temperature", 21.5)
-    assert exc.value.status_code == 503
+    assert exc.value is last
+    assert session.post.await_count == 3
+    assert len(sleeps) == 2
+
+
+async def test_errors_that_will_not_get_better_are_raised_at_once(
+    sleeps: list[float],
+) -> None:
+    for error in (
+        http_errors.SSLError("bad certificate"),
+        http_errors.ProxyError("bad proxy"),
+        http_errors.InvalidURL("nope"),
+        http_errors.MissingSchema("no scheme"),
+        ValueError("a bug"),
+    ):
+        client, session = _client()
+        session.get.side_effect = error
+        with pytest.raises(type(error)):
+            await client.health_live()
+        assert session.get.await_count == 1
+    assert sleeps == []
+
+
+async def test_connection_errors_are_not_retried_when_retries_are_disabled(
+    sleeps: list[float],
+) -> None:
+    client, session = _client(retry=None)
+    session.post.side_effect = http_errors.ConnectionError("down")
+
+    with pytest.raises(http_errors.ConnectionError):
+        await client.publish("temperature", 21.5)
+    assert session.post.await_count == 1
+
+
+async def test_the_total_timeout_also_applies_to_connection_errors(
+    sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = iter([0.0, 9.9, 9.9, 9.9])
+    monkeypatch.setattr(_retry, "_monotonic", lambda: next(clock))
+    monkeypatch.setattr(_retry.random, "uniform", lambda low, high: 0.5)
+    client, session = _client(RetryPolicy(max_attempts=10, total_timeout=10.0))
+    session.post.side_effect = http_errors.ConnectionError("down")
+
+    with pytest.raises(http_errors.ConnectionError):
+        await client.publish("temperature", 21.5)
     assert session.post.await_count == 1
     assert sleeps == []
 

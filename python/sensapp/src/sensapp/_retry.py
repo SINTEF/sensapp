@@ -7,6 +7,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+import niquests.exceptions as http_errors
+
 # Overridable in tests.
 _sleep = asyncio.sleep
 _monotonic = time.monotonic
@@ -14,15 +16,19 @@ _monotonic = time.monotonic
 
 @dataclass(frozen=True, slots=True)
 class RetryPolicy:
-    """How the client retries requests the server could not take right now.
+    """How the client retries requests that could not be served right now.
 
-    Only overload (``503`` and ``429``) is retried, never other errors. The wait
-    follows the server's ``Retry-After`` when there is one. Otherwise it is an
-    exponential backoff with full jitter: ``random(0, min(max_delay,
+    Retried: the server is overloaded or unavailable (``503``, ``429``, ``504``), the
+    connection fails, or the request times out. Never retried: other errors, which would
+    come back the same. The wait follows the server's ``Retry-After`` when there is one.
+    Otherwise it is an exponential backoff with full jitter: ``random(0, min(max_delay,
     base_delay * 2**n))`` for the n-th retry, counted from 0.
 
-    When the policy gives up, the request is dropped and the server's last error
-    is raised.
+    A write that timed out may have been stored, so a retry can store its samples twice:
+    that is accepted, the vacuum operation of the server removes duplicate samples.
+
+    When the policy gives up, the request is dropped and the last error is raised: the
+    server's error, or the exception of the connection.
 
     Attributes:
         max_attempts: Total tries, the first one included. ``1`` disables retries.
@@ -47,7 +53,16 @@ class RetryPolicy:
 DEFAULT_RETRY = RetryPolicy()
 NO_RETRY = RetryPolicy(max_attempts=1)
 
-_OVERLOAD_STATUSES = frozenset({429, 503})
+_RETRYABLE_STATUSES = frozenset({429, 503, 504})
+
+# A failure of the connection or a timeout. A bad certificate or a bad proxy
+# configuration will not get better by waiting.
+_RETRYABLE_ERRORS = (
+    http_errors.ConnectionError,
+    http_errors.Timeout,
+    http_errors.ChunkedEncodingError,
+)
+_PERMANENT_ERRORS = (http_errors.SSLError, http_errors.ProxyError)
 
 
 def retry_after_seconds(response: Any) -> float | None:
@@ -62,48 +77,60 @@ def retry_after_seconds(response: Any) -> float | None:
     return seconds if seconds >= 0 else None
 
 
-def is_retryable(response: Any, *, idempotent: bool) -> bool:
-    """Whether the answer means "not now, try again".
+def is_retryable_status(response: Any) -> bool:
+    """Whether the answer means "not now, try again"."""
+    return response.status_code in _RETRYABLE_STATUSES
 
-    A write is only resent when the server said so with ``Retry-After``: SensApp
-    sends it when it rejects a write before reading it. A bare ``503`` (storage
-    unavailable) may follow a partial write, and SensApp keeps duplicate samples,
-    so it is not resent. Reads are always safe to resend.
-    """
-    if response.status_code not in _OVERLOAD_STATUSES:
-        return False
-    return idempotent or retry_after_seconds(response) is not None
+
+def is_retryable_error(error: BaseException) -> bool:
+    """Whether the connection failed in a way that may not happen again."""
+    return isinstance(error, _RETRYABLE_ERRORS) and not isinstance(
+        error, _PERMANENT_ERRORS
+    )
+
+
+def _give_up(error: BaseException | None, response: Any) -> Any:
+    """End the retries: raise the last exception, or return the last response."""
+    if error is not None:
+        raise error
+    return response
 
 
 async def send_with_retry(
     send: Callable[[], Awaitable[Any]],
     policy: RetryPolicy,
-    *,
-    idempotent: bool,
 ) -> Any:
-    """Call `send` until it succeeds, is not retryable, or the policy gives up.
+    """Call `send` until it succeeds, fails for good, or the policy gives up.
 
-    Giving up returns the last response, so the caller reports the server's own
-    error. Connection errors and timeouts are not retried: a write may already
-    have been processed.
+    Giving up returns the last response, so that the caller reports the server's own
+    error, or raises the last exception of the connection.
     """
     started = _monotonic()
     attempt = 0
     while True:
-        response = await send()
         attempt += 1
-        if attempt >= policy.max_attempts:
-            return response
-        if not is_retryable(response, idempotent=idempotent):
-            return response
+        error: BaseException | None = None
+        response: Any = None
+        try:
+            response = await send()
+        except Exception as caught:
+            if not is_retryable_error(caught):
+                raise
+            error = caught
+        else:
+            if not is_retryable_status(response):
+                return response
 
-        delay = retry_after_seconds(response)
+        if attempt >= policy.max_attempts:
+            return _give_up(error, response)
+
+        delay = retry_after_seconds(response) if response is not None else None
         if delay is None:
             ceiling = min(policy.max_delay, policy.base_delay * 2 ** (attempt - 1))
             delay = random.uniform(0, ceiling)
         elif delay > policy.max_delay:
-            return response
+            return _give_up(error, response)
 
         if _monotonic() - started + delay > policy.total_timeout:
-            return response
+            return _give_up(error, response)
         await _sleep(delay)

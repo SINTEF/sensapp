@@ -256,7 +256,6 @@ class SensAppClient:
                 headers=self._auth_headers(),
             ),
             self._retry,
-            idempotent=True,
         )
         _check_response(response)
         return response  # type: ignore[return-value]
@@ -279,7 +278,6 @@ class SensAppClient:
                 headers=merged_headers,
             ),
             self._retry,
-            idempotent=False,
         )
         _check_response(response)
         return response  # type: ignore[return-value]

@@ -66,11 +66,12 @@ If you want the frame itself to carry upload metadata, `build_upload_table_from_
 
 ## Retries
 
-When SensApp is overloaded it answers `503` (or `429`) and the client retries, within limits (`RetryPolicy`, three attempts by default):
+When SensApp is overloaded or unreachable the client retries, within limits (`RetryPolicy`, three attempts by default). It retries the answers `503`, `429` and `504`, and the connection errors and timeouts (`ConnectionError`, connect and read timeouts, a connection cut while the response is read), for reads and writes:
 
 - It waits for the server's `Retry-After`, or backs off exponentially with full jitter when there is none (`random(0, min(30 s, 0.1 s * 2^n))`).
-- It drops the request and raises `SensAppHTTPError` after `max_attempts`, when the next wait would pass `total_timeout` (60 s), or when `Retry-After` is above `max_delay` (30 s).
-- Only `503` and `429` are retried, never other errors. `publish` is only resent when the `503` carries `Retry-After`, which SensApp sends when it rejected the write before reading it. A bare `503` (storage unavailable) or a timeout may follow a partial write, and SensApp keeps duplicate samples, so those are not resent. Reads are resent in all cases.
+- It drops the request after `max_attempts`, when the next wait would pass `total_timeout` (60 s), or when `Retry-After` is above `max_delay` (30 s). It then raises the last error: `SensAppHTTPError` for an answer of the server, the exception of `niquests` for a connection error or a timeout.
+- Other errors are never retried, they would come back the same: `4xx`, `500`, and the errors that waiting cannot fix (a bad TLS certificate, a bad proxy, an invalid URL).
+- A write that timed out, or that got a `503` without `Retry-After`, may have been stored in whole or in part, so retrying it can store samples twice. That is accepted: the vacuum operation of the server removes duplicate samples (see [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md)).
 - `SensAppClient(..., retry=None)` disables retries, `retry=RetryPolicy(max_attempts=5, ...)` tunes them. If you retry in a proxy or another layer too, disable one of them.
 
 ## What is included

@@ -96,7 +96,7 @@ A client that sends a large body may see the connection closed instead of the `5
 
 Backpressure only works if clients listen to it. The [Python SDK](PYTHON_SDK.md#retries) does all of this by default.
 
-- Retry `503` and `429` only, never other `4xx`. Resend a write only when the `503` has `Retry-After`. After a timeout, a connection error or a `503` without it the write may have been committed, and SensApp does not deduplicate samples (`ideas/sample-deduplication-in-maintenance.md`), so resending can store samples twice.
+- Retry `503`, `504`, `429`, connection errors and timeouts, never other `4xx`. A write rejected with `Retry-After` was not processed at all. After a timeout, a connection error or a `503` without it the write may have been committed in whole or in part, and resending it can store samples twice: SensApp does not reject duplicates when they are written, and the vacuum operation removes them afterwards.
 - Wait for the `Retry-After` value when present, but cap it: if it is longer than you are willing to wait, drop the request instead of coming back early. Otherwise use exponential backoff with full jitter, `sleep = random(0, min(cap, base * 2^n))`, for example a 100 ms base and a 30 s cap.
 - Bound the retrying: 2 to 5 attempts and a total time limit. After that, drop the request and report the failure (or, for a device, keep it in a bounded local buffer and drop the oldest data first). The server cannot do this for you: it keeps no state per client.
 - Retry at one layer only, not in the client library and again in a proxy or an agent: 3 layers × 3 retries is 27 attempts for one request.
