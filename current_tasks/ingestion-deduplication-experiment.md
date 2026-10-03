@@ -78,6 +78,10 @@ transactions (`max_locks_per_transaction` x connections, 6 400 by default). With
 passes (10 x 204, 3.9 s) and the benchmark numbers are unchanged. Not measured yet: throughput of many
 concurrent writers of overlapping series.
 
+Also found, **not caused by the deduplication**: on TimescaleDB, eight writers that register the same *new*
+series at the same moment can deadlock (8 failures in 8 runs with the deduplication off). The test skips that
+half of its rounds on TimescaleDB; the bug is in `ideas/timescaledb-concurrent-first-write-deadlock.md`.
+
 ## Benchmark
 
 `tests/perf/dedup.sh` (server and database) and `tests/perf/dedup.py` (the requests). Release builds, one
