@@ -9,6 +9,7 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 use simplify_polyline::{Point, simplify};
 use smallvec::smallvec;
 use std::collections::BTreeSet;
+use uuid::Uuid;
 
 /// Whether an error comes from a foreign-key violation reported by the database.
 ///
@@ -54,6 +55,27 @@ pub fn duplicate_key_columns(table: &str, time_column: &str) -> String {
         "location_values" => format!("sensor_id, {time_column}, latitude, longitude"),
         _ => format!("sensor_id, {time_column}, value"),
     }
+}
+
+/// Convert a UUID to the 64-bit key of the series in the ClickHouse and BigQuery tables (BigQuery
+/// stores the same bits as a signed `INT64`).
+///
+/// The ids are stored, so this function is part of the on-disk format and must never change:
+/// the XOR of the two big-endian 64-bit halves of the UUID. Sensor UUIDs are hashes, so the
+/// result is uniformly distributed. Do not use `std`'s `DefaultHasher` here, its algorithm is
+/// explicitly allowed to change between Rust releases, which would orphan every stored sample.
+pub fn uuid_to_sensor_id(uuid: &Uuid) -> u64 {
+    let value = uuid.as_u128();
+    ((value >> 64) as u64) ^ (value as u64)
+}
+
+/// Id of a unit in the `units` table: the first 8 bytes of the BLAKE3 hash of its name,
+/// read as a little-endian integer. Part of the on-disk format, like [`uuid_to_sensor_id`].
+pub fn unit_name_to_id(name: &str) -> u64 {
+    let hash = blake3::hash(name.as_bytes());
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&hash.as_bytes()[..8]);
+    u64::from_le_bytes(bytes)
 }
 
 /// Convert SensAppDateTime to Unix microseconds for database storage
@@ -578,6 +600,39 @@ fn aggregate_numeric_samples(
 
 #[cfg(test)]
 mod tests {
+    // These values are stored in ClickHouse and BigQuery. If one of these tests fails, the on-disk format
+    // changed: existing data would no longer be found.
+    #[test]
+    fn sensor_ids_are_pinned() {
+        let id = |uuid: &str| uuid_to_sensor_id(&Uuid::parse_str(uuid).unwrap());
+        assert_eq!(
+            id("00000000-0000-4000-8000-000000000001"),
+            0x8000_0000_0000_4001
+        );
+        assert_eq!(id("00000000-0000-0000-0000-000000000000"), 0);
+        assert_eq!(id("ffffffff-ffff-ffff-ffff-ffffffffffff"), 0);
+        assert_eq!(
+            id("0123456789abcdeffedcba9876543210"),
+            0xffff_ffff_ffff_ffff
+        );
+        assert_eq!(
+            id("9d87123d-9b47-466d-9eda-001c2ecf9c54"),
+            0x9d87_123d_9b47_466d ^ 0x9eda_001c_2ecf_9c54
+        );
+    }
+
+    #[test]
+    fn unit_ids_are_pinned() {
+        assert_eq!(unit_name_to_id("°C"), UNIT_CELSIUS_ID);
+        assert_eq!(unit_name_to_id(""), UNIT_EMPTY_ID);
+        assert_ne!(unit_name_to_id("m"), unit_name_to_id("s"));
+    }
+
+    const UNIT_CELSIUS_ID: u64 = 14_058_937_354_730_164_320;
+    // First 8 bytes of the published BLAKE3 test vector for empty input
+    // (af1349b9f5f9a1a6...), read as little-endian.
+    const UNIT_EMPTY_ID: u64 = 0xa6a1_f9f5_b949_13af;
+
     use super::*;
     use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 
