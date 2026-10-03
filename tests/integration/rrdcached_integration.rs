@@ -616,4 +616,124 @@ mod rrdcached_tests {
 
         Ok(())
     }
+    /// Timings of the common operations, printed for a human: `cargo test ... -- --ignored --nocapture
+    /// rrdcached_performance`. Not a pass/fail test, it only asserts that the data comes back.
+    #[tokio::test]
+    #[serial]
+    #[ignore = "benchmark, run by hand"]
+    async fn rrdcached_performance() -> Result<()> {
+        use std::time::Instant;
+
+        ensure_config();
+        let test_db = TestDb::new_with_type(DatabaseType::RRDcached).await?;
+        let storage = test_db.storage();
+
+        let sensor_count = 50usize;
+        let samples_per_sensor = 8000usize;
+        let now = SensAppDateTime::now()?.to_unix_seconds().floor();
+        let first = now - (samples_per_sensor as f64) * 10.0;
+        let sensors: Vec<Arc<Sensor>> = (0..sensor_count)
+            .map(|i| {
+                Arc::new(Sensor {
+                    uuid: Uuid::new_v4(),
+                    name: format!("perf_{i}"),
+                    sensor_type: SensorType::Float,
+                    unit: None,
+                    labels: SmallVec::new(),
+                })
+            })
+            .collect();
+
+        // Bulk load: batches of about 8192 samples, like SENSAPP_BATCH_SIZE
+        let started = Instant::now();
+        let per_batch = 8192 / sensor_count; // samples of each sensor in a batch
+        let mut offset = 0;
+        while offset < samples_per_sensor {
+            let end = (offset + per_batch).min(samples_per_sensor);
+            let mut vec = SensAppVec::new();
+            for sensor in &sensors {
+                let samples: Vec<Sample<f64>> = (offset..end)
+                    .map(|i| Sample {
+                        datetime: SensAppDateTime::from_unix_seconds(first + i as f64 * 10.0),
+                        value: i as f64,
+                    })
+                    .collect();
+                vec.push(SingleSensorBatch::new(
+                    sensor.clone(),
+                    TypedSamples::Float(samples.into()),
+                ));
+            }
+            storage.publish(Arc::new(Batch::new(vec))).await?;
+            offset = end;
+        }
+        let elapsed = started.elapsed();
+        let total = sensor_count * samples_per_sensor;
+        println!(
+            "bulk load: {total} samples in {:.0} ms ({:.0} samples/s)",
+            elapsed.as_secs_f64() * 1000.0,
+            total as f64 / elapsed.as_secs_f64()
+        );
+
+        // Small writes: one new sample for each of the sensors, like a scrape
+        let writes = 100;
+        let started = Instant::now();
+        for i in 0..writes {
+            let mut vec = SensAppVec::new();
+            for sensor in &sensors {
+                let samples = vec![Sample {
+                    datetime: SensAppDateTime::from_unix_seconds(now + 10.0 + i as f64 * 10.0),
+                    value: 1.0,
+                }];
+                vec.push(SingleSensorBatch::new(
+                    sensor.clone(),
+                    TypedSamples::Float(samples.into()),
+                ));
+            }
+            storage.publish(Arc::new(Batch::new(vec))).await?;
+        }
+        println!(
+            "small writes: {:.2} ms per publish of {sensor_count} sensors",
+            started.elapsed().as_secs_f64() * 1000.0 / writes as f64
+        );
+
+        // Reads of a day, of the whole history
+        for (label, window) in [("1 hour", 3600.0), ("22 hours", 80_000.0)] {
+            let started = Instant::now();
+            let mut found = 0;
+            for sensor in &sensors {
+                let data = storage
+                    .query_sensor_data(
+                        &sensor.uuid.to_string(),
+                        Some(SensAppDateTime::from_unix_seconds(now - window)),
+                        Some(SensAppDateTime::from_unix_seconds(now)),
+                        None,
+                    )
+                    .await?;
+                found += data.map(|d| d.samples.len()).unwrap_or(0);
+            }
+            println!(
+                "read of {label}: {:.2} ms per series, {found} samples in total",
+                started.elapsed().as_secs_f64() * 1000.0 / sensor_count as f64
+            );
+            assert!(found > 0);
+        }
+
+        let started = Instant::now();
+        for _ in 0..100 {
+            storage.health_check().await?;
+        }
+        println!(
+            "health check: {:.2} ms",
+            started.elapsed().as_secs_f64() * 1000.0 / 100.0
+        );
+
+        let started = Instant::now();
+        let listed = storage.list_series(None, Some(256), None).await?;
+        println!(
+            "list_series: {:.2} ms for {} series",
+            started.elapsed().as_secs_f64() * 1000.0,
+            listed.series.len()
+        );
+        Ok(())
+    }
 }
