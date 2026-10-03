@@ -59,7 +59,10 @@ SensApp creates: an existing file keeps its own.
 - `-w` (seconds between two writes of a file, 300 by default) and `-f` are the daemon's cache settings. A longer `-w`
   means fewer disk writes. SensApp never asks for a flush: a read makes the daemon write what it needs.
 
-The image used by the tests (`docker/rrdcached/Dockerfile`) is a good starting point.
+The image used by the tests (`docker/rrdcached/Dockerfile`) is a good starting point: it builds the latest upstream
+`rrdcached` (1.11, Debian's package is 1.7.2), runs it as a non-root user, keeps the files in `/data/db` and the journal
+in `/data/journal`, and starts it with `-O`. It is a copy of the image of
+[rrdcached-client](https://github.com/SINTEF/rrdcached-client).
 
 ## What is different
 
@@ -207,7 +210,7 @@ Unit tests with a scripted daemon run with the library tests (`cargo test --feat
 storage::rrdcached`). The integration tests need a daemon started with `-O` on port 42217, which is what CI does:
 
 ```bash
-docker build -f docker/rrdcached/Dockerfile -t sensapp-rrdcached .
+docker build -t sensapp-rrdcached docker/rrdcached
 docker run -d --name sensapp-rrdcached -p 42217:42217 sensapp-rrdcached
 
 TEST_DATABASE_URL="rrdcached://127.0.0.1:42217?preset=hoarder" \
@@ -217,8 +220,8 @@ TEST_DATABASE_URL="rrdcached://127.0.0.1:42217?preset=hoarder" \
 They write series with a new UUID each, because the files stay in the daemon. The benchmark is ignored by
 default: add `rrdcached_performance -- --ignored --nocapture`.
 
-The backend works with the `rrdcached` of Debian bookworm (1.7.2, the CI image) and 1.11 (Homebrew), over TCP and Unix
-sockets.
+CI runs the tests against `rrdcached` 1.11. The same tests also passed against 1.7.2, the version of Debian's package,
+and the Unix socket scheme was checked by hand with 1.11.
 
 ## Not done
 

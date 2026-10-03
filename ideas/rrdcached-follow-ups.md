@@ -5,8 +5,8 @@ The backend is "good enough" since `done/rrdcached-good-enough.md`: it works, it
 
 ## Use `no_overwrite` of rrdcached-client
 
-`rrdcached-client` (ours) has a branch `create-no-overwrite` (commit `213d155`, not pushed, not released) that adds
-`CreateArguments::no_overwrite`, which sends `-O` with each `CREATE`. Once released as 0.3.0:
+`rrdcached-client` (ours) has a local branch `create-no-overwrite` (not pushed, not released, 0.3.0 does not have it)
+that adds `CreateArguments::no_overwrite`, which sends `-O` with each `CREATE`. Once released:
 
 - bump the dependency, set `no_overwrite: true`, and drop the "start the daemon with `-O`" requirement from
   `docs/RRDCACHED.md` and the Dockerfile: creating a file that exists becomes atomic on the daemon, even with

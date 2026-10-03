@@ -64,7 +64,8 @@ Benchmark (`rrdcached_performance`, debug build, daemon in Docker on a laptop; t
 See `ideas/rrdcached-follow-ups.md`: use `no_overwrite` of rrdcached-client once released, a metadata sidecar, a
 connection pool.
 
-## Tried and not changed
+## Client and image (follow-up of the same day)
 
-The Debian `rrdcached` is 1.7.2 on bookworm and on trixie. Only Homebrew (1.11) and Alpine (1.8) have newer ones,
-so the CI image stays on Debian bookworm.
+`rrdcached-client` 0.3.0 (ours) is used. The test image is now the one of that repository: it builds `rrdcached` 1.11
+from the upstream release (Debian's package is 1.7.2 on bookworm and trixie), runs as non-root, with `-O` added.
+Unit and integration tests pass on it, the benchmark is unchanged. 0.3.0 does not have `no_overwrite` yet.
