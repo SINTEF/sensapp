@@ -1,6 +1,6 @@
 # TimescaleDB: concurrent first writes of a new series can deadlock
 
-Found on 3 Oct 2026 while testing the ingestion deduplication (`current_tasks/ingestion-deduplication-experiment.md`),
+Found on 3 Oct 2026 while testing the ingestion deduplication (`done/ingestion-deduplication.md`),
 but it does **not** depend on it: with the deduplication off the same test deadlocked 8 times out of 8.
 
 ## What happens
