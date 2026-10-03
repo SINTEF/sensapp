@@ -1169,6 +1169,65 @@ mod rrdcached_tests {
             total as f64 / elapsed.as_secs_f64()
         );
 
+        // The first write of many series: every one needs its file
+        let fresh: Vec<Arc<Sensor>> = (0..1000)
+            .map(|i| {
+                Arc::new(Sensor {
+                    uuid: Uuid::new_v4(),
+                    name: format!("fresh_{i}"),
+                    sensor_type: SensorType::Float,
+                    unit: None,
+                    labels: SmallVec::new(),
+                })
+            })
+            .collect();
+        let started = Instant::now();
+        let mut vec = SensAppVec::new();
+        for sensor in &fresh {
+            vec.push(SingleSensorBatch::new(
+                sensor.clone(),
+                TypedSamples::Float(
+                    vec![Sample {
+                        datetime: SensAppDateTime::from_unix_seconds(now),
+                        value: 1.0,
+                    }]
+                    .into(),
+                ),
+            ));
+        }
+        storage.publish(Arc::new(Batch::new(vec))).await?;
+        println!(
+            "new series: {:.2} ms for {} files, {:.2} ms each",
+            started.elapsed().as_secs_f64() * 1000.0,
+            fresh.len(),
+            started.elapsed().as_secs_f64() * 1000.0 / fresh.len() as f64
+        );
+
+        // Scrapes of the series that exist: one new sample for each, every 10 seconds
+        let scrapes = 30;
+        let started = Instant::now();
+        for i in 1..=scrapes {
+            let mut vec = SensAppVec::new();
+            for sensor in &fresh {
+                vec.push(SingleSensorBatch::new(
+                    sensor.clone(),
+                    TypedSamples::Float(
+                        vec![Sample {
+                            datetime: SensAppDateTime::from_unix_seconds(now + i as f64 * 10.0),
+                            value: i as f64,
+                        }]
+                        .into(),
+                    ),
+                ));
+            }
+            storage.publish(Arc::new(Batch::new(vec))).await?;
+        }
+        println!(
+            "scrapes: {:.2} ms per publish of {} series",
+            started.elapsed().as_secs_f64() * 1000.0 / scrapes as f64,
+            fresh.len()
+        );
+
         // Small writes: one new sample for each of the sensors, like a scrape
         let writes = 100;
         let started = Instant::now();
