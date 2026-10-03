@@ -1564,7 +1564,13 @@ impl TimeScaleDBStorage {
             .iter()
             .map(|single_sensor_batch| single_sensor_batch.sensor.as_ref())
             .collect();
-        let sensor_ids = register_sensors(&mut transaction, &sensors).await?;
+        // The hypertables of the batch, in a fixed order, see `register_sensors`
+        let tables: std::collections::BTreeSet<&'static str> = sensors
+            .iter()
+            .map(|sensor| Self::sensor_table_name(sensor.sensor_type))
+            .collect();
+        let tables: Vec<&'static str> = tables.into_iter().collect();
+        let sensor_ids = register_sensors(&mut transaction, &sensors, &tables).await?;
 
         let mut guards = Vec::with_capacity(batch.sensors.len());
         for single_sensor_batch in batch.sensors.as_ref() {

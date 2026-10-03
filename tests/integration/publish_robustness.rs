@@ -182,6 +182,184 @@ async fn concurrent_first_writes_create_one_series() -> Result<()> {
     assert_single_series_with_its_labels(&storage, &sensor, writers).await
 }
 
+/// Different new series, whose first samples are in a time range that has no storage yet (a new
+/// week of the TimescaleDB hypertables, which create their chunks, and so lock `sensors`, on the
+/// first insert): none of the writers may fail because it met another one. Each writer sends
+/// several types, in a different order, so that the hypertables are not met in the same order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
+async fn concurrent_first_writes_of_different_series_in_a_new_time_range() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let run = Uuid::new_v4();
+
+    for round in 0..5 {
+        // One more month every round, so that every round starts on empty storage
+        let seconds = 1_704_067_200.0 + round as f64 * 30.0 * 86_400.0;
+        let tasks: Vec<_> = (0..8)
+            .map(|writer| {
+                let storage = storage.clone();
+                tokio::spawn(async move {
+                    let datetime: SensAppDateTime = hifitime::Epoch::from_unix_seconds(seconds);
+                    let mut sensors = Vec::new();
+                    let mut batch_builder = BatchBuilder::new()?;
+                    for kind in 0..4 {
+                        // The order of the types depends on the writer
+                        let kind = (kind + writer) % 4;
+                        let (sensor_type, samples) = match kind {
+                            0 => (
+                                SensorType::Float,
+                                TypedSamples::Float(
+                                    vec![Sample {
+                                        datetime,
+                                        value: 1.5,
+                                    }]
+                                    .into(),
+                                ),
+                            ),
+                            1 => (
+                                SensorType::Integer,
+                                TypedSamples::Integer(vec![Sample { datetime, value: 7 }].into()),
+                            ),
+                            2 => (
+                                SensorType::String,
+                                TypedSamples::String(
+                                    vec![Sample {
+                                        datetime,
+                                        value: "on".to_string(),
+                                    }]
+                                    .into(),
+                                ),
+                            ),
+                            _ => (
+                                SensorType::Boolean,
+                                TypedSamples::Boolean(
+                                    vec![Sample {
+                                        datetime,
+                                        value: true,
+                                    }]
+                                    .into(),
+                                ),
+                            ),
+                        };
+                        let sensor = Arc::new(Sensor::new_without_uuid(
+                            format!("new_range_{run}_{round}_{writer}_{kind}"),
+                            sensor_type,
+                            None,
+                            None,
+                        )?);
+                        batch_builder.add(sensor.clone(), samples).await?;
+                        sensors.push(sensor);
+                    }
+                    batch_builder.send_what_is_left(storage).await?;
+                    anyhow::Ok(sensors)
+                })
+            })
+            .collect();
+        for task in tasks {
+            for sensor in task.await?? {
+                let data = storage
+                    .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
+                    .await?
+                    .expect("the series should exist");
+                assert_eq!(data.samples.len(), 1, "{} in round {round}", sensor.name);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A writer that registers new series of two types, and a writer that only needs chunks of the same
+/// two types, at the same moment: each can want the storage of the types in the other order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
+async fn concurrent_first_writes_meeting_the_types_in_the_other_order() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let run = Uuid::new_v4();
+
+    let batch = |names: &[(String, bool)], seconds: f64| {
+        let datetime: SensAppDateTime = hifitime::Epoch::from_unix_seconds(seconds);
+        let mut sensors = Vec::new();
+        let mut samples = Vec::new();
+        for (name, is_boolean) in names {
+            let sensor_type = if *is_boolean {
+                SensorType::Boolean
+            } else {
+                SensorType::String
+            };
+            sensors.push(Arc::new(Sensor::new_without_uuid(
+                format!("{name}_{run}"),
+                sensor_type,
+                None,
+                None,
+            )?));
+            samples.push(if *is_boolean {
+                TypedSamples::Boolean(
+                    vec![Sample {
+                        datetime,
+                        value: true,
+                    }]
+                    .into(),
+                )
+            } else {
+                TypedSamples::String(
+                    vec![Sample {
+                        datetime,
+                        value: "on".to_string(),
+                    }]
+                    .into(),
+                )
+            });
+        }
+        anyhow::Ok((sensors, samples))
+    };
+    let publish = |storage: Arc<dyn StorageInstance>, sensors: Vec<Arc<Sensor>>, samples| async move {
+        let mut batch_builder = BatchBuilder::new()?;
+        for (sensor, samples) in sensors.into_iter().zip(samples) {
+            batch_builder.add(sensor, samples).await?;
+        }
+        batch_builder.send_what_is_left(storage).await?;
+        anyhow::Ok(())
+    };
+
+    for round in 0..5 {
+        let start = 1_704_067_200.0;
+        let names = |prefix: &str| {
+            [
+                (format!("{prefix}_boolean_{round}"), true),
+                (format!("{prefix}_string_{round}"), false),
+            ]
+        };
+        // The series of the first writer exist, in the first month
+        let existing = names("existing");
+        let (sensors, samples) = batch(&existing, start)?;
+        publish(storage.clone(), sensors.clone(), samples).await?;
+        // Then, in a month that has no storage: the first writer needs the chunks, in the order of
+        // the code (strings first), the second one registers new series (booleans first)
+        let seconds = start + (round + 1) as f64 * 30.0 * 86_400.0;
+        let (old_sensors, old_samples) = batch(&existing, seconds)?;
+        let fresh = names("fresh");
+        let (new_sensors, new_samples) = batch(&fresh, seconds)?;
+        let (a, b) = tokio::join!(
+            tokio::spawn(publish(storage.clone(), old_sensors, old_samples)),
+            tokio::spawn(publish(storage.clone(), new_sensors.clone(), new_samples)),
+        );
+        a??;
+        b??;
+        for sensor in new_sensors {
+            let data = storage
+                .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
+                .await?
+                .expect("the series should exist");
+            assert_eq!(data.samples.len(), 1, "{} in round {round}", sensor.name);
+        }
+    }
+    Ok(())
+}
+
 /// Devices with a broken clock send dates far from today. They must be stored and read back
 /// as they were sent, not rejected and not moved.
 #[tokio::test]

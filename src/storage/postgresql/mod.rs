@@ -1088,7 +1088,7 @@ impl PostgresStorage {
             .iter()
             .map(|single_sensor_batch| single_sensor_batch.sensor.as_ref())
             .collect();
-        let sensor_ids = register_sensors(&mut transaction, &sensors).await?;
+        let sensor_ids = register_sensors(&mut transaction, &sensors, &[]).await?;
 
         let mut guards = Vec::with_capacity(batch.sensors.len());
         for single_sensor_batch in batch.sensors.as_ref() {
