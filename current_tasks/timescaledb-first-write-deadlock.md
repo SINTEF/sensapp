@@ -13,4 +13,6 @@ reproducing test lives there). Idea file: `ideas/timescaledb-concurrent-first-wr
 
 ## Progress
 
-(nothing yet)
+- [x] 1. Lock confirmed: `sensors` (`ShareRowExclusiveLock` taken by the chunk creation, which adds the foreign key
+  to the new chunk). Wider than the idea said: two different series deadlock too, see the idea file.
+
