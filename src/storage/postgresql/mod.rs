@@ -1120,6 +1120,9 @@ impl PostgresStorage {
             .collect();
         let string_ids = ensure_string_ids(&mut transaction, strings).await?;
 
+        if deduplicate {
+            crate::storage::pg_samples::prefer_hash_join(&mut transaction).await?;
+        }
         publish_numeric_samples(&mut transaction, &samples, deduplicate).await?;
         publish_string_samples(&mut transaction, &samples, &string_ids, deduplicate).await?;
         for (sensor_id, samples) in samples {

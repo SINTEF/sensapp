@@ -46,6 +46,22 @@ pub async fn lock_series(
     Ok(())
 }
 
+/// Makes the planner join the batch with the window of stored rows with a hash join, whatever its
+/// statistics say. For the rest of the transaction. Without it the plan depends on them:
+///   - the new samples of an append are newer than anything the statistics know, so the window is
+///     estimated at one row and the planner chooses a nested loop, which compares every row of the
+///     batch with every row of the window (seconds for 20 000 samples), or probes the index once per
+///     row (0.36 ms each);
+///   - on a table that was never analyzed (right after a bulk load) it chooses a sequential scan.
+/// The hash join builds its table from the batch, so its memory does not grow with the window.
+/// Call it after the statements that need the usual plans (the registration of the series).
+pub async fn prefer_hash_join(connection: &mut sqlx::PgConnection) -> anyhow::Result<()> {
+    sqlx::query("SELECT set_config('enable_nestloop', 'off', true), set_config('enable_seqscan', 'off', true)")
+        .execute(&mut *connection)
+        .await?;
+    Ok(())
+}
+
 /// The window of a batch as bind parameters: `first_param` is the number of the parameter that
 /// holds the lowest time, the next one holds the highest. `sql_type` is the type of the time column.
 #[derive(Clone, Copy)]

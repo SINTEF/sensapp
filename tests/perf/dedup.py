@@ -5,11 +5,16 @@
 
 Stdlib only. The database must be empty. InfluxDB lines `cpu,host=hN,core=cM usage=V`, the value
 only depends on the series and the sample number, so that a replay is made of exact duplicates.
+The history is written in time order (every series gets sample 0, then sample 1, ... like a fleet of
+collectors does), which is what the BRIN index of PostgreSQL relies on. `AFTER_HISTORY='cmd'` runs a command once the history is in. `ORDER=series` writes it one
+series after the other (an import or a backfill), where a time window does not narrow anything.
 Prints one line per step: seconds, samples sent, samples per second. The last line is the number of
 distinct samples sent, to compare with the row count of the database (`dedup.sh` does it).
 """
 import http.client
+import os
 import statistics
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -60,21 +65,33 @@ def report(name: str, seconds: float, samples: int) -> None:
     print(f"{name:<44} {seconds:8.3f} s  {samples:>8} samples  {samples / seconds:>10.0f} /s", flush=True)
 
 
-def batch(series_range, sample_range) -> list[str]:
+def batch(series_range, sample_range, by_series: bool = False) -> list[str]:
     out = []
-    for s in series_range:
-        for i in sample_range:
-            out.append(line(s, i))
-            distinct.add((s, i))
+    pairs = (
+        ((s, i) for s in series_range for i in sample_range)
+        if by_series
+        else ((s, i) for i in sample_range for s in series_range)
+    )
+    for s, i in pairs:
+        out.append(line(s, i))
+        distinct.add((s, i))
     return out
 
 
 conn = connect()
-print(f"series: {SERIES}, history: {HISTORY} samples each ({SERIES * HISTORY} rows)")
+print(f"series: {SERIES}, history: {HISTORY} samples each ({SERIES * HISTORY} rows), {os.environ.get('ORDER', 'time')} order")
 
 # 1. The history, written once. The registration of the series is in this step.
-lines = batch(range(SERIES), range(HISTORY))
-report("history (fresh data, series registered)", request_lines(lines, conn), len(lines))
+ORDER = os.environ.get("ORDER", "time")
+lines = batch(range(SERIES), range(HISTORY), by_series=ORDER == "series")
+report(f"history, {ORDER} order (series registered)", request_lines(lines, conn), len(lines))
+
+# Optional: a shell command run once the history is in, to let the database catch up the way its
+# background work would (`VACUUM ANALYZE` on PostgreSQL: statistics, and the BRIN summaries of the
+# new ranges, which a probe of the recent data otherwise reads in full).
+if os.environ.get("AFTER_HISTORY"):
+    subprocess.run(os.environ["AFTER_HISTORY"], shell=True, check=True, stdout=subprocess.DEVNULL)
+    print(f"(after the history: {os.environ['AFTER_HISTORY']})")
 
 # 2. What a collector does: every series gets new samples (APPEND each) in one request.
 append = batch(range(SERIES), range(HISTORY, HISTORY + APPEND))
