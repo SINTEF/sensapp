@@ -305,12 +305,8 @@ async fn at_ingestion_concurrent_writers_of_the_same_samples_store_them_once() -
     let run = Uuid::new_v4();
 
     // Several rounds: a race does not show every time. Half of the rounds use a series that is
-    // registered already, the others a series that the writers register at the same time, except
-    // on TimescaleDB where eight writers that register the same new series at the same moment can
-    // deadlock, with or without deduplication (ideas/timescaledb-concurrent-first-write-deadlock.md).
-    let register_first = |round: usize| {
-        round.is_multiple_of(2) || test_db.db_type == crate::common::DatabaseType::TimescaleDB
-    };
+    // registered already, the others a series that the writers register at the same time.
+    let register_first = |round: usize| round.is_multiple_of(2);
     for round in 0..6 {
         let sensor = sensor(&format!("ingest_race_{round}"), SensorType::Float, run)?;
         if register_first(round) {
