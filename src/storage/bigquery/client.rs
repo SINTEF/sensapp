@@ -158,6 +158,9 @@ impl BigQueryStorage {
         request.location = self.location.clone();
         request.maximum_bytes_billed = self.max_bytes_billed.map(|bytes| bytes.to_string());
         request.timeout_ms = Some(WAIT_MS);
+        // A result is never served from the cache of an earlier identical query: a read must see
+        // what a write just stored
+        request.use_query_cache = Some(false);
 
         let job = self.client.job();
         let started = Instant::now();

@@ -4,8 +4,8 @@
 
 Use the clean `sensapp-sep-26` clone of upstream `main`. The older local
 checkouts have been reviewed in `done/local-work-reconciliation-september-2026.md`;
-none is a safe release base. The useful unfinished BigQuery work is recorded in
-`ideas/bigquery-backend-reconciliation.md` and is outside the first ClickHouse
+none is a safe release base. The BigQuery backend was rewritten on the current
+storage interface (`docs/BIGQUERY.md`) and is outside the first ClickHouse
 release.
 
 ClickHouse already has migration, health, HTTP lifecycle, and query coverage.
@@ -48,5 +48,5 @@ backend-only release could defer step 5.
 Ship the ClickHouse-backed pre-production build when all four steps have
 evidence. Treat PostgreSQL, SQLite, TimescaleDB, DuckDB, and RRDCached as tested
 compatibility paths rather than equal deployment promises for this release.
-Keep BigQuery experimental until its older read work is ported and tested with a
+Keep BigQuery experimental until its integration suite has been run against a
 real isolated dataset.

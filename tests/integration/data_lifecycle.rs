@@ -397,3 +397,4 @@ backend_tests!("sqlite", DatabaseType::SQLite, sqlite);
 backend_tests!("duckdb", DatabaseType::DuckDB, duckdb);
 backend_tests!("timescaledb", DatabaseType::TimescaleDB, timescaledb);
 backend_tests!("clickhouse", DatabaseType::ClickHouse, clickhouse);
+backend_tests!("bigquery", DatabaseType::BigQuery, bigquery);

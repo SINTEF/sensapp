@@ -2,7 +2,7 @@
 
 use super::BigQueryStorage;
 use super::client::{int_array_param, int_param, required, string_param};
-use super::publishers::sensor_id;
+use super::publishers::uuid_id;
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::unit::Unit;
@@ -18,6 +18,9 @@ use uuid::Uuid;
 
 /// Sensor ids sent to BigQuery in one query for their labels
 const LABEL_LOOKUP_CHUNK: usize = 2000;
+
+/// `LIMIT` takes an INT64
+const MAX_LIMIT: usize = i64::MAX as usize;
 
 /// BigQuery's TIMESTAMP goes from year 1 to year 9999
 const MIN_MICROS: i64 = -62_135_596_800_000_000;
@@ -291,13 +294,7 @@ impl BigQueryStorage {
         sensor_uuid: &str,
     ) -> Result<Option<(i64, Sensor)>> {
         let uuid = parse_uuid(sensor_uuid)?;
-        let id = sensor_id(&Sensor::new(
-            uuid,
-            String::new(),
-            SensorType::Integer,
-            None,
-            None,
-        ));
+        let id = uuid_id(&uuid);
         let sql = self.dataset.sensors_sql(
             &[
                 "s.sensor_id = @id".to_string(),
@@ -334,6 +331,7 @@ impl BigQueryStorage {
              WHERE sensor_id = @id{conditions} ORDER BY timestamp {order} LIMIT {limit}",
             sample_columns(sensor_type),
             self.table(sample_table(sensor_type)),
+            limit = limit.min(MAX_LIMIT),
             order = if newest_first { "DESC" } else { "ASC" },
         );
         let mut samples = empty_samples(sensor_type);
@@ -367,6 +365,7 @@ impl BigQueryStorage {
              ORDER BY sensor_id, timestamp LIMIT {limit}",
             sample_columns(sensor_type),
             self.table(sample_table(sensor_type)),
+            limit = limit.min(MAX_LIMIT),
         );
         let mut by_sensor: HashMap<i64, TypedSamples> = HashMap::new();
         let rows = self

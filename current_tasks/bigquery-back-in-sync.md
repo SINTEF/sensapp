@@ -1,6 +1,8 @@
 # BigQuery: back in sync with the storage interface
 
-Replaces `ideas/bigquery-backend-reconciliation.md`.
+Replaces `ideas/bigquery-backend-reconciliation.md` (removed). The old local checkout
+`/Users/antoinep/work/sensapp-vibe-prom-read` was read for its ideas (cache lifespans, identifier
+validation, parallel reads); nothing of it was copied, and it can be deleted once this task is done.
 
 ## Goal
 
@@ -26,12 +28,30 @@ tests.
 | 9 | Timestamps are sent as ISO strings (nanoseconds are not valid for TIMESTAMP) |
 | 10 | Dictionaries for label names, label values and strings: 3 more tables, a join per read, a lookup per write |
 
-## Plan
+## Done (3 Oct 2026)
 
-- [ ] Move the sensor/unit id helpers to `storage::common`, shared with ClickHouse
-- [ ] New schema and writes: deterministic ids, no dictionaries, micros timestamps, doubles, checked responses
-- [ ] Query helper: pages, incomplete jobs, parameters, `maximum_bytes_billed`
-- [ ] Reads: sensors, samples of the 8 types, labels, matchers, listing, selectors, deletes
-- [ ] Integration tests in the generic harness (`TEST_DATABASE_URL=bigquery://...`), unit tests for the SQL
-- [ ] Docs, CI compile check
-- [ ] GCP setup instructions for the user
+- [x] Id helpers shared with ClickHouse in `storage::common`
+- [x] New schema and writes: ids from the data, no dictionaries, microsecond timestamps, doubles, NUMERIC as
+      text, checked answers, no global write lock, JSON as JSON
+- [x] `client.rs`: waits for jobs, reads all pages, parameters, `maximum_bytes_billed`, error sorting
+- [x] Reads: sensors and labels, 8 sample types, paginated listing, matchers, bulk selectors, latest sample,
+      deletes; aggregation on the raw window with the limit applied to the buckets
+- [x] Unit tests (SQL builders, rows against the migration, connection string, errors): 27, no credentials needed
+- [x] Integration tests: `tests/integration/bigquery_integration.rs` (round trip of every type, a unit and a
+      window, concurrent instances, paging, Prometheus matcher semantics, a result over one page, the cost
+      cap), BigQuery added to `data_lifecycle`, `advanced_backend_queries`, `deduplication`
+- [x] Docs (`docs/BIGQUERY.md` with the Google Cloud setup), CI job `bigquery-checks`, `test-bigquery-live`
+- [x] Dependencies: `gcp-bigquery-client` 0.28, `tonic`, `prost` were already the latest; `bigdecimal`, its
+      encoder, `clru`, `tonic` and `sinteflake` (with `SENSAPP_INSTANCE_ID`) are gone
+
+## To do: run it on Google Cloud
+
+Nothing here ran against BigQuery. Steps in `docs/BIGQUERY.md`. Expect to fix things the unit tests cannot
+see: the exact shape of an `error` answer, the DDL script, partition pruning with parameters, DML on
+recent rows, the length of a full suite run.
+
+- [ ] `bigquery_integration::` module
+- [ ] The generic suites on BigQuery (`data_lifecycle`, `advanced_backend_queries`, `query_sensors_by_labels`,
+      `selector_reads`, `ingestion`, `prometheus_remote_read_integration`)
+- [ ] Measure: latency of a small write and of a read, bytes billed by a full run
+- [ ] Move this file to `done/`, delete `/Users/antoinep/work/sensapp-vibe-prom-read`'s BigQuery changes

@@ -441,6 +441,38 @@ jobs:
         if: always() && matrix.name == 'runtime'
         run: docker rm --force sensapp-ci-runtime || true
 
+  # No Google Cloud project in CI: the BigQuery backend is compiled, linted and unit tested (the SQL
+  # it builds, the rows it sends, the errors it sorts). The live tests are run by hand, see
+  # docs/BIGQUERY.md. Not a requirement of the release.
+  bigquery-checks:
+    name: BigQuery Compile and Unit Tests
+    runs-on: ubuntu-latest
+    needs: quality-checks
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: bigquery-v1
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
+
+      - name: Install cargo-make (prebuilt)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-make
+
+      - name: Run BigQuery checks
+        run: cargo make check-bigquery
+
   docker-bigquery-compile:
     name: Experimental BigQuery Image Compile
     runs-on: ubuntu-latest

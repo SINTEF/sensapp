@@ -560,7 +560,7 @@ async fn only_the_backends_that_can_be_exact_accept_the_switch() -> Result<()> {
     let accepted = deduplicate_on_ingest(&storage, true).await?;
     let expected = !matches!(
         test_db.db_type,
-        DatabaseType::ClickHouse | DatabaseType::RRDcached
+        DatabaseType::ClickHouse | DatabaseType::RRDcached | DatabaseType::BigQuery
     );
     assert_eq!(accepted, expected, "{:?}", test_db.db_type);
     Ok(())

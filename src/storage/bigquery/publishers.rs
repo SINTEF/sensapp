@@ -20,8 +20,12 @@ use std::sync::Arc;
 const NUMERIC_SCALE: u32 = 9;
 
 /// The id of a series in the tables: the bits of the 64-bit key shared with ClickHouse.
+pub fn uuid_id(uuid: &uuid::Uuid) -> i64 {
+    uuid_to_sensor_id(uuid) as i64
+}
+
 pub fn sensor_id(sensor: &Sensor) -> i64 {
-    uuid_to_sensor_id(&sensor.uuid) as i64
+    uuid_id(&sensor.uuid)
 }
 
 pub fn unit_id(name: &str) -> i64 {

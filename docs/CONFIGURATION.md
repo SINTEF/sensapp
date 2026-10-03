@@ -75,7 +75,7 @@ The scheme of `SENSAPP_STORAGE_CONNECTION_STRING` picks the backend. A backend o
 | `sqlite://path/to/sensapp.db` | SQLite | Single file, for small setups and tests. |
 | `duckdb://path/to/sensapp.db` | DuckDB | Experimental. |
 | `rrdcached://host:42217?preset=munin&heartbeat=3600`, `rrdcached+unix:///path/to.sock` | RRDCached | Experimental: numbers only, no names or labels. `preset` is `hoarder` (default) or `munin`, `heartbeat` is in seconds. See [RRDCACHED.md](RRDCACHED.md). |
-| `bigquery://key.json?project_id=P&dataset_id=D` | BigQuery | Experimental, not in sync with the current storage interface. |
+| `bigquery://key.json?project_id=P&dataset_id=D`, without `key.json` for the Application Default Credentials | BigQuery | Experimental, for research: every query is billed. Optional `location` and `max_bytes_billed`. See [BIGQUERY.md](BIGQUERY.md). |
 
 Backends create and migrate their own schema at startup. [BACKENDS.md](BACKENDS.md) says which ones are maintained and which are experimental, and what each is good for.
 

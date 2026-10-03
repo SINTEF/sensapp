@@ -17,9 +17,10 @@ no npm audit findings. The regenerated client also passed a live API smoke test;
 see `ideas/remove-frontend-js-yaml-override.md` for the override follow-up.
 - Separate build, test, and Clippy checks for SQLite, PostgreSQL, ClickHouse,
   DuckDB, TimescaleDB, and RRDCached. The service-backed jobs use real database
-  containers. BigQuery remains an experimental compile-only Docker variant on
-  manual runs until an isolated CI dataset and credentials are
-  available; it does not block the ClickHouse release path.
+  containers. BigQuery is compiled, linted and unit tested on every run (`bigquery-checks`),
+  and built as a Docker variant on manual runs. Its integration suite needs a
+  Google Cloud project, whose queries are billed, and is run by hand
+  ([BIGQUERY.md](BIGQUERY.md)). It does not block the ClickHouse release path.
 - Helm lint/template/package and Docker builds. The normal runtime image is
   actually started with ClickHouse, then `tests/clickhouse_container_smoke.py`
   checks readiness, publish, query, and service metrics. Live Python SDK tests
