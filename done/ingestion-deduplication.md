@@ -79,8 +79,8 @@ passes (10 x 204, 3.9 s) and the benchmark numbers are unchanged. Not measured y
 concurrent writers of overlapping series.
 
 Also found, **not caused by the deduplication**: on TimescaleDB, eight writers that register the same *new*
-series at the same moment can deadlock (8 failures in 8 runs with the deduplication off). The test skips that
-half of its rounds on TimescaleDB; the bug is in `ideas/timescaledb-concurrent-first-write-deadlock.md`.
+series at the same moment can deadlock (8 failures in 8 runs with the deduplication off). The test skipped that
+half of its rounds on TimescaleDB until `done/timescaledb-first-write-deadlock.md` fixed it.
 
 ## Benchmark
 
@@ -181,8 +181,8 @@ Every run stored exactly the distinct samples. The baselines are above.
 
 - ClickHouse: no exact mechanism at insert time. Block deduplication (`insert_deduplication_token`) would
   remove a retried identical request only. The vacuum stays its answer.
-- The TimescaleDB deadlock of concurrent first writes of a new series (`ideas/timescaledb-concurrent-first-write-deadlock.md`),
-  independent of this feature.
+- ~~The TimescaleDB deadlock of concurrent first writes of a new series~~ (independent of this feature): fixed in
+  `done/timescaledb-first-write-deadlock.md`.
 - DuckDB: the staging tables are created with `IF NOT EXISTS` on every batch; creating them once per
   connection and skipping staging for tiny batches may bring back part of the +1.5 ms of small writes.
 - A B-tree plus a unique constraint would give the exact guarantee without locks and without the BRIN condition,

@@ -7,7 +7,7 @@ use super::pg_strings::ensure_string_ids;
 use super::{
     Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT,
     SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
-    common::{VALUE_TABLES, datetime_to_micros, is_foreign_key_violation},
+    common::{VALUE_TABLES, datetime_to_micros, is_deadlock, is_foreign_key_violation},
 };
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
@@ -24,6 +24,9 @@ use sqlx::{
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use uuid::Uuid;
+
+/// How many times a batch is written before its error is returned (see `publish`).
+const PUBLISH_ATTEMPTS: usize = 5;
 
 #[derive(Debug)]
 pub struct TimeScaleDBStorage {
@@ -605,14 +608,27 @@ impl StorageInstance for TimeScaleDBStorage {
         Ok(())
     }
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
-        match self.publish_once(&batch).await {
-            Err(error) if is_foreign_key_violation(&error) => {
-                // Another SensApp instance deleted a sensor between its registration and the
-                // insert of its samples. The transaction was rolled back: try again, which
-                // registers the sensors again.
-                self.publish_once(&batch).await
+        // Each attempt is one transaction that was rolled back whole when it failed, so trying
+        // again leaves nothing behind twice.
+        let mut attempt = 1;
+        loop {
+            match self.publish_once(&batch).await {
+                Err(error) if attempt < PUBLISH_ATTEMPTS && is_foreign_key_violation(&error) => {
+                    // Another SensApp instance deleted a sensor between its registration and the
+                    // insert of its samples: the next attempt registers the sensors again.
+                }
+                Err(error) if attempt < PUBLISH_ATTEMPTS && is_deadlock(&error) => {
+                    // `register_sensors` locks the hypertables in alphabetical order, the inserts
+                    // meet them in the order of the code, so two writers can still wait for each
+                    // other (one holds `string_values` and creates a chunk of `boolean_values`,
+                    // the other the reverse). PostgreSQL aborts one of them, which is what this
+                    // is. A random pause keeps the writers from colliding again in step.
+                    tokio::time::sleep(std::time::Duration::from_millis(fastrand::u64(10..60)))
+                        .await;
+                }
+                result => return result,
             }
-            result => result,
+            attempt += 1;
         }
     }
 
@@ -1564,7 +1580,13 @@ impl TimeScaleDBStorage {
             .iter()
             .map(|single_sensor_batch| single_sensor_batch.sensor.as_ref())
             .collect();
-        let sensor_ids = register_sensors(&mut transaction, &sensors).await?;
+        // The hypertables of the batch, in a fixed order, see `register_sensors`
+        let tables: std::collections::BTreeSet<&'static str> = sensors
+            .iter()
+            .map(|sensor| Self::sensor_table_name(sensor.sensor_type))
+            .collect();
+        let tables: Vec<&'static str> = tables.into_iter().collect();
+        let sensor_ids = register_sensors(&mut transaction, &sensors, &tables).await?;
 
         let mut guards = Vec::with_capacity(batch.sensors.len());
         for single_sensor_batch in batch.sensors.as_ref() {

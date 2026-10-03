@@ -19,9 +19,18 @@ use uuid::Uuid;
 /// Concurrent writers registering the same new sensor are safe: every insert is
 /// `ON CONFLICT DO NOTHING`, and the ids are read again afterwards. Values are sorted before they
 /// are inserted so that concurrent transactions take their locks in the same order.
+///
+/// `lock_first` are tables (the hypertables the batch writes to, sorted) that are locked in
+/// `SHARE UPDATE EXCLUSIVE` mode before the first sensor is inserted, when there is one to insert.
+/// On TimescaleDB creating a chunk takes that lock on the hypertable, then a `SHARE ROW EXCLUSIVE`
+/// lock on `sensors` (it copies the foreign key onto the chunk), which waits for every transaction
+/// that inserted a sensor and did not commit. A transaction that inserted a sensor and then needs a
+/// chunk would take the two locks in the other order: a deadlock. Taking the table first makes the
+/// order the same for everybody.
 pub async fn register_sensors(
     connection: &mut PgConnection,
     sensors: &[&Sensor],
+    lock_first: &[&'static str],
 ) -> Result<HashMap<Uuid, i64>> {
     let mut unique: HashMap<Uuid, &Sensor> = HashMap::with_capacity(sensors.len());
     for sensor in sensors {
@@ -38,6 +47,16 @@ pub async fn register_sensors(
         return Ok(ids);
     }
     missing.sort_by_key(|sensor| sensor.uuid);
+
+    if !lock_first.is_empty() {
+        // `ONLY`: without it the lock is taken on every chunk too. The names are static.
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "LOCK TABLE ONLY {} IN SHARE UPDATE EXCLUSIVE MODE",
+            lock_first.join(", ")
+        )))
+        .execute(&mut *connection)
+        .await?;
+    }
 
     // Units and the dictionaries of label names and descriptions
     let unit_ids = ensure_units(connection, &missing).await?;
