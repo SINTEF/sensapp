@@ -80,5 +80,19 @@ type, which loses the parallelism of bulk loads of *new* series: 4 parallel writ
 the sum of the four batches. One-time per series, steady state is unaffected. Follow-up in
 `ideas/timescaledb-parallel-first-writes.md`.
 
+## CI follow-up: SQLite (PR 47)
+
+The two new concurrent tests are backend-generic and I had only run them on TimescaleDB. On CI the SQLite suite
+failed with `database is locked` (reproduced locally, 3 out of 3). Not caused by the lock order, which is
+TimescaleDB only: `SqliteStorage::publish` opened a deferred transaction (`pool.begin()`). In WAL mode a deferred
+transaction that read first and finds that another writer committed meanwhile fails at its first write at once
+with `SQLITE_BUSY`, whatever the 5 s busy timeout. So concurrent first writes of different series returned a
+500 on SQLite too. Fixed with `begin_with("BEGIN IMMEDIATE")`: the writers wait for each other. Both tests, and
+the deduplication concurrent test, pass 5 times out of 5; SQLite suite 236 unit + 287 integration pass.
+Release binaries before and after (different `shasum`), `scale.sh 3000` on SQLite, 3 runs each: new series
+0.39, 0.43, 0.39 s before and 0.39, 0.40, 0.39 s after; same series again 0.146, 0.143, 0.138 s and
+0.136, 0.141, 0.139 s. No difference. Not looked at: the other SQLite transactions that read before they write
+(`delete_series`, the line-905 transaction) have the same pattern.
+
 Side effect on the dev container: `log_lock_waits` was switched on with `ALTER SYSTEM` while investigating
 (switched off again at the end).

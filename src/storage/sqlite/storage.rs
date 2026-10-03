@@ -79,7 +79,11 @@ impl StorageInstance for SqliteStorage {
         Ok(())
     }
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
+        // IMMEDIATE takes the write lock when the transaction starts, so concurrent writers wait
+        // for each other (the busy timeout). A deferred transaction reads first, and when another
+        // writer commits in between, its first write fails at once with "database is locked",
+        // whatever the busy timeout.
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         for single_sensor_batch in batch.sensors.as_ref() {
             self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
                 .await?;
