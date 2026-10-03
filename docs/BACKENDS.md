@@ -57,7 +57,7 @@ or writes series one by one still works, it costs more round trips with many ser
   labels, the unit and the type are not stored (everything is read back as a float named after the UUID), a read
   returns the consolidated rows of the archive that fits the window, not the samples, and a sample that is not after
   the last one of its series cannot be stored. Prometheus remote write works; remote read can only select a series by
-  its UUID. Run the daemon with `-O` when several instances share it. It is tested against a real `rrdcached` with a
+  its UUID. It is tested against a real `rrdcached` with a
   test module of its own (the backend-generic suite does not apply). All the differences, the presets, the
   measured performance: [RRDCACHED.md](RRDCACHED.md).
 - **BigQuery**: needs Google Cloud credentials and is only compiled in CI.

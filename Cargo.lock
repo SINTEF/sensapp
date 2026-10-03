@@ -4351,9 +4351,9 @@ checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
 
 [[package]]
 name = "rrdcached-client"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43dce2234ffd1a2fd46880ed62bff22dd22f19884e99c25492da4cf64a0fe83d"
+checksum = "2ed7015424e281a765486545c5904767403747aa74117ccdd93b5cde2c19cf83"
 dependencies = [
  "nom 8.0.0",
  "thiserror 2.0.21",

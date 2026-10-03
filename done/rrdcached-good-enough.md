@@ -27,7 +27,7 @@ The 12 existing integration tests pass, but most only print what they find. Prob
 
 - [x] Task file and audit, with an ignored benchmark (`rrdcached_performance`)
 - [x] Heartbeat of an hour, `?heartbeat=` to change it (findings 1)
-- [x] Never recreate an existing file: `LAST` first, one creator at a time, "File exists" accepted (2)
+- [x] Never recreate an existing file: `no_overwrite` on each `CREATE`, "File exists" accepted (2)
 - [x] Sorted, deduplicated batches; the daemon's refusal of old times is not a failed write (3, 4)
 - [x] Cancelled requests drop the connection, 15 s timeout, `PING` health check, no `FLUSHALL`, daemon outages
       are 503 (5, 9)
@@ -38,7 +38,7 @@ The 12 existing integration tests pass, but most only print what they find. Prob
       by hand against a Homebrew daemon over a Unix socket
 - [x] `docs/RRDCACHED.md` rewritten (differences, presets, time and gap semantics, operations, performance),
       `docs/BACKENDS.md`, `docs/CONFIGURATION.md`
-- [x] CI runs the factory tests too; the test image runs the daemon with `-O`
+- [x] CI runs the factory tests too
 
 ## Results
 
@@ -53,7 +53,7 @@ Benchmark (`rrdcached_performance`, debug build, daemon in Docker on a laptop; t
 | Bulk load, 400 000 samples | 190 000 samples/s | 188 000 - 191 000 samples/s |
 | Small write, 50 series | 1.95 - 2.09 ms | 1.28 - 1.35 ms (no `FLUSHALL`) |
 | Scrape of 1 000 series | 8.0 - 9.3 ms | 7.7 - 8.0 ms |
-| First write of 1 000 series | 0.72 - 0.82 s | 1.15 - 1.27 s (the `LAST` check, 0.4 ms per file: it protects the history) |
+| First write of 1 000 series | 0.72 - 0.82 s | 0.72 - 1.2 s (1.15 - 1.27 s while a `LAST` check came first) |
 | Read, 1 hour, per series | 2.5 ms | 2.1 - 2.5 ms |
 | Read, 22 hours, per series | 34 ms | 34 - 35 ms |
 | Health check | 0.47 ms | 0.41 - 0.46 ms |
@@ -61,11 +61,15 @@ Benchmark (`rrdcached_performance`, debug build, daemon in Docker on a laptop; t
 
 ## Not done
 
-See `ideas/rrdcached-follow-ups.md`: use `no_overwrite` of rrdcached-client once released, a metadata sidecar, a
-connection pool.
+See `ideas/rrdcached-follow-ups.md`: a metadata sidecar, a connection pool.
 
 ## Client and image (follow-up of the same day)
 
 `rrdcached-client` 0.3.0 (ours) is used. The test image is now the one of that repository: it builds `rrdcached` 1.11
-from the upstream release (Debian's package is 1.7.2 on bookworm and trixie), runs as non-root, with `-O` added.
-Unit and integration tests pass on it, the benchmark is unchanged. 0.3.0 does not have `no_overwrite` yet.
+from the upstream release (Debian's package is 1.7.2 on bookworm and trixie), runs as non-root.
+Unit and integration tests pass on it, the benchmark is unchanged.
+
+Then `rrdcached-client` 0.4.0 (`no_overwrite`, `-O` on each `CREATE`): SensApp creates files with it and no longer asks
+the daemon first (no `LAST` before a creation, no lock), so the daemon does not need to run with `-O`. The image is a
+plain copy of the client's. The 26 integration tests pass three times on a daemon started without `-O`; the first write
+of 1 000 series is back to 0.7 ms per file.

@@ -25,6 +25,13 @@ fn missing_file() -> RRDCachedClientError {
     RRDCachedClientError::UnexpectedResponse(-1, MISSING_FILE.to_string())
 }
 
+fn existing_file() -> RRDCachedClientError {
+    RRDCachedClientError::UnexpectedResponse(
+        -1,
+        "RRD Error: creating '/var/lib/rrdcached/db/x.rrd': File exists".to_string(),
+    )
+}
+
 fn io_error() -> RRDCachedClientError {
     RRDCachedClientError::Io(io::Error::new(io::ErrorKind::BrokenPipe, "boom"))
 }
@@ -64,7 +71,12 @@ impl RRDCachedClientTrait for MockClient {
     async fn create(&mut self, args: CreateArguments) -> ClientResult<()> {
         let mut script = self.script.lock().unwrap();
         script.creates.push(args.to_str());
-        let result = script.create.pop_front().unwrap_or(Ok(()));
+        // A daemon asked with `-O` does not replace a file that exists
+        let exists = args.no_overwrite && script.files_exist;
+        let result = script
+            .create
+            .pop_front()
+            .unwrap_or_else(|| if exists { Err(existing_file()) } else { Ok(()) });
         if result.is_ok() {
             script.files_exist = true;
         }
@@ -324,8 +336,9 @@ async fn a_new_series_is_created_with_the_heartbeat_and_a_start_before_its_first
 }
 
 #[tokio::test]
-async fn an_existing_file_is_never_created_again() {
-    // A restart, or another instance, finds the files that are there already
+async fn an_existing_file_is_not_replaced() {
+    // A restart, or another instance, finds the files that are there already: the daemon is asked
+    // not to overwrite, and says the file exists
     let f = fixture(Script {
         files_exist: true,
         ..Script::default()
@@ -336,13 +349,13 @@ async fn an_existing_file_is_never_created_again() {
         .unwrap();
 
     let script = f.script();
-    assert_eq!(script.lasts, 1);
-    assert!(script.creates.is_empty());
+    assert_eq!(script.creates.len(), 1);
+    assert!(script.creates[0].contains(" -O "), "{}", script.creates[0]);
     assert_eq!(script.batches.len(), 1);
 }
 
 #[tokio::test]
-async fn a_known_series_is_not_checked_again() {
+async fn a_known_series_is_not_created_again() {
     let f = fixture(Script::default());
     for time in [1_000_000, 1_000_010] {
         f.storage
@@ -351,14 +364,11 @@ async fn a_known_series_is_not_checked_again() {
             .unwrap();
     }
     let script = f.script();
-    assert_eq!(
-        (script.lasts, script.creates.len(), script.batches.len()),
-        (1, 1, 2)
-    );
+    assert_eq!((script.creates.len(), script.batches.len()), (1, 2));
 }
 
 #[tokio::test]
-async fn concurrent_writes_of_a_new_series_create_its_file_once() {
+async fn concurrent_writes_of_a_new_series_never_replace_its_file() {
     let f = Arc::new(fixture(Script::default()));
     let writes = (0..8).map(|i| {
         let f = f.clone();
@@ -371,7 +381,10 @@ async fn concurrent_writes_of_a_new_series_create_its_file_once() {
     for write in futures::future::join_all(writes).await {
         write.unwrap().unwrap();
     }
-    assert_eq!(f.script().creates.len(), 1);
+    // However many requests found the series new, each creation refuses to overwrite
+    let script = f.script();
+    assert!(!script.creates.is_empty());
+    assert!(script.creates.iter().all(|create| create.contains(" -O ")));
 }
 
 #[tokio::test]
@@ -391,9 +404,9 @@ async fn a_file_created_by_another_instance_in_the_meantime_is_fine() {
 }
 
 #[tokio::test]
-async fn a_failed_check_is_an_error_and_nothing_is_created() {
+async fn a_failed_creation_is_an_error_and_nothing_is_written() {
     let f = fixture(Script {
-        last: VecDeque::from([Err(RRDCachedClientError::UnexpectedResponse(
+        create: VecDeque::from([Err(RRDCachedClientError::UnexpectedResponse(
             -1,
             "/var/lib/rrdcached/db/x.rrd: Permission denied".to_string(),
         ))]),
@@ -408,7 +421,7 @@ async fn a_failed_check_is_an_error_and_nothing_is_created() {
         storage_error_of(&error),
         StorageError::OperationFailed { .. }
     ));
-    assert!(f.script().creates.is_empty());
+    assert!(f.script().batches.is_empty());
 }
 
 #[tokio::test]
@@ -432,7 +445,6 @@ async fn series_without_numbers_get_no_file() {
         .unwrap();
 
     let script = f.script();
-    assert_eq!(script.lasts, 0);
     assert!(script.creates.is_empty());
     assert!(script.batches.is_empty());
 }
@@ -552,11 +564,10 @@ async fn another_refusal_fails_the_write_and_the_files_are_looked_for_again() {
         StorageError::OperationFailed { .. }
     ));
 
-    // The file was removed behind our back: the next write checks again, and creates it
+    // The file was removed behind our back: the next write creates it again
     f.script().files_exist = false;
     f.storage.publish(batch).await.unwrap();
     let script = f.script();
-    assert_eq!(script.lasts, 2);
     assert_eq!(script.creates.len(), 2);
 }
 

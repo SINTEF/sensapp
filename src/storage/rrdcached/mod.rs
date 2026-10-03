@@ -30,7 +30,7 @@ use rrdcached_client::{
 };
 use smallvec::SmallVec;
 use std::{collections::HashSet, sync::Arc};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tracing::{debug, warn};
 use url::Url;
 use uuid::Uuid;
@@ -51,12 +51,8 @@ const MAX_FRESH_TAIL_FETCHES: usize = 4;
 #[derive(Debug)]
 pub struct RrdCachedStorage {
     connection: Connection,
-    /// The series whose file is known to exist: a cache of what the daemon says, so that a
-    /// restart, or another instance, can neither see a series as new nor recreate it.
+    /// The series whose file is known to exist: a cache, to not ask the daemon at every write.
     known_files: RwLock<HashSet<Uuid>>,
-    /// Checking that a file is missing and creating it are two commands, and the daemon replaces
-    /// a file that exists: one creator at a time in this process.
-    creation: Mutex<()>,
     preset: Preset,
     heartbeat_seconds: i64,
 }
@@ -202,7 +198,6 @@ impl RrdCachedStorage {
         Self {
             connection,
             known_files: RwLock::new(HashSet::new()),
-            creation: Mutex::new(()),
             preset: settings.preset,
             heartbeat_seconds: settings.heartbeat_seconds,
         }
@@ -231,30 +226,18 @@ impl RrdCachedStorage {
                 .filter(|series| !known.contains(&series.uuid))
                 .collect()
         };
-        if missing.is_empty() {
-            return Ok(());
-        }
-
-        let _creator = self.creation.lock().await;
         for series in missing {
-            // Another request may have created it while this one was waiting
-            if self.known_files.read().await.contains(&series.uuid) {
-                continue;
-            }
-            self.ensure_file(series).await?;
+            self.create_file(series).await?;
             self.known_files.write().await.insert(series.uuid);
         }
         Ok(())
     }
 
-    /// The daemon replaces a file that exists when asked to create it, with all its history, so
-    /// it is asked about the file first. Two SensApp instances can still both find it missing:
-    /// start the daemon with `-O` to refuse the second creation (see the documentation).
-    async fn ensure_file(&self, series: &SeriesPoints) -> Result<()> {
+    /// Create the file of a series, unless it exists. Without `no_overwrite` the daemon replaces
+    /// a file that exists, with all its history: a restart, another instance or a concurrent
+    /// request must find it refused, and that is fine.
+    async fn create_file(&self, series: &SeriesPoints) -> Result<()> {
         let path = series.uuid.to_string();
-        if self.last_update(series.uuid).await?.is_some() {
-            return Ok(());
-        }
 
         // The file starts before its first sample: updates must be after the start
         let start_timestamp = series
@@ -277,13 +260,14 @@ impl RrdCachedStorage {
                     round_robin_archives: self.preset.get_round_robin_archives(),
                     start_timestamp,
                     step_seconds: STEP_SECONDS,
+                    no_overwrite: true,
                 };
                 async move { client.create(arguments).await }.boxed()
             })
             .await;
         match created {
             Ok(()) => Ok(()),
-            // Created by another instance in the meantime
+            // It is there already: stored by an earlier run, another instance or request
             Err(error) if is_existing_file(&error) => Ok(()),
             Err(error) => Err(storage_error("create", error)),
         }

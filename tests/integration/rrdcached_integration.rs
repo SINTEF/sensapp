@@ -1,5 +1,4 @@
-//! The RRDCached backend against a real `rrdcached`, started with `-O` (see
-//! `docker/rrdcached/Dockerfile`). The daemon keeps its files between runs, so every test writes
+//! The RRDCached backend against a real `rrdcached` (see `docker/rrdcached/Dockerfile`). The daemon keeps its files between runs, so every test writes
 //! series of its own, with a new UUID.
 //!
 //! What the backend does differently from the others is in `docs/RRDCACHED.md`: RRDtool stores
@@ -499,8 +498,7 @@ mod rrdcached_tests {
     #[serial]
     async fn writers_that_create_the_same_series_at_once_lose_nothing() -> Result<()> {
         // Several instances see a series for the first time together, and must not replace each
-        // other's file. The daemon has to refuse to overwrite (`-O`); the part of the check that
-        // does not need it is what a single instance does with its requests.
+        // other's file: the daemon is asked not to overwrite.
         let db = connect().await?;
         let sensor = new_sensor();
         let first = now() - 600;

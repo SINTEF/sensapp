@@ -3,17 +3,6 @@
 The backend is "good enough" since `done/rrdcached-good-enough.md`: it works, its differences are written in
 `docs/RRDCACHED.md`. These are the things that were left out on purpose.
 
-## Use `no_overwrite` of rrdcached-client
-
-`rrdcached-client` (ours) has a local branch `create-no-overwrite` (not pushed, not released, 0.3.0 does not have it)
-that adds `CreateArguments::no_overwrite`, which sends `-O` with each `CREATE`. Once released:
-
-- bump the dependency, set `no_overwrite: true`, and drop the "start the daemon with `-O`" requirement from
-  `docs/RRDCACHED.md` and the Dockerfile: creating a file that exists becomes atomic on the daemon, even with
-  several SensApp instances and a daemon started without `-O`
-- the `LAST` check before a creation can go too (it costs 0.4 ms per new series): create, and treat "File exists"
-  as success (the code already does for that message)
-
 ## Metadata sidecar
 
 Names, labels, units and types are not stored, so a series cannot be found by name and Prometheus remote read

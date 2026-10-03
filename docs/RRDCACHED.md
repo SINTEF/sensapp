@@ -16,7 +16,7 @@ RRDtool files.
 Start the daemon, then give SensApp its address:
 
 ```bash
-rrdcached -g -B -O -b /var/lib/rrdcached/db -j /var/lib/rrdcached/journal -l 127.0.0.1:42217
+rrdcached -g -B -b /var/lib/rrdcached/db -j /var/lib/rrdcached/journal -l 127.0.0.1:42217
 ```
 
 ```bash
@@ -48,11 +48,10 @@ SensApp creates: an existing file keeps its own.
 
 ### The daemon
 
-- **`-O` is required when you have several SensApp instances**, and recommended always. The daemon replaces a file
-  that it is asked to create, with all its history, unless it was started with `-O`. SensApp asks whether the file
-  exists before creating it, and creates one file at a time inside a process, but two instances that see a new series
-  at the same moment can only be told apart by the daemon. With `-O` the second `CREATE` is refused and SensApp
-  carries on.
+- **Creating a file never replaces one.** SensApp sends `-O` with each `CREATE` (`no_overwrite` of
+  `rrdcached-client` 0.4), so the daemon refuses to replace a file that exists, with all its history, whatever
+  options it was started with. A restart, a second instance or two concurrent requests find the file there. Without
+  that, the daemon's default would erase the series.
 - `-j <dir>` keeps a journal: the updates that were not written to the files yet are replayed after a crash.
 - `-B` confines the daemon to its base directory (`-b`). Give SensApp a directory of its own: it only lists and reads
   the files named `<uuid>.rrd` and ignores the others, but it does not make a difference for the disk space.
@@ -60,8 +59,8 @@ SensApp creates: an existing file keeps its own.
   means fewer disk writes. SensApp never asks for a flush: a read makes the daemon write what it needs.
 
 The image used by the tests (`docker/rrdcached/Dockerfile`) is a good starting point: it builds the latest upstream
-`rrdcached` (1.11, Debian's package is 1.7.2), runs it as a non-root user, keeps the files in `/data/db` and the journal
-in `/data/journal`, and starts it with `-O`. It is a copy of the image of
+`rrdcached` (1.11, Debian's package is 1.7.2), runs it as a non-root user, and keeps the files in `/data/db` and the
+journal in `/data/journal`. It is a copy of the image of
 [rrdcached-client](https://github.com/SINTEF/rrdcached-client).
 
 ## What is different
@@ -78,7 +77,7 @@ in `/data/journal`, and starts it with `-O`. It is a copy of the image of
 | Delete a series or its samples | No: `501 Not Implemented` | Yes |
 | Remove duplicates, deduplicate at ingestion | No (the server refuses to start with `SENSAPP_DEDUPLICATE_ON_INGEST=true`) | Most |
 | Aggregations (`step`) | By SensApp, on the rows that were read (they are already consolidated) | In the database |
-| Several instances | Safe: they share the daemon (see [the daemon](#the-daemon)) | |
+| Several instances | Safe: they share the daemon and never replace each other's files | |
 | Arrow import and export, search by name or label | Not useful: there is nothing to match | Yes |
 
 The generic integration tests, which assume names, labels, types and deletion, do not apply: the backend has a test
@@ -195,7 +194,7 @@ dominates), the `rrdcached_performance` test of `tests/integration/rrdcached_int
 | | |
 |---|---|
 | Bulk load, 50 series, batches of 8 192 samples | 190 000 samples/s |
-| First write of series that have no file | 1.2 ms per file (1.2 s for 1 000 series). Checking that the file does not exist costs 0.4 ms of it: this is what protects the history |
+| First write of series that have no file | 0.7 ms per file (0.7 s for 1 000 series) |
 | A scrape of 1 000 series, one sample each | 8 ms |
 | Read of a series, one hour (360 rows) | 2.3 ms |
 | Read of a series, 22 hours (8 000 rows) | 35 ms |
@@ -207,7 +206,7 @@ The writes do not wait for the disk: the daemon acknowledges an update when it h
 ## Tests
 
 Unit tests with a scripted daemon run with the library tests (`cargo test --features rrdcached --no-default-features
-storage::rrdcached`). The integration tests need a daemon started with `-O` on port 42217, which is what CI does:
+storage::rrdcached`). The integration tests need a daemon on port 42217, which is what CI starts from the same image:
 
 ```bash
 docker build -t sensapp-rrdcached docker/rrdcached

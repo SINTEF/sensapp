@@ -5,9 +5,7 @@
 # so we build the latest upstream release instead. Only rrdcached and librrd are built,
 # without graphing, bindings, docs or examples.
 #
-# Copy of rrdcached.Dockerfile of https://github.com/SINTEF/rrdcached-client, with `-O`: the daemon
-# refuses to replace a file that exists, which SensApp relies on when several instances create the same
-# series at the same time (see docs/RRDCACHED.md).
+# Copy of rrdcached.Dockerfile of https://github.com/SINTEF/rrdcached-client.
 
 ARG DEBIAN_RELEASE=trixie
 
@@ -78,4 +76,4 @@ VOLUME [ "/data/db", "/data/journal" ]
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-CMD ["/usr/local/bin/rrdcached", "-g", "-F", "-B", "-R", "-O", "-l", ":42217", "-p", "/var/run/rrdcached/rrdcached.pid", "-b", "/data/db", "-j", "/data/journal", "-U", "rrdcached", "-G", "rrdcached", "-w", "300", "-f", "3600", "-t", "4", "-V", "LOG_INFO"]
+CMD ["/usr/local/bin/rrdcached", "-g", "-F", "-B", "-R", "-l", ":42217", "-p", "/var/run/rrdcached/rrdcached.pid", "-b", "/data/db", "-j", "/data/journal", "-U", "rrdcached", "-G", "rrdcached", "-w", "300", "-f", "3600", "-t", "4", "-V", "LOG_INFO"]
