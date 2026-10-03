@@ -874,6 +874,216 @@ mod rrdcached_tests {
         Ok(())
     }
 
+    // ---- through the HTTP API
+
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use prost::Message;
+    use sensapp::datamodel::Sensor as SensorModel;
+    use sensapp::http::{
+        metrics::HttpMetrics,
+        server::{RouterSettings, build_router},
+        state::HttpServerState,
+    };
+    use sensapp::parsing::prometheus::remote_write_models::{
+        Label, Sample as PromSample, TimeSeries, WriteRequest,
+    };
+    use std::time::Duration;
+    use tower::ServiceExt;
+
+    fn router(db: &TestDb) -> Router {
+        let state = HttpServerState {
+            name: Arc::new("SensApp Test".to_string()),
+            storage: db.storage(),
+            metrics: Arc::new(HttpMetrics::new()),
+            influxdb_with_numeric: false,
+            auth: None,
+        };
+        build_router(
+            state,
+            &RouterSettings {
+                max_body_bytes: 64 * 1024 * 1024,
+                request_timeout: Duration::from_secs(30),
+                maintenance_timeout: Duration::from_secs(3600),
+                max_concurrent_writes: 16,
+            },
+        )
+    }
+
+    async fn send(router: &Router, request: Request<Body>) -> (StatusCode, String) {
+        let response = router.clone().oneshot(request).await.unwrap();
+        let (parts, body) = response.into_parts();
+        let body = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        (parts.status, String::from_utf8_lossy(&body).to_string())
+    }
+
+    fn get(path: &str) -> Request<Body> {
+        Request::builder().uri(path).body(Body::empty()).unwrap()
+    }
+
+    fn iso(seconds: i64) -> String {
+        format!("{}Z", at(seconds).to_isoformat())
+    }
+
+    /// The `(time, value)` pairs of a SenML answer
+    fn senml_rows(body: &str) -> Vec<(i64, f64)> {
+        let records: Vec<serde_json::Value> = serde_json::from_str(body).expect("SenML JSON");
+        let mut base = 0.0;
+        records
+            .iter()
+            .map(|record| {
+                if let Some(bt) = record.get("bt").and_then(|bt| bt.as_f64()) {
+                    base = bt;
+                }
+                let time = base + record.get("t").and_then(|t| t.as_f64()).unwrap_or(0.0);
+                (time.round() as i64, record["v"].as_f64().expect("a value"))
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn prometheus_remote_write_then_read_the_series() -> Result<()> {
+        // The story of this backend: Prometheus scrapes every minute, writes to SensApp, the
+        // data is in an RRD file. The series is read by its UUID: the name and the labels are
+        // not stored, so Prometheus cannot read it back by name.
+        let db = connect().await?;
+        let router = router(&db);
+        let name = format!("rrd_http_{}", Uuid::new_v4().simple());
+        let first = (now() - 1800) / 60 * 60;
+        let points: Vec<(i64, f64)> = ramp(first, 60, 10, 2.0);
+
+        let write = WriteRequest {
+            timeseries: vec![TimeSeries {
+                labels: vec![Label {
+                    name: "__name__".to_string(),
+                    value: name.clone(),
+                }],
+                samples: points
+                    .iter()
+                    .map(|(time, value)| PromSample {
+                        value: *value,
+                        timestamp: time * 1000,
+                    })
+                    .collect(),
+            }],
+        };
+        let body = snap::raw::Encoder::new().compress_vec(&write.encode_to_vec())?;
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/prometheus_remote_write")
+            .header("content-type", "application/x-protobuf")
+            .header("content-encoding", "snappy")
+            .header("x-prometheus-remote-write-version", "0.1.0")
+            .body(Body::from(body))?;
+        assert_eq!(send(&router, request).await.0, StatusCode::NO_CONTENT);
+
+        // The same request again, as Prometheus does when it did not get the answer
+        let body = snap::raw::Encoder::new().compress_vec(&write.encode_to_vec())?;
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/prometheus_remote_write")
+            .header("content-type", "application/x-protobuf")
+            .header("content-encoding", "snappy")
+            .header("x-prometheus-remote-write-version", "0.1.0")
+            .body(Body::from(body))?;
+        assert_eq!(send(&router, request).await.0, StatusCode::NO_CONTENT);
+
+        let uuid = SensorModel::new_without_uuid(
+            name.clone(),
+            SensorType::Float,
+            None,
+            Some(vec![("__name__".to_string(), name)].into_iter().collect()),
+        )?
+        .uuid;
+        let (status, body) = send(
+            &router,
+            get(&format!(
+                "/series/{uuid}?start={}&end={}",
+                iso(first),
+                iso(first + 540)
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let rows = senml_rows(&body);
+        for point in &points {
+            assert!(rows.contains(point), "{point:?} is missing from {rows:?}");
+        }
+
+        // The last sample, without any window
+        let (status, body) = send(&router, get(&format!("/series/{uuid}/last"))).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let last: serde_json::Value = serde_json::from_str(&body)?;
+        assert_eq!(
+            last["value"].as_f64(),
+            points.last().map(|(_, value)| *value),
+            "{body}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn senml_samples_an_hour_apart_and_what_the_api_cannot_do() -> Result<()> {
+        let db = connect().await?;
+        let router = router(&db);
+        let name = format!("rrd_senml_{}", Uuid::new_v4().simple());
+        let first = (now() - 6 * 3600) / 3600 * 3600;
+        let records: Vec<serde_json::Value> = (0..4)
+            .map(|i| {
+                serde_json::json!({
+                    "bn": format!("{name}:"), "n": "t", "bt": first + i * 3600, "v": 20.0 + i as f64
+                })
+            })
+            .collect();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/publish")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&records)?))?;
+        let (status, body) = send(&router, request).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        // The series of this name: found by listing, the only one with this UUID name is new
+        let uuid =
+            SensorModel::new_without_uuid(format!("{name}:t"), SensorType::Float, None, None)?.uuid;
+        let (status, body) = send(
+            &router,
+            get(&format!(
+                "/series/{uuid}?start={}&end={}",
+                iso(first),
+                iso(first + 3 * 3600)
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let rows = senml_rows(&body);
+        assert!(rows.contains(&(first + 3 * 3600, 23.0)), "{rows:?}");
+
+        // A series that is not there
+        let (status, _) = send(&router, get(&format!("/series/{}", Uuid::new_v4()))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // Deleting is not implemented
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/series/{uuid}"))
+            .body(Body::empty())?;
+        assert_eq!(send(&router, request).await.0, StatusCode::NOT_IMPLEMENTED);
+
+        // The service is ready and its listing works
+        assert_eq!(send(&router, get("/health/ready")).await.0, StatusCode::OK);
+        assert_eq!(
+            send(&router, get("/series?limit=2")).await.0,
+            StatusCode::OK
+        );
+        Ok(())
+    }
+
     // ---- what the backend does not do
 
     #[tokio::test]
