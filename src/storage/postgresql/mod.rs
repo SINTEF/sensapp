@@ -28,6 +28,7 @@ use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{str::FromStr, sync::Arc};
 use uuid::Uuid;
 
@@ -46,6 +47,8 @@ use postgresql_publishers::*;
 #[derive(Debug)]
 pub struct PostgresStorage {
     pool: PgPool,
+    /// Drop the samples that are stored already when writing, see `pg_samples`
+    deduplicate_on_ingest: AtomicBool,
 }
 
 impl PostgresStorage {
@@ -65,7 +68,10 @@ impl PostgresStorage {
             .await
             .context("Failed to create postgres pool")?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            deduplicate_on_ingest: AtomicBool::new(false),
+        })
     }
 
     async fn get_sensor_metadata(&self, sensor_uuid: &str) -> Result<Option<(i64, Sensor)>> {
@@ -313,6 +319,11 @@ impl StorageInstance for PostgresStorage {
             .await
             .context("Failed to vacuum database")?;
 
+        Ok(())
+    }
+
+    async fn set_deduplicate_on_ingest(&self, enabled: bool) -> Result<()> {
+        self.deduplicate_on_ingest.store(enabled, Ordering::Relaxed);
         Ok(())
     }
 
@@ -1091,6 +1102,12 @@ impl PostgresStorage {
             .map(|(sensor_id, guard)| (*sensor_id, &**guard))
             .collect();
 
+        // Deduplicating: one writer at a time per series, see `lock_series`
+        let deduplicate = self.deduplicate_on_ingest.load(Ordering::Relaxed);
+        if deduplicate {
+            let ids: Vec<i64> = samples.iter().map(|(sensor_id, _)| *sensor_id).collect();
+            crate::storage::pg_samples::lock_series(&mut transaction, &ids).await?;
+        }
         // The ids of all the distinct strings of the batch, then all the samples, in bulk
         let strings: std::collections::BTreeSet<&str> = samples
             .iter()
@@ -1103,10 +1120,13 @@ impl PostgresStorage {
             .collect();
         let string_ids = ensure_string_ids(&mut transaction, strings).await?;
 
-        publish_numeric_samples(&mut transaction, &samples).await?;
-        publish_string_samples(&mut transaction, &samples, &string_ids).await?;
+        if deduplicate {
+            crate::storage::pg_samples::prefer_hash_join(&mut transaction).await?;
+        }
+        publish_numeric_samples(&mut transaction, &samples, deduplicate).await?;
+        publish_string_samples(&mut transaction, &samples, &string_ids, deduplicate).await?;
         for (sensor_id, samples) in samples {
-            self.publish_other_values(&mut transaction, sensor_id, samples)
+            self.publish_other_values(&mut transaction, sensor_id, samples, deduplicate)
                 .await?;
         }
         transaction.commit().await?;
@@ -1120,6 +1140,7 @@ impl PostgresStorage {
         transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         sensor_id: i64,
         samples: &TypedSamples,
+        deduplicate: bool,
     ) -> Result<()> {
         match samples {
             TypedSamples::Integer(_)
@@ -1127,16 +1148,16 @@ impl PostgresStorage {
             | TypedSamples::Float(_)
             | TypedSamples::String(_) => {}
             TypedSamples::Boolean(values) => {
-                publish_boolean_values(transaction, sensor_id, values).await?;
+                publish_boolean_values(transaction, sensor_id, values, deduplicate).await?;
             }
             TypedSamples::Location(values) => {
-                publish_location_values(transaction, sensor_id, values).await?;
+                publish_location_values(transaction, sensor_id, values, deduplicate).await?;
             }
             TypedSamples::Blob(values) => {
-                publish_blob_values(transaction, sensor_id, values).await?;
+                publish_blob_values(transaction, sensor_id, values, deduplicate).await?;
             }
             TypedSamples::Json(values) => {
-                publish_json_values(transaction, sensor_id, values).await?;
+                publish_json_values(transaction, sensor_id, values, deduplicate).await?;
             }
         }
 

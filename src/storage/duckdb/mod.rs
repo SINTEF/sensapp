@@ -15,6 +15,7 @@ use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 use uuid::Uuid;
@@ -31,6 +32,8 @@ mod selector;
 #[derive(Debug)]
 pub struct DuckDBStorage {
     connection: Arc<Mutex<Connection>>,
+    /// Drop the samples that are stored already when writing, see `duckdb_publishers`
+    deduplicate_on_ingest: Arc<AtomicBool>,
 }
 
 const INIT_SQL: &str = include_str!("./migrations/20240223133248_init.sql");
@@ -46,7 +49,10 @@ impl DuckDBStorage {
         let connection = Connection::open(&connection_string[PREFIX.len()..])
             .context("Failed to open DuckDB connection")?;
         let connection = Arc::new(Mutex::new(connection));
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            deduplicate_on_ingest: Arc::new(AtomicBool::new(false)),
+        })
     }
 }
 
@@ -62,10 +68,11 @@ impl StorageInstance for DuckDBStorage {
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         let connection = Arc::clone(&self.connection);
         let bbatch = batch.clone();
+        let deduplicate = self.deduplicate_on_ingest.load(Ordering::Relaxed);
         spawn_blocking(move || -> Result<()> {
             let mut connection = connection.blocking_lock();
             let transaction = connection.transaction()?;
-            publish_batch(&transaction, bbatch.sensors.as_ref())?;
+            publish_batch(&transaction, bbatch.sensors.as_ref(), deduplicate)?;
             transaction.commit()?;
             Ok(())
         })
@@ -76,6 +83,11 @@ impl StorageInstance for DuckDBStorage {
     async fn vacuum(&self) -> Result<()> {
         let connection = self.connection.lock().await;
         connection.execute("VACUUM ANALYZE", [])?;
+        Ok(())
+    }
+
+    async fn set_deduplicate_on_ingest(&self, enabled: bool) -> Result<()> {
+        self.deduplicate_on_ingest.store(enabled, Ordering::Relaxed);
         Ok(())
     }
 
