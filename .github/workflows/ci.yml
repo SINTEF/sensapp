@@ -267,7 +267,7 @@ jobs:
         run: |
           export TEST_DATABASE_URL='rrdcached://127.0.0.1:42217?preset=hoarder'
           cargo build --features rrdcached --no-default-features
-          cargo test --features rrdcached --no-default-features storage::rrdcached --lib
+          cargo test --features rrdcached --no-default-features --lib -- storage::rrdcached storage::storage_factory
           cargo test --features rrdcached --no-default-features http::influxdb::tests::test_publish_influxdb -- --exact
           cargo test --features rrdcached --no-default-features http::influxdb::tests::test_publish_influxdb_with_numeric_enabled -- --exact
           cargo test --features rrdcached --no-default-features --test integration rrdcached_integration::

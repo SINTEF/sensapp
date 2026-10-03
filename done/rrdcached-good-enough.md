@@ -23,21 +23,48 @@ The 12 existing integration tests pass, but most only print what they find. Prob
 | 9 | A cancelled request (HTTP timeout) leaves the shared connection mid-protocol: the next command reads the reply of the previous one | Wrong answers after a timeout |
 | 10 | Non-numeric samples are dropped with a log line only; names, units, labels, types are not stored (by design) | Documented limitation |
 
-## Plan
+## Done
 
-- [ ] Task file and audit
-- [ ] Tests that really assert (module tests with a scripted client, integration tests against the daemon)
-- [ ] Heartbeat
-- [ ] Never recreate an existing file
-- [ ] Robust batches: sorted, deduplicated, stale samples tolerated
-- [ ] Connection safety: cancelled requests, `PING` health check, no `FLUSHALL`
-- [ ] Queries: window, limit, errors, empty windows, fresh tail
-- [ ] Listing: sorted, paginated, only SensApp files
-- [ ] Selectors: list once
-- [ ] Documentation of the differences (`docs/RRDCACHED.md`, `docs/BACKENDS.md`)
-- [ ] CI and Docker image
-- [ ] Measured performance before and after
-- [ ] Full gate (check, clippy, tests of the backends that share code) and pull request
+- [x] Task file and audit, with an ignored benchmark (`rrdcached_performance`)
+- [x] Heartbeat of an hour, `?heartbeat=` to change it (findings 1)
+- [x] Never recreate an existing file: `LAST` first, one creator at a time, "File exists" accepted (2)
+- [x] Sorted, deduplicated batches; the daemon's refusal of old times is not a failed write (3, 4)
+- [x] Cancelled requests drop the connection, 15 s timeout, `PING` health check, no `FLUSHALL`, daemon outages
+      are 503 (5, 9)
+- [x] Reads: window, first row, open windows, limit, errors, empty versus missing, freshest rows (6)
+- [x] Listing sorted and paginated, only the files named like a series (7)
+- [x] Selectors read each series once (8)
+- [x] `rrdcached+unix://` was never routed by the storage factory ("Unsupported storage type"): fixed and tested
+      by hand against a Homebrew daemon over a Unix socket
+- [x] `docs/RRDCACHED.md` rewritten (differences, presets, time and gap semantics, operations, performance),
+      `docs/BACKENDS.md`, `docs/CONFIGURATION.md`
+- [x] CI runs the factory tests too; the test image runs the daemon with `-O`
 
-## Progress notes
+## Results
 
+Unit tests: 54 with a scripted daemon (`storage::rrdcached`). Integration tests against a real daemon: 12 weak
+tests replaced by 26 that assert, and 20 of the 24 first ones fail on the previous code. Passing on `rrdcached`
+1.7.2 (Debian bookworm and trixie, what CI uses) and 1.11 (Homebrew).
+
+Benchmark (`rrdcached_performance`, debug build, daemon in Docker on a laptop; two runs each):
+
+| | before | after |
+|---|---|---|
+| Bulk load, 400 000 samples | 190 000 samples/s | 188 000 - 191 000 samples/s |
+| Small write, 50 series | 1.95 - 2.09 ms | 1.28 - 1.35 ms (no `FLUSHALL`) |
+| Scrape of 1 000 series | 8.0 - 9.3 ms | 7.7 - 8.0 ms |
+| First write of 1 000 series | 0.72 - 0.82 s | 1.15 - 1.27 s (the `LAST` check, 0.4 ms per file: it protects the history) |
+| Read, 1 hour, per series | 2.5 ms | 2.1 - 2.5 ms |
+| Read, 22 hours, per series | 34 ms | 34 - 35 ms |
+| Health check | 0.47 ms | 0.41 - 0.46 ms |
+| `list_series`, 256 of 6 000 files | 74 - 96 ms | 35 - 49 ms |
+
+## Not done
+
+See `ideas/rrdcached-follow-ups.md`: use `no_overwrite` of rrdcached-client once released, a metadata sidecar, a
+connection pool.
+
+## Tried and not changed
+
+The Debian `rrdcached` is 1.7.2 on bookworm and on trixie. Only Homebrew (1.11) and Alpine (1.8) have newer ones,
+so the CI image stays on Debian bookworm.
