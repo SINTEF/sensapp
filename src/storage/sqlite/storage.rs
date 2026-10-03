@@ -26,6 +26,7 @@ use sqlx::{Sqlite, Transaction};
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -33,6 +34,8 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct SqliteStorage {
     pub(super) pool: SqlitePool,
+    /// Drop the samples that are stored already when writing, see `sqlite_publishers`
+    deduplicate_on_ingest: AtomicBool,
 }
 
 impl SqliteStorage {
@@ -57,7 +60,10 @@ impl SqliteStorage {
             .await
             .context("Failed to create sqlite pool")?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            deduplicate_on_ingest: AtomicBool::new(false),
+        })
     }
 }
 
@@ -88,6 +94,11 @@ impl StorageInstance for SqliteStorage {
             .execute(&self.pool)
             .await
             .context("Failed to vacuum database")?;
+        Ok(())
+    }
+
+    async fn set_deduplicate_on_ingest(&self, enabled: bool) -> Result<()> {
+        self.deduplicate_on_ingest.store(enabled, Ordering::Relaxed);
         Ok(())
     }
 
@@ -1217,32 +1228,33 @@ impl SqliteStorage {
     ) -> Result<()> {
         let sensor_id =
             get_sensor_id_or_create_sensor(transaction, &single_sensor_batch.sensor).await?;
+        let deduplicate = self.deduplicate_on_ingest.load(Ordering::Relaxed);
         {
             let samples_guard = single_sensor_batch.samples.read().await;
             match &*samples_guard {
                 TypedSamples::Integer(samples) => {
-                    publish_integer_values(transaction, sensor_id, samples).await?;
+                    publish_integer_values(transaction, sensor_id, samples, deduplicate).await?;
                 }
                 TypedSamples::Numeric(samples) => {
-                    publish_numeric_values(transaction, sensor_id, samples).await?;
+                    publish_numeric_values(transaction, sensor_id, samples, deduplicate).await?;
                 }
                 TypedSamples::Float(samples) => {
-                    publish_float_values(transaction, sensor_id, samples).await?;
+                    publish_float_values(transaction, sensor_id, samples, deduplicate).await?;
                 }
                 TypedSamples::String(samples) => {
-                    publish_string_values(transaction, sensor_id, samples).await?;
+                    publish_string_values(transaction, sensor_id, samples, deduplicate).await?;
                 }
                 TypedSamples::Boolean(samples) => {
-                    publish_boolean_values(transaction, sensor_id, samples).await?;
+                    publish_boolean_values(transaction, sensor_id, samples, deduplicate).await?;
                 }
                 TypedSamples::Location(samples) => {
-                    publish_location_values(transaction, sensor_id, samples).await?;
+                    publish_location_values(transaction, sensor_id, samples, deduplicate).await?;
                 }
                 TypedSamples::Blob(samples) => {
-                    publish_blob_values(transaction, sensor_id, samples).await?;
+                    publish_blob_values(transaction, sensor_id, samples, deduplicate).await?;
                 }
                 TypedSamples::Json(samples) => {
-                    publish_json_values(transaction, sensor_id, samples).await?;
+                    publish_json_values(transaction, sensor_id, samples, deduplicate).await?;
                 }
             }
         }

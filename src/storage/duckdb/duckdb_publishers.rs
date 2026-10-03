@@ -1,6 +1,7 @@
 use super::duckdb_registration::{ensure_string_ids, register_sensors};
 use crate::datamodel::batch::SingleSensorBatch;
 use crate::datamodel::{Sample, TypedSamples};
+use crate::storage::common::duplicate_key_columns;
 use anyhow::{Context, Result};
 use duckdb::{Appender, Connection, params};
 use geo::Point;
@@ -10,7 +11,17 @@ use std::collections::{BTreeSet, HashMap};
 
 /// Writes a batch: the sensors and the strings are registered with a handful of statements, then
 /// the samples of every sensor go through one appender per value table.
-pub fn publish_batch(connection: &Connection, sensors: &[SingleSensorBatch]) -> Result<()> {
+///
+/// With `deduplicate` the appenders write to a temporary table per value table, and one statement
+/// then copies the rows that are not stored yet (and the batch once if it repeats itself) to the
+/// real table, looking only at the stored rows inside the time window of the batch (DuckDB skips
+/// the row groups outside it). The connection is shared behind a mutex and a file has one process,
+/// so no other writer can slip in between.
+pub fn publish_batch(
+    connection: &Connection,
+    sensors: &[SingleSensorBatch],
+    deduplicate: bool,
+) -> Result<()> {
     let sensor_refs: Vec<&crate::datamodel::Sensor> =
         sensors.iter().map(|batch| batch.sensor.as_ref()).collect();
     let ids = register_sensors(connection, &sensor_refs)?;
@@ -27,7 +38,7 @@ pub fn publish_batch(connection: &Connection, sensors: &[SingleSensorBatch]) -> 
     }
     let string_ids = ensure_string_ids(connection, &strings)?;
 
-    let mut appenders = Appenders::new(connection);
+    let mut appenders = Appenders::new(connection, deduplicate);
     for (batch, guard) in sensors.iter().zip(&guards) {
         let sensor_id = *ids
             .get(&batch.sensor.uuid)
@@ -68,21 +79,35 @@ pub fn publish_batch(connection: &Connection, sensors: &[SingleSensorBatch]) -> 
 /// The appenders of a batch, opened when a sensor of that table shows up.
 struct Appenders<'a> {
     connection: &'a Connection,
+    deduplicate: bool,
     appenders: HashMap<&'static str, Appender<'a>>,
 }
 
 impl<'a> Appenders<'a> {
-    fn new(connection: &'a Connection) -> Self {
+    fn new(connection: &'a Connection, deduplicate: bool) -> Self {
         Self {
             connection,
+            deduplicate,
             appenders: HashMap::new(),
         }
     }
 
     fn get(&mut self, table: &'static str) -> Result<&mut Appender<'a>> {
         if !self.appenders.contains_key(table) {
-            self.appenders
-                .insert(table, self.connection.appender(table)?);
+            let appender = if self.deduplicate {
+                // The rows of a rolled back batch go with the transaction
+                self.connection.execute_batch(&format!(
+                    "CREATE TEMP TABLE IF NOT EXISTS stage_{table} AS SELECT * FROM {table} LIMIT 0"
+                ))?;
+                self.connection.appender_to_catalog_and_db(
+                    &format!("stage_{table}"),
+                    "temp",
+                    "main",
+                )?
+            } else {
+                self.connection.appender(table)?
+            };
+            self.appenders.insert(table, appender);
         }
         Ok(self.appenders.get_mut(table).expect("inserted above"))
     }
@@ -90,6 +115,24 @@ impl<'a> Appenders<'a> {
     fn flush(mut self) -> Result<()> {
         for appender in self.appenders.values_mut() {
             appender.flush()?;
+        }
+        if self.deduplicate {
+            for table in self.appenders.keys() {
+                let columns = duplicate_key_columns(table, "timestamp_us");
+                let same_sample = columns
+                    .split(", ")
+                    .map(|column| format!("e.{column} = s.{column}"))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+                self.connection.execute_batch(&format!(
+                    "INSERT INTO {table} SELECT DISTINCT {columns} FROM stage_{table} s \
+                     WHERE NOT EXISTS (SELECT 1 FROM {table} e \
+                       WHERE e.timestamp_us BETWEEN (SELECT min(timestamp_us) FROM stage_{table}) \
+                                                AND (SELECT max(timestamp_us) FROM stage_{table}) \
+                         AND {same_sample}); \
+                     DELETE FROM stage_{table};"
+                ))?;
+            }
         }
         Ok(())
     }
