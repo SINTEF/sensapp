@@ -55,11 +55,6 @@ async fn async_main() -> Result<()> {
         ))
     });
 
-    sinteflake::set_instance_id(config.instance_id).context("Failed to set instance ID")?;
-    sinteflake::set_instance_id_async(config.instance_id)
-        .await
-        .context("Failed to set async instance ID")?;
-
     // Initialize storage backend
     println!("🗄️  Connecting to storage...");
     let storage = create_storage_from_connection_string(&config.storage_connection_string)

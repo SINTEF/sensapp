@@ -51,7 +51,6 @@ Details on what the limits protect against are in [HTTP_LIMITS.md](HTTP_LIMITS.m
 | --- | --- | --- |
 | `SENSAPP_SENSOR_SALT` | `sensapp` | Salt of the hash that turns a sensor's name, type, unit and labels into its UUID. **Changing it changes the UUID of every sensor**: existing data is no longer matched by new writes. Set it once per deployment, before ingesting. |
 | `SENSAPP_INFLUXDB_WITH_NUMERIC` | `false` | Store InfluxDB numbers as exact decimals instead of floats. Precise but slower. See [INFLUX_DB.md](INFLUX_DB.md). |
-| `SENSAPP_INSTANCE_ID` | `0` | Instance number (`u16`) mixed into generated identifiers. Give each SensApp instance writing to the same database a different value. |
 
 ### Observability
 

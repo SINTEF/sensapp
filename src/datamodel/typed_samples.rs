@@ -52,6 +52,20 @@ impl TypedSamples {
         }
     }
 
+    /// Keep the first `len` samples.
+    pub fn truncate(&mut self, len: usize) {
+        match self {
+            TypedSamples::Integer(vec) => vec.truncate(len),
+            TypedSamples::Numeric(vec) => vec.truncate(len),
+            TypedSamples::Float(vec) => vec.truncate(len),
+            TypedSamples::String(vec) => vec.truncate(len),
+            TypedSamples::Boolean(vec) => vec.truncate(len),
+            TypedSamples::Location(vec) => vec.truncate(len),
+            TypedSamples::Blob(vec) => vec.truncate(len),
+            TypedSamples::Json(vec) => vec.truncate(len),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
