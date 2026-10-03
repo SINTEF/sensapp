@@ -66,6 +66,15 @@ pub trait StorageInstance: Send + Sync + Debug {
         Err(StorageError::Unsupported("removing duplicate samples".to_string()).into())
     }
 
+    /// Switch the deduplication of the samples when they are written: a sample that is stored
+    /// already (same series, same timestamp, same value), or that is repeated in the batch, is
+    /// not written again. Off by default.
+    ///
+    /// Not every backend can do it: the default says so with `StorageError::Unsupported`.
+    async fn set_deduplicate_on_ingest(&self, _enabled: bool) -> Result<()> {
+        Err(StorageError::Unsupported("deduplication at ingestion".to_string()).into())
+    }
+
     /// Delete a series: all its samples, its labels and the sensor itself.
     ///
     /// Returns `Ok(false)` when no series has this UUID. Publishing the same sensor
@@ -249,6 +258,8 @@ pub trait StorageInstance: Send + Sync + Debug {
 pub mod storage_factory;
 
 // Sensor registration shared by the backends that use PostgreSQL's SQL dialect and schema
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+pub mod pg_samples;
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]
 pub mod pg_sensor_registration;
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]

@@ -20,9 +20,20 @@ it a real feature, or is the vacuum enough?
 - Duplicates inside one request are dropped too.
 - Opt-in switch while this is an experiment, so that the same binary gives the before and the after:
   `SENSAPP_DEDUPLICATE_ON_INGEST` (default off).
-- Known limit, accepted for the experiment: two requests carrying the same new sample at the same moment
-  can both write it (no lock, no unique index). A retry after a timeout comes later, which is the case that
-  matters; the vacuum still catches the rest.
+- **Must hold with several instances** (SensApp scales horizontally, behind a load balancer). A read
+  before the insert is not enough: a retry after a timeout can reach another instance while the first
+  request is still running, and under READ COMMITTED its `NOT EXISTS` cannot see the uncommitted rows.
+  A design that does not survive two concurrent writers of the same sample is only a best-effort filter.
+  The options, per backend:
+  - a unique constraint plus `ON CONFLICT DO NOTHING`: rock solid, but a B-tree on every row (instead of
+    BRIN) and a different key rule on TimescaleDB;
+  - PostgreSQL family without schema change: a transaction-level advisory lock per series, taken in sorted
+    order, *before* the `NOT EXISTS` (each statement takes a new snapshot, so it then sees what the other
+    writer committed). Writers of the same series are serialized, other series are not;
+  - SQLite and DuckDB: one writer at a time already, one process;
+  - ClickHouse: nothing is rock solid at insert time (no unique key, no transaction). Only eventual
+    (`ReplacingMergeTree` merges, the vacuum).
+  A concurrency test (the same new samples written by many tasks at once must be stored once) decides.
 
 ## Approach (no schema change)
 

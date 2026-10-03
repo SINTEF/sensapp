@@ -1,6 +1,7 @@
 //! Duplicate samples (a retried write, a client that sends twice, a crash in the middle of a
-//! request) are removed by the vacuum operation. Only exact duplicates go: same series, same
-//! timestamp, same value. These tests run on the backend selected by `TEST_DATABASE_URL`.
+//! request) are removed by the vacuum operation, or not written at all when the deduplication at
+//! ingestion is on. Only exact duplicates go: same series, same timestamp, same value. These tests
+//! run on the backend selected by `TEST_DATABASE_URL`.
 
 use crate::common::TestDb;
 use anyhow::Result;
@@ -126,6 +127,230 @@ async fn deduplicate(storage: &Arc<dyn StorageInstance>) -> Result<Option<u64>> 
         }
         Err(error) => Err(error),
     }
+}
+
+/// Switches the deduplication at ingestion on. A backend that cannot do it says so; the tests then
+/// have nothing to check.
+async fn deduplicate_on_ingest(storage: &Arc<dyn StorageInstance>, enabled: bool) -> Result<bool> {
+    match storage.set_deduplicate_on_ingest(enabled).await {
+        Ok(()) => Ok(true),
+        Err(error)
+            if matches!(
+                error.downcast_ref::<StorageError>(),
+                Some(StorageError::Unsupported(_))
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn floats(samples: Vec<(usize, f64)>) -> TypedSamples {
+    TypedSamples::Float(
+        samples
+            .into_iter()
+            .map(|(index, value)| Sample {
+                datetime: at(index),
+                value,
+            })
+            .collect::<Vec<_>>()
+            .into(),
+    )
+}
+
+/// The `(second, value)` pairs of a float series, sorted.
+async fn stored_floats(
+    storage: &Arc<dyn StorageInstance>,
+    sensor: &Sensor,
+) -> Result<Vec<(usize, i64)>> {
+    let data = storage
+        .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
+        .await?
+        .expect("series");
+    let TypedSamples::Float(stored) = &data.samples else {
+        panic!("float samples");
+    };
+    let start = at(0).to_unix_seconds().round();
+    let mut values: Vec<(usize, i64)> = stored
+        .iter()
+        .map(|sample| {
+            (
+                (sample.datetime.to_unix_seconds().round() - start) as usize,
+                (sample.value * 10.0).round() as i64,
+            )
+        })
+        .collect();
+    values.sort();
+    Ok(values)
+}
+
+#[tokio::test]
+#[serial]
+async fn at_ingestion_the_same_samples_of_every_type_are_written_once() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    if !deduplicate_on_ingest(&storage, true).await? {
+        return Ok(());
+    }
+    let run = Uuid::new_v4();
+
+    for sensor_type in ALL_TYPES {
+        let sensor = sensor(&format!("ingest_{sensor_type}"), sensor_type, run)?;
+        // The same three samples written three times: stored once
+        for _ in 0..3 {
+            publish(&storage, &sensor, samples(sensor_type)).await?;
+        }
+        assert_eq!(count(&storage, &sensor).await?, 3, "{sensor_type}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn at_ingestion_repeats_inside_one_request_are_written_once() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    if !deduplicate_on_ingest(&storage, true).await? {
+        return Ok(());
+    }
+    let run = Uuid::new_v4();
+
+    let sensor = sensor("ingest_inside", SensorType::Float, run)?;
+    publish(
+        &storage,
+        &sensor,
+        floats(vec![(0, 1.0), (1, 2.0), (0, 1.0), (1, 2.0), (2, 3.0)]),
+    )
+    .await?;
+    assert_eq!(
+        stored_floats(&storage, &sensor).await?,
+        vec![(0, 10), (1, 20), (2, 30)]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn at_ingestion_only_exact_duplicates_are_dropped() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    if !deduplicate_on_ingest(&storage, true).await? {
+        return Ok(());
+    }
+    let run = Uuid::new_v4();
+
+    // Two values at one timestamp both stay, so does one value at two timestamps, and the same
+    // sample of another series is not a duplicate. Written twice: nothing more is stored.
+    let first = sensor("ingest_exact_first", SensorType::Float, run)?;
+    let second = sensor("ingest_exact_second", SensorType::Float, run)?;
+    for _ in 0..2 {
+        publish(&storage, &first, floats(vec![(0, 1.0), (0, 2.0), (1, 1.0)])).await?;
+        publish(&storage, &second, floats(vec![(0, 1.0)])).await?;
+    }
+    assert_eq!(
+        stored_floats(&storage, &first).await?,
+        vec![(0, 10), (0, 20), (1, 10)]
+    );
+    assert_eq!(stored_floats(&storage, &second).await?, vec![(0, 10)]);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn at_ingestion_a_partial_overlap_adds_only_what_is_new() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    if !deduplicate_on_ingest(&storage, true).await? {
+        return Ok(());
+    }
+    let run = Uuid::new_v4();
+
+    let sensor = sensor("ingest_overlap", SensorType::Float, run)?;
+    publish(
+        &storage,
+        &sensor,
+        floats(vec![(0, 1.0), (1, 2.0), (2, 3.0)]),
+    )
+    .await?;
+    // 1 and 2 are known, 3 and 4 are new, and the value at 2 is a different one: kept
+    publish(
+        &storage,
+        &sensor,
+        floats(vec![(1, 2.0), (2, 3.0), (2, 9.0), (3, 4.0), (4, 5.0)]),
+    )
+    .await?;
+    assert_eq!(
+        stored_floats(&storage, &sensor).await?,
+        vec![(0, 10), (1, 20), (2, 30), (2, 90), (3, 40), (4, 50)]
+    );
+    Ok(())
+}
+
+/// SensApp runs as several instances: a retry can reach another instance while the first request is
+/// still being written. Writers of the same new samples at the same moment must store them once.
+#[tokio::test]
+#[serial]
+async fn at_ingestion_concurrent_writers_of_the_same_samples_store_them_once() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    if !deduplicate_on_ingest(&storage, true).await? {
+        return Ok(());
+    }
+    let run = Uuid::new_v4();
+
+    // Several rounds: a race does not show every time. Half of the rounds use a series that is
+    // registered already, the others a series that the writers register at the same time.
+    for round in 0..6 {
+        let sensor = sensor(&format!("ingest_race_{round}"), SensorType::Float, run)?;
+        if round % 2 == 0 {
+            publish(&storage, &sensor, floats(vec![(1000, 0.0)])).await?;
+        }
+        let mut writers = Vec::new();
+        for _ in 0..8 {
+            let (storage, sensor) = (storage.clone(), sensor.clone());
+            writers.push(tokio::spawn(async move {
+                publish(
+                    &storage,
+                    &sensor,
+                    floats((0..50).map(|index| (index, index as f64)).collect()),
+                )
+                .await
+            }));
+        }
+        for writer in writers {
+            writer.await??;
+        }
+        let expected = 50 + usize::from(round % 2 == 0);
+        assert_eq!(count(&storage, &sensor).await?, expected, "round {round}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn switching_the_deduplication_off_writes_duplicates_again() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    if !deduplicate_on_ingest(&storage, true).await? {
+        return Ok(());
+    }
+    let run = Uuid::new_v4();
+
+    let sensor = sensor("ingest_switch", SensorType::Float, run)?;
+    publish(&storage, &sensor, floats(vec![(0, 1.0)])).await?;
+    publish(&storage, &sensor, floats(vec![(0, 1.0)])).await?;
+    assert_eq!(count(&storage, &sensor).await?, 1);
+    deduplicate_on_ingest(&storage, false).await?;
+    publish(&storage, &sensor, floats(vec![(0, 1.0)])).await?;
+    assert_eq!(count(&storage, &sensor).await?, 2);
+    Ok(())
 }
 
 #[tokio::test]
