@@ -8,4 +8,4 @@ RUN mkdir -p /var/lib/rrdcached/db /var/lib/rrdcached/journal
 
 EXPOSE 42217
 
-CMD ["rrdcached", "-g", "-B", "-R", "-l", "0.0.0.0:42217", "-b", "/var/lib/rrdcached/db", "-j", "/var/lib/rrdcached/journal", "-w", "1", "-f", "1"]
+CMD ["rrdcached", "-g", "-B", "-R", "-O", "-l", "0.0.0.0:42217", "-b", "/var/lib/rrdcached/db", "-j", "/var/lib/rrdcached/journal", "-w", "1", "-f", "2"]
