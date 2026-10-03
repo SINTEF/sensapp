@@ -23,6 +23,18 @@ pub fn is_foreign_key_violation(error: &anyhow::Error) -> bool {
     })
 }
 
+/// Whether PostgreSQL aborted a transaction because it was part of a deadlock (SQLSTATE 40P01).
+///
+/// PostgreSQL rolls the transaction back whole and documents that the application tries again.
+pub fn is_deadlock(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<sqlx::Error>()
+            .and_then(|error| error.as_database_error())
+            .is_some_and(|error| error.code().as_deref() == Some("40P01"))
+    })
+}
+
 /// Names of the per-type sample tables, shared by the SQL backends for bulk deletes.
 pub const VALUE_TABLES: [&str; 8] = [
     "blob_values",

@@ -34,3 +34,5 @@ mod selector_reads;
 mod simple_promql;
 #[cfg(feature = "timescaledb")]
 mod timescale_compressed;
+#[cfg(feature = "timescaledb")]
+mod timescale_deadlock;
