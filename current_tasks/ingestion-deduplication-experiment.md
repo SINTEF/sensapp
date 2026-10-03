@@ -68,9 +68,15 @@ A read before the insert is only a best-effort filter. The test
 
 | backend | several writers / instances | how |
 |---|---|---|
-| PostgreSQL, TimescaleDB | yes | advisory lock per series until the end of the transaction: the second writer waits, its next statement takes a new snapshot and sees the committed rows. Writers of the same series are serialized, other series are not. Locks are taken in id order and before anything else that can wait (strings), so they cannot deadlock. Costs one lock in the shared lock table per series of the batch (`max_locks_per_transaction`): a batch of thousands of series needs a higher value |
+| PostgreSQL, TimescaleDB | yes | advisory lock per series until the end of the transaction: the second writer waits, its next statement takes a new snapshot and sees the committed rows. Writers of the same series are serialized, other series are not. Series are hashed into 1 024 lock buckets, taken in order and before anything else that can wait (strings), so they cannot deadlock. A large batch holds most buckets, so concurrent large batches take turns |
 | SQLite, DuckDB | yes | one writer at a time, one process |
 | ClickHouse | **no** | no transaction, no unique key: nothing exact is possible at insert time |
+
+Found on 3 Oct 2026 by a stress test, then fixed: with one lock per series, 10 concurrent requests of 8 000
+series each made 5 of them fail with `out of shared memory` (HTTP 500), because the lock table is shared by all
+transactions (`max_locks_per_transaction` x connections, 6 400 by default). With 1 024 buckets the same test
+passes (10 x 204, 3.9 s) and the benchmark numbers are unchanged. Not measured yet: throughput of many
+concurrent writers of overlapping series.
 
 ## Benchmark
 

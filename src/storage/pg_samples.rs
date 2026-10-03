@@ -11,17 +11,37 @@
 /// Namespace of the advisory locks of the series, the first key of the two-integer form.
 const SERIES_LOCK_NAMESPACE: i32 = 0x5345_4E53; // "SENS"
 
-/// Takes, until the end of the transaction, a lock per series of the batch. Needed to deduplicate
-/// with several writers (several instances, a retry that reaches another one while the first
-/// request is still running): the check for a stored sample cannot see the rows another
-/// transaction has not committed, so two writers of the same sample would both write it. With the
-/// lock the second one waits for the first to commit, and its check (a new snapshot for every
-/// statement in READ COMMITTED) then sees the sample. Other series are not blocked.
+/// Number of advisory locks the series are hashed into. Every lock is an entry of the lock table
+/// that all the transactions of the server share (`max_locks_per_transaction` x connections, 6 400
+/// by default): a lock per series made ten concurrent requests of 8 000 series each fail with
+/// "out of shared memory". With a fixed number of buckets the entries SensApp can hold are bounded
+/// whatever the number of series and of writers.
+const SERIES_LOCK_BUCKETS: i64 = 1024;
+
+/// The distinct lock keys of the series of a batch, sorted.
+fn lock_keys(sensor_ids: &[i64]) -> Vec<i32> {
+    let mut keys: Vec<i32> = sensor_ids
+        .iter()
+        .map(|id| id.rem_euclid(SERIES_LOCK_BUCKETS) as i32)
+        .collect();
+    keys.sort_unstable();
+    keys.dedup();
+    keys
+}
+
+/// Takes, until the end of the transaction, the locks of the series of the batch. Needed to
+/// deduplicate with several writers (several instances, a retry that reaches another one while the
+/// first request is still running, two requests with overlapping data): the check for a stored
+/// sample cannot see the rows another transaction has not committed, so two writers of the same
+/// sample would both write it. With the lock the second one waits for the first to commit, and its
+/// check (a new snapshot for every statement in READ COMMITTED) then sees the sample. Other series
+/// are not blocked, except the ones that hash to the same bucket (a large batch holds most of them:
+/// concurrent large batches take turns).
 ///
-/// The locks are taken in the order of the ids, so that two writers of overlapping sets of series
+/// The locks are taken in the order of the keys, so that two writers of overlapping sets of series
 /// cannot wait for each other. Take them before anything else that can wait for another
 /// transaction (the dictionary of strings): a writer that waits on a lock then holds nothing the
-/// others need. Two series whose ids are equal modulo 2^31 share a lock, which only serializes them.
+/// others need.
 pub async fn lock_series(
     connection: &mut sqlx::PgConnection,
     sensor_ids: &[i64],
@@ -29,18 +49,12 @@ pub async fn lock_series(
     if sensor_ids.is_empty() {
         return Ok(());
     }
-    let mut keys: Vec<i32> = sensor_ids
-        .iter()
-        .map(|id| (*id & 0x7FFF_FFFF) as i32)
-        .collect();
-    keys.sort_unstable();
-    keys.dedup();
     sqlx::query(
         "SELECT pg_advisory_xact_lock($1, key) \
          FROM (SELECT key FROM unnest($2::INT[]) AS key ORDER BY key) ordered",
     )
     .bind(SERIES_LOCK_NAMESPACE)
-    .bind(keys)
+    .bind(lock_keys(sensor_ids))
     .execute(&mut *connection)
     .await?;
     Ok(())
@@ -105,6 +119,18 @@ pub fn insert_samples(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_locks_of_a_batch_are_bounded_sorted_and_distinct() {
+        let ids: Vec<i64> = (1..=100_000).collect();
+        let keys = lock_keys(&ids);
+        assert_eq!(keys.len(), SERIES_LOCK_BUCKETS as usize);
+        assert!(keys.windows(2).all(|pair| pair[0] < pair[1]));
+        // The same series always takes the same lock, and a few series take a few
+        assert_eq!(lock_keys(&[5, 5, 1029]), vec![5]);
+        assert_eq!(lock_keys(&[7, 3, 9]), vec![3, 7, 9]);
+        assert_eq!(lock_keys(&[-1]), vec![1023]);
+    }
 
     #[test]
     fn without_deduplication_it_is_a_plain_insert() {
