@@ -25,6 +25,7 @@ The Helm chart sets variables through `env:` in `values.yaml` (see the [chart RE
 | --- | --- | --- |
 | `SENSAPP_STORAGE_CONNECTION_STRING` | `postgres://postgres:postgres@localhost:5432/sensapp` | Selects and configures the storage backend by URL scheme, see [Backends](#backends). Contains credentials: it is redacted from logs and errors, keep it in a secret. |
 | `SENSAPP_PG_POOL_MAX_CONNECTIONS` | `10` | Size of the connection pool for `postgres:` and `timescaledb:`. Invalid or `0` falls back to the default. Not part of the settings file: it can only be set as an environment variable. |
+| `SENSAPP_DEDUPLICATE_ON_INGEST` | `false` | Do not write the samples that are stored already (same series, same timestamp, same value), nor the repeated samples of a request. Costs a few milliseconds per write and has a PostgreSQL condition, see [Duplicate samples](DATA_LIFECYCLE.md#duplicate-samples). The server **refuses to start** on a backend that cannot do it: PostgreSQL, TimescaleDB, SQLite and DuckDB can, ClickHouse, BigQuery and RRDCached cannot. |
 | `SENSAPP_BATCH_SIZE` | `8192` | Number of samples collected before being sent to storage in one batch. Larger batches mean fewer round trips and more memory per request. |
 
 ### HTTP server

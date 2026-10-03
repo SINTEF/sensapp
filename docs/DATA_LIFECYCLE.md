@@ -65,7 +65,9 @@ Two importers also accept an explicit UUID, which then identifies the series:
 
 Writes are plain appends. Publishing a sample at a `(series, timestamp)` that already exists stores a second
 sample, it does not replace the first. This is by design, because enforcing uniqueness costs ingestion
-performance. It is why correcting means deleting first. Removing duplicates is a maintenance task,
+performance (it can be turned on for the identical samples, see
+[Duplicate samples](#duplicate-samples), but two different values at one timestamp are still both kept). It
+is why correcting means deleting first. Removing duplicates is a maintenance task, or an option at ingestion,
 see [Duplicate samples](#duplicate-samples).
 
 ### Several SensApp instances
@@ -96,7 +98,7 @@ Each deletion is logged at `INFO` level with the series UUID, the token subject,
 
 ## Duplicate samples
 
-SensApp does not reject a sample that already exists: a unique index on every insert would cost ingestion speed. A retried write (the Python SDK retries timeouts), a client that sends a sample twice or a crash in the middle of a request can therefore leave duplicates.
+By default SensApp does not reject a sample that already exists: a unique index on every insert would cost ingestion speed. A retried write (the Python SDK retries timeouts), a client that sends a sample twice or a crash in the middle of a request can therefore leave duplicates.
 
 **Nothing removes them automatically.** There is no scheduler and no vacuum after a write: a duplicate stays in the database until someone runs the vacuum operation, and until then every read sees it. `count` and `avg` count a duplicated sample twice, and the values of a series list it twice. Run the vacuum after an incident that may have produced duplicates (a retried write that had timed out, a crash during a large import), or from your own scheduler (a cron job calling the endpoint) if you want it regularly.
 
@@ -107,6 +109,25 @@ SensApp does not reject a sample that already exists: a unique index on every in
 ```
 
 Only exact duplicates go: the same series, the same timestamp and the same value (the same coordinates for a location), and the first one written is kept. Two different values at the same timestamp are both kept, there is no rule to choose one. Run it again and it removes nothing. `duplicates_removed` is `null` on a backend that cannot remove duplicates (see below); the count is exact on the SQL backends (it is the number of rows their `DELETE` removed, whatever else is written). On ClickHouse a merge does not say how many rows it dropped, so SensApp counts the rows of each table before and after: it is exact on a database that nothing writes to, and an estimate otherwise, since every row inserted during the run lowers it (to 0 at the lowest) and every row deleted raises it. On a large database the operation scans every value table and is slow. It has a timeout of its own, `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS` (one hour by default, the other requests have 30 seconds). If it is exceeded the answer is a `504` and the database carries on. Do not start a second vacuum while one is running: they would compete for the same rows.
+
+### Not writing them: deduplication at ingestion
+
+`SENSAPP_DEDUPLICATE_ON_INGEST=true` (or `deduplicate_on_ingest = true` in the settings file) makes the write itself leave out the samples that are stored already, and write the repeated samples of one request once. The rule is the vacuum's: a duplicate has the same series, timestamp and value (the same coordinates for a location), two different values at one timestamp are both kept, and nothing is rejected: the request succeeds. It works for requests that overlap or repeat each other, not only for retries. It does not remove the duplicates that were written before it was turned on: run the vacuum for those. **The server refuses to start** when the backend cannot do it.
+
+| Backend | At ingestion | Several writers or instances |
+|---|---|---|
+| PostgreSQL | yes | exact: a lock per series (1 024 buckets) held until the end of the transaction. Writers of the same series take turns, and so do two large batches, which hold most of the buckets |
+| TimescaleDB | yes | exact, same locks |
+| SQLite | yes | exact, a single writer |
+| DuckDB | yes | exact, a single process |
+| ClickHouse | **no** | not possible: there is no transaction and no unique key. Use the vacuum, which merges the duplicates away |
+| BigQuery, RRDCached | no | |
+
+How it works, and what it costs. The statement that writes the samples of a batch leaves out the ones that exist already, looking only at the stored samples inside the time window of the batch (the oldest to the newest timestamp of the request). A request that spans a long time is therefore more expensive than a request about the last minute. Measured on a table of one million rows, release build, for a request of 20 000 new samples: no visible difference on SQLite, DuckDB and TimescaleDB; PostgreSQL 0.14 s against 0.14 s. A small write (one series, 10 samples) costs about 1.5 ms more on DuckDB and TimescaleDB and 1 to 3 ms more on PostgreSQL. Writing again samples that are all stored is as fast or faster, since nothing is inserted.
+
+**PostgreSQL: keep the BRIN indexes summarized.** The probe reads the window through the BRIN index of the value table, and a BRIN index returns every range it has not summarized yet in full. A table that has just been bulk loaded and not vacuumed yet, or the newest part of a live table that autovacuum has not reached, is read entirely by every write: a small write took 64 ms instead of 3.5 ms on a table of one million rows, and the cost grows with the unsummarized part (by default autovacuum visits an insert-only table every 20% of growth). The migrations set `autosummarize` on the indexes, which asks autovacuum to summarize a range as soon as it is complete; make sure autovacuum runs, and after a large import run `VACUUM ANALYZE` (the vacuum endpoint runs `VACUUM`, which summarizes too). TimescaleDB does not use BRIN indexes and does not have this condition. Reads of the time windows of a table benefit from the same summaries.
+
+Two requests that write the same new sample at the same moment, on different instances, store it once on the SQL backends: the second waits for the first to commit. This is also what makes the retry of a request that timed out safe while the first one is still running.
 
 ## Backend support
 

@@ -72,6 +72,9 @@ env:
   SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS: "30"
   SENSAPP_HTTP_MAX_CONCURRENT_WRITES: "16"
   SENSAPP_BATCH_SIZE: "8192"
+  # Do not write samples that are stored already; PostgreSQL, TimescaleDB, SQLite and DuckDB only,
+  # the server refuses to start on another backend. See docs/DATA_LIFECYCLE.md#duplicate-samples
+  SENSAPP_DEDUPLICATE_ON_INGEST: "false"
   SENSAPP_INFLUXDB_WITH_NUMERIC: "false"
 
 storage:

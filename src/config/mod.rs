@@ -40,6 +40,13 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_BATCH_SIZE", default = 8192)]
     pub batch_size: usize,
 
+    /// Do not write the samples that are stored already (same series, same timestamp, same value),
+    /// and write the repeated samples of a request once. Off by default: it costs a few
+    /// milliseconds per write, see docs/DATA_LIFECYCLE.md. The server refuses to start when the
+    /// storage backend cannot do it.
+    #[config(env = "SENSAPP_DEDUPLICATE_ON_INGEST", default = false)]
+    pub deduplicate_on_ingest: bool,
+
     #[config(env = "SENSAPP_SENSOR_SALT", default = "sensapp")]
     pub sensor_salt: String,
 

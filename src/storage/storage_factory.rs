@@ -28,15 +28,6 @@ use super::clickhouse::ClickHouseStorage;
 pub async fn create_storage_from_connection_string(
     connection_string: &str,
 ) -> Result<Arc<dyn StorageInstance>> {
-    let storage = connect_storage(connection_string).await?;
-    // Experimental: `SENSAPP_DEDUPLICATE_ON_INGEST=true` drops the samples that are stored already
-    if std::env::var("SENSAPP_DEDUPLICATE_ON_INGEST").is_ok_and(|value| value == "true") {
-        storage.set_deduplicate_on_ingest(true).await?;
-    }
-    Ok(storage)
-}
-
-async fn connect_storage(connection_string: &str) -> Result<Arc<dyn StorageInstance>> {
     Ok(match connection_string {
         #[cfg(feature = "bigquery")]
         s if s.starts_with("bigquery:") => Arc::new(BigQueryStorage::connect(s).await?),

@@ -65,6 +65,13 @@ async fn async_main() -> Result<()> {
     let storage = create_storage_from_connection_string(&config.storage_connection_string)
         .await
         .context("Failed to create storage backend")?;
+    if config.deduplicate_on_ingest {
+        storage.set_deduplicate_on_ingest(true).await.context(
+            "SENSAPP_DEDUPLICATE_ON_INGEST is set, but this storage backend cannot deduplicate \
+             samples at ingestion (PostgreSQL, TimescaleDB, SQLite and DuckDB can)",
+        )?;
+        println!("🧹 Deduplication at ingestion is on");
+    }
 
     // Initialize database schema
     storage
