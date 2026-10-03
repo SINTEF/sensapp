@@ -1,7 +1,7 @@
-# Experiment: deduplicate samples at ingestion
+# Deduplicate samples at ingestion (opt-in)
 
-Branch `dedup-at-ingestion`. This is an experiment, not a commitment: measure, then decide whether it
-goes further (and into a pull request) or stays a branch.
+Branch `dedup-at-ingestion`. Started as an experiment; the maintainer decided to merge it as an **opt-in**
+feature (`SENSAPP_DEDUPLICATE_ON_INGEST`, off by default). Final state in the last section.
 
 ## Goal
 
@@ -148,14 +148,44 @@ existing databases with duplicates would need the vacuum first.
 ## Done when
 
 - [x] Benchmark and baseline.
-- [x] Implemented behind the switch on PostgreSQL, TimescaleDB, SQLite, DuckDB; backend-generic tests
-  (every type, repeats inside a request, exact duplicates only, partial overlap, switching off, concurrent
-  writers) green on those four; full suites on the five backends and clippy on all features.
-- [x] Measured, verdict above.
-- [ ] Decide: stop here (leave the branch), or make it a feature (docs, `autosummarize` migration or B-tree,
-  ClickHouse token, config entry, pull request).
+- [x] Implemented on PostgreSQL, TimescaleDB, SQLite, DuckDB; ClickHouse, BigQuery and RRDCached refuse it.
+- [x] Backend-generic tests: every type, repeats inside a request, exact duplicates only, partial overlap,
+  switching off, concurrent writers, repeated and overlapping requests through the HTTP API, compressed
+  TimescaleDB chunks, which backends accept the switch, the PostgreSQL migration.
+- [x] Config entry (`SENSAPP_DEDUPLICATE_ON_INGEST`, `deduplicate_on_ingest`), chart value, `settings.toml`; the
+  server refuses to start on a backend that cannot do it.
+- [x] Migration: `autosummarize` on the PostgreSQL BRIN indexes.
+- [x] Docs: `CONFIGURATION.md`, `DATA_LIFECYCLE.md` (semantics, backend table, cost, the PostgreSQL condition).
+- [x] Full suites on the five backends, clippy on all features.
 
 ## Progress
 
-3 Oct 2026: benchmark and baseline; PostgreSQL and TimescaleDB (found the race with a test, the nested
-loop and the unsummarized BRIN by measuring); SQLite and DuckDB; results above. Branch `dedup-at-ingestion`.
+3 Oct 2026: benchmark and baseline; PostgreSQL and TimescaleDB (the race found by a test, the nested loop
+and the unsummarized BRIN by measuring); SQLite and DuckDB; the lock table exhaustion found by a stress test
+and fixed with 1 024 buckets; the configuration, the startup refusal, the migration, the documentation and
+the end-to-end tests.
+
+Final numbers (release build, 1 M rows, `tests/perf/dedup.sh`, one run, with the switch on):
+
+| | history (1 M) | append (20 k) | replay | old | half | small | small, dup |
+|---|---|---|---|---|---|---|---|
+| SQLite | 4.11 s | 0.158 s | 0.070 s | 0.051 s | 0.130 s | 0.3 ms | 0.2 ms |
+| DuckDB | 3.09 s | 0.064 s | 0.061 s | 0.060 s | 0.064 s | 2.4 ms | 1.9 ms |
+| TimescaleDB | 43.3 s | 0.81 s | 0.095 s | 0.36 s | 0.45 s | 4.5 ms | 4.3 ms |
+| PostgreSQL, as loaded | 10.5 s | 0.303 s | 0.271 s | 0.313 s | 0.301 s | 63.5 ms | 63.3 ms |
+| PostgreSQL, 90 s later (default autovacuum) | (same) | 0.186 s | 0.081 s | 0.193 s | 0.109 s | 3.9 ms | 3.8 ms |
+
+Every run stored exactly the distinct samples. The baselines are above.
+
+## Left for later
+
+- ClickHouse: no exact mechanism at insert time. Block deduplication (`insert_deduplication_token`) would
+  remove a retried identical request only. The vacuum stays its answer.
+- The TimescaleDB deadlock of concurrent first writes of a new series (`ideas/timescaledb-concurrent-first-write-deadlock.md`),
+  independent of this feature.
+- DuckDB: the staging tables are created with `IF NOT EXISTS` on every batch; creating them once per
+  connection and skipping staging for tiny batches may bring back part of the +1.5 ms of small writes.
+- A B-tree plus a unique constraint would give the exact guarantee without locks and without the BRIN condition,
+  at +17% on bulk loads and +65% on disk (measured above); JSON and blob values over about 2.7 kB cannot be
+  indexed.
+- Throughput of many concurrent writers of overlapping series was not measured.
