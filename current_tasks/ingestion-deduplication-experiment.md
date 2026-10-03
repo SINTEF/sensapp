@@ -127,9 +127,8 @@ existing databases with duplicates would need the vacuum first.
   mechanism is block deduplication (`insert_deduplication_token`, needs `non_replicated_deduplication_window`
   on the tables), which removes a *retried identical request*, not partial overlaps or the same sample in
   another request. Not tried.
-- **What it does not fix**: the same sample sent twice in two different requests *and* both transactions
-  already past the lock (impossible by construction on the SQL backends), a `delete` plus a rewrite of the
-  same samples, or any duplicate written before the switch was turned on (the vacuum still does that).
+- **What it does not fix**: duplicates written before the switch was turned on (the vacuum still removes
+  them), and a `delete` followed by a rewrite of the same samples (that is a correction, not a duplicate).
 - **Reading of the numbers**: if the goal is "a retried request must not duplicate", this works on the SQL
   backends at a cost of a few milliseconds per request, with a PostgreSQL operational condition. If the goal
   is only cleanliness, the vacuum (2.4 s for 3 million rows) is much cheaper and has no condition. The
