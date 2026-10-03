@@ -13,7 +13,7 @@ mature. This page says which ones to rely on, and what each one is for.
 | TimescaleDB | **Maintained** | yes | PostgreSQL deployments that want hypertables and compression |
 | SQLite | **Maintained** | yes | Tests, demos, single-node edge devices, one writer |
 | DuckDB | Compatibility path, **less mature** | yes | Local analysis of a dataset, notebooks. Writes are bulk (3000 new series in 0.2 s) |
-| RRDCached | **Experimental** | yes (its own job) | Fixed-size round-robin storage, monitoring-style data; no deletion |
+| RRDCached | **Experimental**, good enough | yes (its own job, a real daemon) | Fixed-size round-robin storage of numeric monitoring-style data. No names, labels, types or deletion, reads are consolidated rows |
 | BigQuery | **Experimental, parked** | compile only | Nothing yet: it has not been brought back in line with the current storage interface (see `ideas/bigquery-backend-reconciliation.md`) |
 
 "Maintained" means a regression in it fails CI, the backend-generic integration tests run on it, and bugs
@@ -53,9 +53,13 @@ or writes series one by one still works, it costs more round trips with many ser
   because `COUNT(*)` failed to plan over many chunks. Details: `done/timescaledb-compressed-chunks.md`.
 - **SQLite**: one writer at a time; units keep their name but not their description.
 - **DuckDB**: timestamps are stored with a microsecond precision, like the other backends. One process owns the database file; a batch is one transaction, registered and written with a few statements whatever the number of series.
-- **RRDCached**: only its dedicated integration module runs against a real `rrdcached` (the backend-generic
-  suite does not apply: no labels, no deletion, consolidated data). Data is consolidated according to the chosen preset, old precision is lost by design. Details:
-  [RRDCACHED.md](RRDCACHED.md).
+- **RRDCached**: numbers only, in fixed-size RRDtool files, one per series, named after its UUID. The name, the
+  labels, the unit and the type are not stored (everything is read back as a float named after the UUID), a read
+  returns the consolidated rows of the archive that fits the window, not the samples, and a sample that is not after
+  the last one of its series cannot be stored. Prometheus remote write works; remote read can only select a series by
+  its UUID. It is tested against a real `rrdcached` with a
+  test module of its own (the backend-generic suite does not apply). All the differences, the presets, the
+  measured performance: [RRDCACHED.md](RRDCACHED.md).
 - **BigQuery**: needs Google Cloud credentials and is only compiled in CI.
 
 ## Features: production-oriented and research-oriented

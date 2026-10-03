@@ -57,18 +57,17 @@ services:
 
   rrdcached:
     build:
-      context: .
-      dockerfile: docker/rrdcached/Dockerfile
+      context: docker/rrdcached
     container_name: sensapp-rrdcached
     ports:
       - "42217:42217"
     healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "42217"]
+      test: ["CMD", "bash", "-c", "echo PING > /dev/tcp/127.0.0.1/42217"]
       interval: 5s
       timeout: 5s
       retries: 20
     volumes:
-      - rrdcached-test-data:/var/lib/rrdcached
+      - rrdcached-test-data:/data/db
 
 volumes:
   postgres-test-data:

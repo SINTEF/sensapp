@@ -25,6 +25,11 @@ use super::rrdcached::RrdCachedStorage;
 #[cfg(feature = "clickhouse")]
 use super::clickhouse::ClickHouseStorage;
 
+/// `rrdcached://` (TCP), `rrdcached+tcp://` and `rrdcached+unix://`
+fn is_rrdcached(connection_string: &str) -> bool {
+    connection_string.starts_with("rrdcached:") || connection_string.starts_with("rrdcached+")
+}
+
 pub async fn create_storage_from_connection_string(
     connection_string: &str,
 ) -> Result<Arc<dyn StorageInstance>> {
@@ -45,7 +50,7 @@ pub async fn create_storage_from_connection_string(
         s if s.starts_with("timescaledb:") => Arc::new(TimeScaleDBStorage::connect(s).await?),
 
         #[cfg(feature = "rrdcached")]
-        s if s.starts_with("rrdcached:") => Arc::new(RrdCachedStorage::connect(s).await?),
+        s if is_rrdcached(s) => Arc::new(RrdCachedStorage::connect(s).await?),
 
         #[cfg(feature = "clickhouse")]
         s if s.starts_with("clickhouse:") || s.starts_with("clickhouses:") => {
@@ -79,7 +84,7 @@ pub async fn create_storage_from_connection_string(
         }
 
         #[cfg(not(feature = "rrdcached"))]
-        s if s.starts_with("rrdcached:") => {
+        s if is_rrdcached(s) => {
             bail!("RRDCached storage backend is not enabled. Enable with --features rrdcached")
         }
 
@@ -106,5 +111,32 @@ mod tests {
         };
 
         assert_eq!(error.to_string(), "Unsupported storage type");
+    }
+
+    #[test]
+    fn every_rrdcached_scheme_is_recognised() {
+        for scheme in [
+            "rrdcached://h:1",
+            "rrdcached+tcp://h:1",
+            "rrdcached+unix:///s",
+        ] {
+            assert!(is_rrdcached(scheme), "{scheme}");
+        }
+        assert!(!is_rrdcached("rrdcachedx://h:1"));
+    }
+
+    #[cfg(feature = "rrdcached")]
+    #[tokio::test]
+    async fn a_unix_socket_that_is_not_there_is_a_connection_error() {
+        let error = match create_storage_from_connection_string(
+            "rrdcached+unix:///nonexistent/rrdcached.sock",
+        )
+        .await
+        {
+            Ok(_) => panic!("there is no daemon"),
+            Err(error) => error,
+        };
+
+        assert_ne!(error.to_string(), "Unsupported storage type");
     }
 }
