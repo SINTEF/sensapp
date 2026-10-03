@@ -53,6 +53,7 @@ pub async fn lock_series(
 ///     batch with every row of the window (seconds for 20 000 samples), or probes the index once per
 ///     row (0.36 ms each);
 ///   - on a table that was never analyzed (right after a bulk load) it chooses a sequential scan.
+///
 /// The hash join builds its table from the batch, so its memory does not grow with the window.
 /// Call it after the statements that need the usual plans (the registration of the series).
 pub async fn prefer_hash_join(connection: &mut sqlx::PgConnection) -> anyhow::Result<()> {
