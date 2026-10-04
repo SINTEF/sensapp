@@ -18,7 +18,7 @@ see `ideas/remove-frontend-js-yaml-override.md` for the override follow-up.
 - Separate build, test, and Clippy checks for SQLite, PostgreSQL, ClickHouse,
   DuckDB, TimescaleDB, and RRDCached. The service-backed jobs use real database
   containers. BigQuery is compiled, linted and unit tested on every run (`bigquery-checks`),
-  and built as a Docker variant on manual runs. Its integration suite needs a
+  also together with the other backends of the Docker image. Its integration suite needs a
   Google Cloud project, whose queries are billed, and is run by hand
   ([BIGQUERY.md](BIGQUERY.md)). It does not block the ClickHouse release path.
 - Helm lint/template/package and Docker builds. The normal runtime image is
