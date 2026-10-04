@@ -115,6 +115,11 @@ impl std::fmt::Debug for BigQueryStorage {
 impl BigQueryStorage {
     pub async fn connect(connection_string: &str) -> Result<Self> {
         let info = connection::parse_connection_string(connection_string)?;
+        // The gRPC client of the Storage Write API builds its TLS configuration from the default
+        // provider of rustls, and refuses to guess when both `ring` and `aws-lc-rs` are compiled in
+        // (the REST client does not care). The server installs it at startup; a library user or a
+        // test did not. `Err` only says that one is installed already.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         info!(
             "Connecting to BigQuery with project_id: {}, dataset_id: {}",
             info.project_id, info.dataset_id

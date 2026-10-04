@@ -13,7 +13,21 @@ use gcp_bigquery_client::model::query_parameter::QueryParameter;
 use std::collections::HashMap;
 
 /// The aggregate of a bucket. `First` and `Last` take the value of the oldest and the newest sample.
-fn value_expression(aggregation: Aggregation) -> &'static str {
+///
+/// The average is the sum over the count, like the other backends: `AVG` of BigQuery accumulates a
+/// running mean and gives `-5.5e-17` for integers that average to 0, and `0.17499999999999996` for
+/// `0.175`. The sum of integers is exact (a NUMERIC does not overflow).
+fn value_expression(sensor_type: SensorType, aggregation: Aggregation) -> &'static str {
+    match (sensor_type, aggregation) {
+        (SensorType::Integer, Aggregation::Avg) => {
+            "CAST(SUM(CAST(value AS NUMERIC)) AS FLOAT64) / COUNT(*)"
+        }
+        (SensorType::Float, Aggregation::Avg) => "SUM(value) / COUNT(*)",
+        (_, aggregation) => value_expression_of(aggregation),
+    }
+}
+
+fn value_expression_of(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Avg => "AVG(value)",
         Aggregation::Min => "MIN(value)",
@@ -65,7 +79,7 @@ pub fn aggregated_sql(
         "SELECT sensor_id, {BUCKET_EXPRESSION} AS bucket_us, {} AS value FROM {table} \
          WHERE sensor_id IN UNNEST(@ids){conditions} \
          GROUP BY sensor_id, bucket_us ORDER BY sensor_id, bucket_us LIMIT {}",
-        value_expression(read.aggregation),
+        value_expression(sensor_type, read.aggregation),
         limit.min(super::reads::MAX_LIMIT),
     );
     Ok((sql, params))
@@ -137,7 +151,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            sql.contains("AVG(value) AS value FROM `p.d.float_values`"),
+            sql.contains("SUM(value) / COUNT(*) AS value FROM `p.d.float_values`"),
             "{sql}"
         );
         assert!(sql.contains("GROUP BY sensor_id, bucket_us"), "{sql}");
@@ -196,8 +210,20 @@ mod tests {
             (Aggregation::First, "HAVING MIN timestamp"),
             (Aggregation::Last, "HAVING MAX timestamp"),
         ] {
-            assert!(value_expression(aggregation).contains(expected));
+            assert!(value_expression(SensorType::Float, aggregation).contains(expected));
         }
+        assert_eq!(
+            value_expression(SensorType::Float, Aggregation::Avg),
+            "SUM(value) / COUNT(*)"
+        );
+        assert_eq!(
+            value_expression(SensorType::Numeric, Aggregation::Avg),
+            "AVG(value)"
+        );
+        assert!(
+            value_expression(SensorType::Integer, Aggregation::Avg)
+                .contains("SUM(CAST(value AS NUMERIC))")
+        );
     }
 
     #[test]

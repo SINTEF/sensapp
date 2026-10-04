@@ -769,16 +769,19 @@ mod bigquery_tests {
         let Some(db) = open().await? else {
             return Ok(());
         };
-        db.storage().create_or_migrate().await?; // the tables exist for the capped instance
+        db.storage().create_or_migrate().await?;
         let url = std::env::var("TEST_DATABASE_URL")?;
         let separator = if url.contains('?') { '&' } else { '?' };
         let capped =
             create_storage_from_connection_string(&format!("{url}{separator}max_bytes_billed=1"))
                 .await?;
+        // The statement that looks at the metadata of the dataset bills at least 10 MB. (A read of
+        // rows that were just written is not billed: they are in the streaming buffer, so a cap
+        // cannot be tested on them.)
         let error = capped
-            .list_metrics()
+            .create_or_migrate()
             .await
-            .expect_err("reading a table bills at least 10 MB");
+            .expect_err("a statement over the cap fails");
         assert!(
             matches!(
                 error.downcast_ref::<StorageError>(),
