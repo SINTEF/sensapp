@@ -14,7 +14,7 @@ mature. This page says which ones to rely on, and what each one is for.
 | SQLite | **Maintained** | yes | Tests, demos, single-node edge devices, one writer |
 | DuckDB | Compatibility path, **less mature** | yes | Local analysis of a dataset, notebooks. Writes are bulk (3000 new series in 0.2 s) |
 | RRDCached | **Experimental**, good enough | yes (its own job, a real daemon) | Fixed-size round-robin storage of numeric monitoring-style data. No names, labels, types or deletion, reads are consolidated rows |
-| BigQuery | **Experimental, parked** | compile only | Nothing yet: it has not been brought back in line with the current storage interface (see `ideas/bigquery-backend-reconciliation.md`) |
+| BigQuery | **Experimental**, R&D | compile and unit tests; the integration suite is run by hand on a real dataset (passed on 4 Oct 2026) | Comparing a warehouse with the time series databases, SQL over sensor data next to other datasets. Every query is billed. [BIGQUERY.md](BIGQUERY.md) |
 
 "Maintained" means a regression in it fails CI, the backend-generic integration tests run on it, and bugs
 found on it are fixed. "Experimental" means it works for the basic ingest and query paths, may lag behind new
@@ -25,12 +25,12 @@ features, and has no promise.
 | | ClickHouse | PostgreSQL | TimescaleDB | SQLite | DuckDB | RRDCached | BigQuery |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Values of every type | yes | yes | yes | yes | yes | numeric data points | yes |
-| Delete a series or its samples | yes | yes | yes | yes | yes | no | no |
-| Aggregations (`step`) in the database | yes | yes | yes | yes | yes | no | no |
+| Delete a series or its samples | yes | yes | yes | yes | yes | no | yes |
+| Aggregations (`step`) in the database | yes | yes | yes | yes | yes | no (in SensApp, on the consolidated rows) | yes |
 | Remove duplicate samples (vacuum) | yes | yes | yes | yes | yes | no | no |
-| Registration of many new series per write in bulk | yes | yes | yes | one by one, fast locally | one by one | no | no |
-| A selector reads its series with a few queries | yes | yes | yes | yes | yes (numeric series; aggregated ones one at a time) | one series at a time | one series at a time |
-| Prometheus remote read with a `step` aggregates its series with a few queries | yes | yes | yes | yes | one series at a time (each aggregation is a single query) | one series at a time | one series at a time |
+| Registration of many new series per write in bulk | yes | yes | yes | one by one, fast locally | one by one | no | yes |
+| A selector reads its series with a few queries | yes | yes | yes | yes | yes (numeric series; aggregated ones one at a time) | one series at a time | yes (numeric series) |
+| Prometheus remote read with a `step` aggregates its series with a few queries | yes | yes | yes | yes | one series at a time (each aggregation is a single query) | one series at a time | yes |
 | Replication | not created by SensApp | the database's own | the database's own | no | no | no | managed |
 
 The last two rows are a consequence of how the code is written, not of the databases: a backend that reads
@@ -60,7 +60,10 @@ or writes series one by one still works, it costs more round trips with many ser
   its UUID. It is tested against a real `rrdcached` with a
   test module of its own (the backend-generic suite does not apply). All the differences, the presets, the
   measured performance: [RRDCACHED.md](RRDCACHED.md).
-- **BigQuery**: needs Google Cloud credentials and is only compiled in CI.
+- **BigQuery**: a warehouse, not a time series database: every statement is a job of a few hundred milliseconds and
+  bills at least 10 MB. Writes are at least once and cannot be deduplicated (like ClickHouse), aggregation runs in
+  BigQuery. It needs a Google Cloud project, and CI only compiles it and runs its unit tests; the integration suite is
+  run by hand. Setup, cost and limits: [BIGQUERY.md](BIGQUERY.md).
 
 ## Features: production-oriented and research-oriented
 

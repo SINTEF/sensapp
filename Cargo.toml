@@ -15,12 +15,7 @@ postgres = ["sqlx/postgres"]
 sqlite = ["sqlx/sqlite", "sqlx/regexp"]
 timescaledb = ["sqlx/postgres"] # Uses same driver as postgres
 duckdb = ["dep:duckdb"]
-bigquery = [
-  "dep:gcp-bigquery-client",
-  "dep:bigdecimal",
-  "dep:big-decimal-byte-string-encoder",
-  "dep:tonic",
-]
+bigquery = ["dep:gcp-bigquery-client"]
 rrdcached = ["dep:rrdcached-client"]
 clickhouse = ["dep:clickhouse"]
 # Convenience feature to enable all storage backends
@@ -95,11 +90,6 @@ hybridmap = "0.1.3"
 sentry = { version = "0.47", features = ["anyhow", "tower"] }
 url = "2.5"
 gcp-bigquery-client = { version = "0.28", optional = true }
-sinteflake = { version = "0.1", features = ["async"] }
-tonic = { version = "0.14", optional = true }
-bigdecimal = { version = "0.4", optional = true }
-big-decimal-byte-string-encoder = { version = "0.1", optional = true }
-clru = "0.6"
 utoipa = { version = "6", features = ["axum_extras"] }
 utoipa-scalar = { version = "0.4", features = ["axum"] }
 rrdcached-client = { version = "0.4", optional = true }

@@ -441,25 +441,42 @@ jobs:
         if: always() && matrix.name == 'runtime'
         run: docker rm --force sensapp-ci-runtime || true
 
-  docker-bigquery-compile:
-    name: Experimental BigQuery Image Compile
+  # No Google Cloud project in CI: the BigQuery backend is compiled, linted and unit tested (the SQL
+  # it builds, the rows it sends, the errors it sorts). The live tests are run by hand, see
+  # docs/BIGQUERY.md. Not a requirement of the release.
+  bigquery-checks:
+    name: BigQuery Compile and Unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     needs: quality-checks
-    if: github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v6
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/build-push-action@v7
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
-          context: .
-          push: false
-          platforms: linux/amd64
-          build-args: |
-            FEATURES=postgres,sqlite,timescaledb,duckdb,clickhouse,rrdcached,bigquery
-            NO_DEFAULT_FEATURES=true
-          cache-from: type=gha,scope=runtime-bigquery
-          cache-to: type=gha,scope=runtime-bigquery,mode=max
+          toolchain: stable
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: bigquery-v1
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
+
+      - name: Install cargo-make (prebuilt)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-make
+
+      - name: Run BigQuery checks
+        run: cargo make check-bigquery
+
+      # The backends of the Docker image plus BigQuery must compile together (DuckDB is left out: its
+      # library download is slow, and it does not interact with BigQuery)
+      - name: Lint the backends together
+        run: cargo clippy --all-targets --no-default-features --features postgres,sqlite,timescaledb,clickhouse,rrdcached,bigquery -- -D warnings
 
   # Disabled temporarily due to timeout issues
   # coverage:

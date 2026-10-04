@@ -23,6 +23,7 @@ TEST_DATABASE_URL_TIMESCALEDB = { value = "timescaledb://postgres:postgres@local
 TEST_DATABASE_URL_DUCKDB = { value = "duckdb://test.duckdb", condition = { env_not_set = ["TEST_DATABASE_URL_DUCKDB"] } }
 TEST_DATABASE_URL_CLICKHOUSE = { value = "clickhouse://default:password@localhost:8123/sensapp_test", condition = { env_not_set = ["TEST_DATABASE_URL_CLICKHOUSE"] } }
 TEST_DATABASE_URL_RRDCACHED = { value = "rrdcached://127.0.0.1:42217?preset=hoarder", condition = { env_not_set = ["TEST_DATABASE_URL_RRDCACHED"] } }
+# BigQuery has no default: it needs a Google Cloud project (docs/BIGQUERY.md)
 
 # Environment profiles
 [env.ci]
@@ -298,6 +299,15 @@ description = "Test with BigQuery feature"
 env = { "CARGO_MAKE_TASK_FEATURE" = "bigquery" }
 command = "cargo"
 args = ["test", "--features", "bigquery", "--no-default-features", "--lib", "--bins"]
+
+# Runs the whole integration suite against a real dataset: it bills queries, see docs/BIGQUERY.md.
+# Set TEST_DATABASE_URL_BIGQUERY=bigquery://key.json?project_id=P&dataset_id=D&max_bytes_billed=N
+[tasks.test-bigquery-live]
+private = false
+description = "Integration tests against a real BigQuery dataset (TEST_DATABASE_URL_BIGQUERY, costs money)"
+env = { "TEST_DATABASE_URL" = "${TEST_DATABASE_URL_BIGQUERY}" }
+command = "cargo"
+args = ["test", "--features", "bigquery", "--no-default-features", "--test", "integration"]
 
 [tasks.clippy-bigquery]
 extend = "template-clippy"

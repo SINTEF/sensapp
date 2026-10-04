@@ -41,3 +41,7 @@ python/demo-dashboard/
 
 bin/
 target
+
+# Google Cloud service account keys (docs/BIGQUERY.md)
+key.json
+*-key.json

@@ -1,26 +1,26 @@
-# BigQuery and SensApp
+# BigQuery backend
 
-We are usually not a fan of proprietary solutions, but BigQuery is worth a try.
+User documentation: [docs/BIGQUERY.md](../../../docs/BIGQUERY.md) (connection string, differences, Google Cloud setup,
+tests). Notes for whoever changes the code:
 
-Infortunately, while it uses some SQL flavour to query data, it's not very standard nor straightforward to use. It has vendor lock-in.
+| File | What |
+|---|---|
+| `connection.rs` | The connection string and the validation of the identifiers that end up in backticks |
+| `client.rs` | Parameters, `run_query` (waits for the job, reads every page, DML counts), the sorting of errors |
+| `rows.rs` | The protobuf rows of the Storage Write API and their descriptors, checked against `migrations/init.sql` by a test |
+| `publishers.rs` | Registration of new series and the write of a batch (one append per table, answers checked) |
+| `reads.rs` | Sensors, labels and samples, the SQL of the sets that collapse duplicate registrations |
+| `matchers.rs` | Label matchers as parameterized SQL |
+| `selector.rs` | `BulkSelectorBackend`: a selector with a few queries |
+| `mod.rs` | The `StorageInstance` implementation |
 
-As the summer of 2024, it seems that we have many options to upload data to BigQuery:
+Rules the code relies on:
 
-- A JSON/REST API. We upload JSON (potentially compressed with Gzip).
-- A Storage Write API that requires some protocol buffer binary and schema over gRPC.
-- Upload a static file to Google Cloud Storage and then load it into BigQuery as a job.
-- Use some big data pipeline tool like Apache Beam or Apache Spark that can then be connected to BigQuery.
-
-The best option for now seems to be the Storage Write API with the `gcp-bigquery-client` crate.
-
-## No denormalisation
-
-BigQuery may benefit from data denormalisation, but we aren't doing it for now. It would be too different when comparing against the other databases. I'm also not convinced about the benefits of denormalisation for SensApp.
-
-## Transactions
-
-As far as I understood, BigQuery does not support transactions when ingesting data.
-
-## No sequential IDs
-
-BigQuery does not support sequential IDs. Querying the database to compute the next ID is not an option, as it's too slow and costly. Therefore, we use [sinteflake](https://crates.io/crates/sinteflake), a distributed unique ID generator inspired by Twitter's Snowflake.
+- **Never put a value in a statement**: values go in `@parameters`. Only the project, dataset and table names
+  (validated, quoted) and numbers (`LIMIT`) are formatted into SQL.
+- **Registration is idempotent**: ids come from the data, so concurrent writers insert identical rows. Reads of
+  `sensors`, `units` and `labels` must collapse duplicates (`GROUP BY`, `DISTINCT`), see `Dataset::sensors_set`.
+- **A response of the Storage Write API is not a success until its `error` and `row_errors` are empty.**
+- **A result is not read until the job is complete and every page is read** (`ResultSet::new_from_query_response`
+  returns zero rows for an unfinished job).
+- The ids and the types of the columns are an on-disk format, like ClickHouse's.

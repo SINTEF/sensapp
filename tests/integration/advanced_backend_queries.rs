@@ -285,3 +285,17 @@ async fn test_clickhouse_native_bucketed_average_query() -> Result<()> {
 async fn test_clickhouse_native_latest_and_availability_queries() -> Result<()> {
     assert_latest_and_availability_for_backend(DatabaseType::ClickHouse).await
 }
+
+#[cfg(feature = "bigquery")]
+#[tokio::test]
+#[serial]
+async fn test_bigquery_bucketed_average_query() -> Result<()> {
+    assert_bucketed_average_for_backend(DatabaseType::BigQuery).await
+}
+
+#[cfg(feature = "bigquery")]
+#[tokio::test]
+#[serial]
+async fn test_bigquery_latest_and_availability_queries() -> Result<()> {
+    assert_latest_and_availability_for_backend(DatabaseType::BigQuery).await
+}

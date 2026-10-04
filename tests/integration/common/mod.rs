@@ -18,6 +18,7 @@ pub enum DatabaseType {
     TimescaleDB,
     DuckDB,
     RRDcached,
+    BigQuery,
 }
 
 impl DatabaseType {
@@ -40,6 +41,9 @@ impl DatabaseType {
                 .unwrap_or_else(|_| "duckdb://test.duckdb".to_string()),
             DatabaseType::RRDcached => std::env::var("TEST_DATABASE_URL")
                 .unwrap_or_else(|_| "rrdcached://127.0.0.1:42217?preset=hoarder".to_string()),
+            // Costs money and needs a Google Cloud project: no default, see docs/BIGQUERY.md
+            DatabaseType::BigQuery => std::env::var("TEST_DATABASE_URL")
+                .unwrap_or_else(|_| "bigquery://?TEST_DATABASE_URL_is_not_set".to_string()),
         }
     }
 
@@ -55,6 +59,8 @@ impl DatabaseType {
             DatabaseType::DuckDB
         } else if connection_string.starts_with("rrdcached://") {
             DatabaseType::RRDcached
+        } else if connection_string.starts_with("bigquery:") {
+            DatabaseType::BigQuery
         } else {
             // Default to PostgreSQL for postgres://, postgresql://, or any other prefix
             DatabaseType::PostgreSQL
@@ -77,6 +83,8 @@ impl DatabaseType {
             DatabaseType::SQLite
         } else if cfg!(feature = "rrdcached") {
             DatabaseType::RRDcached
+        } else if cfg!(feature = "bigquery") {
+            DatabaseType::BigQuery
         } else {
             DatabaseType::PostgreSQL
         }
@@ -114,6 +122,7 @@ impl TestDb {
             DatabaseType::TimescaleDB => "sensapp-test".to_string(),
             DatabaseType::DuckDB => "test.duckdb".to_string(),
             DatabaseType::RRDcached => "rrdcached".to_string(),
+            DatabaseType::BigQuery => "bigquery".to_string(),
         };
 
         let connection_string = db_type.default_connection_string();
