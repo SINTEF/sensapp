@@ -2,31 +2,22 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+// The API lives at the root of SensApp; `npm run dev` proxies it.
+const SENSAPP = 'http://localhost:3000'
+const API_PATHS = ['/api', '/health', '/metrics', '/series', '/docs']
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // SensApp serves the built files under /ui/ (src/http/ui.rs), and `npm run dev` does too.
+  base: '/ui/',
+  build: {
+    // echarts alone is about 580 kB, and only loaded when a chart is drawn.
+    chunkSizeWarningLimit: 650,
+  },
   server: {
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
-      '/metrics': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
-      '/series': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
-      '/health': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
-      '/docs': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
-    },
+    proxy: Object.fromEntries(
+      API_PATHS.map((path) => [path, { target: SENSAPP, changeOrigin: true }]),
+    ),
   },
 })

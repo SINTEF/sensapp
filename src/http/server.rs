@@ -11,6 +11,7 @@ use super::prometheus_read::prometheus_remote_read;
 use super::prometheus_write::publish_prometheus;
 use super::simple_promql::simple_promql_query;
 use super::state::HttpServerState;
+use super::ui::{add_ui, ui_directory};
 use crate::config;
 use crate::http::crud::{
     __path_delete_series, __path_delete_series_samples, __path_get_series_availability,
@@ -43,6 +44,7 @@ use futures::TryStreamExt;
 use serde::Serialize;
 use std::io;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
@@ -79,6 +81,8 @@ pub struct RouterSettings {
     pub maintenance_timeout: Duration,
     /// Write requests handled at the same time, 0 for no limit
     pub max_concurrent_writes: usize,
+    /// Directory of the built web UI to serve under `/ui/`, `None` to not serve it
+    pub ui_dir: Option<PathBuf>,
 }
 
 impl RouterSettings {
@@ -88,6 +92,7 @@ impl RouterSettings {
             request_timeout: Duration::from_secs(config.http_server_timeout_seconds),
             maintenance_timeout: Duration::from_secs(config.http_maintenance_timeout_seconds),
             max_concurrent_writes: config.http_max_concurrent_writes,
+            ui_dir: ui_directory(config),
         })
     }
 }
@@ -148,13 +153,17 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
 
     // Create our application with route groups split by auth requirements.
     //
-    // Public routes — always accessible (health checks, docs, prometheus scrape):
+    // Public routes — always accessible (health checks, docs, prometheus scrape, the UI files):
     let public_routes = Router::new()
-        .route("/", get(frontpage))
         .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
         .route("/prometheus/metrics", get(prometheus_metrics))
         .route("/health/live", get(liveness))
         .route("/health/ready", get(readiness));
+    // `/` redirects to the UI when it is served, and is the name of the instance otherwise
+    let public_routes = match &settings.ui_dir {
+        Some(directory) => add_ui(public_routes, directory),
+        None => public_routes.route("/", get(frontpage)),
+    };
 
     // Read-protected routes — require a valid JWT with "read" scope when auth is enabled:
     let read_routes = Router::new()
@@ -323,7 +332,7 @@ async fn enforce_request_body_limit(
     path = "/",
     tag = "SensApp",
     responses(
-        (status = 200, description = "SensApp Frontpage", body = String)
+        (status = 200, description = "SensApp Frontpage: the name of the instance. Redirects to the web UI at `/ui/` instead when the UI is served", body = String)
     )
 )]
 async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>, AppError> {

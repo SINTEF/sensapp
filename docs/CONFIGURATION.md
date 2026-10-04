@@ -39,6 +39,15 @@ The Helm chart sets variables through `env:` in `values.yaml` (see the [chart RE
 
 Details on what the limits protect against are in [HTTP_LIMITS.md](HTTP_LIMITS.md).
 
+### Web UI
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SENSAPP_UI_ENABLED` | `true` | Serves the web UI under `/ui/` and redirects `/` to it. `false` brings back the JSON name of the instance at `/`. |
+| `SENSAPP_UI_DIR` | `frontend/dist` | Directory with the built UI. The container image sets it to `/usr/share/sensapp/ui`. When it has no `index.html` (the frontend was not built) SensApp logs a warning and does not serve the UI: it still starts. |
+
+See [FRONTEND.md](FRONTEND.md).
+
 ### Authentication
 
 | Variable | Default | Description |

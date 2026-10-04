@@ -74,6 +74,7 @@ curl http://localhost:3000/metrics \
 |----------|--------------|-------|
 | `GET /` | No | — |
 | `GET /docs` | No | — |
+| `GET /ui/*` (the web UI files) | No | — |
 | `GET /health/live` | No | — |
 | `GET /health/ready` | No | — |
 | `GET /prometheus/metrics` | No for service metrics; yes when `include_latest_samples=true` | `read` for latest samples |
@@ -89,7 +90,7 @@ curl http://localhost:3000/metrics \
 | `POST /api/v1/prometheus_remote_write` | Yes | `write` |
 | `POST /api/v1/admin/vacuum` | Yes | `delete` (it removes duplicate samples) |
 
-Health checks, documentation, and Prometheus scrape endpoints are always public so that orchestration tools (Kubernetes probes, Prometheus scraper) work without tokens.
+Health checks, documentation, the web UI files, and Prometheus scrape endpoints are always public so that orchestration tools (Kubernetes probes, Prometheus scraper) work without tokens.
 
 ## JWT Claims
 
@@ -131,3 +132,7 @@ Tokens use the HS256 (HMAC-SHA256) algorithm with the following claims:
 - With JWT authentication enabled, `/prometheus/metrics?include_latest_samples=true` requires a read token and applies its sensor allow list. Plain `/prometheus/metrics` stays public for service monitoring.
 - Sensor-scoped tokens cannot run the database-wide `/api/v1/admin/vacuum` operation.
 - The `delete` scope is never implied by `read write`. It only allows deleting, not reading. With a sensor allow list, series the token cannot access are reported as not found. See [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md).
+
+## Web UI
+
+The UI (see [FRONTEND.md](FRONTEND.md)) is made of public static files. When authentication is enabled, its API calls get `401`, and it asks for a token: paste the output of `sensapp generate-token`. The UI keeps the token for the browser tab only and sends it as `Authorization: Bearer`. A `read` token is enough to explore; a token without `read` gets `403`, which the UI reports the same way.

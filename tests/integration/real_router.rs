@@ -123,6 +123,7 @@ fn settings() -> RouterSettings {
         request_timeout: Duration::from_secs(30),
         maintenance_timeout: Duration::from_secs(3600),
         max_concurrent_writes: 16,
+        ui_dir: None,
     }
 }
 
@@ -609,5 +610,55 @@ async fn the_vacuum_has_a_timeout_of_its_own() -> Result<()> {
     let (_db, router) = self::router(Duration::from_secs(2), None, settings).await?;
     let (status, _, _) = send(&router, vacuum_request(None)).await;
     assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+    Ok(())
+}
+
+/// The UI files are public, they hold no data. Its API calls need the token as any other client.
+#[tokio::test]
+#[serial]
+async fn the_ui_is_public_and_its_data_is_not() -> Result<()> {
+    let dist = std::env::temp_dir().join(format!("sensapp-ui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dist)?;
+    std::fs::write(dist.join("index.html"), "<html>SensApp UI</html>")?;
+    let settings = RouterSettings {
+        ui_dir: Some(dist.clone()),
+        ..settings()
+    };
+    let auth = AuthConfig::from_secret(SECRET)?;
+    let (_db, router) = router(Duration::ZERO, Some(auth), settings).await?;
+
+    let (status, headers, _) = send(&router, get_request("/")).await;
+    assert_eq!(status, StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(headers["location"], "/ui/");
+
+    let (status, _, body) = send(&router, get_request("/ui/")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, "<html>SensApp UI</html>");
+
+    // The catalog behind it answers 401 without a token, which is what makes the UI ask for one
+    let (status, _, body) = send(&router, get_request("/metrics")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(body.contains("Authorization"), "{body}");
+    let request = Request::builder()
+        .uri("/metrics")
+        .header("authorization", format!("Bearer {}", token("read")))
+        .body(Body::empty())?;
+    let (status, _, _) = send(&router, request).await;
+    assert_eq!(status, StatusCode::OK);
+
+    std::fs::remove_dir_all(dist)?;
+    Ok(())
+}
+
+/// Without the UI, `/` is the name of the instance as before.
+#[tokio::test]
+#[serial]
+async fn the_root_is_the_name_of_the_instance_without_the_ui() -> Result<()> {
+    let (_db, router) = router(Duration::ZERO, None, settings()).await?;
+    let (status, _, body) = send(&router, get_request("/")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, "\"SensApp Test\"");
+    let (status, _, _) = send(&router, get_request("/ui/")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     Ok(())
 }

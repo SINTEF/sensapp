@@ -1,3 +1,14 @@
+# The web UI is static files: build them once, on the build platform, whatever the target.
+FROM --platform=$BUILDPLATFORM node:24-slim AS frontend
+
+WORKDIR /frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
 FROM rust:1.98-slim-bookworm AS chef
 
 ARG DUCKDB_DOWNLOAD_LIB="1"
@@ -77,8 +88,12 @@ COPY --from=builder /app/target/release/sensapp /usr/local/bin/sensapp
 COPY --from=builder /out/lib/ /usr/local/lib/
 RUN ldconfig
 
+# Served under /ui/, see SENSAPP_UI_ENABLED
+COPY --from=frontend /frontend/dist /usr/share/sensapp/ui
+
 ENV SENSAPP_ENDPOINT=0.0.0.0 \
     SENSAPP_PORT=3000 \
+    SENSAPP_UI_DIR=/usr/share/sensapp/ui \
     SENSAPP_STORAGE_CONNECTION_STRING=sqlite:///var/lib/sensapp/sensapp.db \
     RUST_LOG=info
 

@@ -18,6 +18,11 @@ storage_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp
 # Maximum concurrent write requests, extra writes get 503 + a jittered Retry-After (default: 16, 0 = no limit)
 # http_max_concurrent_writes = 16
 
+# Web UI, served under /ui/ with / redirecting to it (default: true). It needs the built frontend
+# (npm run build in frontend/); the container image ships it. See docs/FRONTEND.md.
+# ui_enabled = true
+# ui_dir = "frontend/dist"
+
 # Sentry DSN for error tracking (leave commented to disable)
 # sentry_dsn = "https://your-dsn@your-sentry-instance/project-id"
 

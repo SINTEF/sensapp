@@ -31,6 +31,16 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_MAX_CONCURRENT_WRITES", default = 16)]
     pub http_max_concurrent_writes: usize,
 
+    /// Serve the web UI under `/ui/`, and redirect `/` to it. The UI is only the static files of
+    /// `frontend/`: the data stays behind the same authentication as the API.
+    #[config(env = "SENSAPP_UI_ENABLED", default = true)]
+    pub ui_enabled: bool,
+
+    /// Directory with the built UI (`frontend/dist`). The container image sets it to where it
+    /// ships the files. When it has no `index.html` the UI is not served and a warning is logged.
+    #[config(env = "SENSAPP_UI_DIR", default = "frontend/dist")]
+    pub ui_dir: String,
+
     #[config(env = "SENSAPP_MAX_INFERENCES_ROWS", default = 128)]
     pub max_inference_rows: usize,
 
@@ -142,6 +152,8 @@ mod tests {
 
         assert_eq!(config.port, 3000);
         assert_eq!(config.endpoint, IpAddr::from([127, 0, 0, 1]));
+        assert!(config.ui_enabled);
+        assert_eq!(config.ui_dir, "frontend/dist");
 
         temp_env::with_var("SENSAPP_PORT", Some("8080"), || {
             let config = SensAppConfig::load().unwrap();

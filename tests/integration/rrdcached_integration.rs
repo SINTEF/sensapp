@@ -907,6 +907,7 @@ mod rrdcached_tests {
                 request_timeout: Duration::from_secs(30),
                 maintenance_timeout: Duration::from_secs(3600),
                 max_concurrent_writes: 16,
+                ui_dir: None,
             },
         )
     }

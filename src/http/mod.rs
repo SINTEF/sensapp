@@ -12,3 +12,4 @@ pub mod prometheus_write;
 pub mod server;
 pub mod simple_promql;
 pub mod state;
+pub mod ui;
