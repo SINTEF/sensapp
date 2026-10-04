@@ -51,7 +51,7 @@ export function TimeRangeSelector() {
         ))}
       </div>
 
-      <div className="flex items-center gap-1 text-xs text-base-content/50">
+      <div className="flex flex-wrap items-center gap-1 text-xs text-base-content/50">
         <span>from</span>
         <input
           type="datetime-local"

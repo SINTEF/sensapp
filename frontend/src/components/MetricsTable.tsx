@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMetrics } from '../hooks/useMetrics';
 import type { DcatDataset } from '../hooks/useMetrics';
 import { useSelectionStore } from '../stores/useSelectionStore';
+import { ErrorAlert, Loading } from './Feedback';
 
 const SENSOR_TYPES = [
   '',
@@ -83,21 +84,9 @@ export function MetricsTable() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
-      {isLoading && (
-        <div className="flex items-center justify-center gap-2 py-6">
-          <span className="loading loading-spinner loading-xs text-primary" />
-          <span className="text-xs text-base-content/50">Loading...</span>
-        </div>
-      )}
+      {isLoading && <Loading />}
 
-      {error && (
-        <div className="alert alert-error">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-          </svg>
-          <span>Failed to load metrics: {error instanceof Error ? error.message : 'Unknown error'}</span>
-        </div>
-      )}
+      {error && <ErrorAlert what="metrics" error={error} />}
 
       {!isLoading && !error && metrics.length === 0 && (
         <div className="text-center py-6">

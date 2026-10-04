@@ -28,17 +28,14 @@
   --font-sans: Roboto, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
+/* The page scrolls on small screens. From lg on it is one screen, and the panels scroll. */
 html, body, #root {
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
 }
 
-/* Smooth transitions for interactive elements */
-.transition-card {
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
-}
-
-/* Better table row hover */
-tr.cursor-pointer:hover td {
-  background-color: oklch(var(--color-primary) / 0.04);
+@media (min-width: 1024px) {
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
 }

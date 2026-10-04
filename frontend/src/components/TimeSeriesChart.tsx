@@ -3,7 +3,7 @@ import { useQueries } from '@tanstack/react-query';
 import { getSeriesData } from '../client';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { unwrap } from '../api/clientConfig';
-import type { SenMLRecord } from '../hooks/useSeriesData';
+import { chartStep, isNumericType } from '../lib/chartStep';
 
 // echarts is large: load it when the first chart is drawn.
 const EChart = lazy(() => import('./EChart'));
@@ -21,20 +21,23 @@ function buildSeriesLabel(name: string, labels: Record<string, string>): string 
   return labelStr ? `${name}{${labelStr}}` : name;
 }
 
+/** One SenML record. Only the first of a pack has the base time (`bt`), the others are relative to it. */
+interface SenMLRecord {
+  bt?: number;
+  t?: number;
+  v?: number;
+  vs?: string;
+}
+
 function parseSenMLToTimeSeries(
   records: SenMLRecord[]
 ): Array<[number, number]> {
-  let baseName = '';
   let baseTime = 0;
 
   const points: Array<[number, number]> = [];
 
   for (const rec of records) {
-    if (rec.bn !== undefined) baseName = rec.bn;
     if (rec.bt !== undefined) baseTime = rec.bt;
-
-    // We only care about re-assigning baseName for multi-record packs
-    void baseName;
 
     const time = (baseTime + (rec.t ?? 0)) * 1000; // Convert to ms
     const value = rec.v ?? (rec.vs ? parseFloat(rec.vs) : NaN);
@@ -50,6 +53,8 @@ function parseSenMLToTimeSeries(
 export function TimeSeriesChart() {
   const { selectedSeries, timeRange } = useSelectionStore();
 
+  const step = chartStep(timeRange.start, timeRange.end);
+
   const queries = useQueries({
     queries: selectedSeries.map((s, index) => ({
       queryKey: ['seriesData', s.uuid, timeRange] as const,
@@ -60,6 +65,8 @@ export function TimeSeriesChart() {
             format: 'senml',
             start: timeRange.start,
             end: timeRange.end,
+            // A wide range is averaged per step, the server refuses to send more than 100 000 raw samples
+            ...(step && isNumericType(s.type) ? { step, aggregation: 'avg' } : {}),
           },
         });
         return {

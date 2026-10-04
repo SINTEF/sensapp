@@ -2,14 +2,18 @@ import { MetricsTable } from '../components/MetricsTable';
 import { SeriesTable } from '../components/SeriesTable';
 import { TimeSeriesChart } from '../components/TimeSeriesChart';
 import { TimeRangeSelector } from '../components/TimeRangeSelector';
+import { chartStep, isNumericType } from '../lib/chartStep';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
 export function ExplorerPage() {
-  const { selectedMetric, selectedSeries, clearSelectedSeries } =
+  const { selectedMetric, selectedSeries, clearSelectedSeries, timeRange } =
     useSelectionStore();
+  // Wide ranges are averaged per step: say so
+  const step = chartStep(timeRange.start, timeRange.end);
+  const averaged = step && selectedSeries.some((s) => isNumericType(s.type));
 
   return (
-    <div className="flex flex-col gap-3 h-full">
+    <div className="flex flex-col gap-3 lg:h-full">
       {/* Chart + Time Range — always on top, à la InfluxDB */}
       <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm shrink-0">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 border-b border-base-300">
@@ -17,6 +21,14 @@ export function ExplorerPage() {
           {selectedSeries.length > 0 && (
             <span className="text-xs text-base-content/40">
               {selectedSeries.length} series
+            </span>
+          )}
+          {averaged && (
+            <span
+              className="text-xs text-base-content/40"
+              title="The server sends at most 100 000 samples of a series: on a wide range they are averaged per step"
+            >
+              averaged per {step}
             </span>
           )}
           <div className="ml-auto">
@@ -42,9 +54,9 @@ export function ExplorerPage() {
       </section>
 
       {/* Metrics + Series side-by-side below the chart */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 lg:flex-1 lg:min-h-0">
         {/* Metrics panel */}
-        <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm flex flex-col min-h-0">
+        <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm flex flex-col min-h-72 lg:min-h-0">
           <div className="flex items-center justify-between px-4 py-2 border-b border-base-300 shrink-0">
             <h2 className="text-sm font-semibold">Metrics</h2>
             <div className="btn btn-ghost btn-xs invisible" aria-hidden="true" />
@@ -55,7 +67,7 @@ export function ExplorerPage() {
         </section>
 
         {/* Series panel */}
-        <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm flex flex-col min-h-0">
+        <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm flex flex-col min-h-72 lg:min-h-0">
           <div className="flex items-center justify-between px-4 py-2 border-b border-base-300 shrink-0">
             <h2 className="text-sm font-semibold">
               {selectedMetric ? (

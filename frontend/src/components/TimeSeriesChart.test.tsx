@@ -1,0 +1,100 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
+import { TimeSeriesChart } from './TimeSeriesChart';
+import { useSelectionStore } from '../stores/useSelectionStore';
+
+const mockGetSeriesData = vi.fn();
+vi.mock('../client', () => ({
+  getSeriesData: (...args: unknown[]) => mockGetSeriesData(...args),
+}));
+
+const START = '2026-10-04T00:00:00.000Z';
+const hours = (n: number) => new Date(Date.parse(START) + n * 3600_000).toISOString();
+
+const temperature = { uuid: 'uuid-temperature', name: 'temperature', labels: {}, type: 'float' };
+const state = { uuid: 'uuid-state', name: 'state', labels: {}, type: 'string' };
+
+function renderChart() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<TimeSeriesChart />, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+}
+
+function queryOf(uuid: string) {
+  return mockGetSeriesData.mock.calls
+    .map(([options]) => options)
+    .find((options) => options.path.series_uuid === uuid)?.query;
+}
+
+describe('TimeSeriesChart', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // SenML: the base time is in the first record, the others are relative to it
+    mockGetSeriesData.mockResolvedValue({
+      data: [{ bt: 1_791_000_000, t: 0, v: 1 }, { t: 30, v: 2 }, { t: 60, v: 3 }],
+    });
+  });
+
+  it('averages the numeric series of a wide range, the server refuses to send them raw', async () => {
+    useSelectionStore.setState({
+      selectedSeries: [temperature, state],
+      timeRange: { start: START, end: hours(24) },
+    });
+    renderChart();
+
+    await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(2));
+    expect(queryOf('uuid-temperature')).toMatchObject({ step: '1m', aggregation: 'avg' });
+    // Not the others: strings cannot be averaged
+    expect(queryOf('uuid-state')).not.toHaveProperty('step');
+    expect(queryOf('uuid-state')).not.toHaveProperty('aggregation');
+  });
+
+  it('reads a short range as it is', async () => {
+    useSelectionStore.setState({
+      selectedSeries: [temperature],
+      timeRange: { start: START, end: hours(0.25) },
+    });
+    renderChart();
+
+    await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(1));
+    expect(queryOf('uuid-temperature')).toEqual({
+      format: 'senml',
+      start: START,
+      end: hours(0.25),
+    });
+  });
+
+  it('draws one line per series', async () => {
+    useSelectionStore.setState({
+      selectedSeries: [temperature],
+      timeRange: { start: START, end: hours(1) },
+    });
+    renderChart();
+
+    expect(await screen.findByTestId('echarts')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('echarts')).toHaveAttribute('data-series-count', '1'));
+  });
+
+  it('says which series failed, and draws the others', async () => {
+    mockGetSeriesData.mockImplementation(({ path }) =>
+      Promise.resolve(
+        path.series_uuid === 'uuid-state'
+          ? { error: { error: 'Internal Server Error' }, response: { status: 500 } }
+          : { data: [{ bt: 1_791_000_000, t: 0, v: 1 }] },
+      ),
+    );
+    useSelectionStore.setState({
+      selectedSeries: [temperature, state],
+      timeRange: { start: START, end: hours(1) },
+    });
+    renderChart();
+
+    expect(await screen.findByText(/Some series failed to load: Internal Server Error/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('echarts')).toHaveAttribute('data-series-count', '1'));
+  });
+});

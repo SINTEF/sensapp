@@ -9,6 +9,12 @@ SensApp ships a small explorer: pick a metric, pick series, draw them over a tim
 - The files are public. Responses carry a `Content-Security-Policy` (the page only talks to its own origin, and cannot be framed), `X-Content-Type-Options: nosniff` and `Cache-Control: no-cache`.
 - The UI calls the SensApp API of its own origin: `/metrics`, `/series`, `/series/{uuid}` and `/health/ready`.
 
+## Charts
+
+The server refuses to send more than 100 000 raw samples of a series ([HTTP_LIMITS.md](HTTP_LIMITS.md)), so the chart asks for a `step` once the time range is longer than about 2.8 hours: the range is cut in at most 2 000 buckets of a round duration (`10s`, `1m`, `10m`, `1h`, …) and the samples of a bucket are averaged (`aggregation=avg`). The chart header says "averaged per 1m". Shorter ranges are read as they are. Series that are not numbers (strings, booleans) are always read as they are, and are not drawn.
+
+The list of series is cut by the server at 256 series: the UI says so, and a label selector narrows it.
+
 ## Authentication
 
 With `SENSAPP_JWT_SECRET` unset the UI works without further ado. When it is set, the API answers `401` and the UI shows a dialog asking for a token: paste the output of `sensapp generate-token <name> --scope read`. See [JWT_AUTH.md](JWT_AUTH.md).
@@ -29,4 +35,13 @@ npm run dev        # http://localhost:5173/ui/, proxies the API to http://localh
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-Run SensApp on port 3000 next to it (`cargo run`). `npm run openapi-ts` regenerates `src/client` from `openapi.json` (the generated files are committed).
+Run SensApp on port 3000 next to it (`cargo run`).
+
+`src/client` is generated from `openapi.json`, and both are committed. `openapi.json` is the OpenAPI document of the server: a Rust test fails when it is out of date. After an API change:
+
+```bash
+UPDATE_OPENAPI=1 cargo test frontend_openapi_document   # rewrites frontend/openapi.json
+cd frontend && npm run openapi-ts                       # regenerates src/client
+```
+
+`VITE_SENSAPP_LIVE_URL=http://localhost:3000 npm test` also runs the test that talks to a running SensApp (without authentication).

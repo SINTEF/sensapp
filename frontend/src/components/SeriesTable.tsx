@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useSeries } from '../hooks/useSeries';
 import type { SeriesDataset } from '../hooks/useSeries';
 import { useSelectionStore } from '../stores/useSelectionStore';
+import { ErrorAlert, Loading } from './Feedback';
 
 function labelsToRecord(
   labels?: Array<Record<string, string>>
@@ -88,21 +89,9 @@ export function SeriesTable() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
-      {isLoading && (
-        <div className="flex items-center justify-center gap-2 py-6">
-          <span className="loading loading-spinner loading-xs text-primary" />
-          <span className="text-xs text-base-content/50">Loading...</span>
-        </div>
-      )}
+      {isLoading && <Loading />}
 
-      {error && (
-        <div className="alert alert-error">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-          </svg>
-          <span>Failed to load series: {error instanceof Error ? error.message : 'Unknown error'}</span>
-        </div>
-      )}
+      {error && <ErrorAlert what="series" error={error} />}
 
       {!isLoading && !error && filteredSeries.length === 0 && (
         <div className="text-center py-6">
@@ -142,6 +131,7 @@ export function SeriesTable() {
                       <input
                         type="checkbox"
                         className="checkbox checkbox-primary checkbox-xs"
+                        aria-label={`Select series ${s['dct:identifier']}`}
                         checked={checked}
                         onChange={() => handleToggle(s)}
                         onClick={(e) => e.stopPropagation()}
@@ -181,6 +171,11 @@ export function SeriesTable() {
           <div className="text-xs text-base-content/40 mt-2">
             {filteredSeries.length} series
             {filteredSeries.length !== series.length && ` (${series.length} total)`}
+            {data?.['hydra:view'] && (
+              <span className="text-warning">
+                {' '}· more series exist: narrow the list with a selector
+              </span>
+            )}
           </div>
         </div>
       )}

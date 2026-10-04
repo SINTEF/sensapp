@@ -21,7 +21,7 @@ export function HealthBadge() {
   return (
     <div className="flex items-center gap-1.5" title={isHealthy ? `Database: ${data?.database}` : 'Backend disconnected'}>
       <span className={`inline-block w-2 h-2 rounded-full ${isHealthy ? 'bg-success animate-pulse' : 'bg-error'}`} />
-      <span className="text-xs font-medium opacity-70">
+      <span className="max-sm:sr-only text-xs font-medium opacity-70">
         {isHealthy ? 'Connected' : 'Disconnected'}
       </span>
     </div>
