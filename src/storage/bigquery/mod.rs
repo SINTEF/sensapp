@@ -6,7 +6,7 @@ use crate::{
     storage::{
         DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, LabelMatcher, ListSeriesResult,
         MAX_LIST_SERIES_LIMIT, SensorDataQueryOptions, StorageError, StorageInstance,
-        selector::SelectorRead,
+        selector::{AggregatedRead, SelectorRead, aggregated_kind, empty_samples},
     },
 };
 use anyhow::{Context, Result};
@@ -23,6 +23,7 @@ use std::{
 };
 use tracing::{debug, info};
 
+mod aggregation;
 mod client;
 mod connection;
 mod matchers;
@@ -379,27 +380,70 @@ impl StorageInstance for BigQueryStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
-    /// Aggregations run here, on the raw samples of the window: the `limit` counts the buckets
-    /// returned, so it cannot cut the raw samples first.
+    /// Aggregations run in BigQuery for the numeric series; the `limit` counts the buckets. The
+    /// other types have no aggregation, as on the other backends.
     async fn query_sensor_data_advanced(
         &self,
         sensor_uuid: &str,
         options: &SensorDataQueryOptions,
     ) -> Result<Option<SensorData>> {
         options.validate()?;
-        let aggregating = options.step_ms.is_some();
-        let raw_limit = if aggregating { None } else { options.limit };
-        let Some(raw) = self
-            .query_sensor_data(sensor_uuid, options.start_time, options.end_time, raw_limit)
-            .await?
-        else {
+        let (Some(step_ms), Some(aggregation)) = (options.step_ms, options.aggregation) else {
+            let raw = self
+                .query_sensor_data(
+                    sensor_uuid,
+                    options.start_time,
+                    options.end_time,
+                    options.limit,
+                )
+                .await?;
+            return raw
+                .map(|data| crate::storage::common::apply_query_options(data, options))
+                .transpose();
+        };
+
+        let Some((id, mut sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
             return Ok(None);
         };
-        let mut data = crate::storage::common::apply_query_options(raw, options)?;
-        if aggregating && let Some(limit) = options.limit {
-            data.samples.truncate(limit);
+        if !matches!(
+            sensor.sensor_type,
+            SensorType::Integer | SensorType::Numeric | SensorType::Float
+        ) {
+            anyhow::bail!("aggregation is only supported for numeric series");
         }
-        Ok(Some(data))
+        let micros = |time: &SensAppDateTime| crate::storage::common::datetime_to_micros(time);
+        let read = AggregatedRead {
+            start_us: options.start_time.as_ref().map(micros),
+            end_us: options.end_time.as_ref().map(micros),
+            step_ms,
+            aggregation,
+        };
+        let limit = options.limit.unwrap_or(DEFAULT_QUERY_LIMIT);
+        let kind = aggregation::kind_type(aggregated_kind(sensor.sensor_type, aggregation));
+        let samples = self
+            .query_aggregated_of_many(sensor.sensor_type, &[id], &read, limit)
+            .await?
+            .remove(&id)
+            .unwrap_or_else(|| empty_samples(kind));
+        sensor.sensor_type = kind;
+        if aggregation.output_is_count() {
+            sensor.unit = None;
+        }
+
+        // What is left to do is the simplification, on the buckets
+        let simplify_only = SensorDataQueryOptions {
+            start_time: options.start_time,
+            end_time: options.end_time,
+            limit: options.limit,
+            step_ms: None,
+            aggregation: None,
+            simplify: options.simplify,
+        };
+        crate::storage::common::apply_query_options(
+            SensorData::new(sensor, samples),
+            &simplify_only,
+        )
+        .map(Some)
     }
 
     async fn query_sensor_data_latest(
@@ -472,6 +516,23 @@ impl StorageInstance for BigQueryStorage {
             start_time,
             end_time,
             numeric_only,
+            max_series,
+            max_samples,
+        )
+        .await
+    }
+
+    async fn query_selector_aggregated(
+        &self,
+        matchers: &[LabelMatcher],
+        options: &SensorDataQueryOptions,
+        max_series: usize,
+        max_samples: usize,
+    ) -> Result<SelectorRead> {
+        crate::storage::selector::read_aggregated_selector_in_bulk(
+            self,
+            matchers,
+            options,
             max_series,
             max_samples,
         )

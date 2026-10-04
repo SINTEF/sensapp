@@ -20,7 +20,7 @@ use uuid::Uuid;
 const LABEL_LOOKUP_CHUNK: usize = 2000;
 
 /// `LIMIT` takes an INT64
-const MAX_LIMIT: usize = i64::MAX as usize;
+pub(super) const MAX_LIMIT: usize = i64::MAX as usize;
 
 /// BigQuery's TIMESTAMP goes from year 1 to year 9999
 const MIN_MICROS: i64 = -62_135_596_800_000_000;
@@ -129,7 +129,11 @@ pub fn read_sample(samples: &mut TypedSamples, row: &ResultSet) -> Result<()> {
 }
 
 /// The `WHERE` conditions of a window on the timestamp, with the parameters `start` and `end`.
-fn window(start_us: Option<i64>, end_us: Option<i64>, params: &mut Vec<QueryParameter>) -> String {
+pub(super) fn window(
+    start_us: Option<i64>,
+    end_us: Option<i64>,
+    params: &mut Vec<QueryParameter>,
+) -> String {
     let mut conditions = String::new();
     if let Some(start_us) = start_us {
         conditions.push_str(" AND timestamp >= TIMESTAMP_MICROS(@start)");
@@ -389,7 +393,7 @@ impl BigQueryStorage {
 }
 
 /// Move the samples of `from` to the end of `to`, of the same type.
-fn append_samples(to: &mut TypedSamples, from: TypedSamples) {
+pub(super) fn append_samples(to: &mut TypedSamples, from: TypedSamples) {
     match (to, from) {
         (TypedSamples::Integer(to), TypedSamples::Integer(from)) => to.extend(from),
         (TypedSamples::Numeric(to), TypedSamples::Numeric(from)) => to.extend(from),

@@ -548,6 +548,178 @@ mod bigquery_tests {
         Ok(())
     }
 
+    /// Aggregation is done by BigQuery (a `GROUP BY` of buckets), not on the samples read back: every
+    /// numeric type and aggregation gives what the local reference computes from the raw samples.
+    /// The values are multiples of a quarter, so that no order of summation changes a result.
+    #[tokio::test]
+    #[serial]
+    async fn aggregation_in_bigquery_equals_the_local_reference() -> Result<()> {
+        use sensapp::storage::common::apply_query_options;
+        use sensapp::storage::{Aggregation, SensorDataQueryOptions};
+
+        let Some(db) = open().await? else {
+            return Ok(());
+        };
+        let storage = db.storage();
+        let start = 1_704_067_200.0 + 1_234.0; // not aligned on anything
+        // Three days, a sample every 37 minutes
+        let times: Vec<f64> = (0..117).map(|i| start + f64::from(i) * 2_220.0).collect();
+        let integer = sensor("bq_agg_integer", SensorType::Integer, &[]);
+        let float = sensor("bq_agg_float", SensorType::Float, &[]);
+        let numeric = sensor("bq_agg_numeric", SensorType::Numeric, &[]);
+        publish(
+            &storage,
+            vec![
+                (
+                    integer.clone(),
+                    TypedSamples::Integer(
+                        times
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| Sample {
+                                datetime: at(*t),
+                                value: (i as i64 * 7) % 23 - 11,
+                            })
+                            .collect(),
+                    ),
+                ),
+                (
+                    float.clone(),
+                    TypedSamples::Float(
+                        times
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| Sample {
+                                datetime: at(*t),
+                                value: ((i * 5) % 17) as f64 * 0.25 - 2.0,
+                            })
+                            .collect(),
+                    ),
+                ),
+                (
+                    numeric.clone(),
+                    TypedSamples::Numeric(
+                        times
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| Sample {
+                                datetime: at(*t),
+                                value: Decimal::new(((i * 3) % 19) as i64 * 25, 2),
+                            })
+                            .collect(),
+                    ),
+                ),
+            ],
+        )
+        .await?;
+
+        // A window that starts and ends inside buckets of 6 hours
+        let window_start = Some(at(start + 3_000.0));
+        let window_end = Some(at(start + 2.5 * 86_400.0));
+        for sensor in [&integer, &float, &numeric] {
+            let uuid = sensor.uuid.to_string();
+            for aggregation in [
+                Aggregation::Avg,
+                Aggregation::Min,
+                Aggregation::Max,
+                Aggregation::Sum,
+                Aggregation::Count,
+                Aggregation::First,
+                Aggregation::Last,
+            ] {
+                let options = SensorDataQueryOptions {
+                    start_time: window_start,
+                    end_time: window_end,
+                    limit: None,
+                    step_ms: Some(6 * 3_600_000),
+                    aggregation: Some(aggregation),
+                    simplify: None,
+                };
+                let raw = storage
+                    .query_sensor_data(&uuid, window_start, window_end, None)
+                    .await?
+                    .unwrap();
+                let expected = apply_query_options(raw, &options)?;
+                let got = storage
+                    .query_sensor_data_advanced(&uuid, &options)
+                    .await?
+                    .unwrap();
+
+                let what = format!("{} {aggregation:?}", sensor.name);
+                assert_eq!(
+                    got.sensor.sensor_type, expected.sensor.sensor_type,
+                    "{what}"
+                );
+                assert_eq!(got.sensor.unit, expected.sensor.unit, "{what}");
+                match (&got.samples, &expected.samples) {
+                    // BigQuery rounds an average to 9 digits, the reference keeps more
+                    (TypedSamples::Numeric(got), TypedSamples::Numeric(expected))
+                        if aggregation == Aggregation::Avg =>
+                    {
+                        assert_eq!(got.len(), expected.len(), "{what}");
+                        for (got, expected) in got.iter().zip(expected) {
+                            assert_eq!(got.datetime, expected.datetime, "{what}");
+                            assert!(
+                                (got.value - expected.value).abs() < Decimal::new(1, 8),
+                                "{what}"
+                            );
+                        }
+                    }
+                    (got, expected) => assert_eq!(got, expected, "{what}"),
+                }
+                assert!(got.samples.len() > 8, "{what}: several buckets");
+            }
+
+            // The limit counts buckets
+            let limited = storage
+                .query_sensor_data_advanced(
+                    &uuid,
+                    &SensorDataQueryOptions {
+                        start_time: window_start,
+                        end_time: window_end,
+                        limit: Some(3),
+                        step_ms: Some(6 * 3_600_000),
+                        aggregation: Some(Aggregation::Max),
+                        simplify: None,
+                    },
+                )
+                .await?
+                .unwrap();
+            assert_eq!(limited.samples.len(), 3);
+        }
+
+        // Only numbers are aggregated
+        let text = sensor("bq_agg_text", SensorType::String, &[]);
+        publish(
+            &storage,
+            vec![(
+                text.clone(),
+                TypedSamples::String(smallvec![Sample {
+                    datetime: at(start),
+                    value: "x".to_string()
+                }]),
+            )],
+        )
+        .await?;
+        assert!(
+            storage
+                .query_sensor_data_advanced(
+                    &text.uuid.to_string(),
+                    &SensorDataQueryOptions {
+                        start_time: None,
+                        end_time: None,
+                        limit: None,
+                        step_ms: Some(1000),
+                        aggregation: Some(Aggregation::Count),
+                        simplify: None,
+                    },
+                )
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
+
     /// The first answer of a query is at most 10 MB: a result over that needs the next pages.
     #[tokio::test]
     #[serial]

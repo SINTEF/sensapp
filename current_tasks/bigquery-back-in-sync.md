@@ -35,7 +35,8 @@ tests.
       text, checked answers, no global write lock, JSON as JSON
 - [x] `client.rs`: waits for jobs, reads all pages, parameters, `maximum_bytes_billed`, error sorting
 - [x] Reads: sensors and labels, 8 sample types, paginated listing, matchers, bulk selectors, latest sample,
-      deletes; aggregation on the raw window with the limit applied to the buckets
+      deletes; aggregation in BigQuery (`GROUP BY` of buckets, single series and selectors), checked in the
+      integration tests against the local reference of `apply_query_options`
 - [x] Unit tests (SQL builders, rows against the migration, connection string, errors): 27, no credentials needed
 - [x] Integration tests: `tests/integration/bigquery_integration.rs` (round trip of every type, a unit and a
       window, concurrent instances, paging, Prometheus matcher semantics, a result over one page, the cost
