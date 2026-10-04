@@ -623,10 +623,12 @@ async fn list_filtered_series(
     tag = "SensApp",
     params(
         ("metric" = Option<String>, Query, description = "Filter series by metric name"),
-        ("selector" = Option<String>, Query, description = "PromQL-style label selector (e.g., '{env=\"prod\",region=~\"us.*\"}')")
+        ("selector" = Option<String>, Query, description = "PromQL-style label selector (e.g., '{env=\"prod\",region=~\"us.*\"}')"),
+        ("limit" = Option<usize>, Query, description = "Series per page, 256 by default, 16384 at most"),
+        ("bookmark" = Option<String>, Query, description = "Cursor of the next page: the `bookmark` of the `hydra:next` link of the previous page")
     ),
     responses(
-        (status = 200, description = "Time series catalog in DCAT format", body = Value),
+        (status = 200, description = "Time series catalog in DCAT format. A full page has a `hydra:view` with the link to the next page", body = Value),
         (status = 503, description = "The storage backend is unavailable: retry later"),
         (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
     )

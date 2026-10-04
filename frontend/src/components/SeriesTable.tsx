@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSeries } from '../hooks/useSeries';
+import { nextBookmark, useSeries } from '../hooks/useSeries';
 import type { SeriesDataset } from '../hooks/useSeries';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { ErrorAlert, Loading } from './Feedback';
@@ -23,13 +23,17 @@ export function SeriesTable() {
     setLabelFilter,
   } = useSelectionStore();
   const [selectorInput, setSelectorInput] = useState('');
+  // The cursor of every page shown so far: the server only goes forward, so Previous pops one
+  const [bookmarks, setBookmarks] = useState<string[]>([]);
 
   const selector = selectorInput || undefined;
 
   const { data, isLoading, error } = useSeries({
     metric: selectedMetric || undefined,
     selector,
+    bookmark: bookmarks.at(-1),
   });
+  const next = nextBookmark(data);
 
   const series = data?.['dcat:dataset'] ?? [];
 
@@ -72,7 +76,10 @@ export function SeriesTable() {
           placeholder='{env="prod", region=~"us.*"}'
           className="input input-bordered input-xs font-mono text-xs flex-1 min-w-44 max-w-xs h-7"
           value={selectorInput}
-          onChange={(e) => setSelectorInput(e.target.value)}
+          onChange={(e) => {
+            setSelectorInput(e.target.value);
+            setBookmarks([]);
+          }}
         />
         <input
           type="text"
@@ -168,13 +175,30 @@ export function SeriesTable() {
               })}
             </tbody>
           </table>
-          <div className="text-xs text-base-content/40 mt-2">
-            {filteredSeries.length} series
-            {filteredSeries.length !== series.length && ` (${series.length} total)`}
-            {data?.['hydra:view'] && (
-              <span className="text-warning">
-                {' '}· more series exist: narrow the list with a selector
-              </span>
+          <div className="sticky bottom-0 bg-base-100 flex items-center justify-between pt-2 text-xs text-base-content/40">
+            <span>
+              {filteredSeries.length} series
+              {filteredSeries.length !== series.length && ` (${series.length} on this page)`}
+            </span>
+            {(bookmarks.length > 0 || next) && (
+              <div className="join">
+                <button
+                  className="join-item btn btn-xs btn-outline"
+                  aria-label="Previous page"
+                  disabled={bookmarks.length === 0}
+                  onClick={() => setBookmarks(bookmarks.slice(0, -1))}
+                >
+                  ‹
+                </button>
+                <button
+                  className="join-item btn btn-xs btn-outline"
+                  aria-label="Next page"
+                  disabled={!next}
+                  onClick={() => next && setBookmarks([...bookmarks, next])}
+                >
+                  ›
+                </button>
+              </div>
             )}
           </div>
         </div>

@@ -49,5 +49,10 @@ a `step`; the page was unusable on a phone (clipped header and date range, a Met
 Found on the way, left for later (in `ideas/`): `string-series-aggregation-500.md` (server),
 `metrics-tests-need-loaded-config.md` (two unit tests that depend on test order), `frontend-next-steps.md`.
 
+Review round (4 October 2026): the "averaged per" label in the chart header is gone (a UI that explains itself in
+text is noise), the series list is paged with Previous/Next on the server's bookmark (tested live with 300 series;
+`/series` now documents `limit` and `bookmark` in the OpenAPI document), and dark mode works: the daisyUI `dark`
+theme was declared but not selected (`--prefersdark`), echarts now uses its dark theme and follows the OS.
+
 Not checked: the Dockerfile build for linux/arm64 (the Node stage is platform independent), and the complete
 `docker-smoke` job with ClickHouse (only its new `check_ui` step, against an image with SQLite).

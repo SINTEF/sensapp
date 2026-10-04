@@ -33,10 +33,7 @@ export function AuthDialog() {
         <h2 id="auth-dialog-title" className="text-lg font-bold">
           {token ? 'This token is not accepted' : 'Authentication required'}
         </h2>
-        <p className="py-2 text-sm text-base-content/70">
-          This SensApp asks for a token. Paste one generated with:
-        </p>
-        <pre className="bg-base-200 rounded px-3 py-2 text-xs overflow-x-auto">
+        <pre className="bg-base-200 rounded px-3 py-2 mt-2 text-xs overflow-x-auto">
           <code>sensapp generate-token ui --scope read</code>
         </pre>
 
@@ -60,10 +57,6 @@ export function AuthDialog() {
             onChange={(event) => setInput(event.target.value)}
           />
         </label>
-        <p className="mt-1 text-xs text-base-content/40">
-          Kept for this browser tab only, and sent to this server only.
-        </p>
-
         <div className="modal-action">
           <button type="button" className="btn btn-ghost btn-sm" onClick={closeDialog}>
             Cancel

@@ -787,6 +787,25 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Series per page, 256 by default, 16384 at most",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Cursor of the next page: the `bookmark` of the `hydra:next` link of the previous page",
+            "in": "query",
+            "name": "bookmark",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -796,7 +815,7 @@
                 "schema": {}
               }
             },
-            "description": "Time series catalog in DCAT format"
+            "description": "Time series catalog in DCAT format. A full page has a `hydra:view` with the link to the next page"
           },
           "503": {
             "description": "The storage backend is unavailable: retry later"

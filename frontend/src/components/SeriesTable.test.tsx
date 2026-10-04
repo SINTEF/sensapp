@@ -50,7 +50,9 @@ describe('SeriesTable', () => {
     expect(useSelectionStore.getState().selectedSeries).toEqual([
       { uuid: 'uuid-a', name: 'temperature', labels: { host: 'alpha' }, type: 'float' },
     ]);
-    expect(mockListSeries).toHaveBeenCalledWith({ query: { metric: 'temperature', selector: undefined } });
+    expect(mockListSeries).toHaveBeenCalledWith({
+      query: { metric: 'temperature', selector: undefined, bookmark: undefined },
+    });
   });
 
   it('filters the list as people type', async () => {
@@ -63,18 +65,82 @@ describe('SeriesTable', () => {
     expect(screen.getByText('uuid-b')).toBeInTheDocument();
   });
 
-  it('says when the list is cut, the server sends 256 series at most', async () => {
-    mockListSeries.mockResolvedValue({
-      data: { ...catalog, 'hydra:view': { '@type': 'hydra:PartialCollectionView', 'hydra:next': '/series?bookmark=x', 'hydra:itemsPerPage': 2 } },
+  describe('pages', () => {
+    const page = (uuid: string, host: string, bookmark?: string) => ({
+      '@type': 'dcat:Catalog',
+      'dcat:dataset': [dataset(uuid, host)],
+      ...(bookmark && {
+        'hydra:view': {
+          '@type': 'hydra:PartialCollectionView',
+          'hydra:next': `/series?limit=1&bookmark=${bookmark}&metric=temperature`,
+          'hydra:itemsPerPage': 1,
+        },
+      }),
     });
-    renderTable();
-    expect(await screen.findByText(/more series exist/)).toBeInTheDocument();
-  });
 
-  it('does not say it when the list is complete', async () => {
-    renderTable();
-    await screen.findByText('uuid-a');
-    expect(screen.queryByText(/more series exist/)).not.toBeInTheDocument();
+    beforeEach(() => {
+      mockListSeries.mockImplementation(({ query }) =>
+        Promise.resolve({
+          data:
+            query.bookmark === 'p2'
+              ? page('uuid-2', 'beta', 'p3')
+              : query.bookmark === 'p3'
+                ? page('uuid-3', 'gamma')
+                : page('uuid-1', 'alpha', 'p2'),
+        }),
+      );
+    });
+
+    it('goes forward with the bookmark of the server, and back', async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await screen.findByText('uuid-1');
+      expect(screen.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+
+      await user.click(screen.getByRole('button', { name: 'Next page' }));
+      expect(await screen.findByText('uuid-2')).toBeInTheDocument();
+      expect(mockListSeries).toHaveBeenLastCalledWith({
+        query: { metric: 'temperature', selector: undefined, bookmark: 'p2' },
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Next page' }));
+      expect(await screen.findByText('uuid-3')).toBeInTheDocument();
+      // The last page has no next
+      expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled();
+
+      await user.click(screen.getByRole('button', { name: 'Previous page' }));
+      expect(await screen.findByText('uuid-2')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Previous page' }));
+      expect(await screen.findByText('uuid-1')).toBeInTheDocument();
+    });
+
+    it('keeps the selection from one page to the other', async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(await screen.findByRole('checkbox', { name: 'Select series uuid-1' }));
+      await user.click(screen.getByRole('button', { name: 'Next page' }));
+      await user.click(await screen.findByRole('checkbox', { name: 'Select series uuid-2' }));
+      expect(useSelectionStore.getState().selectedSeries.map((s) => s.uuid)).toEqual(['uuid-1', 'uuid-2']);
+    });
+
+    it('starts again from the first page when the selector changes', async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await screen.findByText('uuid-1');
+      await user.click(screen.getByRole('button', { name: 'Next page' }));
+      await screen.findByText('uuid-2');
+
+      await user.type(screen.getByPlaceholderText(/env=/), 'x');
+      expect(await screen.findByText('uuid-1')).toBeInTheDocument();
+      expect(mockListSeries.mock.lastCall?.[0].query.bookmark).toBeUndefined();
+    });
+
+    it('has no pager when everything fits on one page', async () => {
+      mockListSeries.mockResolvedValue({ data: catalog });
+      renderTable();
+      await screen.findByText('uuid-a');
+      expect(screen.queryByRole('button', { name: 'Next page' })).not.toBeInTheDocument();
+    });
   });
 
   it('shows what failed', async () => {

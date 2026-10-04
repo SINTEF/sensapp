@@ -36,9 +36,17 @@ export interface SeriesCatalog {
   };
 }
 
+/** The cursor of the next page, in the `hydra:next` link of a page. */
+export function nextBookmark(catalog?: SeriesCatalog): string | undefined {
+  const next = catalog?.['hydra:view']?.['hydra:next'];
+  if (!next) return undefined;
+  return new URL(next, 'http://sensapp').searchParams.get('bookmark') ?? undefined;
+}
+
 export function useSeries(filters?: {
   metric?: string;
   selector?: string;
+  bookmark?: string;
 }) {
   return useQuery({
     queryKey: ['series', filters],
@@ -47,6 +55,7 @@ export function useSeries(filters?: {
         query: {
           metric: filters?.metric,
           selector: filters?.selector,
+          bookmark: filters?.bookmark,
         },
       });
       return unwrap(result) as unknown as SeriesCatalog;

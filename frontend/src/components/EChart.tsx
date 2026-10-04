@@ -9,6 +9,7 @@ import {
   TooltipComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
+import { usePrefersDark } from '../lib/usePrefersDark';
 
 // Only what the time series chart needs: the full echarts bundle is three times bigger.
 echarts.use([
@@ -25,11 +26,13 @@ echarts.use([
 export default function EChart({ option }: { option: echarts.EChartsCoreOption }) {
   const container = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
+  const dark = usePrefersDark();
 
+  // A new instance when the theme changes: echarts cannot switch it on a live one
   useEffect(() => {
     const element = container.current;
     if (!element) return;
-    const instance = echarts.init(element);
+    const instance = echarts.init(element, dark ? 'dark' : undefined);
     chart.current = instance;
     const observer = new ResizeObserver(() => instance.resize());
     observer.observe(element);
@@ -38,11 +41,12 @@ export default function EChart({ option }: { option: echarts.EChartsCoreOption }
       instance.dispose();
       chart.current = null;
     };
-  }, []);
+  }, [dark]);
 
   useEffect(() => {
-    chart.current?.setOption(option, true);
-  }, [option]);
+    // The theme brings a background of its own: the card has one already
+    chart.current?.setOption({ backgroundColor: 'transparent', ...option }, true);
+  }, [option, dark]);
 
   return <div ref={container} className="h-full w-full" />;
 }

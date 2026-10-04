@@ -11,9 +11,9 @@ SensApp ships a small explorer: pick a metric, pick series, draw them over a tim
 
 ## Charts
 
-The server refuses to send more than 100 000 raw samples of a series ([HTTP_LIMITS.md](HTTP_LIMITS.md)), so the chart asks for a `step` once the time range is longer than about 2.8 hours: the range is cut in at most 2 000 buckets of a round duration (`10s`, `1m`, `10m`, `1h`, …) and the samples of a bucket are averaged (`aggregation=avg`). The chart header says "averaged per 1m". Shorter ranges are read as they are. Series that are not numbers (strings, booleans) are always read as they are, and are not drawn.
+The server refuses to send more than 100 000 raw samples of a series ([HTTP_LIMITS.md](HTTP_LIMITS.md)), so the chart asks for a `step` once the time range is longer than about 2.8 hours: the range is cut in at most 2 000 buckets of a round duration (`10s`, `1m`, `10m`, `1h`, …) and the samples of a bucket are averaged (`aggregation=avg`). Shorter ranges are read as they are. Series that are not numbers (strings, booleans) are always read as they are, and are not drawn.
 
-The list of series is cut by the server at 256 series: the UI says so, and a label selector narrows it.
+The list of series is paged by the server (256 per page, cursor based): Previous and Next appear when there is more than one page, and the selection is kept from page to page. The theme follows the OS (light or dark), the chart included.
 
 ## Authentication
 

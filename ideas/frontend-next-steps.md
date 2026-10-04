@@ -2,11 +2,6 @@
 
 What was left out of `done/frontend-good-enough.md` on purpose, most useful first.
 
-- **Dark mode.** daisyUI has the `dark` theme but only follows the OS scheme for a theme flagged
-  `--prefersdark`, so it is never selected. Enable it, and give echarts a dark theme (axis and legend text,
-  tooltip background).
-- **Series beyond the first 256.** The UI says that more exist (`hydra:view`). A "load more" with the
-  `bookmark` of `hydra:next` would list them.
 - **Selection in the URL.** Metric, series and time range as query parameters, so that a chart can be shared
   or reloaded. Small with the router already in place.
 - **Non-numeric series.** Strings, booleans and locations are listed but not drawn. A table of the latest

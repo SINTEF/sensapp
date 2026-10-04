@@ -2,15 +2,11 @@ import { MetricsTable } from '../components/MetricsTable';
 import { SeriesTable } from '../components/SeriesTable';
 import { TimeSeriesChart } from '../components/TimeSeriesChart';
 import { TimeRangeSelector } from '../components/TimeRangeSelector';
-import { chartStep, isNumericType } from '../lib/chartStep';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
 export function ExplorerPage() {
-  const { selectedMetric, selectedSeries, clearSelectedSeries, timeRange } =
+  const { selectedMetric, selectedSeries, clearSelectedSeries } =
     useSelectionStore();
-  // Wide ranges are averaged per step: say so
-  const step = chartStep(timeRange.start, timeRange.end);
-  const averaged = step && selectedSeries.some((s) => isNumericType(s.type));
 
   return (
     <div className="flex flex-col gap-3 lg:h-full">
@@ -21,14 +17,6 @@ export function ExplorerPage() {
           {selectedSeries.length > 0 && (
             <span className="text-xs text-base-content/40">
               {selectedSeries.length} series
-            </span>
-          )}
-          {averaged && (
-            <span
-              className="text-xs text-base-content/40"
-              title="The server sends at most 100 000 samples of a series: on a wide range they are averaged per step"
-            >
-              averaged per {step}
             </span>
           )}
           <div className="ml-auto">
@@ -88,7 +76,7 @@ export function ExplorerPage() {
           </div>
           <div className="p-3 pt-2 flex-1 min-h-0 flex flex-col">
             {selectedMetric ? (
-              <SeriesTable />
+              <SeriesTable key={selectedMetric} />
             ) : (
               <div className="text-center py-8 text-base-content/30">
                 <p className="text-sm">Select a metric to browse series</p>

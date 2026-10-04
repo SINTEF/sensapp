@@ -465,6 +465,14 @@ export type ListSeriesData = {
          * PromQL-style label selector (e.g., '{env="prod",region=~"us.*"}')
          */
         selector?: string;
+        /**
+         * Series per page, 256 by default, 16384 at most
+         */
+        limit?: number;
+        /**
+         * Cursor of the next page: the `bookmark` of the `hydra:next` link of the previous page
+         */
+        bookmark?: string;
     };
     url: '/series';
 };
@@ -482,7 +490,7 @@ export type ListSeriesErrors = {
 
 export type ListSeriesResponses = {
     /**
-     * Time series catalog in DCAT format
+     * Time series catalog in DCAT format. A full page has a `hydra:view` with the link to the next page
      */
     200: unknown;
 };
