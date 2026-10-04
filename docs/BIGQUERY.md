@@ -63,21 +63,41 @@ You need a project with billing enabled (the BigQuery sandbox does not allow the
 SensApp uses). A throwaway project is the easiest way to keep the cost and the permissions contained.
 
 ```bash
+# 1. The project. The id is global, pick your own (or use an existing project and skip to 3)
+PROJECT_ID=sensapp-test-$RANDOM
 gcloud auth login
-gcloud projects create my-sensapp-test            # or use an existing project
-gcloud billing projects link my-sensapp-test --billing-account=XXXXXX-XXXXXX-XXXXXX
-gcloud config set project my-sensapp-test
+gcloud projects create "$PROJECT_ID" --name="SensApp test"   # inside an organization: add --organization=ORG_ID or --folder=FOLDER_ID
+
+# 2. Billing (needs the Billing User role on the billing account)
+gcloud billing accounts list
+gcloud billing projects link "$PROJECT_ID" --billing-account=XXXXXX-XXXXXX-XXXXXX
+
+# 3. The APIs
+gcloud config set project "$PROJECT_ID"
 gcloud services enable bigquery.googleapis.com bigquerystorage.googleapis.com
 
-# A service account that can run jobs and edit the dataset
-gcloud iam service-accounts create sensapp-test
-SA=sensapp-test@my-sensapp-test.iam.gserviceaccount.com
-gcloud projects add-iam-policy-binding my-sensapp-test --member="serviceAccount:$SA" --role=roles/bigquery.jobUser
-gcloud projects add-iam-policy-binding my-sensapp-test --member="serviceAccount:$SA" --role=roles/bigquery.dataEditor
+# 4. A service account that runs jobs and edits the data, and its key
+gcloud iam service-accounts create sensapp-test --display-name="SensApp test"
+SA="sensapp-test@$PROJECT_ID.iam.gserviceaccount.com"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$SA" --role=roles/bigquery.jobUser
+gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$SA" --role=roles/bigquery.dataEditor
 gcloud iam service-accounts keys create key.json --iam-account="$SA"
+
+# 5. The dataset the tests will wipe (SensApp creates it when it is missing, in europe-north1 by default)
+bq --project_id="$PROJECT_ID" mk --dataset --location=europe-north1 "$PROJECT_ID:sensapp_test"
+
+# 6. A budget alert at 5 dollars (50%, 90% and 100% of it)
+BILLING_ACCOUNT=XXXXXX-XXXXXX-XXXXXX
+gcloud billing budgets create --billing-account="$BILLING_ACCOUNT" --display-name="SensApp test" \
+  --budget-amount=5USD --filter-projects="projects/$PROJECT_ID" \
+  --threshold-rule=percent=0.5 --threshold-rule=percent=0.9 --threshold-rule=percent=1.0
 ```
 
-If your organization forbids service account keys, skip the last command and the key in the connection string:
+Project-level roles keep the commands short; they are fine in a project that only exists for this. `bq` comes
+with the Google Cloud CLI.
+
+If the key command fails with `iam.disableServiceAccountKeyCreation` (the default policy of organizations created
+since 2024), skip it and the key in the connection string:
 `gcloud auth application-default login` and `bigquery://?project_id=...` use your own account (which then
 needs the same two roles).
 
@@ -85,10 +105,11 @@ Limit what a mistake can cost before the first run:
 
 - In the console, **IAM & Admin → Quotas & System limits**, filter on "Query usage per day" (BigQuery API) and set a
   custom limit for the project, for instance 20 GiB. This is a hard stop.
-- Create a **budget alert** (Billing → Budgets & alerts), for instance 5 dollars.
+- The budget alert of step 6 only emails, it does not stop anything: the quota above and `max_bytes_billed` do.
 - Keep `max_bytes_billed` in the connection string.
 
-Keep `key.json` out of the repository.
+Keep `key.json` out of the repository (`key.json` and `*-key.json` are in `.gitignore`). The paths in the
+connection string are relative to where `cargo test` or `sensapp` runs, the root of the repository.
 
 Prices change, look at [the BigQuery pricing page](https://cloud.google.com/bigquery/pricing): at the time of
 writing the first TiB of queries and 10 GiB of storage per month are free, then queries are billed per TiB

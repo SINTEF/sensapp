@@ -3,6 +3,13 @@
 //! Types follow the table of supported protocol buffer types of the API: a TIMESTAMP is an `int64`
 //! of microseconds since the epoch, a NUMERIC a decimal `string`, a JSON a `string`.
 //! `migrations/init.sql` is the other side of this file; a test compares their columns.
+//!
+//! Floats are `double`, which the first version of the backend could not write: with
+//! `gcp-bigquery-client` 0.22 a `ColumnType::Float64` descriptor was declared to the service as a protobuf
+//! `float` (32 bits) while the row carried a `double`, and BigQuery stored NULL
+//! (<https://github.com/lquerel/gcp-bigquery-client/issues/106>), hence the `f32` and its comment. Since
+//! 0.26 the descriptor has `ColumnType::Double`, which is declared as `double`, and the integration test
+//! `every_type_comes_back_as_written` checks that `0.1 + 0.2` comes back exactly.
 
 use gcp_bigquery_client::storage::{ColumnMode, ColumnType, FieldDescriptor, TableDescriptor};
 use prost::Message;
