@@ -1,10 +1,12 @@
-import { useMemo } from 'react';
-import ReactECharts from 'echarts-for-react';
+import { lazy, Suspense, useMemo } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { getSeriesData } from '../client';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { extractErrorMessage } from '../api/clientConfig';
 import type { SenMLRecord } from '../hooks/useSeriesData';
+
+// echarts is large: load it when the first chart is drawn.
+const EChart = lazy(() => import('./EChart'));
 
 // Color palette for multiple series
 const COLORS = [
@@ -166,12 +168,11 @@ export function TimeSeriesChart() {
         </div>
       )}
 
-      <ReactECharts
-        option={option}
-        style={{ height: '100%', width: '100%' }}
-        notMerge={true}
-        lazyUpdate={true}
-      />
+      <div className="flex-1 min-h-0">
+        <Suspense fallback={null}>
+          <EChart option={option} />
+        </Suspense>
+      </div>
     </div>
   );
 }

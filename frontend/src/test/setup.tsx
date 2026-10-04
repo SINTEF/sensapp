@@ -1,13 +1,11 @@
 import '@testing-library/jest-dom/vitest';
 
-// Mock echarts-for-react globally since it requires canvas in jsdom
-vi.mock('echarts-for-react', () => ({
+// echarts needs a canvas, which jsdom does not have.
+vi.mock('../components/EChart', () => ({
   default: (props: { option: unknown }) => {
-    const seriesCount = Array.isArray((props.option as Record<string, unknown>)?.series)
-      ? ((props.option as Record<string, unknown>).series as unknown[]).length
-      : 0;
+    const series = (props.option as { series?: unknown[] })?.series;
     return (
-      <div data-testid="echarts" data-series-count={seriesCount}>
+      <div data-testid="echarts" data-series-count={Array.isArray(series) ? series.length : 0}>
         Chart
       </div>
     );
