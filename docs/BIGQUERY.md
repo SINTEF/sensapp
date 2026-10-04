@@ -6,7 +6,8 @@ datasets), not for production: it is **experimental**, kept simple on purpose, a
 that every query is billed. See [BACKENDS.md](BACKENDS.md) for how it compares to the others.
 
 It is tested by hand: CI compiles it and runs its unit tests, but has no Google Cloud project (see
-[Testing](#testing)).
+[Testing](#testing)). The whole integration suite, backend-generic modules included, passed on a real dataset
+on 4 October 2026.
 
 ## Connection string
 
@@ -125,8 +126,10 @@ connection string are relative to where `cargo test` or `sensapp` runs, the root
 
 Prices change, look at [the BigQuery pricing page](https://cloud.google.com/bigquery/pricing): at the time of
 writing the first TiB of queries and 10 GiB of storage per month are free, then queries are billed per TiB
-scanned, and the Storage Write API has a free monthly allowance. SensApp's tables are small in tests: a whole
-test run scans tens of GB at most, because each statement bills a 10 MB minimum.
+scanned, and the Storage Write API has a free monthly allowance. SensApp's tables are small in tests, and rows
+that were just written (still in the streaming buffer) are billed 0 bytes. Measured on 4 October 2026: running
+the whole integration suite, with partial and repeated runs, was 16 901 statements and 25 GiB billed, which is
+less than a dollar at list price.
 
 ## Testing
 
@@ -150,7 +153,8 @@ TEST_DATABASE_URL=$TEST_DATABASE_URL_BIGQUERY cargo test --no-default-features -
 TEST_DATABASE_URL=$TEST_DATABASE_URL_BIGQUERY cargo test --no-default-features --features bigquery \
   --test integration data_lifecycle:: advanced_backend_queries:: query_sensors_by_labels:: selector_reads::
 
-# Everything (long: every test is serial and starts with a cleanup of 11 statements)
+# Everything: about 290 tests, a little under an hour (every test is serial and starts with a migration and a
+# cleanup of 11 statements, a statement is about 2 seconds)
 cargo make test-bigquery-live
 ```
 

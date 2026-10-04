@@ -14,7 +14,7 @@ mature. This page says which ones to rely on, and what each one is for.
 | SQLite | **Maintained** | yes | Tests, demos, single-node edge devices, one writer |
 | DuckDB | Compatibility path, **less mature** | yes | Local analysis of a dataset, notebooks. Writes are bulk (3000 new series in 0.2 s) |
 | RRDCached | **Experimental**, good enough | yes (its own job, a real daemon) | Fixed-size round-robin storage of numeric monitoring-style data. No names, labels, types or deletion, reads are consolidated rows |
-| BigQuery | **Experimental**, R&D | compile and unit tests only; the integration suite is run by hand on a real dataset | Comparing a warehouse with the time series databases, SQL over sensor data next to other datasets. Every query is billed. [BIGQUERY.md](BIGQUERY.md) |
+| BigQuery | **Experimental**, R&D | compile and unit tests; the integration suite is run by hand on a real dataset (passed on 4 Oct 2026) | Comparing a warehouse with the time series databases, SQL over sensor data next to other datasets. Every query is billed. [BIGQUERY.md](BIGQUERY.md) |
 
 "Maintained" means a regression in it fails CI, the backend-generic integration tests run on it, and bugs
 found on it are fixed. "Experimental" means it works for the basic ingest and query paths, may lag behind new

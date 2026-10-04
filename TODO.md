@@ -42,7 +42,7 @@ Done: Prometheus scrape endpoint with HTTP request count, duration and in-flight
 
 These are valid tasks, but not the current focus. Most have a note in `ideas/`.
 
-- [ ] BigQuery: back in sync with the storage trait and query model, written and unit tested; to run against a real dataset (`current_tasks/bigquery-back-in-sync.md`, `docs/BIGQUERY.md`)
+- [x] BigQuery back in sync with the storage trait and query model, integration suite passing on a real dataset (`done/bigquery-back-in-sync.md`, `docs/BIGQUERY.md`)
 - [ ] Add benchmark tooling for storage backend comparison (a first script exists: `tests/perf/scale.sh`, writes and selector reads of thousands of series through the HTTP API)
 - [ ] Add research-specific comparison endpoints and reporting helpers
 - [ ] Add storage-space and latency comparison reports across backends

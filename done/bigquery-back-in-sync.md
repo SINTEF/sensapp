@@ -45,14 +45,27 @@ tests.
 - [x] Dependencies: `gcp-bigquery-client` 0.28, `tonic`, `prost` were already the latest; `bigdecimal`, its
       encoder, `clru`, `tonic` and `sinteflake` (with `SENSAPP_INSTANCE_ID`) are gone
 
-## To do: run it on Google Cloud
+## Live run (4 Oct 2026, project `smartbuildinghub`, dataset in europe-north1, user credentials)
 
-Nothing here ran against BigQuery. Steps in `docs/BIGQUERY.md`. Expect to fix things the unit tests cannot
-see: the exact shape of an `error` answer, the DDL script, partition pruning with parameters, DML on
-recent rows, the length of a full suite run.
+All the integration tests that apply to BigQuery pass: the 9 of `bigquery_integration`, the 42 of the
+`data_lifecycle`, `advanced_backend_queries`, `query_sensors_by_labels`, `selector_reads`,
+`selector_aggregated`, `aggregated_windows` and `cross_series_reads` modules, and the 242 others (arrow,
+ingestion, InfluxDB, Prometheus remote read and write, PromQL, JWT, exports, CRUD, publish robustness...).
+Measured: 16 901 statements (3 415 `DELETE`, 9 639 `SELECT`), **25 GiB billed**, for these runs and the
+partial or repeated ones. Time: 143 s for the 9, 1 300 s for the 42, 1 705 s for the 242.
 
-- [ ] `bigquery_integration::` module
-- [ ] The generic suites on BigQuery (`data_lifecycle`, `advanced_backend_queries`, `query_sensors_by_labels`,
-      `selector_reads`, `ingestion`, `prometheus_remote_read_integration`)
-- [ ] Measure: latency of a small write and of a read, bytes billed by a full run
-- [ ] Move this file to `done/`, delete `/Users/antoinep/work/sensapp-vibe-prom-read`'s BigQuery changes
+Found by the first live run and fixed (`994221d`):
+
+| # | Finding |
+|---|---------|
+| 1 | The gRPC client of the Storage Write API panicked: no default rustls provider when `ring` and `aws-lc-rs` are both compiled in (the server installs one, a test does not). `connect` installs it |
+| 2 | `AVG` of BigQuery is not the exact sum over the count in the last bits (-5.5e-17 for integers that average to 0). Kept: it is faster, and the difference does not matter in a warehouse. The test compares with a tolerance |
+| 3 | Rows still in the streaming buffer are billed 0 bytes, so `max_bytes_billed` cannot be tested on them: the test uses the metadata statement, which bills 10 MB at least |
+| 4 | `TRUNCATE` is not faster than `DELETE ... WHERE TRUE` (about 2.5 s a statement either way), kept `DELETE` |
+
+Not a finding but worth knowing: doubles are exact on `gcp-bigquery-client` 0.28 (`0.1 + 0.2` and `f64::MAX`
+round trip). The `f32` of the first backend was the `Float64` descriptor of 0.22 declared as a protobuf `float`
+(lquerel/gcp-bigquery-client#106), fixed since 0.26.
+
+Not measured: latency of a small write and of a read in isolation, behaviour under real load, the Storage
+Write API quotas.
