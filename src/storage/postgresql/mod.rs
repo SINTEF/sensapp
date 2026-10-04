@@ -64,6 +64,21 @@ impl PostgresStorage {
 
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
+            // Plan every statement with its parameters. sqlx prepares statements and PostgreSQL
+            // reuses a generic plan after five executions, where an absent time bound is not known
+            // to be absent: with a generic plan a week of 1.33 M samples took 31 ms with BRIN
+            // instead of 3 ms (a sequential scan) and a read without bounds 312 ms instead of
+            // 117 ms (a bitmap scan and a sort), whichever way the bounds are written. The planning
+            // of a custom plan costs a fraction of a millisecond. Same setting as the TimescaleDB
+            // backend, for another reason.
+            .after_connect(|connection, _metadata| {
+                Box::pin(async move {
+                    sqlx::query("SET plan_cache_mode = force_custom_plan")
+                        .execute(connection)
+                        .await?;
+                    Ok(())
+                })
+            })
             .connect_with(connect_options)
             .await
             .context("Failed to create postgres pool")?;
@@ -198,8 +213,8 @@ impl PostgresStorage {
             SELECT MAX(timestamp_us) AS timestamp_us
             FROM {table_name}
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+            AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
             "#
         );
 
@@ -1083,6 +1098,13 @@ impl StorageInstance for PostgresStorage {
 impl PostgresStorage {
     async fn publish_once(&self, batch: &Batch) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
+        // The connections plan every statement with its parameters (see `connect`), which suits
+        // the reads. A write is `INSERT .. SELECT unnest($1, $2, $3)` over thousands of values:
+        // planning those as constants again at every batch took 200 ms, and the load of 1.33 M
+        // samples 50 s instead of 19 s. Back to the default for this transaction only.
+        sqlx::query("SET LOCAL plan_cache_mode = auto")
+            .execute(&mut *transaction)
+            .await?;
         let sensors: Vec<&crate::datamodel::Sensor> = batch
             .sensors
             .iter()

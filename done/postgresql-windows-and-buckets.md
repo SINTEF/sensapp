@@ -1,5 +1,7 @@
 # PostgreSQL: windows, the latest sample and buckets
 
+Done on 4 October 2026 (branch `write-timeouts`) for points 1 and 2, see the Outcome at the end. BRIN stays (point 3). Original analysis:
+
 Measured on 4 October 2026 (1.33 M samples of one series, release build, PostgreSQL 16.6; numbers in
 `ideas/read-and-write-performance-first-numbers.md`). Nothing was changed yet. In order of value, and
 none of the first two touches the schema.
@@ -74,3 +76,32 @@ multi-instance care): only if the B-tree turns out too expensive.
 
 1 and 2 first: no schema change, no write cost, tests exist. Re-measure, then decide 3 with the numbers of
 the real benchmark.
+
+## Outcome
+
+- **Bucket expression (point 2)**: `bucketed_cte` computes the bucket on the integer,
+  `timestamp_us - (((timestamp_us - origin) % step_us) + step_us) % step_us`, floored like `date_bin`.
+  Compared with the old expression on 1.4 M random timestamps (7 steps, 4 origins, negative origin,
+  samples before the origin): 0 differences. 1.25 s to 0.21 s for 875 daily buckets in `psql`.
+- **Time bounds (point 1)**: the 38 predicates of `src/storage/postgresql/` are
+  `timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)` (and the `<=` twin), as for SQLite.
+  `tests/integration/time_window_reads.rs::time_bounds_are_written_in_a_plannable_form` fails when the
+  `IS NULL OR` form comes back in `sqlite/` or `postgresql/`. TimescaleDB is left alone: with a forced
+  generic plan it still excludes 131 of 133 chunks at run time and answers in a few milliseconds.
+- **The `COALESCE` form alone is not enough**, which the benchmark showed: with a generic plan a read
+  without bounds takes 312 ms (a bitmap scan on BRIN, then a sort) instead of 117 ms, and `MAX` 174 ms
+  instead of 60 ms, because the planner cannot drop a predicate that is always true. Each way of writing the
+  bounds fails one case in a generic plan, so the connections of the PostgreSQL backend now plan every
+  statement with its parameters (`SET plan_cache_mode = force_custom_plan` in `after_connect`, as the
+  TimescaleDB backend already did).
+- **That setting made the load 2.7 times slower** (50.7 s instead of 18.6 s for 1.33 M samples): the bulk
+  `INSERT .. SELECT unnest($1, $2, $3)` was planned again for every batch with thousands of constants, 200 ms
+  each. `publish_once` runs `SET LOCAL plan_cache_mode = auto` first, which gives the writes their plan cache
+  back (load 19.7 s again) and leaves the reads on custom plans.
+- Measured (1.33 M samples, release build, **60 s between the load and the reads**, no manual `ANALYZE`;
+  PostgreSQL median ms, before to after): raw week 22 to 25, `1h avg` week 21 to **9.6**, `1m avg` month
+  109 to **58**, `1d avg` whole history 561 to **135**, `1h avg` 579 to **153**, `1h max` 419 to **146**, `1d
+  last` 561 to **312**, `/last` 65 to **47** (BRIN cannot do better: it reads the table). Unchanged:
+  `limit=100000` (141 to 157), availability (262 to 277).
+- Left for later: the B-tree question (point 3), the availability query (`COUNT(DISTINCT ...)`), and
+  `ideas/timescaledb-write-plan-cache.md`.

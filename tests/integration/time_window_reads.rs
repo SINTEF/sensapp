@@ -214,3 +214,45 @@ async fn raw_reads_honour_each_time_bound_for_every_type() -> Result<()> {
     }
     Ok(())
 }
+
+/// The queries of SQLite and PostgreSQL must not test the time bounds with `? IS NULL OR`.
+///
+/// SQLite cannot use the time column of its index for it. PostgreSQL can while it plans for the
+/// values it is given, but a prepared statement becomes a generic plan after a few executions, and
+/// then the bounds are only a filter: on 1.33 M samples a week took 115 ms with a B-tree and 30 ms
+/// with BRIN (a sequential scan) instead of 2 to 3 ms, and the latest sample 94 ms instead of 0.03.
+/// The form is `timestamp_us >= COALESCE(?, <lowest>)`. This reads the sources because a plan is not
+/// something a result shows.
+///
+/// TimescaleDB is left out on purpose: its chunk exclusion works at run time too (131 of 133 chunks
+/// excluded with a forced generic plan, a few milliseconds), measured on 4 October 2026.
+#[test]
+fn time_bounds_are_written_in_a_plannable_form() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/storage");
+    let mut found = Vec::new();
+    for directory in ["sqlite", "postgresql"] {
+        for entry in std::fs::read_dir(root.join(directory)).expect("storage sources") {
+            let path = entry.expect("directory entry").path();
+            if path.extension().is_none_or(|extension| extension != "rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("read a source file");
+            for (number, line) in source.lines().enumerate() {
+                let compact = line.replace(' ', "");
+                if compact.contains("ISNULLOR") && compact.contains("timestamp_us") {
+                    found.push(format!(
+                        "{}:{}: {}",
+                        path.display(),
+                        number + 1,
+                        line.trim()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "write the time bounds as `timestamp_us >= COALESCE(?, <lowest>)`, see the comment of this test:\n{}",
+        found.join("\n")
+    );
+}

@@ -201,8 +201,8 @@ impl PostgresStorage {
                 SELECT sensor_id, timestamp_us, value
                 FROM integer_values
                 WHERE sensor_id = s.id
-                AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-                AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+                AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+                AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
                 ORDER BY timestamp_us ASC
                 LIMIT $4
             ) sub
@@ -261,8 +261,8 @@ impl PostgresStorage {
                 SELECT sensor_id, timestamp_us, value
                 FROM numeric_values
                 WHERE sensor_id = s.id
-                AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-                AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+                AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+                AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
                 ORDER BY timestamp_us ASC
                 LIMIT $4
             ) sub
@@ -321,8 +321,8 @@ impl PostgresStorage {
                 SELECT sensor_id, timestamp_us, value
                 FROM float_values
                 WHERE sensor_id = s.id
-                AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-                AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+                AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+                AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
                 ORDER BY timestamp_us ASC
                 LIMIT $4
             ) sub
@@ -382,8 +382,8 @@ impl PostgresStorage {
                 FROM string_values sv
                 JOIN strings_values_dictionary svd ON sv.value = svd.id
                 WHERE sv.sensor_id = s.id
-                AND ($2::BIGINT IS NULL OR sv.timestamp_us >= $2)
-                AND ($3::BIGINT IS NULL OR sv.timestamp_us <= $3)
+                AND sv.timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+                AND sv.timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
                 ORDER BY sv.timestamp_us ASC
                 LIMIT $4
             ) sub
@@ -442,8 +442,8 @@ impl PostgresStorage {
                 SELECT sensor_id, timestamp_us, value
                 FROM boolean_values
                 WHERE sensor_id = s.id
-                AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-                AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+                AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+                AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
                 ORDER BY timestamp_us ASC
                 LIMIT $4
             ) sub
@@ -503,8 +503,8 @@ impl PostgresStorage {
                 SELECT sensor_id, timestamp_us, latitude, longitude
                 FROM location_values
                 WHERE sensor_id = s.id
-                AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-                AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+                AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+                AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
                 ORDER BY timestamp_us ASC
                 LIMIT $4
             ) sub
@@ -563,8 +563,8 @@ impl PostgresStorage {
                 SELECT sensor_id, timestamp_us, value
                 FROM json_values
                 WHERE sensor_id = s.id
-                AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-                AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+                AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+                AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
                 ORDER BY timestamp_us ASC
                 LIMIT $4
             ) sub
@@ -623,8 +623,8 @@ impl PostgresStorage {
                 SELECT sensor_id, timestamp_us, value
                 FROM blob_values
                 WHERE sensor_id = s.id
-                AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-                AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+                AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+                AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
                 ORDER BY timestamp_us ASC
                 LIMIT $4
             ) sub
