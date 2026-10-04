@@ -96,10 +96,22 @@ gcloud billing budgets create --billing-account="$BILLING_ACCOUNT" --display-nam
 Project-level roles keep the commands short; they are fine in a project that only exists for this. `bq` comes
 with the Google Cloud CLI.
 
-If the key command fails with `iam.disableServiceAccountKeyCreation` (the default policy of organizations created
-since 2024), skip it and the key in the connection string:
-`gcloud auth application-default login` and `bigquery://?project_id=...` use your own account (which then
-needs the same two roles).
+If the key command fails with `iam.disableServiceAccountKeyCreation` or `iam.managed.disableServiceAccountKeyCreation`
+(a policy of your organization, the default of the ones created since 2024), do not look for a way around it: run as
+yourself. Skip the key and leave it out of the connection string:
+
+```bash
+gcloud auth application-default login
+unset GOOGLE_APPLICATION_CREDENTIALS
+# TEST_DATABASE_URL='bigquery://?project_id=P&dataset_id=sensapp_test&max_bytes_billed=2000000000'
+```
+
+SensApp then reads `~/.config/gcloud/application_default_credentials.json` (or the file named by
+`GOOGLE_APPLICATION_CREDENTIALS`). Only user credentials and service account keys are understood: an
+`--impersonate-service-account` file is not. Your account needs `roles/bigquery.jobUser` on the project and
+`roles/bigquery.dataEditor` on the dataset. A machine of Google Cloud (Compute Engine, Cloud Run, GKE) with a service
+account attached needs neither a key nor a login. If a write fails with a 403 that talks about a quota project, try
+`gcloud auth application-default set-quota-project P` and report it: the client does not send one itself.
 
 Limit what a mistake can cost before the first run:
 
