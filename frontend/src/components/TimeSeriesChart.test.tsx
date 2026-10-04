@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -34,6 +34,7 @@ function queryOf(uuid: string) {
 describe('TimeSeriesChart', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useSelectionStore.setState({ step: 'auto', aggregation: 'avg' });
     // SenML: the base time is in the first record, the others are relative to it
     mockGetSeriesData.mockResolvedValue({
       data: [{ bt: 1_791_000_000, t: 0, v: 1 }, { t: 30, v: 2 }, { t: 60, v: 3 }],
@@ -52,6 +53,52 @@ describe('TimeSeriesChart', () => {
     // Not the others: strings cannot be averaged
     expect(queryOf('uuid-state')).not.toHaveProperty('step');
     expect(queryOf('uuid-state')).not.toHaveProperty('aggregation');
+  });
+
+  it('sends the step and the aggregation that were chosen, to the numeric series only', async () => {
+    useSelectionStore.setState({
+      selectedSeries: [temperature, state],
+      timeRange: { start: START, end: hours(1) },
+      step: '5m',
+      aggregation: 'max',
+    });
+    renderChart();
+
+    await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(2));
+    expect(queryOf('uuid-temperature')).toMatchObject({ step: '5m', aggregation: 'max' });
+    expect(queryOf('uuid-state')).not.toHaveProperty('step');
+  });
+
+  it('reads raw when asked to, even on a wide range', async () => {
+    useSelectionStore.setState({
+      selectedSeries: [temperature],
+      timeRange: { start: START, end: hours(24) },
+      step: 'raw',
+    });
+    renderChart();
+
+    await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(1));
+    expect(queryOf('uuid-temperature')).not.toHaveProperty('step');
+    expect(queryOf('uuid-temperature')).not.toHaveProperty('aggregation');
+  });
+
+  it('asks again when the step or the aggregation changes', async () => {
+    useSelectionStore.setState({
+      selectedSeries: [temperature],
+      timeRange: { start: START, end: hours(1) },
+      step: '5m',
+      aggregation: 'avg',
+    });
+    renderChart();
+    await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(1));
+
+    act(() => useSelectionStore.getState().setAggregation('min'));
+    await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(2));
+    expect(mockGetSeriesData.mock.lastCall?.[0].query).toMatchObject({ aggregation: 'min' });
+
+    act(() => useSelectionStore.getState().setStep('1h'));
+    await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(3));
+    expect(mockGetSeriesData.mock.lastCall?.[0].query).toMatchObject({ step: '1h' });
   });
 
   it('reads a short range as it is', async () => {

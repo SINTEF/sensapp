@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { Aggregation } from '../lib/chartStep';
 
 interface SelectedSeries {
   uuid: string;
@@ -14,12 +15,17 @@ interface SelectionState {
     start: string;
     end: string;
   };
+  /** `auto` (the range decides), `raw`, or a duration such as `5m` */
+  step: string;
+  aggregation: Aggregation;
   labelFilter: string;
   setSelectedMetric: (metric: string | null) => void;
   toggleSeries: (series: SelectedSeries) => void;
   clearSelectedSeries: () => void;
   setTimeRange: (start: string, end: string) => void;
   setLabelFilter: (filter: string) => void;
+  setStep: (step: string) => void;
+  setAggregation: (aggregation: Aggregation) => void;
 }
 
 function defaultTimeRange() {
@@ -36,6 +42,8 @@ export const useSelectionStore = create<SelectionState>((set) => ({
   selectedSeries: [],
   timeRange: defaultTimeRange(),
   labelFilter: '',
+  step: 'auto',
+  aggregation: 'avg',
 
   setSelectedMetric: (metric) =>
     set({ selectedMetric: metric, selectedSeries: [] }),
@@ -60,4 +68,8 @@ export const useSelectionStore = create<SelectionState>((set) => ({
   setTimeRange: (start, end) => set({ timeRange: { start, end } }),
 
   setLabelFilter: (filter) => set({ labelFilter: filter }),
+
+  setStep: (step) => set({ step }),
+
+  setAggregation: (aggregation) => set({ aggregation }),
 }));

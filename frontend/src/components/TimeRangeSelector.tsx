@@ -1,3 +1,5 @@
+import { AGGREGATIONS, FIXED_STEPS } from '../lib/chartStep';
+import type { Aggregation } from '../lib/chartStep';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
 const PRESETS = [
@@ -10,7 +12,8 @@ const PRESETS = [
 ];
 
 export function TimeRangeSelector() {
-  const { timeRange, setTimeRange } = useSelectionStore();
+  const { timeRange, setTimeRange, step, setStep, aggregation, setAggregation } =
+    useSelectionStore();
 
   function handlePreset(minutes: number) {
     const end = new Date();
@@ -66,6 +69,38 @@ export function TimeRangeSelector() {
           value={toLocalDatetime(timeRange.end)}
           onChange={(e) => handleEndChange(e.target.value)}
         />
+      </div>
+
+      <div className="flex items-center gap-1">
+        <select
+          className="select select-bordered select-xs text-xs h-7"
+          aria-label="Step"
+          title="Step"
+          value={step}
+          onChange={(e) => setStep(e.target.value)}
+        >
+          <option value="auto">Auto</option>
+          <option value="raw">Raw</option>
+          {FIXED_STEPS.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <select
+          className="select select-bordered select-xs text-xs h-7"
+          aria-label="Aggregation"
+          title="Aggregation"
+          value={aggregation}
+          disabled={step === 'raw'}
+          onChange={(e) => setAggregation(e.target.value as Aggregation)}
+        >
+          {AGGREGATIONS.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
       </div>
     </div>
   );

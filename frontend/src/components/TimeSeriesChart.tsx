@@ -3,7 +3,7 @@ import { useQueries } from '@tanstack/react-query';
 import { getSeriesData } from '../client';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { unwrap } from '../api/clientConfig';
-import { chartStep, isNumericType } from '../lib/chartStep';
+import { isNumericType, resolveStep } from '../lib/chartStep';
 
 // echarts is large: load it when the first chart is drawn.
 const EChart = lazy(() => import('./EChart'));
@@ -51,13 +51,13 @@ function parseSenMLToTimeSeries(
 }
 
 export function TimeSeriesChart() {
-  const { selectedSeries, timeRange } = useSelectionStore();
+  const { selectedSeries, timeRange, step: stepChoice, aggregation } = useSelectionStore();
 
-  const step = chartStep(timeRange.start, timeRange.end);
+  const step = resolveStep(stepChoice, timeRange.start, timeRange.end);
 
   const queries = useQueries({
     queries: selectedSeries.map((s, index) => ({
-      queryKey: ['seriesData', s.uuid, timeRange] as const,
+      queryKey: ['seriesData', s.uuid, timeRange, step, aggregation] as const,
       queryFn: async () => {
         const result = await getSeriesData({
           path: { series_uuid: s.uuid },
@@ -65,8 +65,8 @@ export function TimeSeriesChart() {
             format: 'senml',
             start: timeRange.start,
             end: timeRange.end,
-            // A wide range is averaged per step, the server refuses to send more than 100 000 raw samples
-            ...(step && isNumericType(s.type) ? { step, aggregation: 'avg' } : {}),
+            // Only numbers can be aggregated. The server refuses more than 100 000 raw samples.
+            ...(step && isNumericType(s.type) ? { step, aggregation } : {}),
           },
         });
         return {

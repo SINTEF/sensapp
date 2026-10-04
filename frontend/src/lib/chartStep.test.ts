@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chartStep, isNumericType } from './chartStep';
+import { chartStep, isNumericType, resolveStep } from './chartStep';
 
 const START = '2026-10-04T00:00:00.000Z';
 const at = (seconds: number) => new Date(Date.parse(START) + seconds * 1000).toISOString();
@@ -42,5 +42,20 @@ describe('isNumericType', () => {
   it('knows what can be averaged', () => {
     for (const type of ['float', 'Float', 'integer', 'numeric']) expect(isNumericType(type)).toBe(true);
     for (const type of ['string', 'boolean', 'location', 'json', 'blob']) expect(isNumericType(type)).toBe(false);
+  });
+});
+
+describe('resolveStep', () => {
+  it('lets the range decide on auto', () => {
+    expect(resolveStep('auto', START, at(24 * 3600))).toBe('1m');
+    expect(resolveStep('auto', START, at(3600))).toBeUndefined();
+  });
+
+  it('does not aggregate raw', () => {
+    expect(resolveStep('raw', START, at(30 * 86400))).toBeUndefined();
+  });
+
+  it('takes a fixed step as it is, whatever the range', () => {
+    expect(resolveStep('5m', START, at(3600))).toBe('5m');
   });
 });
