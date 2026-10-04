@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { listSeries } from '../client';
-import { extractErrorMessage } from '../api/clientConfig';
+import { unwrap } from '../api/clientConfig';
 
 export interface SeriesLabel {
   [key: string]: string;
@@ -49,10 +49,7 @@ export function useSeries(filters?: {
           selector: filters?.selector,
         },
       });
-      if (result.error) {
-        throw new Error(extractErrorMessage(result.error));
-      }
-      return result.data as unknown as SeriesCatalog;
+      return unwrap(result) as unknown as SeriesCatalog;
     },
     enabled: !!filters?.metric || !!filters?.selector,
   });

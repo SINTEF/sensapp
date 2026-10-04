@@ -1,4 +1,6 @@
 import { Link, Outlet } from 'react-router-dom';
+import { AuthDialog } from './AuthDialog';
+import { AuthStatus } from './AuthStatus';
 import { HealthBadge } from './HealthBadge';
 
 export function Layout() {
@@ -20,6 +22,7 @@ export function Layout() {
             </div>
             <div className="flex items-center gap-3">
               <HealthBadge />
+              <AuthStatus />
               <a
                 href="/docs"
                 target="_blank"
@@ -39,6 +42,7 @@ export function Layout() {
       <main className="flex-1 min-h-0 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-3">
         <Outlet />
       </main>
+      <AuthDialog />
     </div>
   );
 }

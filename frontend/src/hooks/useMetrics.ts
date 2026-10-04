@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { listMetrics } from '../client';
-import { extractErrorMessage } from '../api/clientConfig';
+import { unwrap } from '../api/clientConfig';
 
 export interface DcatDataset {
   '@type': string;
@@ -49,10 +49,7 @@ export function useMetrics(filters?: {
           type: filters?.type,
         },
       });
-      if (result.error) {
-        throw new Error(extractErrorMessage(result.error));
-      }
-      return result.data as unknown as DcatCatalog;
+      return unwrap(result) as unknown as DcatCatalog;
     },
   });
 }

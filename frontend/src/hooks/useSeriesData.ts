@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getSeriesData } from '../client';
-import { extractErrorMessage } from '../api/clientConfig';
+import { unwrap } from '../api/clientConfig';
 
 export interface SenMLRecord {
   bn?: string;
@@ -36,10 +36,7 @@ export function useSeriesData(
           limit: options?.limit,
         },
       });
-      if (result.error) {
-        throw new Error(extractErrorMessage(result.error));
-      }
-      return result.data as unknown as SenMLRecord[];
+      return unwrap(result) as unknown as SenMLRecord[];
     },
     enabled: !!seriesUuid,
   });

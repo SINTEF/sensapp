@@ -2,7 +2,7 @@ import { lazy, Suspense, useMemo } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { getSeriesData } from '../client';
 import { useSelectionStore } from '../stores/useSelectionStore';
-import { extractErrorMessage } from '../api/clientConfig';
+import { unwrap } from '../api/clientConfig';
 import type { SenMLRecord } from '../hooks/useSeriesData';
 
 // echarts is large: load it when the first chart is drawn.
@@ -62,11 +62,8 @@ export function TimeSeriesChart() {
             end: timeRange.end,
           },
         });
-        if (result.error) {
-          throw new Error(extractErrorMessage(result.error));
-        }
         return {
-          records: result.data as unknown as SenMLRecord[],
+          records: unwrap(result) as unknown as SenMLRecord[],
           series: s,
           colorIndex: index,
         };
