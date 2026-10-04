@@ -591,6 +591,31 @@ mod tests {
         }
     }
 
+    /// The client of the frontend is generated from `frontend/openapi.json`, so that file is the
+    /// document of this server. After an API change, rewrite it and regenerate the client:
+    /// `UPDATE_OPENAPI=1 cargo test frontend_openapi_document`, then `npm run openapi-ts` in `frontend/`.
+    #[test]
+    fn frontend_openapi_document_is_up_to_date() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/frontend/openapi.json");
+        let current = serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI document");
+
+        if std::env::var_os("UPDATE_OPENAPI").is_some() {
+            let json = serde_json::to_string_pretty(&current).expect("format OpenAPI document");
+            std::fs::write(path, json + "\n").expect("write frontend/openapi.json");
+            return;
+        }
+
+        let saved: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(path).expect("read frontend/openapi.json"),
+        )
+        .expect("parse frontend/openapi.json");
+        assert!(
+            saved == current,
+            "frontend/openapi.json is not the OpenAPI document of the server: run \
+             `UPDATE_OPENAPI=1 cargo test frontend_openapi_document`, then `npm run openapi-ts` in frontend/"
+        );
+    }
+
     #[test]
     fn data_endpoints_document_overload_and_timeout_answers() {
         let document = serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI document");

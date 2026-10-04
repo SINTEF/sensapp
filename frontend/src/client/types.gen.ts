@@ -28,6 +28,21 @@ export type ReadinessResponse = {
     status: string;
 };
 
+/**
+ * What a vacuum did.
+ */
+export type VacuumResponse = {
+    /**
+     * Number of duplicate samples removed (same series, same timestamp, same value, the first
+     * one written is kept), or `null` when the storage backend cannot remove duplicates
+     */
+    duplicates_removed?: number | null;
+    /**
+     * `ok` when the maintenance completed
+     */
+    status: string;
+};
+
 export type FrontpageData = {
     body?: never;
     path?: never;
@@ -37,7 +52,7 @@ export type FrontpageData = {
 
 export type FrontpageResponses = {
     /**
-     * SensApp Frontpage
+     * SensApp Frontpage: the name of the instance. Redirects to the web UI at `/ui/` instead when the UI is served
      */
     200: string;
 };
@@ -53,18 +68,30 @@ export type VacuumDatabaseData = {
 
 export type VacuumDatabaseErrors = {
     /**
+     * The token does not have the delete scope, or has a sensor allow list
+     */
+    403: unknown;
+    /**
      * Failed to vacuum database
      */
     500: string;
+    /**
+     * The storage backend is unavailable: retry later
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS (one hour by default), and the storage backend may carry on after the answer
+     */
+    504: unknown;
 };
 
 export type VacuumDatabaseError = VacuumDatabaseErrors[keyof VacuumDatabaseErrors];
 
 export type VacuumDatabaseResponses = {
     /**
-     * Database vacuum completed successfully
+     * Maintenance completed, with the number of duplicate samples removed
      */
-    200: string;
+    200: VacuumResponse;
 };
 
 export type VacuumDatabaseResponse = VacuumDatabaseResponses[keyof VacuumDatabaseResponses];
@@ -102,6 +129,14 @@ export type PrometheusRemoteReadErrors = {
      * Internal Server Error
      */
     500: AppError;
+    /**
+     * The storage backend is unavailable: retry later
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
 };
 
 export type PrometheusRemoteReadError = PrometheusRemoteReadErrors[keyof PrometheusRemoteReadErrors];
@@ -146,6 +181,14 @@ export type PublishPrometheusErrors = {
      * Internal Server Error
      */
     500: AppError;
+    /**
+     * The storage backend is unavailable, or SensApp is busy writing and sheds the write. A `Retry-After` header (seconds, randomised) means the request was not processed at all and can be sent again after that delay
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
 };
 
 export type PublishPrometheusError = PublishPrometheusErrors[keyof PublishPrometheusErrors];
@@ -171,6 +214,10 @@ export type SimplePromqlQueryData = {
          * Output format: senml (default), csv, jsonl, or arrow
          */
         format?: string;
+        /**
+         * Bucket width for aggregation queries, using Prometheus duration syntax (e.g., '5m'). Without it, the whole window is one bucket
+         */
+        step?: string;
     };
     url: '/api/v1/query';
 };
@@ -184,6 +231,14 @@ export type SimplePromqlQueryErrors = {
      * Internal server error
      */
     500: unknown;
+    /**
+     * The storage backend is unavailable: retry later
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
 };
 
 export type SimplePromqlQueryResponses = {
@@ -229,6 +284,14 @@ export type PublishInfluxdbErrors = {
      * Internal Server Error
      */
     500: AppError;
+    /**
+     * The storage backend is unavailable, or SensApp is busy writing and sheds the write. A `Retry-After` header (seconds, randomised) means the request was not processed at all and can be sent again after that delay
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
 };
 
 export type PublishInfluxdbError = PublishInfluxdbErrors[keyof PublishInfluxdbErrors];
@@ -303,6 +366,17 @@ export type ListMetricsData = {
     url: '/metrics';
 };
 
+export type ListMetricsErrors = {
+    /**
+     * The storage backend is unavailable: retry later
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
+};
+
 export type ListMetricsResponses = {
     /**
      * Metrics catalog in DCAT format
@@ -313,7 +387,20 @@ export type ListMetricsResponses = {
 export type PrometheusMetricsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Append the most recent sample for Prometheus-compatible series
+         */
+        include_latest_samples?: boolean;
+        /**
+         * Optional metric name filter used when include_latest_samples=true
+         */
+        metric?: string;
+        /**
+         * Optional PromQL-style label selector used when include_latest_samples=true
+         */
+        selector?: string;
+    };
     url: '/prometheus/metrics';
 };
 
@@ -345,6 +432,14 @@ export type PublishSensorsDataErrors = {
      * Internal Server Error
      */
     500: AppError;
+    /**
+     * The storage backend is unavailable, or SensApp is busy writing and sheds the write. A `Retry-After` header (seconds, randomised) means the request was not processed at all and can be sent again after that delay
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
 };
 
 export type PublishSensorsDataError = PublishSensorsDataErrors[keyof PublishSensorsDataErrors];
@@ -374,12 +469,71 @@ export type ListSeriesData = {
     url: '/series';
 };
 
+export type ListSeriesErrors = {
+    /**
+     * The storage backend is unavailable: retry later
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
+};
+
 export type ListSeriesResponses = {
     /**
      * Time series catalog in DCAT format
      */
     200: unknown;
 };
+
+export type DeleteSeriesData = {
+    body?: never;
+    path: {
+        /**
+         * UUID of the series to delete
+         */
+        series_uuid: string;
+    };
+    query?: never;
+    url: '/series/{series_uuid}';
+};
+
+export type DeleteSeriesErrors = {
+    /**
+     * Invalid UUID
+     */
+    400: unknown;
+    /**
+     * The token does not have the delete scope
+     */
+    403: unknown;
+    /**
+     * Series not found
+     */
+    404: unknown;
+    /**
+     * The storage backend does not support deletion
+     */
+    501: unknown;
+    /**
+     * The storage backend is unavailable: retry later
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
+};
+
+export type DeleteSeriesResponses = {
+    /**
+     * Series deleted
+     */
+    204: void;
+};
+
+export type DeleteSeriesResponse = DeleteSeriesResponses[keyof DeleteSeriesResponses];
 
 export type GetSeriesDataData = {
     body?: never;
@@ -403,9 +557,29 @@ export type GetSeriesDataData = {
          */
         end?: string;
         /**
-         * Maximum number of samples (default: 10,000,000)
+         * Maximum number of samples (at most 100,000). Returns the oldest N samples of the window, in time order, and silently drops the rest. With simplify, it bounds the rows read before simplification
          */
         limit?: number;
+        /**
+         * Bucket width using Prometheus duration syntax (e.g., '1h', '5m', '1d')
+         */
+        step?: string;
+        /**
+         * Aggregation function: avg, min, max, sum, count, first, last
+         */
+        aggregation?: string;
+        /**
+         * Explicitly enable simplify-based point reduction. Applied to the rows read for the window (after bucketing when step is set); more than 100,000 rows to simplify is rejected with HTTP 400 instead of being truncated, so use step/aggregation or a narrower start/end
+         */
+        simplify?: boolean;
+        /**
+         * Dimensionless simplify tolerance on normalized time/value coordinates
+         */
+        simplify_tolerance?: number;
+        /**
+         * Use Douglas-Peucker only when simplifying
+         */
+        simplify_high_quality?: boolean;
     };
     url: '/series/{series_uuid}';
 };
@@ -419,11 +593,172 @@ export type GetSeriesDataErrors = {
      * Series not found
      */
     404: unknown;
+    /**
+     * The storage backend is unavailable: retry later
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
 };
 
 export type GetSeriesDataResponses = {
     /**
      * Series data in requested format
+     */
+    200: unknown;
+};
+
+export type GetSeriesAvailabilityData = {
+    body?: never;
+    path: {
+        /**
+         * UUID of the series
+         */
+        series_uuid: string;
+    };
+    query: {
+        /**
+         * Inclusive start datetime in ISO 8601 format
+         */
+        start: string;
+        /**
+         * Inclusive end datetime in ISO 8601 format
+         */
+        end: string;
+        /**
+         * Optional bucket width using Prometheus duration syntax for coverage calculation
+         */
+        step?: string;
+    };
+    url: '/series/{series_uuid}/availability';
+};
+
+export type GetSeriesAvailabilityErrors = {
+    /**
+     * Invalid query parameters
+     */
+    400: unknown;
+    /**
+     * Series not found
+     */
+    404: unknown;
+    /**
+     * The storage backend is unavailable: retry later
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
+};
+
+export type GetSeriesAvailabilityResponses = {
+    /**
+     * Availability information for the requested series and window
+     */
+    200: unknown;
+};
+
+export type GetSeriesLastSampleData = {
+    body?: never;
+    path: {
+        /**
+         * UUID of the series
+         */
+        series_uuid: string;
+    };
+    query?: {
+        /**
+         * Optional inclusive start datetime in ISO 8601 format
+         */
+        start?: string;
+        /**
+         * Optional inclusive end datetime in ISO 8601 format
+         */
+        end?: string;
+    };
+    url: '/series/{series_uuid}/last';
+};
+
+export type GetSeriesLastSampleErrors = {
+    /**
+     * Invalid query parameters
+     */
+    400: unknown;
+    /**
+     * Series not found or no sample matched the requested window
+     */
+    404: unknown;
+    /**
+     * The storage backend is unavailable: retry later
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
+};
+
+export type GetSeriesLastSampleResponses = {
+    /**
+     * Latest sample for the requested series
+     */
+    200: unknown;
+};
+
+export type DeleteSeriesSamplesData = {
+    body?: never;
+    path: {
+        /**
+         * UUID of the series
+         */
+        series_uuid: string;
+    };
+    query: {
+        /**
+         * Inclusive start datetime in ISO 8601 format
+         */
+        start: string;
+        /**
+         * Inclusive end datetime in ISO 8601 format
+         */
+        end: string;
+    };
+    url: '/series/{series_uuid}/samples';
+};
+
+export type DeleteSeriesSamplesErrors = {
+    /**
+     * Invalid UUID, or missing or invalid time bounds
+     */
+    400: unknown;
+    /**
+     * The token does not have the delete scope
+     */
+    403: unknown;
+    /**
+     * Series not found
+     */
+    404: unknown;
+    /**
+     * The storage backend does not support deletion
+     */
+    501: unknown;
+    /**
+     * The storage backend is unavailable: retry later
+     */
+    503: unknown;
+    /**
+     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     */
+    504: unknown;
+};
+
+export type DeleteSeriesSamplesResponses = {
+    /**
+     * Number of deleted samples
      */
     200: unknown;
 };

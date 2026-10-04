@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { FrontpageData, FrontpageResponses, GetSeriesDataData, GetSeriesDataErrors, GetSeriesDataResponses, ListMetricsData, ListMetricsResponses, ListSeriesData, ListSeriesResponses, LivenessData, LivenessResponses, PrometheusMetricsData, PrometheusMetricsResponses, PrometheusRemoteReadData, PrometheusRemoteReadErrors, PrometheusRemoteReadResponses, PublishInfluxdbData, PublishInfluxdbErrors, PublishInfluxdbResponses, PublishPrometheusData, PublishPrometheusErrors, PublishPrometheusResponses, PublishSensorsDataData, PublishSensorsDataErrors, PublishSensorsDataResponses, ReadinessData, ReadinessErrors, ReadinessResponses, SimplePromqlQueryData, SimplePromqlQueryErrors, SimplePromqlQueryResponses, VacuumDatabaseData, VacuumDatabaseErrors, VacuumDatabaseResponses } from './types.gen';
+import type { DeleteSeriesData, DeleteSeriesErrors, DeleteSeriesResponses, DeleteSeriesSamplesData, DeleteSeriesSamplesErrors, DeleteSeriesSamplesResponses, FrontpageData, FrontpageResponses, GetSeriesAvailabilityData, GetSeriesAvailabilityErrors, GetSeriesAvailabilityResponses, GetSeriesDataData, GetSeriesDataErrors, GetSeriesDataResponses, GetSeriesLastSampleData, GetSeriesLastSampleErrors, GetSeriesLastSampleResponses, ListMetricsData, ListMetricsErrors, ListMetricsResponses, ListSeriesData, ListSeriesErrors, ListSeriesResponses, LivenessData, LivenessResponses, PrometheusMetricsData, PrometheusMetricsResponses, PrometheusRemoteReadData, PrometheusRemoteReadErrors, PrometheusRemoteReadResponses, PublishInfluxdbData, PublishInfluxdbErrors, PublishInfluxdbResponses, PublishPrometheusData, PublishPrometheusErrors, PublishPrometheusResponses, PublishSensorsDataData, PublishSensorsDataErrors, PublishSensorsDataResponses, ReadinessData, ReadinessErrors, ReadinessResponses, SimplePromqlQueryData, SimplePromqlQueryErrors, SimplePromqlQueryResponses, VacuumDatabaseData, VacuumDatabaseErrors, VacuumDatabaseResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -23,8 +23,10 @@ export const frontpage = <ThrowOnError extends boolean = false>(options?: Option
 /**
  * Database Vacuuming
  *
- * Cleans up and optimizes the database by removing unused data and reclaiming space.
- * (only if supported by the underlying storage engine).
+ * Removes the duplicate samples (a retried write, a client that sends twice, a crash in the middle
+ * of a request leave some), then cleans up and optimizes the database and reclaims space, as far as
+ * the storage backend supports it. Only exact duplicates go: two different values at the same
+ * timestamp are both kept. Requires the `delete` scope, and a token without a sensor allow list.
  */
 export const vacuumDatabase = <ThrowOnError extends boolean = false>(options?: Options<VacuumDatabaseData, ThrowOnError>): RequestResult<VacuumDatabaseResponses, VacuumDatabaseErrors, ThrowOnError> => (options?.client ?? client).post<VacuumDatabaseResponses, VacuumDatabaseErrors, ThrowOnError>({ url: '/api/v1/admin/vacuum', ...options });
 
@@ -96,7 +98,7 @@ export const readiness = <ThrowOnError extends boolean = false>(options?: Option
 /**
  * List unique metrics (measurement types) with aggregated information in DCAT catalog format.
  */
-export const listMetrics = <ThrowOnError extends boolean = false>(options?: Options<ListMetricsData, ThrowOnError>): RequestResult<ListMetricsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListMetricsResponses, unknown, ThrowOnError>({ url: '/metrics', ...options });
+export const listMetrics = <ThrowOnError extends boolean = false>(options?: Options<ListMetricsData, ThrowOnError>): RequestResult<ListMetricsResponses, ListMetricsErrors, ThrowOnError> => (options?.client ?? client).get<ListMetricsResponses, ListMetricsErrors, ThrowOnError>({ url: '/metrics', ...options });
 
 export const prometheusMetrics = <ThrowOnError extends boolean = false>(options?: Options<PrometheusMetricsData, ThrowOnError>): RequestResult<PrometheusMetricsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<PrometheusMetricsResponses, unknown, ThrowOnError>({ url: '/prometheus/metrics', ...options });
 
@@ -106,7 +108,7 @@ export const prometheusMetrics = <ThrowOnError extends boolean = false>(options?
  * Accepts sensor data in one of the following formats:
  * - **SenML JSON** (RFC 8428): `Content-Type: application/json`
  * - **CSV**: `Content-Type: text/csv` or `application/csv`
- * - **Apache Arrow IPC**: `Content-Type: application/vnd.apache.arrow.file`
+ * - **Apache Arrow IPC**: `Content-Type: application/vnd.apache.arrow.stream`
  *
  * If no Content-Type header is provided, defaults to CSV format.
  */
@@ -123,9 +125,37 @@ export const publishSensorsData = <ThrowOnError extends boolean = false>(options
 /**
  * List all series (time series) in DCAT catalog format.
  */
-export const listSeries = <ThrowOnError extends boolean = false>(options?: Options<ListSeriesData, ThrowOnError>): RequestResult<ListSeriesResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListSeriesResponses, unknown, ThrowOnError>({ url: '/series', ...options });
+export const listSeries = <ThrowOnError extends boolean = false>(options?: Options<ListSeriesData, ThrowOnError>): RequestResult<ListSeriesResponses, ListSeriesErrors, ThrowOnError> => (options?.client ?? client).get<ListSeriesResponses, ListSeriesErrors, ThrowOnError>({ url: '/series', ...options });
+
+/**
+ * Delete a series: all its samples, its labels and the sensor itself.
+ *
+ * Publishing the same sensor again recreates it with the same UUID.
+ * Requires the `delete` scope when authentication is enabled.
+ */
+export const deleteSeries = <ThrowOnError extends boolean = false>(options: Options<DeleteSeriesData, ThrowOnError>): RequestResult<DeleteSeriesResponses, DeleteSeriesErrors, ThrowOnError> => (options.client ?? client).delete<DeleteSeriesResponses, DeleteSeriesErrors, ThrowOnError>({ url: '/series/{series_uuid}', ...options });
 
 /**
  * Get series data in various formats based on query parameter.
  */
 export const getSeriesData = <ThrowOnError extends boolean = false>(options: Options<GetSeriesDataData, ThrowOnError>): RequestResult<GetSeriesDataResponses, GetSeriesDataErrors, ThrowOnError> => (options.client ?? client).get<GetSeriesDataResponses, GetSeriesDataErrors, ThrowOnError>({ url: '/series/{series_uuid}', ...options });
+
+/**
+ * Get presence and optional bucket coverage for a series over a time window.
+ */
+export const getSeriesAvailability = <ThrowOnError extends boolean = false>(options: Options<GetSeriesAvailabilityData, ThrowOnError>): RequestResult<GetSeriesAvailabilityResponses, GetSeriesAvailabilityErrors, ThrowOnError> => (options.client ?? client).get<GetSeriesAvailabilityResponses, GetSeriesAvailabilityErrors, ThrowOnError>({ url: '/series/{series_uuid}/availability', ...options });
+
+/**
+ * Get the most recent sample for a series, optionally within a bounded time window.
+ */
+export const getSeriesLastSample = <ThrowOnError extends boolean = false>(options: Options<GetSeriesLastSampleData, ThrowOnError>): RequestResult<GetSeriesLastSampleResponses, GetSeriesLastSampleErrors, ThrowOnError> => (options.client ?? client).get<GetSeriesLastSampleResponses, GetSeriesLastSampleErrors, ThrowOnError>({ url: '/series/{series_uuid}/last', ...options });
+
+/**
+ * Delete the samples of a series between `start` and `end`, both inclusive.
+ *
+ * Both bounds are required, so that a request cannot wipe a whole series by
+ * accident (use `DELETE /series/{series_uuid}` for that). `start` equal to `end`
+ * deletes the samples at one exact timestamp. The sensor and its labels are kept.
+ * Requires the `delete` scope when authentication is enabled.
+ */
+export const deleteSeriesSamples = <ThrowOnError extends boolean = false>(options: Options<DeleteSeriesSamplesData, ThrowOnError>): RequestResult<DeleteSeriesSamplesResponses, DeleteSeriesSamplesErrors, ThrowOnError> => (options.client ?? client).delete<DeleteSeriesSamplesResponses, DeleteSeriesSamplesErrors, ThrowOnError>({ url: '/series/{series_uuid}/samples', ...options });
