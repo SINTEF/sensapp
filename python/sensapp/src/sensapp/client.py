@@ -50,14 +50,14 @@ class SensAppClient:
         base_url: str = "http://127.0.0.1:3000",
         *,
         token: str | None = None,
-        timeout: float = 35.0,
+        timeout: float = 125.0,
         write_timeout: float = 330.0,
         retry: RetryPolicy | None = DEFAULT_RETRY,
     ) -> None:
         """Create a client.
 
         ``timeout`` is how long a read may take and ``write_timeout`` how long a write
-        may take, in seconds. They are a little above the defaults of the server (30 s
+        may take, in seconds. They are a little above the defaults of the server (120 s
         and 300 s), so that its ``504`` answer, which says what happened, reaches the
         client before the client gives up. A write is slower than a read when its body
         is large. Lower them to fail faster, raise them with the server's.

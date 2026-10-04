@@ -51,3 +51,11 @@ Release build, TimescaleDB 2.17.2 container, empty database, SDK and server defa
 Arrow request of 1,331,266 samples now answers 200 after 48.7 s on the server (51.6 s for the client).
 The database holds **1,331,266 rows and 1,331,266 distinct timestamps**, and the log has no 504. Before: 504
 after 30 s, a retry, and 1,351,680 rows for 688,128 distinct timestamps.
+
+## Follow-up: the reads, 4 October 2026
+
+30 s was also low for reads: a raw read is bounded (100,000 samples) but an aggregation scans its window.
+Whole-history aggregations of the 1.33 M-sample series took 0.17 to 0.98 s, linear in the samples scanned,
+so 120 s covers about 100 million samples on the slowest query measured. `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS`
+now defaults to **120 s** and the SDK's `timeout` to **125 s** (writes: 300 s and 330 s). Docs:
+`docs/CONFIGURATION.md`, `docs/HTTP_LIMITS.md#timeouts`, `docs/PYTHON_SDK.md#timeouts`.

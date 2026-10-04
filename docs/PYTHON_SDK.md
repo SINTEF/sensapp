@@ -66,9 +66,9 @@ If you want the frame itself to carry upload metadata, `build_upload_table_from_
 
 ## Timeouts
 
-`SensAppClient(timeout=35, write_timeout=330)`: a read may take 35 s and a write 330 s. They sit a little above the server's own timeouts (30 s and 300 s, see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts)), so that the server's `504` answer reaches you instead of a client-side timeout. Sending a large history is slower than reading it back: prefer requests of 100,000 to 200,000 samples to one huge `publish`. If you change the timeouts of the server, change the ones of the client with them.
+`SensAppClient(timeout=125, write_timeout=330)`: a read may take 125 s and a write 330 s. They sit a little above the server's own timeouts (120 s and 300 s, see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts)), so that the server's `504` answer reaches you instead of a client-side timeout. Sending a large history is slower than reading it back: prefer requests of 100,000 to 200,000 samples to one huge `publish`. If you change the timeouts of the server, change the ones of the client with them.
 
-A write that took longer than `RetryPolicy.total_timeout` (60 s) is not retried, see below.
+A request that took longer than `RetryPolicy.total_timeout` (60 s) is not retried, see below.
 
 ## Retries
 

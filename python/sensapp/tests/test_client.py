@@ -158,7 +158,7 @@ def test_read_timeout_is_above_the_server_default(
     SensAppClient("http://sensapp.test")
     SensAppClient("http://sensapp.test", timeout=5.0)
 
-    assert created == [35.0, 5.0]
+    assert created == [125.0, 5.0]
 
 
 async def test_publish_sample_list_sends_arrow() -> None:
