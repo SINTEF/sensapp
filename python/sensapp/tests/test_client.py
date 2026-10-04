@@ -125,6 +125,42 @@ async def test_publish_single_value_sends_arrow() -> None:
     assert payload.column_names == ["timestamp", "value", "sensor_name"]
 
 
+async def test_publish_waits_longer_than_a_read() -> None:
+    # A large write is slower than a read: it has a timeout of its own
+    client, session = _mock_client()
+    session.post.return_value = MockResponse.text_ok("ok")
+
+    await client.publish("temperature", 21.5)
+
+    assert session.post.call_args[1]["timeout"] == 330.0
+
+
+async def test_publish_uses_the_write_timeout_it_was_given() -> None:
+    client = SensAppClient("http://sensapp.test", write_timeout=900.0)
+    session = AsyncMock()
+    session.post.return_value = MockResponse.text_ok("ok")
+    client._session = session
+
+    await client.publish("temperature", 21.5)
+
+    assert session.post.call_args[1]["timeout"] == 900.0
+
+
+def test_read_timeout_is_above_the_server_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[float] = []
+    monkeypatch.setattr(
+        "sensapp.client.niquests.AsyncSession",
+        lambda timeout: created.append(timeout),
+    )
+
+    SensAppClient("http://sensapp.test")
+    SensAppClient("http://sensapp.test", timeout=5.0)
+
+    assert created == [35.0, 5.0]
+
+
 async def test_publish_sample_list_sends_arrow() -> None:
     client, session = _mock_client()
     session.post.return_value = MockResponse.text_ok("ok")

@@ -20,6 +20,13 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS", default = 30)]
     pub http_server_timeout_seconds: u64,
 
+    /// Time a write request (`/publish`, InfluxDB and Prometheus writes) may take before it is
+    /// answered with a 504. The work of a write grows with its body, which
+    /// `SENSAPP_HTTP_BODY_LIMIT` bounds, and a backfill is slower than a read: 64 MiB of line
+    /// protocol into TimescaleDB took about a minute in the slowest case we measured.
+    #[config(env = "SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS", default = 300)]
+    pub http_write_timeout_seconds: u64,
+
     /// Time the maintenance request (`POST /api/v1/admin/vacuum`) may take before it is answered
     /// with a 504. Removing duplicates scans every value table, so it is much longer than the
     /// timeout of the other requests.

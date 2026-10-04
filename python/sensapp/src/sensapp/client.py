@@ -50,10 +50,17 @@ class SensAppClient:
         base_url: str = "http://127.0.0.1:3000",
         *,
         token: str | None = None,
-        timeout: float = 10.0,
+        timeout: float = 35.0,
+        write_timeout: float = 330.0,
         retry: RetryPolicy | None = DEFAULT_RETRY,
     ) -> None:
         """Create a client.
+
+        ``timeout`` is how long a read may take and ``write_timeout`` how long a write
+        may take, in seconds. They are a little above the defaults of the server (30 s
+        and 300 s), so that its ``504`` answer, which says what happened, reaches the
+        client before the client gives up. A write is slower than a read when its body
+        is large. Lower them to fail faster, raise them with the server's.
 
         ``retry`` controls how overload answers (``503``/``429``) are retried, see
         `RetryPolicy`. Pass ``None`` to never retry.
@@ -61,6 +68,7 @@ class SensAppClient:
         self._base_url = base_url.rstrip("/")
         self._token = token
         self._retry = retry or NO_RETRY
+        self._write_timeout = write_timeout
         self._session = niquests.AsyncSession(timeout=timeout)
 
     @classmethod
@@ -276,6 +284,7 @@ class SensAppClient:
                 data=data,
                 json=json_body,
                 headers=merged_headers,
+                timeout=self._write_timeout,
             ),
             self._retry,
         )
