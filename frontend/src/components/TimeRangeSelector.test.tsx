@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { TimeRangeSelector } from '../components/TimeRangeSelector';
@@ -76,5 +76,19 @@ describe('TimeRangeSelector', () => {
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Step' }), 'raw');
     expect(aggregation).toBeDisabled();
+  });
+
+  it('marks the preset the range comes from, and none once dates are typed', async () => {
+    const user = userEvent.setup();
+    render(<TimeRangeSelector />);
+
+    await user.click(screen.getByRole('button', { name: '24h' }));
+    expect(useSelectionStore.getState().relativeRange).toBe('24h');
+    expect(screen.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '1h' })).toHaveAttribute('aria-pressed', 'false');
+
+    act(() => useSelectionStore.getState().setTimeRange('2026-10-04T10:00:00.000Z', '2026-10-04T11:00:00.000Z'));
+    expect(useSelectionStore.getState().relativeRange).toBeNull();
+    expect(screen.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'false');
   });
 });

@@ -1,25 +1,11 @@
 import { AGGREGATIONS, FIXED_STEPS } from '../lib/chartStep';
 import type { Aggregation } from '../lib/chartStep';
+import { PRESETS } from '../lib/timeRange';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
-const PRESETS = [
-  { label: '15m', minutes: 15 },
-  { label: '1h', minutes: 60 },
-  { label: '6h', minutes: 360 },
-  { label: '24h', minutes: 1440 },
-  { label: '7d', minutes: 10080 },
-  { label: '30d', minutes: 43200 },
-];
-
 export function TimeRangeSelector() {
-  const { timeRange, setTimeRange, step, setStep, aggregation, setAggregation } =
+  const { timeRange, relativeRange, setTimeRange, setRelativeRange, step, setStep, aggregation, setAggregation } =
     useSelectionStore();
-
-  function handlePreset(minutes: number) {
-    const end = new Date();
-    const start = new Date(end.getTime() - minutes * 60 * 1000);
-    setTimeRange(start.toISOString(), end.toISOString());
-  }
 
   function handleStartChange(value: string) {
     if (value) {
@@ -46,8 +32,9 @@ export function TimeRangeSelector() {
         {PRESETS.map((preset) => (
           <button
             key={preset.label}
-            className="join-item btn btn-xs btn-outline"
-            onClick={() => handlePreset(preset.minutes)}
+            className={`join-item btn btn-xs btn-outline ${relativeRange === preset.label ? 'btn-active' : ''}`}
+            onClick={() => setRelativeRange(preset.label)}
+            aria-pressed={relativeRange === preset.label}
           >
             {preset.label}
           </button>

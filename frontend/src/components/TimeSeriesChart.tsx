@@ -3,7 +3,8 @@ import { useQueries } from '@tanstack/react-query';
 import { getSeriesData } from '../client';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { unwrap } from '../api/clientConfig';
-import { isNumericType, resolveStep } from '../lib/chartStep';
+import { isBooleanType, isNumericType, resolveStep } from '../lib/chartStep';
+import { buildChartOption } from '../lib/chartOption';
 
 // echarts is large: load it when the first chart is drawn.
 const EChart = lazy(() => import('./EChart'));
@@ -27,6 +28,7 @@ interface SenMLRecord {
   t?: number;
   v?: number;
   vs?: string;
+  vb?: boolean;
 }
 
 function parseSenMLToTimeSeries(
@@ -40,7 +42,8 @@ function parseSenMLToTimeSeries(
     if (rec.bt !== undefined) baseTime = rec.bt;
 
     const time = (baseTime + (rec.t ?? 0)) * 1000; // Convert to ms
-    const value = rec.v ?? (rec.vs ? parseFloat(rec.vs) : NaN);
+    // A boolean is 0 or 1
+    const value = rec.vb !== undefined ? Number(rec.vb) : (rec.v ?? (rec.vs ? parseFloat(rec.vs) : NaN));
 
     if (!isNaN(value) && isFinite(time)) {
       points.push([time, value]);
@@ -51,7 +54,8 @@ function parseSenMLToTimeSeries(
 }
 
 export function TimeSeriesChart() {
-  const { selectedSeries, timeRange, step: stepChoice, aggregation } = useSelectionStore();
+  const { selectedSeries, timeRange, step: stepChoice, aggregation, chartStyle, logScale } =
+    useSelectionStore();
 
   const step = resolveStep(stepChoice, timeRange.start, timeRange.end);
 
@@ -83,75 +87,19 @@ export function TimeSeriesChart() {
   const errors = queries.filter((q) => q.error);
 
   const option = useMemo(() => {
-    const seriesData = queries
+    const series = queries
       .filter((q) => q.data)
       .map((q) => {
         const { records, series, colorIndex } = q.data!;
-        const points = parseSenMLToTimeSeries(records);
         return {
           name: buildSeriesLabel(series.name, series.labels),
-          type: 'line' as const,
-          data: points,
-          smooth: false,
-          showSymbol: points.length < 100,
-          symbol: 'circle',
-          symbolSize: 3,
-          lineStyle: { width: 1.5 },
+          points: parseSenMLToTimeSeries(records),
+          boolean: isBooleanType(series.type),
           color: COLORS[colorIndex % COLORS.length],
         };
       });
-
-    return {
-      tooltip: {
-        trigger: 'axis' as const,
-        axisPointer: {
-          type: 'cross' as const,
-        },
-      },
-      legend: {
-        data: seriesData.map((s) => s.name),
-        type: 'scroll' as const,
-        bottom: 0,
-      },
-      grid: {
-        top: 40,
-        right: 40,
-        bottom: 60,
-        left: 60,
-      },
-      xAxis: {
-        type: 'time' as const,
-        min: new Date(timeRange.start).getTime(),
-        max: new Date(timeRange.end).getTime(),
-      },
-      yAxis: {
-        type: 'value' as const,
-        scale: true,
-      },
-      dataZoom: [
-        {
-          type: 'inside' as const,
-          start: 0,
-          end: 100,
-        },
-        {
-          type: 'slider' as const,
-          start: 0,
-          end: 100,
-          bottom: 30,
-          height: 20,
-        },
-      ],
-      toolbox: {
-        feature: {
-          saveAsImage: {},
-          dataZoom: {},
-          restore: {},
-        },
-      },
-      series: seriesData,
-    };
-  }, [queries, timeRange]);
+    return buildChartOption(series, chartStyle, logScale, timeRange);
+  }, [queries, timeRange, chartStyle, logScale]);
 
   if (selectedSeries.length === 0) {
     return null;

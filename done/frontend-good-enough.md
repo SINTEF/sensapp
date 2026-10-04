@@ -54,5 +54,9 @@ text is noise), the series list is paged with Previous/Next on the server's book
 `/series` now documents `limit` and `bookmark` in the OpenAPI document), and dark mode works: the daisyUI `dark`
 theme was declared but not selected (`--prefersdark`), echarts now uses its dark theme and follows the OS.
 
+Second review round: step and aggregation selectors; the explorer in the address (`docs/FRONTEND.md`); booleans
+drawn as 0/1 step lines; chart styles (line, step, area, stacked, bars) and a log scale. The canvas of the last two
+was not looked at in a browser (the pane was hidden), only tested through the option builder and the requests.
+
 Not checked: the Dockerfile build for linux/arm64 (the Node stage is platform independent), and the complete
 `docker-smoke` job with ClickHouse (only its new `check_ui` step, against an image with SQLite).

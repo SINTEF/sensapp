@@ -5,7 +5,11 @@ vi.mock('../components/EChart', () => ({
   default: (props: { option: unknown }) => {
     const series = (props.option as { series?: unknown[] })?.series;
     return (
-      <div data-testid="echarts" data-series-count={Array.isArray(series) ? series.length : 0}>
+      <div
+        data-testid="echarts"
+        data-series-count={Array.isArray(series) ? series.length : 0}
+        data-option={JSON.stringify(props.option)}
+      >
         Chart
       </div>
     );

@@ -58,3 +58,7 @@ export function resolveStep(choice: string, start: string, end: string): string 
   if (choice === 'auto') return chartStep(start, end);
   return choice;
 }
+
+export function isBooleanType(type: string): boolean {
+  return type.toLowerCase() === 'boolean';
+}

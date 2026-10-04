@@ -1,12 +1,15 @@
+import { ChartOptions } from '../components/ChartOptions';
 import { MetricsTable } from '../components/MetricsTable';
 import { SeriesTable } from '../components/SeriesTable';
 import { TimeSeriesChart } from '../components/TimeSeriesChart';
 import { TimeRangeSelector } from '../components/TimeRangeSelector';
+import { useUrlState } from '../hooks/useUrlState';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
 export function ExplorerPage() {
   const { selectedMetric, selectedSeries, clearSelectedSeries } =
     useSelectionStore();
+  useUrlState();
 
   return (
     <div className="flex flex-col gap-3 lg:h-full">
@@ -19,6 +22,7 @@ export function ExplorerPage() {
               {selectedSeries.length} series
             </span>
           )}
+          <ChartOptions />
           <div className="ml-auto">
             <TimeRangeSelector />
           </div>

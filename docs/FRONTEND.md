@@ -16,7 +16,22 @@ Two selectors next to the time range control what the server computes, as in the
 - **Step**: `Auto`, `Raw`, or a fixed duration (`5s` … `1d`). `Auto` reads ranges under about 2.8 hours as they are, and above that cuts the range in at most 2 000 buckets of a round duration, because the server refuses more than 100 000 raw samples of a series ([HTTP_LIMITS.md](HTTP_LIMITS.md)). `Raw` on a range that is too wide gets that refusal.
 - **Aggregation**: `avg`, `min`, `max`, `sum`, `count`, `first`, `last`, applied to the samples of each step. Disabled on `Raw`.
 
-Series that are not numbers (strings, booleans) are always read as they are, and are not drawn.
+Series are drawn as a `line`, `step`, `area`, `stacked` or `bars` chart, on a linear or `log` scale. Booleans are drawn as a 0/1 step line on an axis of their own, whatever the style, and always read as they are (the server cannot aggregate them). Strings and locations are listed but not drawn.
+
+## Address
+
+The explorer is in the address, so a link shares a view and a reload keeps it: `/ui/?metric=cpu&series=<uuid>&series=<uuid>&range=24h&step=5m&agg=max&style=area&log=1`.
+
+| Parameter | Meaning | Left out when |
+| --- | --- | --- |
+| `metric` | the selected metric | none |
+| `series` | a selected series, repeated | none |
+| `range` | a preset (`15m`, `1h`, `6h`, `24h`, `7d`, `30d`), ending when the page opens | `1h` |
+| `from`, `to` | an absolute range (ISO 8601), once dates were typed | a preset is used |
+| `step`, `agg` | the step (`raw` or a duration) and the aggregation | `auto`, `avg` |
+| `style`, `log` | the chart style, `log=1` for the log scale | `line`, linear |
+
+The address follows the explorer without adding history entries. What is wrong in an address is ignored; a series that no longer exists is dropped. A series is named by its uuid only: the UI asks the server for the first sample of each one (its name, labels and type), and on a server with authentication a link asks for a token like any other page.
 
 The list of series is paged by the server (256 per page, cursor based): Previous and Next appear when there is more than one page, and the selection is kept from page to page. The theme follows the OS (light or dark), the chart included.
 

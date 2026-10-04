@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import type { Aggregation } from '../lib/chartStep';
+import type { ChartStyle } from '../lib/chartOption';
+import { DEFAULT_RANGE, rangeFor } from '../lib/timeRange';
 
-interface SelectedSeries {
+export interface SelectedSeries {
   uuid: string;
   name: string;
   labels: Record<string, string>;
@@ -15,6 +17,10 @@ interface SelectionState {
     start: string;
     end: string;
   };
+  /** The preset the range comes from (`24h`), `null` once dates were typed */
+  relativeRange: string | null;
+  chartStyle: ChartStyle;
+  logScale: boolean;
   /** `auto` (the range decides), `raw`, or a duration such as `5m` */
   step: string;
   aggregation: Aggregation;
@@ -23,6 +29,10 @@ interface SelectionState {
   toggleSeries: (series: SelectedSeries) => void;
   clearSelectedSeries: () => void;
   setTimeRange: (start: string, end: string) => void;
+  /** A preset: the range ending now */
+  setRelativeRange: (label: string) => void;
+  setChartStyle: (style: ChartStyle) => void;
+  setLogScale: (log: boolean) => void;
   setLabelFilter: (filter: string) => void;
   setStep: (step: string) => void;
   setAggregation: (aggregation: Aggregation) => void;
@@ -41,6 +51,9 @@ export const useSelectionStore = create<SelectionState>((set) => ({
   selectedMetric: null,
   selectedSeries: [],
   timeRange: defaultTimeRange(),
+  relativeRange: DEFAULT_RANGE,
+  chartStyle: 'line',
+  logScale: false,
   labelFilter: '',
   step: 'auto',
   aggregation: 'avg',
@@ -65,7 +78,17 @@ export const useSelectionStore = create<SelectionState>((set) => ({
 
   clearSelectedSeries: () => set({ selectedSeries: [] }),
 
-  setTimeRange: (start, end) => set({ timeRange: { start, end } }),
+  setTimeRange: (start, end) =>
+    set({ timeRange: { start, end }, relativeRange: null }),
+
+  setRelativeRange: (label) => {
+    const timeRange = rangeFor(label);
+    if (timeRange) set({ timeRange, relativeRange: label });
+  },
+
+  setChartStyle: (chartStyle) => set({ chartStyle }),
+
+  setLogScale: (logScale) => set({ logScale }),
 
   setLabelFilter: (filter) => set({ labelFilter: filter }),
 

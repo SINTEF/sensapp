@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts/core';
-import { LineChart } from 'echarts/charts';
+import { BarChart, LineChart } from 'echarts/charts';
 import {
   DataZoomComponent,
   GridComponent,
@@ -13,6 +13,7 @@ import { usePrefersDark } from '../lib/usePrefersDark';
 
 // Only what the time series chart needs: the full echarts bundle is three times bigger.
 echarts.use([
+  BarChart,
   LineChart,
   DataZoomComponent,
   GridComponent,

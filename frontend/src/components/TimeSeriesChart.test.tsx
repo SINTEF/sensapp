@@ -15,6 +15,7 @@ const hours = (n: number) => new Date(Date.parse(START) + n * 3600_000).toISOStr
 
 const temperature = { uuid: 'uuid-temperature', name: 'temperature', labels: {}, type: 'float' };
 const state = { uuid: 'uuid-state', name: 'state', labels: {}, type: 'string' };
+const door = { uuid: 'uuid-door', name: 'door', labels: {}, type: 'boolean' };
 
 function renderChart() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -34,7 +35,7 @@ function queryOf(uuid: string) {
 describe('TimeSeriesChart', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useSelectionStore.setState({ step: 'auto', aggregation: 'avg' });
+    useSelectionStore.setState({ step: 'auto', aggregation: 'avg', chartStyle: 'line', logScale: false });
     // SenML: the base time is in the first record, the others are relative to it
     mockGetSeriesData.mockResolvedValue({
       data: [{ bt: 1_791_000_000, t: 0, v: 1 }, { t: 30, v: 2 }, { t: 60, v: 3 }],
@@ -143,5 +144,40 @@ describe('TimeSeriesChart', () => {
 
     expect(await screen.findByText(/Some series failed to load: Internal Server Error/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('echarts')).toHaveAttribute('data-series-count', '1'));
+  });
+
+  it('draws a boolean as 0 and 1 on an axis of its own, and reads it raw', async () => {
+    mockGetSeriesData.mockResolvedValue({
+      data: [{ bt: 1_791_000_000, t: 0, vb: true }, { t: 30, vb: false }, { t: 60, vb: true }],
+    });
+    useSelectionStore.setState({
+      selectedSeries: [door],
+      timeRange: { start: START, end: hours(24) },
+    });
+    renderChart();
+
+    const chart = await screen.findByTestId('echarts');
+    await waitFor(() => expect(chart).toHaveAttribute('data-series-count', '1'));
+    const option = JSON.parse(chart.getAttribute('data-option')!);
+    expect(option.series[0]).toMatchObject({ step: 'end', yAxisIndex: 1 });
+    expect(option.series[0].data.map(([, value]: [number, number]) => value)).toEqual([1, 0, 1]);
+    // A boolean cannot be averaged, even on a wide range
+    expect(queryOf('uuid-door')).not.toHaveProperty('step');
+  });
+
+  it('draws with the style and the scale that were chosen', async () => {
+    useSelectionStore.setState({
+      selectedSeries: [temperature],
+      timeRange: { start: START, end: hours(1) },
+      chartStyle: 'stacked',
+      logScale: true,
+    });
+    renderChart();
+
+    const chart = await screen.findByTestId('echarts');
+    await waitFor(() => expect(chart).toHaveAttribute('data-series-count', '1'));
+    const option = JSON.parse(chart.getAttribute('data-option')!);
+    expect(option.series[0]).toMatchObject({ stack: 'total' });
+    expect(option.yAxis[0]).toMatchObject({ type: 'log' });
   });
 });
