@@ -1131,16 +1131,14 @@ impl SqliteStorage {
             SELECT MAX(timestamp_us) AS timestamp_us
             FROM {table_name}
             WHERE sensor_id = ?
-            AND (? IS NULL OR timestamp_us >= ?)
-            AND (? IS NULL OR timestamp_us <= ?)
+            AND timestamp_us >= COALESCE(?, -9223372036854775807)
+            AND timestamp_us <= COALESCE(?, 9223372036854775807)
             "#
         );
 
         let timestamp_us: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(sensor_id)
             .bind(start_time)
-            .bind(start_time)
-            .bind(end_time)
             .bind(end_time)
             .fetch_one(&self.pool)
             .await?;
@@ -1283,16 +1281,14 @@ impl SqliteStorage {
             r#"
             SELECT timestamp_us, value FROM integer_values
             WHERE sensor_id = ?
-            AND (? IS NULL OR timestamp_us >= ?)
-            AND (? IS NULL OR timestamp_us <= ?)
+            AND timestamp_us >= COALESCE(?, -9223372036854775807)
+            AND timestamp_us <= COALESCE(?, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
-        .bind(start_time)
-        .bind(end_time)
         .bind(end_time)
         .bind(limit_value)
         .fetch_all(&self.pool)
@@ -1682,16 +1678,14 @@ impl SqliteStorage {
             r#"
             SELECT timestamp_us, value FROM numeric_values
             WHERE sensor_id = ?
-            AND (? IS NULL OR timestamp_us >= ?)
-            AND (? IS NULL OR timestamp_us <= ?)
+            AND timestamp_us >= COALESCE(?, -9223372036854775807)
+            AND timestamp_us <= COALESCE(?, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
-        .bind(start_time)
-        .bind(end_time)
         .bind(end_time)
         .bind(limit_value)
         .fetch_all(&self.pool)
@@ -1725,16 +1719,14 @@ impl SqliteStorage {
             r#"
             SELECT timestamp_us, value FROM float_values
             WHERE sensor_id = ?
-            AND (? IS NULL OR timestamp_us >= ?)
-            AND (? IS NULL OR timestamp_us <= ?)
+            AND timestamp_us >= COALESCE(?, -9223372036854775807)
+            AND timestamp_us <= COALESCE(?, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
-        .bind(start_time)
-        .bind(end_time)
         .bind(end_time)
         .bind(limit_value)
         .fetch_all(&self.pool)
@@ -1770,16 +1762,14 @@ impl SqliteStorage {
             FROM string_values sv
             JOIN strings_values_dictionary svd ON sv.value = svd.id
             WHERE sv.sensor_id = ?
-            AND (? IS NULL OR sv.timestamp_us >= ?)
-            AND (? IS NULL OR sv.timestamp_us <= ?)
+            AND sv.timestamp_us >= COALESCE(?, -9223372036854775807)
+            AND sv.timestamp_us <= COALESCE(?, 9223372036854775807)
             ORDER BY sv.timestamp_us ASC
             LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
-        .bind(start_time)
-        .bind(end_time)
         .bind(end_time)
         .bind(limit_value)
         .fetch_all(&self.pool)
@@ -1813,16 +1803,14 @@ impl SqliteStorage {
             r#"
             SELECT timestamp_us, value FROM boolean_values
             WHERE sensor_id = ?
-            AND (? IS NULL OR timestamp_us >= ?)
-            AND (? IS NULL OR timestamp_us <= ?)
+            AND timestamp_us >= COALESCE(?, -9223372036854775807)
+            AND timestamp_us <= COALESCE(?, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
-        .bind(start_time)
-        .bind(end_time)
         .bind(end_time)
         .bind(limit_value)
         .fetch_all(&self.pool)
@@ -1857,16 +1845,14 @@ impl SqliteStorage {
             r#"
             SELECT timestamp_us, latitude, longitude FROM location_values
             WHERE sensor_id = ?
-            AND (? IS NULL OR timestamp_us >= ?)
-            AND (? IS NULL OR timestamp_us <= ?)
+            AND timestamp_us >= COALESCE(?, -9223372036854775807)
+            AND timestamp_us <= COALESCE(?, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
-        .bind(start_time)
-        .bind(end_time)
         .bind(end_time)
         .bind(limit_value)
         .fetch_all(&self.pool)
@@ -1900,16 +1886,14 @@ impl SqliteStorage {
             r#"
             SELECT timestamp_us, value FROM json_values
             WHERE sensor_id = ?
-            AND (? IS NULL OR timestamp_us >= ?)
-            AND (? IS NULL OR timestamp_us <= ?)
+            AND timestamp_us >= COALESCE(?, -9223372036854775807)
+            AND timestamp_us <= COALESCE(?, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
-        .bind(start_time)
-        .bind(end_time)
         .bind(end_time)
         .bind(limit_value)
         .fetch_all(&self.pool)
@@ -1944,16 +1928,14 @@ impl SqliteStorage {
             r#"
             SELECT timestamp_us, value FROM blob_values
             WHERE sensor_id = ?
-            AND (? IS NULL OR timestamp_us >= ?)
-            AND (? IS NULL OR timestamp_us <= ?)
+            AND timestamp_us >= COALESCE(?, -9223372036854775807)
+            AND timestamp_us <= COALESCE(?, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT ?
             "#,
         )
         .bind(sensor_id)
         .bind(start_time)
-        .bind(start_time)
-        .bind(end_time)
         .bind(end_time)
         .bind(limit_value)
         .fetch_all(&self.pool)

@@ -151,8 +151,8 @@ impl SqliteStorage {
             JOIN integer_values v ON v.rowid IN (
                 SELECT w.rowid FROM integer_values w
                 WHERE w.sensor_id = ids.value
-                AND (?2 IS NULL OR w.timestamp_us >= ?2)
-                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                AND w.timestamp_us >= COALESCE(?2, -9223372036854775807)
+                AND w.timestamp_us <= COALESCE(?3, 9223372036854775807)
                 ORDER BY w.timestamp_us ASC
                 LIMIT ?4
             )
@@ -207,8 +207,8 @@ impl SqliteStorage {
             JOIN numeric_values v ON v.rowid IN (
                 SELECT w.rowid FROM numeric_values w
                 WHERE w.sensor_id = ids.value
-                AND (?2 IS NULL OR w.timestamp_us >= ?2)
-                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                AND w.timestamp_us >= COALESCE(?2, -9223372036854775807)
+                AND w.timestamp_us <= COALESCE(?3, 9223372036854775807)
                 ORDER BY w.timestamp_us ASC
                 LIMIT ?4
             )
@@ -265,8 +265,8 @@ impl SqliteStorage {
             JOIN float_values v ON v.rowid IN (
                 SELECT w.rowid FROM float_values w
                 WHERE w.sensor_id = ids.value
-                AND (?2 IS NULL OR w.timestamp_us >= ?2)
-                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                AND w.timestamp_us >= COALESCE(?2, -9223372036854775807)
+                AND w.timestamp_us <= COALESCE(?3, 9223372036854775807)
                 ORDER BY w.timestamp_us ASC
                 LIMIT ?4
             )
@@ -321,8 +321,8 @@ impl SqliteStorage {
             JOIN string_values v ON v.rowid IN (
                 SELECT w.rowid FROM string_values w
                 WHERE w.sensor_id = ids.value
-                AND (?2 IS NULL OR w.timestamp_us >= ?2)
-                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                AND w.timestamp_us >= COALESCE(?2, -9223372036854775807)
+                AND w.timestamp_us <= COALESCE(?3, 9223372036854775807)
                 ORDER BY w.timestamp_us ASC
                 LIMIT ?4
             )
@@ -378,8 +378,8 @@ impl SqliteStorage {
             JOIN boolean_values v ON v.rowid IN (
                 SELECT w.rowid FROM boolean_values w
                 WHERE w.sensor_id = ids.value
-                AND (?2 IS NULL OR w.timestamp_us >= ?2)
-                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                AND w.timestamp_us >= COALESCE(?2, -9223372036854775807)
+                AND w.timestamp_us <= COALESCE(?3, 9223372036854775807)
                 ORDER BY w.timestamp_us ASC
                 LIMIT ?4
             )
@@ -435,8 +435,8 @@ impl SqliteStorage {
             JOIN location_values v ON v.rowid IN (
                 SELECT w.rowid FROM location_values w
                 WHERE w.sensor_id = ids.value
-                AND (?2 IS NULL OR w.timestamp_us >= ?2)
-                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                AND w.timestamp_us >= COALESCE(?2, -9223372036854775807)
+                AND w.timestamp_us <= COALESCE(?3, 9223372036854775807)
                 ORDER BY w.timestamp_us ASC
                 LIMIT ?4
             )
@@ -491,8 +491,8 @@ impl SqliteStorage {
             JOIN json_values v ON v.rowid IN (
                 SELECT w.rowid FROM json_values w
                 WHERE w.sensor_id = ids.value
-                AND (?2 IS NULL OR w.timestamp_us >= ?2)
-                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                AND w.timestamp_us >= COALESCE(?2, -9223372036854775807)
+                AND w.timestamp_us <= COALESCE(?3, 9223372036854775807)
                 ORDER BY w.timestamp_us ASC
                 LIMIT ?4
             )
@@ -549,8 +549,8 @@ impl SqliteStorage {
             JOIN blob_values v ON v.rowid IN (
                 SELECT w.rowid FROM blob_values w
                 WHERE w.sensor_id = ids.value
-                AND (?2 IS NULL OR w.timestamp_us >= ?2)
-                AND (?3 IS NULL OR w.timestamp_us <= ?3)
+                AND w.timestamp_us >= COALESCE(?2, -9223372036854775807)
+                AND w.timestamp_us <= COALESCE(?3, 9223372036854775807)
                 ORDER BY w.timestamp_us ASC
                 LIMIT ?4
             )

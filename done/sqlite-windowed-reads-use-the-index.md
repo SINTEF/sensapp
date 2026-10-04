@@ -1,5 +1,7 @@
 # SQLite: a time window or the last sample scans the whole series
 
+Fixed on 4 October 2026 (branch `write-timeouts`), see the Outcome at the end. Original report:
+
 ## Observation (4 October 2026)
 
 One series of 1,331,266 float samples, SQLite file of 49 MB, release build. Tiny reads are not tiny:
@@ -39,3 +41,23 @@ availability fast paths for the same pattern. Test: `EXPLAIN QUERY PLAN` shows b
 PostgreSQL has a different version of the same weakness: its value tables only have a BRIN index
 (see `done/ingestion-deduplication.md`), so `limit=1` and `/last` read the series (40 to 50 ms here); TimescaleDB does
 not (chunks, and an index per chunk). Check whether that matters before adding a B-tree.
+
+## Outcome
+
+- The 20 positional and 24 numbered time predicates of `src/storage/sqlite/` (`storage.rs`, `selector.rs`,
+  `batch_queries.rs`, `storage_query_helpers.rs`) are now `timestamp_us >= COALESCE(?, -9223372036854775807)`
+  and `timestamp_us <= COALESCE(?, 9223372036854775807)`: the same meaning for a missing bound, and the
+  planner can use both columns of the index (`EXPLAIN QUERY PLAN`: `SEARCH ... (sensor_id=? AND
+  timestamp_us>? AND timestamp_us<?)`). The positional queries take one bind per bound instead of two. The
+  constants are exact integers (`-i64::MAX`, not `i64::MIN`, which SQLite would read as a float).
+- Measured on the 1.33 M-sample series (release build, median of 9 runs through the HTTP API): `/last` 54 ms to
+  **0.5 ms**, a week of 1-hour buckets 65 to **5.0 ms**, a raw week (20,000 samples) 78 to **26 ms**, a month
+  of 1-minute buckets 131 to 76 ms. Whole-history aggregations did not change (they read every row): 0.45 to
+  1 s. In the `sqlite3` shell, the one-hour window: 175 ms to 0.1 ms.
+- Test: `tests/integration/time_window_reads.rs`, on every backend (SQLite, PostgreSQL and TimescaleDB were
+  run): all eight sample types, no bound / a start / an end / both / between two samples / with a limit /
+  outside the data, for the read of one series, the latest sample and the read by labels. Swapping two
+  binds in `query_float_samples` or in `query_latest_timestamp_us` makes it fail. Before this, the only
+  "time range" test of the suite (`test_time_range_queries`) asserted `is_some() || is_none()`.
+- Not changed: `storage.rs` catalog listing (`?1 IS NULL OR name = ?1`, `sensor_id > ?2`), which is not on a
+  time column.
