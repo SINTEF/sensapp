@@ -651,8 +651,23 @@ mod bigquery_tests {
                     "{what}"
                 );
                 assert_eq!(got.sensor.unit, expected.sensor.unit, "{what}");
+                // Averages: BigQuery's AVG is not the exact sum over the count in the last bits
+                // (-5.5e-17 for integers that average to 0), and it rounds NUMERIC to 9 digits
                 match (&got.samples, &expected.samples) {
-                    // BigQuery rounds an average to 9 digits, the reference keeps more
+                    (TypedSamples::Float(got), TypedSamples::Float(expected))
+                        if aggregation == Aggregation::Avg =>
+                    {
+                        assert_eq!(got.len(), expected.len(), "{what}");
+                        for (got, expected) in got.iter().zip(expected) {
+                            assert_eq!(got.datetime, expected.datetime, "{what}");
+                            assert!(
+                                (got.value - expected.value).abs() < 1e-9,
+                                "{what}: {} against {}",
+                                got.value,
+                                expected.value
+                            );
+                        }
+                    }
                     (TypedSamples::Numeric(got), TypedSamples::Numeric(expected))
                         if aggregation == Aggregation::Avg =>
                     {
