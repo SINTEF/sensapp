@@ -43,10 +43,12 @@ describe('load snippets', () => {
     expect(code).toContain('token=os.environ["SENSAPP_TOKEN"],');
   });
 
-  it('telegraf: sends a Bearer token, not the Token of InfluxDB, which SensApp does not read', () => {
+  it('telegraf: gives its token to Telegraf, which sends it the InfluxDB way', () => {
     expect(codeOf('telegraf', open)).toContain('urls = ["http://sensapp.example:3000"]');
-    expect(codeOf('telegraf', open)).not.toContain('http_headers');
-    expect(codeOf('telegraf', secured)).toContain('http_headers = {"Authorization" = "Bearer ${SENSAPP_TOKEN}"}');
+    expect(codeOf('telegraf', open)).not.toContain('token');
+    expect(codeOf('telegraf', secured)).toContain('token = "${SENSAPP_TOKEN}"');
+    // SensApp reads the Token scheme of Telegraf: no header to rewrite
+    expect(codeOf('telegraf', secured)).not.toContain('http_headers');
   });
 
   it('prometheus: writes and reads', () => {

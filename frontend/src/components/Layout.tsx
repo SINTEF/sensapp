@@ -13,6 +13,7 @@ const logoSmallWhite = `${base}sensapp_logo_small_white-fs8.png`;
 const TABS = [
   { to: '/', label: 'Data Explorer', end: true },
   { to: '/load', label: 'Load Data', end: false },
+  { to: '/credentials', label: 'Credentials', end: false },
 ];
 
 export function Layout() {

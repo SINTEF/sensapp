@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'react-router-dom';
+import { ADMIN_TOKEN_COMMAND } from '../lib/credentials';
 import { normalizeToken, useAuthStore } from '../stores/useAuthStore';
 
 /** Asks for a JWT when the server refuses a request (401, or 403 for a token that is not enough). */
@@ -8,6 +10,8 @@ export function AuthDialog() {
   const { dialogOpen, message, token, signIn, closeDialog } = useAuthStore();
   const queryClient = useQueryClient();
   const [input, setInput] = useState('');
+  // The page that makes tokens needs an admin one, the others a token that reads
+  const command = useLocation().pathname === '/credentials' ? ADMIN_TOKEN_COMMAND : 'sensapp generate-token ui --scope read';
 
   if (!dialogOpen) return null;
 
@@ -34,8 +38,11 @@ export function AuthDialog() {
           {token ? 'This token is not accepted' : 'Authentication required'}
         </h2>
         <pre className="bg-base-200 rounded px-3 py-2 mt-2 text-xs overflow-x-auto">
-          <code>sensapp generate-token ui --scope read</code>
+          <code>{command}</code>
         </pre>
+        <p className="text-xs text-base-content/60 mt-2">
+          A local SensApp without a secret prints a token when it starts.
+        </p>
 
         {message && (
           <div role="alert" className="alert alert-warning alert-soft mt-3 py-2 text-sm">

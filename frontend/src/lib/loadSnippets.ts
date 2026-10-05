@@ -155,10 +155,9 @@ export function telegrafSections(input: LoadInput): LoadSection[] {
     '  influx_uint_support = true',
     ...(input.authenticated
       ? [
-          '  # Telegraf sends its token as "Authorization: Token ...", SensApp wants "Bearer".',
           '  # Make a token with:  ' + WRITE_TOKEN_COMMAND,
           '  # and start Telegraf with it in SENSAPP_TOKEN.',
-          '  http_headers = {"Authorization" = "Bearer ${SENSAPP_TOKEN}"}',
+          '  token = "${SENSAPP_TOKEN}"',
         ]
       : []),
     '',

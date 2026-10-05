@@ -34,13 +34,18 @@ export interface DcatCatalog {
   'dcat:dataset': DcatDataset[];
 }
 
-export function useMetrics(filters?: {
-  name?: string;
-  nameRegex?: string;
-  type?: string;
-}) {
+export function useMetrics(
+  filters?: {
+    name?: string;
+    nameRegex?: string;
+    type?: string;
+  },
+  // `false` when the catalog is not needed, nor worth a refusal that asks for a token
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: ['metrics', filters],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       const result = await listMetrics({
         query: {

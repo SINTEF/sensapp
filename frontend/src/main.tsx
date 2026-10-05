@@ -6,9 +6,13 @@ import './index.css'
 import App from './App.tsx'
 import { configureApiClient } from './api/clientConfig'
 import { createQueryClient } from './api/queryClient'
+import { pickUpTokenFromAddress } from './lib/tokenFromAddress'
 
 // Configure API client
 configureApiClient()
+
+// A link printed by a local SensApp carries a token in its fragment
+pickUpTokenFromAddress()
 
 const queryClient = createQueryClient()
 
