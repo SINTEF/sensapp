@@ -43,16 +43,86 @@ fn aggregation_from_read_hints(hints: &ReadHints) -> Option<Aggregation> {
     }
 }
 
+/// How far before an evaluation time Prometheus looks for the sample of an instant selector
+/// (`--query.lookback-delta`, 5 minutes by default). The hints do not say it.
+const DEFAULT_LOOKBACK_MS: i64 = 5 * 60 * 1000;
+
+/// What Prometheus evaluates on the value of each series at the evaluation time: no function (a
+/// plain selector), and the aggregation operators. The functions of a range vector or of a
+/// subquery (`rate`, `max_over_time(x[1d:1h])`) are not in the list: their selector is not
+/// evaluated on the grid of the query.
+fn is_evaluated_at_each_step(func: &str) -> bool {
+    matches!(
+        func.trim(),
+        "" | "sum"
+            | "avg"
+            | "min"
+            | "max"
+            | "count"
+            | "group"
+            | "stddev"
+            | "stdvar"
+            | "quantile"
+            | "topk"
+            | "bottomk"
+            | "count_values"
+    )
+}
+
+/// The options to answer a query evaluated at each step on the latest sample of each series, such
+/// as `my_metric` or `sum(my_metric)`: Prometheus looks, at each evaluation time `t`, for the last
+/// sample in `(t - lookback, t]`, and ignores the others. One sample per step is enough, the
+/// last sample of the step, with its own timestamp: Prometheus then keeps it or drops it for being
+/// too old exactly as it does with the raw samples.
+///
+/// The steps must end on the evaluation times, which the hints do not give. The last evaluation
+/// is at the end of the hints when the range of the query is a whole number of steps, which
+/// Grafana makes sure of. Prometheus asks from `t - lookback + 1 ms` for the first evaluation `t`,
+/// so with its default lookback `end - start + 1 - lookback` is then a whole number of steps: when
+/// it is not, the grid is not the one of the end, and the raw samples answer.
+fn latest_options_from_read_hints(
+    hints: &ReadHints,
+    max_samples: usize,
+) -> Option<SensorDataQueryOptions> {
+    let (start_ms, end_ms, step_ms) = (hints.start_ms, hints.end_ms, hints.step_ms);
+    if hints.range_ms != 0
+        || step_ms <= 0
+        || end_ms < start_ms
+        || !is_evaluated_at_each_step(&hints.func)
+        || (end_ms - start_ms + 1 - DEFAULT_LOOKBACK_MS).rem_euclid(step_ms) != 0
+    {
+        return None;
+    }
+
+    // The steps start on the grid of the end, the first one at or before the start of the hints
+    let steps = (end_ms + 1 - start_ms + step_ms - 1) / step_ms;
+    let origin_ms = end_ms + 1 - steps * step_ms;
+
+    Some(SensorDataQueryOptions {
+        start_time: Some(SensAppDateTime::from_unix_milliseconds_i64(origin_ms)),
+        end_time: Some(SensAppDateTime::from_unix_milliseconds_i64(end_ms)),
+        limit: Some(max_samples.saturating_add(1)),
+        step_ms: Some(step_ms),
+        aggregation: Some(Aggregation::Latest),
+        simplify: None,
+    })
+}
+
 /// `range_ms` is the width of the `[1h]` of the query, `step_ms` the distance between two
 /// evaluations. Prometheus starts the window at the end of the first range, so buckets of one
 /// step that start there fit the windows of the evaluations when the range is a whole number of
 /// steps. A shorter range would be answered with a bucket wider than the window it asks for.
+///
+/// A query without a range, evaluated at each step, is answered with the latest sample of each
+/// step (`latest_options_from_read_hints`).
 fn query_options_from_read_hints(
     query: &Query,
     max_samples: usize,
 ) -> Option<SensorDataQueryOptions> {
     let hints = query.hints.as_ref()?;
-    let aggregation = aggregation_from_read_hints(hints)?;
+    let Some(aggregation) = aggregation_from_read_hints(hints) else {
+        return latest_options_from_read_hints(hints, max_samples);
+    };
 
     if hints.step_ms <= 0 || hints.range_ms <= 0 || hints.range_ms % hints.step_ms != 0 {
         return None;
@@ -117,7 +187,7 @@ async fn query_sensor_data_for_prometheus(
         return Ok(aggregated);
     }
 
-    crate::http::limits::query_selector_bounded(
+    let raw = crate::http::limits::query_selector_bounded(
         &state.storage,
         &matchers,
         Some(start_time),
@@ -125,7 +195,21 @@ async fn query_sensor_data_for_prometheus(
         true,
         state.max_query_samples,
     )
-    .await
+    .await;
+
+    // Say why the samples were not aggregated: the query cannot be shortened by the client
+    match (raw, &query.hints) {
+        (Err(AppError::BadRequest(error)), Some(hints)) if hints.step_ms > 0 => {
+            Err(AppError::bad_request(anyhow::anyhow!(
+                "{error}. This query (function '{}', step {} ms, range {} ms) could not be answered \
+                 with one value per step, so its raw samples were counted",
+                hints.func,
+                hints.step_ms,
+                hints.range_ms
+            )))
+        }
+        (raw, _) => raw,
+    }
 }
 
 fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
@@ -705,5 +789,101 @@ mod tests {
             })
             .is_none()
         );
+    }
+
+    const HOUR_MS: i64 = 3_600_000;
+    const T0_MS: i64 = 1_704_067_200_000;
+
+    /// The hints of Prometheus 3 for `func(x)` evaluated every `step_ms` from `T0 + first_ms`
+    /// to `T0 + last_ms`: the first window starts a lookback of 5 minutes before the evaluation.
+    fn instant_hints(func: &str, step_ms: i64, first_ms: i64, last_ms: i64) -> ReadHints {
+        ReadHints {
+            step_ms,
+            func: func.to_string(),
+            start_ms: T0_MS + first_ms - 300_000 + 1,
+            end_ms: T0_MS + last_ms,
+            grouping: vec![],
+            by: false,
+            range_ms: 0,
+        }
+    }
+
+    #[test]
+    fn test_a_query_evaluated_at_each_step_is_answered_with_the_latest_sample_of_each_step() {
+        // A plain selector and the aggregation operators, over 10 hours at a step of 1 hour
+        for func in ["", "sum", "avg", "min", "max", "count", "group", "topk"] {
+            let options = options_of(&query_with(instant_hints(func, HOUR_MS, 0, 10 * HOUR_MS)))
+                .unwrap_or_else(|| panic!("{func:?}"));
+            assert_eq!(options.aggregation, Some(Aggregation::Latest), "{func:?}");
+            assert_eq!(options.step_ms, Some(HOUR_MS));
+            // The steps end on the evaluation times: the last one ends at the last evaluation
+            // (to the millisecond, as the buckets start 1 ms after the end of the one before)
+            // and the first one is the hour before the first evaluation, which has the lookback
+            assert_eq!(
+                options.start_time,
+                Some(SensAppDateTime::from_unix_milliseconds_i64(
+                    T0_MS - HOUR_MS + 1
+                ))
+            );
+            assert_eq!(
+                options.end_time,
+                Some(SensAppDateTime::from_unix_milliseconds_i64(
+                    T0_MS + 10 * HOUR_MS
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn test_the_steps_of_the_latest_sample_cover_the_start_of_the_hints() {
+        // The lookback of the first evaluation is longer than a step: the first step starts
+        // before it, on the grid
+        let hints = instant_hints("", 60_000, 0, 600_000);
+        let (hints_start_ms, hints_end_ms) = (hints.start_ms, hints.end_ms);
+        let options = options_of(&query_with(hints)).unwrap();
+        let start = options.start_time.unwrap();
+        let start_ms = start.to_unix_milliseconds().round() as i64;
+        assert!(start_ms <= hints_start_ms);
+        assert!(hints_start_ms - start_ms < 60_000);
+        assert_eq!((hints_end_ms + 1 - start_ms) % 60_000, 0);
+    }
+
+    #[test]
+    fn test_a_query_that_is_not_evaluated_on_a_grid_that_ends_with_the_hints_gets_the_raw_samples()
+    {
+        // The range of the query is not a whole number of steps: the last evaluation is not at
+        // the end
+        let mut hints = instant_hints("", HOUR_MS, 0, 10 * HOUR_MS);
+        hints.end_ms += 30 * 60_000;
+        assert!(options_of(&query_with(hints)).is_none());
+
+        // Another lookback, or Prometheus 2, which asks from the evaluation time less the lookback
+        let mut hints = instant_hints("", HOUR_MS, 0, 10 * HOUR_MS);
+        hints.start_ms -= 300_000;
+        assert!(options_of(&query_with(hints)).is_none());
+        let mut hints = instant_hints("", HOUR_MS, 0, 10 * HOUR_MS);
+        hints.start_ms -= 1;
+        assert!(options_of(&query_with(hints)).is_none());
+
+        // An instant query has no step, and the hints may not say where they end
+        assert!(options_of(&query_with(instant_hints("", 0, 0, 0))).is_none());
+        let mut hints = instant_hints("", HOUR_MS, 0, 10 * HOUR_MS);
+        hints.end_ms = 0;
+        assert!(options_of(&query_with(hints)).is_none());
+    }
+
+    #[test]
+    fn test_the_functions_of_a_range_or_of_a_subquery_are_not_answered_with_the_latest_sample() {
+        // `rate(x[5m])` has a range; a subquery has none but its selector is not evaluated on
+        // the grid of the query
+        for func in ["rate", "increase", "max_over_time", "avg_over_time", "abs"] {
+            assert!(
+                options_of(&query_with(instant_hints(func, HOUR_MS, 0, 10 * HOUR_MS))).is_none(),
+                "{func:?}"
+            );
+        }
+        let mut hints = instant_hints("", HOUR_MS, 0, 10 * HOUR_MS);
+        hints.range_ms = 300_000;
+        assert!(options_of(&query_with(hints)).is_none());
     }
 }

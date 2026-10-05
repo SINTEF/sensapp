@@ -16,7 +16,7 @@ the raw samples, with one sample per step. Plan: `~/.claude/plans/while-querying
 
 - [x] 1. `SENSAPP_HTTP_MAX_QUERY_SAMPLES` (default 100,000) replaces the three hard-coded sample constants; limit tests at the boundary with a low value.
 - [x] 2-5. `Aggregation::Latest` (internal): value of the last sample of a bucket, stamped with its real timestamp, in every backend (common, SQLite, DuckDB, PostgreSQL, TimescaleDB, ClickHouse, BigQuery). Tested live on PostgreSQL, SQLite, DuckDB, TimescaleDB and ClickHouse (`selector_aggregated.rs`); BigQuery by its SQL unit test.
-- [ ] 6. Hint routing: `range_ms == 0` and aligned grid answers with `Latest`; clearer error when the raw fallback exceeds the limit.
+- [x] 6. Hint routing: `range_ms == 0` and aligned grid answers with `Latest`; clearer error when the raw fallback exceeds the limit.
 - [ ] 7. Live Prometheus harness cases, docs (`DATAMODEL.md`, `HTTP_LIMITS.md`, `CONFIGURATION.md`, `BACKENDS.md`), move to `done/`.
 
 ## Progress
