@@ -58,7 +58,7 @@ For a quick setup, you can set `storage.connectionString` directly instead of re
 SensApp does not run open: the container image listens on every address, so it refuses to start without a secret. By default the chart **makes a random secret on the first install** and keeps it across upgrades (it reads it back from the Secret of the release). Make an admin token, which makes the other tokens in the UI (Credentials tab):
 
 ```bash
-kubectl exec deploy/sensapp -- sensapp generate-token me --scope admin
+kubectl exec deploy/sensapp -- sensapp generate-token me --scope read,admin
 ```
 
 | Value | Effect |

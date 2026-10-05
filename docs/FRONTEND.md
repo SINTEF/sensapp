@@ -65,11 +65,11 @@ The third tab (`/ui/credentials`) makes tokens for the clients of SensApp (see [
 3. **What it may do**: `read` and `write` by default, `delete` on demand, and `admin`, which only the command line makes.
 4. **Only these sensors**: type a name and press Enter (or Add), remove it with its ×. A name is kept exactly as typed, spaces and commas included, and the sensors of the server are offered to click when the token in use can read them (an admin-only token cannot).
 5. **Command line**: the `sensapp generate-token …` command for what the form says, updated as it changes, with a `--sensor` for each name and everything quoted for the shell. It works without an admin token, needs the secret (so it runs where SensApp runs: `docker exec`, `kubectl exec`), and is the only way to make an admin token.
-6. **Make it here**: the button, for an admin token (`POST /api/v1/admin/tokens`). Without one the section says how to make one and opens the sign-in dialog, which then suggests the admin command instead of a read token.
+6. **Make it here**: the button, for an admin token (`POST /api/v1/admin/tokens`). Without one the section says how to make one and opens the sign-in dialog, which then suggests the admin command (`sensapp generate-token me --scope read,admin`: `read` too, so that the same token browses the data and the explorer does not ask for another) instead of a read token.
 
 The token is then **shown once** at the top of the page, with a Copy button, what it was made with and the `export SENSAPP_TOKEN=…` line that [Load Data](#load-data) reads. SensApp keeps nothing: the page has no list of tokens and cannot revoke one (rotating the secret does, see [JWT_AUTH.md](JWT_AUTH.md#rotating-the-secret-and-revoking-tokens)). The page does not keep the token either: it is dropped from the cache of the requests when the page is left, and a refresh forgets it.
 
-With no token, a server that answers anyway has authentication disabled: the page says so and shows nothing else. With an admin token the catalog is not read, because an admin token cannot read and the refusal would ask for a token again.
+With no token, a server that answers anyway has authentication disabled: the page says so and shows nothing else. The catalog (for the sensors to click in) is only read when the token in use can read: an `admin` token alone cannot, and the refusal would ask for a token again.
 
 The page is in `src/pages/CredentialsPage.tsx` (the command and the checks of a name in `src/lib/credentials.ts`) and loaded when its tab is first opened (it shows code, with the highlighter).
 

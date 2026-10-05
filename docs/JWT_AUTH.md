@@ -55,8 +55,8 @@ sensapp generate-token cleanup --scope delete --duration 900
 # Scopes can be combined
 sensapp generate-token cleanup --scope readwrite,delete
 
-# A token that makes tokens
-sensapp generate-token me --scope admin
+# A token that makes tokens, and that reads, to browse the data of the UI with it
+sensapp generate-token me --scope read,admin
 ```
 
 The token is printed to stdout. In a container: `docker exec <container> sensapp generate-token …`, in Kubernetes `kubectl exec deploy/<release> -- sensapp generate-token …`.
@@ -83,7 +83,7 @@ The answer holds the `token` and what it was made with (`subject`, `scope`, `sen
 
 - `scope` is a list of `read`, `write` and `delete`. **The endpoint never makes an `admin` token** (403): those come from the command line, which has the secret. A stolen admin token therefore cannot renew itself, and an admin token that expires is replaced with one command.
 - `duration_seconds` is at most `SENSAPP_TOKEN_MAX_DURATION_SECONDS` (one year by default).
-- An admin token reads and writes nothing: the scope is as separate as `delete` is. Whoever has it can still make a token for any scope, so keep it as private as the secret, and short. It lasts an hour by default.
+- The `admin` scope reads and writes nothing: it is as separate as `delete` is. The command the UI suggests asks for `read,admin`, so that the same token can browse the data and the web UI does not ask for another token. Make it `admin` alone for a token that only manages tokens. Whoever has it can still make a token for any scope, so keep it as private as the secret, and short. It lasts an hour by default.
 - With authentication disabled there is nothing to sign with: the answer is `404`.
 - Every creation is logged (who asked, for whom, the scope, the sensors, the expiry, the `jti`), never the token.
 

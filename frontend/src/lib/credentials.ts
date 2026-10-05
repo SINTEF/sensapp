@@ -1,7 +1,11 @@
 import type { TokenInfo } from '../stores/useAuthStore';
 
-/** What makes a token that can make tokens. It reads nothing, and the endpoint never makes another one. */
-export const ADMIN_TOKEN_COMMAND = 'sensapp generate-token me --scope admin';
+/**
+ * What makes a token that can make tokens. The `admin` scope reads nothing, and the endpoint never
+ * makes another admin token. `read` is added for the person who signs in with it: the explorer
+ * would otherwise ask for another token.
+ */
+export const ADMIN_TOKEN_COMMAND = 'sensapp generate-token me --scope read,admin';
 
 /** What the form asks for. */
 export interface TokenWish {

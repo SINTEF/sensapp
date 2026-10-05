@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addSensor, shellWord, tokenCommand, tokenScopes } from './credentials';
+import { ADMIN_TOKEN_COMMAND, addSensor, shellWord, tokenCommand, tokenScopes } from './credentials';
 
 describe('addSensor', () => {
   it('adds a name and keeps the order', () => {
@@ -41,6 +41,12 @@ describe('shellWord', () => {
     // Nothing a name holds can add a command
     expect(shellWord('x; rm -rf ~')).toBe("'x; rm -rf ~'");
     expect(shellWord('$(whoami)')).toBe("'$(whoami)'");
+  });
+});
+
+describe('ADMIN_TOKEN_COMMAND', () => {
+  it('makes a token that can read as well, so that the explorer does not ask for another', () => {
+    expect(ADMIN_TOKEN_COMMAND).toBe('sensapp generate-token me --scope read,admin');
   });
 });
 

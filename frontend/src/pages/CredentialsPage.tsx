@@ -288,7 +288,13 @@ function TokenMaker({ token, canRead, isAdmin }: { token: string | null; canRead
 
       <Row
         title="Make it here"
-        description={isAdmin ? 'The token is shown once, at the top of the page.' : <>Needs a token with the {code('admin')} scope. It reads and writes nothing.</>}
+        description={
+            isAdmin ? (
+              'The token is shown once, at the top of the page.'
+            ) : (
+              <>Needs a token with the {code('admin')} scope, which gives nothing else: the command has {code('read')} too, to browse the data with it.</>
+            )
+          }
       >
         {isAdmin ? (
           <>

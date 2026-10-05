@@ -18,6 +18,7 @@ vi.mock('../client', () => ({
 }));
 
 const ADMIN = fakeToken({ sub: 'root', scope: 'admin', exp: 4_102_444_800 });
+const READ_ADMIN = fakeToken({ sub: 'me', scope: 'read admin', exp: 4_102_444_800 });
 const READER = fakeToken({ sub: 'reader', scope: 'read', exp: 4_102_444_800 });
 // The token the local run prints has every scope
 const LOCAL = fakeToken({ sub: 'local-dev', scope: 'read write delete admin', exp: 4_102_444_800 });
@@ -85,12 +86,13 @@ describe('CredentialsPage', () => {
     renderPage();
     expect(await screen.findByRole('textbox', { name: 'Name' })).toBeInTheDocument();
     expect(command()).toContain('sensapp generate-token NAME --scope read,write --duration 86400');
-    expect(screen.getByLabelText('Command that makes an admin token')).toHaveTextContent('sensapp generate-token me --scope admin');
+    expect(screen.getByLabelText('Command that makes an admin token')).toHaveTextContent('sensapp generate-token me --scope read,admin');
     expect(screen.queryByRole('button', { name: 'Make the token' })).toBeNull();
     // The sign-in dialog opened with the answer of the server, and the command of an admin token
     const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveTextContent('sensapp generate-token me --scope admin');
-    expect(dialog).not.toHaveTextContent('--scope read');
+    expect(dialog).toHaveTextContent('sensapp generate-token me --scope read,admin');
+    // Not the command of the read token that the other pages suggest
+    expect(dialog).not.toHaveTextContent('generate-token ui --scope read');
   });
 
   it('says that the token in use is not an admin one, and leaves the command', async () => {
@@ -106,6 +108,19 @@ describe('CredentialsPage', () => {
     renderPage();
     expect(await screen.findByRole('button', { name: 'Make the token' })).toBeInTheDocument();
     expect(mockListMetrics).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().dialogOpen).toBe(false);
+  });
+
+  it('reads the sensors with the token the page suggests, which has read and admin: nothing asks for another token', async () => {
+    const user = userEvent.setup();
+    useAuthStore.setState({ token: READ_ADMIN });
+    mockCreateToken.mockResolvedValue({ data: created });
+    renderPage();
+
+    // The form is the admin's, and the sensors of the server are offered
+    await user.click(await screen.findByRole('button', { name: 'temperature' }));
+    expect(screen.getByRole('button', { name: 'Make the token' })).toBeInTheDocument();
+    expect(mockListMetrics).toHaveBeenCalled();
     expect(useAuthStore.getState().dialogOpen).toBe(false);
   });
 

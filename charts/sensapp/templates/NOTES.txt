@@ -27,7 +27,7 @@
    The chart made the secret, and keeps it across upgrades.
 {{- end }}
    Make an admin token (it makes the other tokens, in the UI under Credentials or with POST /api/v1/admin/tokens):
-     kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "sensapp.fullname" . }} -- sensapp generate-token me --scope admin
+     kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "sensapp.fullname" . }} -- sensapp generate-token me --scope read,admin
    Or a token for a client:
      kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "sensapp.fullname" . }} -- sensapp generate-token <subject> --scope readwrite --duration 86400
    Use it in requests:

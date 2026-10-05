@@ -91,7 +91,7 @@ storage:
 #
 # By default the chart makes a random secret on the first install and keeps it across upgrades
 # (it is read back from the Secret of the release). Make an admin token with:
-#   kubectl exec deploy/<release name> -- sensapp generate-token me --scope admin
+#   kubectl exec deploy/<release name> -- sensapp generate-token me --scope read,admin
 # Tools that only render the chart (Argo CD, `helm template`) cannot read it back and would make a
 # new secret each time: for those, give jwtSecret or existingSecret.
 auth:
