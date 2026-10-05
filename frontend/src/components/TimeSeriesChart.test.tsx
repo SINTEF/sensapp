@@ -245,4 +245,21 @@ describe('TimeSeriesChart', () => {
     expect(await screen.findByRole('progressbar', { name: 'Loading chart data' })).toBeInTheDocument();
     expect(screen.getByTestId('echarts')).toBeInTheDocument();
   });
+
+  it('names a series by what tells it from the others', async () => {
+    const lab = { ...temperature, uuid: 'uuid-lab', labels: { org: 'sensapp', room: 'lab' } };
+    const office = { ...temperature, uuid: 'uuid-office', slot: 1, labels: { org: 'sensapp', room: 'office' } };
+    useSelectionStore.setState({ selectedSeries: [lab, office], timeRange: { start: START, end: hours(1) } });
+    renderChart();
+
+    const chart = await screen.findByTestId('echarts');
+    await waitFor(() => expect(chart).toHaveAttribute('data-series-count', '2'));
+    const names = JSON.parse(chart.getAttribute('data-option')!).series.map((s: { name: string }) => s.name);
+    expect(names).toEqual(['temperature{room="lab"}', 'temperature{room="office"}']);
+
+    // Alone, it says all it has
+    act(() => useSelectionStore.setState({ selectedSeries: [lab] }));
+    await waitFor(() => expect(chart).toHaveAttribute('data-series-count', '1'));
+    expect(JSON.parse(chart.getAttribute('data-option')!).series[0].name).toBe('temperature{org="sensapp", room="lab"}');
+  });
 });

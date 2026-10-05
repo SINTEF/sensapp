@@ -6,6 +6,7 @@ import { unwrap } from '../api/clientConfig';
 import { isBooleanType, isNumericType, resolveStep } from '../lib/chartStep';
 import { buildChartOption } from '../lib/chartOption';
 import { seriesColor } from '../lib/palette';
+import { sharedLabels, withoutShared } from '../lib/seriesLabels';
 import { brushedRange } from '../lib/timeRange';
 import { usePrefersDark } from '../lib/usePrefersDark';
 
@@ -95,12 +96,14 @@ export function TimeSeriesChart() {
   }
 
   const option = useMemo(() => {
+    // What every series has is not what tells them apart
+    const shared = sharedLabels(selectedSeries.map((s) => s.labels));
     const series = selectedSeries
       .filter((s) => shown[s.uuid])
       .map((s) => {
         return {
           id: s.uuid,
-          name: buildSeriesLabel(s.name, s.labels),
+          name: buildSeriesLabel(s.name, withoutShared(s.labels, shared)),
           points: parseSenMLToTimeSeries(shown[s.uuid].records),
           boolean: isBooleanType(s.type),
           color: seriesColor(s.slot, dark),

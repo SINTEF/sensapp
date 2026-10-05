@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { freeSlot, SERIES_COLORS, seriesColor, SLOTS } from './palette';
+import { freeSlot, readableOn, SERIES_COLORS, seriesColor, SLOTS } from './palette';
 
 describe('palette', () => {
   it('has a step of each hue for each theme', () => {
@@ -18,5 +18,10 @@ describe('palette', () => {
     const all = Array.from({ length: SLOTS }, (_, i) => i);
     expect(freeSlot(all)).toBe(0);
     expect(seriesColor(SLOTS + 1, false)).toBe(seriesColor(1, false));
+  });
+
+  it('writes in dark on the light colors and in white on the others', () => {
+    expect(readableOn('#eda100')).toBe('#111827');
+    expect(readableOn('#2a78d6')).toBe('#ffffff');
   });
 });

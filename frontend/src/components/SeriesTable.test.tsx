@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { SeriesTable } from './SeriesTable';
+import { SERIES_COLORS } from '../lib/palette';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
 const mockListSeries = vi.fn();
@@ -55,8 +56,7 @@ describe('SeriesTable', () => {
     renderTable();
 
     await screen.findByText('uuid-a');
-    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
-    expect(headers).toEqual(['Select', 'host', 'room', 'Series ID']);
+    expect(screen.getAllByTitle(/^Sort by/).map((b) => b.title)).toEqual(['Sort by host', 'Sort by room']);
     const [, alpha, beta] = screen.getAllByRole('row');
     expect(within(alpha).getAllByRole('cell').map((c) => c.textContent)).toEqual(['', 'alpha', 'lab', 'uuid-a']);
     // A label that a series does not have is a dash
@@ -77,6 +77,89 @@ describe('SeriesTable', () => {
     expect(screen.getByText('string')).toBeInTheDocument();
   });
 
+  describe('sorting', () => {
+    const hosts = () =>
+      screen
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) => within(row).getAllByRole('cell')[1].textContent);
+    const withHosts = (...names: string[]) =>
+      mockListSeries.mockResolvedValue({
+        data: { ...catalog, 'dcat:dataset': names.map((name, i) => dataset(`uuid-${i}`, name)) },
+      });
+
+    it('sorts by the first column, numbers in natural order', async () => {
+      withHosts('node-10', 'node-2', 'node-1');
+      renderTable();
+      await screen.findByText('uuid-0');
+      expect(hosts()).toEqual(['node-1', 'node-2', 'node-10']);
+      expect(screen.getByRole('columnheader', { name: /host/ })).toHaveAttribute('aria-sort', 'ascending');
+    });
+
+    it('sorts by the column that is clicked, and the other way when it is clicked again', async () => {
+      const user = userEvent.setup();
+      mockListSeries.mockResolvedValue({
+        data: {
+          ...catalog,
+          'dcat:dataset': [
+            { ...dataset('uuid-a', 'alpha'), 'sensor:labels': [{ host: 'alpha', room: 'z' }] },
+            { ...dataset('uuid-b', 'beta'), 'sensor:labels': [{ host: 'beta', room: 'a' }] },
+          ],
+        },
+      });
+      renderTable();
+      await screen.findByText('uuid-a');
+      expect(hosts()).toEqual(['alpha', 'beta']);
+
+      await user.click(screen.getByTitle('Sort by room'));
+      expect(hosts()).toEqual(['beta', 'alpha']);
+      await user.click(screen.getByTitle('Sort by room'));
+      expect(hosts()).toEqual(['alpha', 'beta']);
+      expect(screen.getByRole('columnheader', { name: /room/ })).toHaveAttribute('aria-sort', 'descending');
+      await user.click(screen.getByTitle('Sort by host'));
+      expect(screen.getByRole('columnheader', { name: /host/ })).toHaveAttribute('aria-sort', 'ascending');
+    });
+  });
+
+  describe('labels that are on every series', () => {
+    const influx = (host: string) => ({
+      ...dataset(`uuid-${host}`, host),
+      'sensor:labels': [{ influxdb_org: 'sensapp', host }],
+    });
+
+    it('are said once above the list, not in a column', async () => {
+      mockListSeries.mockResolvedValue({ data: { ...catalog, 'dcat:dataset': [influx('alpha'), influx('beta')] } });
+      renderTable();
+
+      await screen.findByText('uuid-alpha');
+      expect(screen.getByText('on every series')).toBeInTheDocument();
+      expect(screen.getByText('influxdb_org=')).toBeInTheDocument();
+      expect(screen.queryByTitle('Sort by influxdb_org')).not.toBeInTheDocument();
+      expect(screen.getByTitle('Sort by host')).toBeInTheDocument();
+    });
+
+    it('stay a column when there is one series: it would have nothing else to show', async () => {
+      mockListSeries.mockResolvedValue({ data: { ...catalog, 'dcat:dataset': [influx('alpha')] } });
+      renderTable();
+
+      await screen.findByText('uuid-alpha');
+      expect(screen.queryByText('on every series')).not.toBeInTheDocument();
+      expect(screen.getByTitle('Sort by influxdb_org')).toBeInTheDocument();
+    });
+  });
+
+  it('suggests a selector made of labels of the series', async () => {
+    mockListSeries.mockResolvedValue({
+      data: {
+        ...catalog,
+        'dcat:dataset': [{ ...dataset('uuid-a', 'alpha'), 'sensor:labels': [{ host: 'alpha', room: 'lab' }] }],
+      },
+    });
+    renderTable();
+    await screen.findByText('uuid-a');
+    expect(screen.getByPlaceholderText('{host="alpha", room=~"l.*"}')).toBeInTheDocument();
+  });
+
   describe('selection', () => {
     const uuids = () => useSelectionStore.getState().selectedSeries.map((s) => s.uuid);
 
@@ -91,7 +174,11 @@ describe('SeriesTable', () => {
         type: 'float',
         slot: 0,
       });
-      expect(await screen.findAllByTestId('series-color')).toHaveLength(2);
+      // The checkbox of a series has the color of its line
+      const [first, second] = screen.getAllByRole('checkbox');
+      expect(first).toBeChecked();
+      expect(first.style.getPropertyValue('--input-color')).toBe(SERIES_COLORS.light[0]);
+      expect(second.style.getPropertyValue('--input-color')).toBe(SERIES_COLORS.light[1]);
       expect(screen.getByText('2 selected')).toBeInTheDocument();
     });
 
@@ -229,7 +316,7 @@ describe('SeriesTable', () => {
       await user.click(screen.getByRole('button', { name: 'Next page' }));
       await screen.findByText('uuid-2');
 
-      await user.type(screen.getByPlaceholderText(/env=/), 'x');
+      await user.type(screen.getByPlaceholderText(/host=/), 'x');
       expect(await screen.findByText('uuid-1')).toBeInTheDocument();
       expect(mockListSeries.mock.lastCall?.[0].query.bookmark).toBeUndefined();
     });

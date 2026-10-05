@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { nextBookmark, useSeries } from '../hooks/useSeries';
 import type { SeriesDataset } from '../hooks/useSeries';
 import { isBooleanType, isNumericType } from '../lib/chartStep';
-import { seriesColor, SLOTS } from '../lib/palette';
+import { readableOn, seriesColor, SLOTS } from '../lib/palette';
+import { exampleSelector, sharedLabels, sortByColumns } from '../lib/seriesLabels';
 import { usePrefersDark } from '../lib/usePrefersDark';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import type { SeriesInfo } from '../stores/useSelectionStore';
@@ -43,6 +45,8 @@ export function SeriesTable() {
   const [selectorInput, setSelectorInput] = useState('');
   // The cursor of every page shown so far: the server only goes forward, so Previous pops one
   const [bookmarks, setBookmarks] = useState<string[]>([]);
+  // Sorted by the first column, until another one is clicked, and again to reverse it
+  const [sort, setSort] = useState<{ column?: string; descending: boolean }>({ descending: false });
 
   const selector = selectorInput || undefined;
 
@@ -75,8 +79,15 @@ export function SeriesTable() {
     return selectedSeries.find((s) => s.uuid === dataset['dct:identifier']);
   }
 
-  // One column per label dimension
-  const dimensions = [...new Set(series.flatMap((s) => Object.keys(labelsToRecord(s['sensor:labels']))))].sort();
+  // One column per label dimension, but what is the same on every series is said once, above
+  const labelsList = series.map((s) => labelsToRecord(s['sensor:labels']));
+  const dimensions = [...new Set(labelsList.flatMap(Object.keys))].sort();
+  const shared = sharedLabels(labelsList);
+  const columns = dimensions.filter((dimension) => !(dimension in shared));
+  const sortedBy = sort.column ?? columns[0];
+  function sortBy(column: string) {
+    setSort(column === sortedBy ? { column, descending: !sort.descending } : { column, descending: false });
+  }
   // The type is said when there is something to tell: a name can exist with more than one
   const mixedTypes = new Set(series.map((s) => s['sensor:type'])).size > 1;
 
@@ -91,6 +102,14 @@ export function SeriesTable() {
         return searchStr.includes(labelFilter.toLowerCase());
       })
     : series;
+  // The server pages by creation, so this is the order of the page on screen
+  const sortedSeries = sortByColumns(
+    filteredSeries,
+    (s) => labelsToRecord(s['sensor:labels']),
+    columns,
+    sortedBy,
+    sort.descending,
+  );
 
   if (!selectedMetric) {
     return null;
@@ -101,7 +120,7 @@ export function SeriesTable() {
       <div className="flex flex-wrap gap-2 items-center shrink-0">
         <input
           type="text"
-          placeholder='{env="prod", region=~"us.*"}'
+          placeholder={exampleSelector(labelsList[0], columns.length > 0 ? columns : dimensions)}
           className="input input-bordered input-xs font-mono text-xs flex-1 min-w-44 max-w-xs h-7"
           value={selectorInput}
           onChange={(e) => {
@@ -138,18 +157,42 @@ export function SeriesTable() {
 
       {!isLoading && !error && filteredSeries.length > 0 && (
         <div>
+          {Object.keys(shared).length > 0 && (
+            <div className="flex flex-wrap items-center gap-1 pb-1.5 text-xs text-base-content/50">
+              <span>on every series</span>
+              {Object.entries(shared).map(([key, value]) => (
+                <span key={key} className="inline-flex gap-0.5 rounded bg-base-200 px-1.5 py-0.5">
+                  <span>{key}=</span>
+                  <span className="font-medium text-base-content/70">{value}</span>
+                </span>
+              ))}
+            </div>
+          )}
           <table className="table table-xs w-full">
             <thead>
               <tr className="text-xs text-base-content/50">
                 <th className="w-12 font-medium">
                   <span className="sr-only">Select</span>
                 </th>
-                {dimensions.map((dimension) => (
-                  <th key={dimension} className="font-medium">
-                    {dimension}
+                {columns.map((column) => (
+                  <th
+                    key={column}
+                    className="font-medium"
+                    aria-sort={column === sortedBy ? (sort.descending ? 'descending' : 'ascending') : undefined}
+                  >
+                    <button
+                      className="inline-flex items-center gap-1 font-medium hover:text-base-content cursor-pointer"
+                      title={`Sort by ${column}`}
+                      onClick={() => sortBy(column)}
+                    >
+                      {column}
+                      <span aria-hidden="true" className={column === sortedBy ? '' : 'invisible'}>
+                        {sort.descending ? '▼' : '▲'}
+                      </span>
+                    </button>
                   </th>
                 ))}
-                {dimensions.length === 0 && <th className="font-medium">Series</th>}
+                {columns.length === 0 && <th className="font-medium">Series</th>}
                 {mixedTypes && <th className="font-medium">Type</th>}
                 <th className="font-medium text-right">
                   <span className="sr-only">Series ID</span>
@@ -157,7 +200,7 @@ export function SeriesTable() {
               </tr>
             </thead>
             <tbody>
-              {filteredSeries.map((s) => {
+              {sortedSeries.map((s) => {
                 const uuid = s['dct:identifier'];
                 const selected = selectedOf(s);
                 const labels = labelsToRecord(s['sensor:labels']);
@@ -172,29 +215,31 @@ export function SeriesTable() {
                     onClick={() => toggleSeries(toSeriesInfo(s))}
                   >
                     <td>
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="checkbox"
-                          className="checkbox checkbox-primary checkbox-xs"
-                          aria-label={`Select series ${uuid}`}
-                          checked={!!selected}
-                          onChange={() => toggleSeries(toSeriesInfo(s))}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <span
-                          className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-                          data-testid={selected ? 'series-color' : undefined}
-                          style={{ background: selected ? seriesColor(selected.slot, dark) : 'transparent' }}
-                        />
-                      </div>
+                      {/* The checkbox is the color of the series in the chart */}
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-sm"
+                        aria-label={`Select series ${uuid}`}
+                        checked={!!selected}
+                        style={
+                          selected
+                            ? ({
+                                '--input-color': seriesColor(selected.slot, dark),
+                                color: readableOn(seriesColor(selected.slot, dark)),
+                              } as CSSProperties)
+                            : undefined
+                        }
+                        onChange={() => toggleSeries(toSeriesInfo(s))}
+                        onClick={(e) => e.stopPropagation()}
+                      />
                     </td>
-                    {dimensions.map((dimension) => (
-                      <td key={dimension} className="text-xs max-w-40 truncate" title={labels[dimension]}>
-                        {labels[dimension] ?? <span className="text-base-content/30">—</span>}
+                    {columns.map((column) => (
+                      <td key={column} className="text-xs max-w-40 truncate" title={labels[column]}>
+                        {labels[column] ?? <span className="text-base-content/30">—</span>}
                       </td>
                     ))}
-                    {dimensions.length === 0 && (
-                      <td className="text-xs text-base-content/30">no labels</td>
+                    {columns.length === 0 && (
+                      <td className="text-xs text-base-content/30">{dimensions.length === 0 ? 'no labels' : '—'}</td>
                     )}
                     {mixedTypes && (
                       <td>

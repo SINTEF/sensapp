@@ -27,3 +27,9 @@ export function freeSlot(used: number[]): number {
   }
   return used.length % SLOTS;
 }
+
+/** The ink of a tick on a color: dark on the light colors (the yellow), white on the others. */
+export function readableOn(hex: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.45 ? '#111827' : '#ffffff';
+}
