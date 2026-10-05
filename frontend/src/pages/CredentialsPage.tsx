@@ -262,7 +262,7 @@ function TokenMaker({ token, canRead, isAdmin }: { token: string | null; canRead
           <legend className="sr-only">Scopes</legend>
           {SCOPES.map((item) => (
             <label key={item.id} className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" className="checkbox checkbox-sm" checked={scope.includes(item.id)} onChange={() => toggle(item.id)} />
+              <input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={scope.includes(item.id)} onChange={() => toggle(item.id)} />
               <span className="font-mono">{item.id}</span>
               <span className="text-base-content/55">{item.help}</span>
             </label>
