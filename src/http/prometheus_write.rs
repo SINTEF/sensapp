@@ -107,7 +107,7 @@ fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
             description = "The storage backend is unavailable, or SensApp is busy writing and sheds the write. A `Retry-After` header (seconds, randomised) means the request was not processed at all and can be sent again after that delay",
             headers(("Retry-After" = u32, description = "Seconds to wait before sending the write again"))
         ),
-        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice")
     )
 )]
 #[debug_handler]

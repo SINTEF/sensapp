@@ -54,8 +54,8 @@ impl BulkSelectorBackend for PostgresStorage {
                     "SELECT sensor_id, timestamp_us, value FROM ",
                     $table,
                     " WHERE sensor_id = ANY($1)",
-                    " AND ($2::BIGINT IS NULL OR timestamp_us >= $2)",
-                    " AND ($3::BIGINT IS NULL OR timestamp_us <= $3)",
+                    " AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)",
+                    " AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)",
                     " ORDER BY sensor_id, timestamp_us LIMIT $4"
                 ))
                 .bind(sensor_ids)

@@ -11,8 +11,8 @@ pub(super) fn sqlite_bucketed_cte(table_name: &'static str) -> String {
                 (?5 + ((timestamp_us - ?5) / ?4) * ?4) AS bucket_us
             FROM {table_name}
             WHERE sensor_id = ?1
-              AND (?2 IS NULL OR timestamp_us >= ?2)
-              AND (?3 IS NULL OR timestamp_us <= ?3)
+              AND timestamp_us >= COALESCE(?2, -9223372036854775807)
+              AND timestamp_us <= COALESCE(?3, 9223372036854775807)
         )
         "#
     )
@@ -42,8 +42,8 @@ pub(super) fn sqlite_first_last_query(
                 (?5 + ((timestamp_us - ?5) / ?4) * ?4) AS bucket_us
             FROM {table_name}
             WHERE sensor_id = ?1
-              AND (?2 IS NULL OR timestamp_us >= ?2)
-              AND (?3 IS NULL OR timestamp_us <= ?3)
+              AND timestamp_us >= COALESCE(?2, -9223372036854775807)
+              AND timestamp_us <= COALESCE(?3, 9223372036854775807)
         ),
         ranked AS (
             SELECT

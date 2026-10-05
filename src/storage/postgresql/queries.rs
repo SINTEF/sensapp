@@ -315,8 +315,8 @@ impl PostgresStorage {
             r#"
             SELECT timestamp_us, value FROM integer_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+            AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
@@ -355,8 +355,8 @@ impl PostgresStorage {
             r#"
             SELECT timestamp_us, value FROM numeric_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+            AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
@@ -395,8 +395,8 @@ impl PostgresStorage {
             r#"
             SELECT timestamp_us, value FROM float_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+            AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
@@ -437,8 +437,8 @@ impl PostgresStorage {
             FROM string_values sv
             JOIN strings_values_dictionary svd ON sv.value = svd.id
             WHERE sv.sensor_id = $1
-            AND ($2::BIGINT IS NULL OR sv.timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR sv.timestamp_us <= $3)
+            AND sv.timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+            AND sv.timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
             ORDER BY sv.timestamp_us ASC
             LIMIT $4
             "#,
@@ -477,8 +477,8 @@ impl PostgresStorage {
             r#"
             SELECT timestamp_us, value FROM boolean_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+            AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
@@ -518,8 +518,8 @@ impl PostgresStorage {
             r#"
             SELECT timestamp_us, latitude, longitude FROM location_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+            AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
@@ -558,8 +558,8 @@ impl PostgresStorage {
             r#"
             SELECT timestamp_us, value FROM json_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+            AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
@@ -598,8 +598,8 @@ impl PostgresStorage {
             r#"
             SELECT timestamp_us, value FROM blob_values
             WHERE sensor_id = $1
-            AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-            AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+            AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+            AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
             ORDER BY timestamp_us ASC
             LIMIT $4
             "#,
@@ -625,6 +625,11 @@ impl PostgresStorage {
 /// The buckets of the samples of one sensor (`WHERE sensor_id = $1`) or of many
 /// (`WHERE sensor_id = ANY($1)`, with the sensor in the rows), $2 and $3 bounding the time, $4 the
 /// step in milliseconds and $5 the origin of the buckets in microseconds.
+///
+/// The bucket is computed on the integer, as `date_bin` would: the start of the step that holds the
+/// sample, steps counted from the origin. The `%` form floors, where an integer division truncates
+/// toward zero, so a sample before the origin lands in its own step too. Converting every row to a
+/// timestamp for `date_bin` took six times longer (1.25 s against 0.21 s for 1.33 M samples).
 pub(super) fn bucketed_cte(table: &str, many_sensors: bool) -> String {
     let (sensor_column, sensor_filter) = if many_sensors {
         ("sensor_id,", "sensor_id = ANY($1)")
@@ -636,13 +641,13 @@ pub(super) fn bucketed_cte(table: &str, many_sensors: bool) -> String {
     WITH bucketed AS (
         SELECT
             {sensor_column}
-            (EXTRACT(EPOCH FROM date_bin(($4::bigint * interval '1 millisecond'), to_timestamp(timestamp_us / 1000000.0), to_timestamp($5 / 1000000.0))) * 1000000)::bigint AS bucket_us,
+            timestamp_us - (((timestamp_us - $5::bigint) % ($4::bigint * 1000)) + ($4::bigint * 1000)) % ($4::bigint * 1000) AS bucket_us,
             timestamp_us,
             value
         FROM {table}
         WHERE {sensor_filter}
-        AND ($2::BIGINT IS NULL OR timestamp_us >= $2)
-        AND ($3::BIGINT IS NULL OR timestamp_us <= $3)
+        AND timestamp_us >= COALESCE($2::BIGINT, -9223372036854775807)
+        AND timestamp_us <= COALESCE($3::BIGINT, 9223372036854775807)
     )
     "#
     )

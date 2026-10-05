@@ -121,6 +121,7 @@ fn settings() -> RouterSettings {
     RouterSettings {
         max_body_bytes: 64 * 1024 * 1024,
         request_timeout: Duration::from_secs(30),
+        write_timeout: Duration::from_secs(300),
         maintenance_timeout: Duration::from_secs(3600),
         max_concurrent_writes: 16,
     }
@@ -336,7 +337,7 @@ async fn the_write_limit_sits_behind_authentication() -> Result<()> {
 #[serial]
 async fn slow_requests_get_a_504() -> Result<()> {
     let settings = RouterSettings {
-        request_timeout: Duration::from_millis(200),
+        write_timeout: Duration::from_millis(200),
         ..settings()
     };
     let (_db, router) = router(Duration::from_secs(2), None, settings).await?;
@@ -443,7 +444,7 @@ async fn load_shedding_is_not_logged_as_an_error() -> Result<()> {
 #[serial]
 async fn timeouts_are_logged_as_warnings_with_the_request_id() -> Result<()> {
     let settings = RouterSettings {
-        request_timeout: Duration::from_millis(200),
+        write_timeout: Duration::from_millis(200),
         ..settings()
     };
     let (_db, router) = router(Duration::from_secs(2), None, settings).await?;
@@ -583,12 +584,45 @@ async fn vacuum_removes_the_duplicates_of_a_retried_write() -> Result<()> {
     Ok(())
 }
 
+/// A large write is slower than a read, so it has a timeout of its own: the one of the other
+/// requests does not apply to it, and its own bounds it.
+#[tokio::test]
+#[serial]
+async fn writes_have_a_timeout_of_their_own() -> Result<()> {
+    // Slower than the timeout of the other requests, faster than the one of the writes
+    let settings = RouterSettings {
+        request_timeout: Duration::from_millis(200),
+        write_timeout: Duration::from_secs(10),
+        ..settings()
+    };
+    let (_db, router) = router(Duration::from_millis(600), None, settings).await?;
+    let (status, _, body) = send(&router, write_request(None)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    // And the writes are not unbounded
+    let settings = RouterSettings {
+        request_timeout: Duration::from_secs(30),
+        write_timeout: Duration::from_millis(200),
+        ..self::settings()
+    };
+    let (_db, router) = self::router(Duration::from_secs(2), None, settings).await?;
+    let started = std::time::Instant::now();
+    let (status, _, _) = send(&router, write_request(None)).await;
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+    assert!(started.elapsed() < Duration::from_secs(1));
+    // The other requests keep their own timeout
+    let (status, _, _) = send(&router, get_request("/health/live")).await;
+    assert_eq!(status, StatusCode::OK);
+    Ok(())
+}
+
 #[tokio::test]
 #[serial]
 async fn the_vacuum_has_a_timeout_of_its_own() -> Result<()> {
     // Slower than the timeout of the other requests, faster than its own
     let settings = RouterSettings {
         request_timeout: Duration::from_millis(200),
+        write_timeout: Duration::from_millis(200),
         maintenance_timeout: Duration::from_secs(10),
         ..settings()
     };
