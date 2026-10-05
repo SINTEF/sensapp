@@ -10,7 +10,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 function withCode(text: string): ReactNode {
   return text.split('`').map((part, index) =>
     index % 2 === 1 ? (
-      <code key={index} className="font-mono text-[0.8em] bg-base-200 px-1 py-0.5 rounded">
+      <code key={index} className="font-mono text-[0.8em] bg-base-200 px-0.5 py-0.5 rounded">
         {part}
       </code>
     ) : (
@@ -54,52 +54,60 @@ export function LoadPage() {
   });
 
   return (
-    <div className="max-w-4xl mx-auto flex flex-col gap-3">
-      <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm">
-        <div className="px-4 py-3 border-b border-base-300">
-          <h1 className="text-sm font-semibold">Load data into SensApp</h1>
-          <p className="text-xs text-base-content/60 mt-1">
-            Pick the way that fits your data, copy the code, and run it. The address in it is the one of this server.
-            Everything else SensApp reads is in the <a className="link" href="/docs" target="_blank" rel="noopener noreferrer">API docs</a>.
+    <div className="flex flex-col gap-5 px-1 sm:px-2 pt-2 pb-8">
+      <div>
+        <h1 className="font-display text-xl font-semibold">Load data into SensApp</h1>
+        <p className="text-sm text-base-content/65 mt-1">
+          Pick the way that fits your data, copy the code, and run it. The address in it is the one of this server. Everything else SensApp
+          reads is in the{' '}
+          <a className="link" href="/docs" target="_blank" rel="noopener noreferrer">
+            API docs
+          </a>
+          .
+        </p>
+      </div>
+
+      <div role="tablist" aria-label="Way to load data" className="flex gap-1 sm:gap-3 border-b border-base-300" onKeyDown={handleTabKey}>
+        {LOAD_WAYS.map((item) => (
+          <button
+            key={item.id}
+            id={`load-tab-${item.id}`}
+            type="button"
+            role="tab"
+            aria-selected={way === item.id}
+            aria-controls="load-panel"
+            tabIndex={way === item.id ? 0 : -1}
+            className={`whitespace-nowrap px-3 sm:px-4 py-2.5 -mb-px border-b-2 text-sm font-medium transition-colors cursor-pointer ${
+              way === item.id
+                ? 'border-primary text-base-content'
+                : 'border-transparent text-base-content/55 hover:text-base-content hover:border-base-content/25'
+            }`}
+            onClick={() => choose(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <div id="load-panel" role="tabpanel" aria-labelledby={`load-tab-${way}`} className="flex flex-col">
+        {authenticated && (
+          <p className="text-sm border-l-4 border-primary/60 pl-3 py-1 mb-2">
+            This server asks for a token. Loading needs the <code className="font-mono">write</code> scope: make one with{' '}
+            <code className="font-mono">{WRITE_TOKEN_COMMAND}</code>. The code reads it from <code className="font-mono">SENSAPP_TOKEN</code>.
           </p>
-        </div>
-
-        <div role="tablist" aria-label="Way to load data" className="flex flex-wrap gap-1 px-3 pt-3" onKeyDown={handleTabKey}>
-          {LOAD_WAYS.map((item) => (
-            <button
-              key={item.id}
-              id={`load-tab-${item.id}`}
-              type="button"
-              role="tab"
-              aria-selected={way === item.id}
-              aria-controls="load-panel"
-              tabIndex={way === item.id ? 0 : -1}
-              className={`btn btn-quiet btn-sm ${way === item.id ? 'btn-active' : ''}`}
-              onClick={() => choose(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-
-        <div id="load-panel" role="tabpanel" aria-labelledby={`load-tab-${way}`} className="p-4 flex flex-col gap-6">
-          {authenticated && (
-            <p className="text-xs rounded-lg bg-base-200 px-3 py-2">
-              This server asks for a token. Loading needs the <code className="font-mono">write</code> scope: make one with{' '}
-              <code className="font-mono">{WRITE_TOKEN_COMMAND}</code>. The code reads it from <code className="font-mono">SENSAPP_TOKEN</code>.
-            </p>
-          )}
+        )}
+        <div className="flex flex-col divide-y divide-base-300">
           {sections.map((section) => (
-            <div key={section.title} className="flex flex-col gap-2">
+            <section key={section.title} className="grid gap-x-8 gap-y-3 py-6 first:pt-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
               <div>
-                <h2 className="text-sm font-semibold">{section.title}</h2>
-                <p className="text-xs text-base-content/70 mt-0.5">{withCode(section.description)}</p>
+                <h2 className="text-base font-semibold">{section.title}</h2>
+                <p className="text-sm text-base-content/70 mt-1 leading-relaxed">{withCode(section.description)}</p>
               </div>
               <CodeBlock code={section.code} language={section.language} label={section.title} />
-            </div>
+            </section>
           ))}
         </div>
-      </section>
+      </div>
     </div>
   );
 }

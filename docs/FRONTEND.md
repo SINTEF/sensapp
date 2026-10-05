@@ -45,7 +45,7 @@ The **Code** button of the header opens the code that loads what the explorer sh
 
 ## Load Data
 
-The second tab of the header (`/ui/load`) explains how to get data into SensApp, with code to copy (the same dark block and copy button as the Code dialog). It is short on purpose, enough to start; `/docs` is the reference. The way is a tab of the page and is in the address (`/ui/load?via=telegraf`; `python`, `telegraf`, `prometheus`, `curl`; Python when it is missing or unknown).
+The second tab of the header (`/ui/load`) explains how to get data into SensApp, with code to copy (the same dark block and copy button as the Code dialog). It is short on purpose, enough to start; `/docs` is the reference. No card: the page uses the whole width, with underlined tabs like the header's, and a section is a title and a sentence on the left, its code on the right (stacked on a narrow screen). The way is a tab of the page and is in the address (`/ui/load?via=telegraf`; `python`, `telegraf`, `prometheus`, `curl`; Python when it is missing or unknown).
 
 - **Python SDK**: a whole DataFrame (sent by slices of 100 000 samples, as [PYTHON_SDK.md](PYTHON_SDK.md#timeouts) advises), one sample at a time, a few samples at a time. Same `uv run` header as the Code dialog.
 - **Telegraf**: `outputs.influxdb_v2` against `/api/v2/write` with a few inputs (see [INFLUX_DB.md](INFLUX_DB.md)), and how to check it (`--once`).
