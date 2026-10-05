@@ -9,7 +9,7 @@ export function ChartOptions() {
   return (
     <div className="flex items-center gap-1">
       <select
-        className="select select-bordered select-xs text-xs h-7"
+        className="select select-xs text-xs h-7 w-auto"
         aria-label="Style"
         title="Style"
         value={chartStyle}

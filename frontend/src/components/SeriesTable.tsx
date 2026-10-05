@@ -9,6 +9,7 @@ import { usePrefersDark } from '../lib/usePrefersDark';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import type { SeriesInfo } from '../stores/useSelectionStore';
 import { ErrorAlert, Loading } from './Feedback';
+import { Panel } from './Panel';
 
 function labelsToRecord(
   labels?: Array<Record<string, string>>
@@ -39,6 +40,7 @@ export function SeriesTable() {
     toggleSeries,
     selectSeries,
     unselectSeries,
+    clearSelectedSeries,
     setHoveredSeries,
     labelFilter,
     setLabelFilter,
@@ -116,36 +118,87 @@ export function SeriesTable() {
   const visibleSelected = sortedSeries.filter((s) => selectedOf(s)).length;
 
   if (!selectedMetric) {
-    return null;
+    return (
+      <Panel title="Series">
+        <div className="text-center py-8 text-base-content/30">
+          <p className="text-sm">Select a metric to browse series</p>
+        </div>
+      </Panel>
+    );
   }
 
-  return (
-    <div className="flex flex-col h-full gap-2">
-      <div className="flex flex-wrap gap-2 items-center shrink-0">
-        <input
-          type="text"
-          placeholder={exampleSelector(labelsList[0], columns.length > 0 ? columns : dimensions)}
-          className="input input-bordered input-xs font-mono text-xs flex-1 min-w-44 max-w-xs h-7"
-          value={selectorInput}
-          onChange={(e) => {
-            setSelectorInput(e.target.value);
-            setBookmarks([]);
-          }}
-        />
-        <input
-          type="text"
-          placeholder="Quick filter..."
-          className="input input-bordered input-xs text-xs min-w-28 max-w-40 h-7"
-          value={labelFilter}
-          onChange={(e) => setLabelFilter(e.target.value)}
-        />
-        {selectedSeries.length > 0 && (
-          <span className="text-xs text-primary font-medium">
-            {selectedSeries.length} selected
-          </span>
-        )}
-      </div>
+  const paged = bookmarks.length > 0 || !!next;
+  const controls = (
+    <>
+      <input
+        type="text"
+        placeholder={exampleSelector(labelsList[0], columns.length > 0 ? columns : dimensions)}
+        aria-label="Selector"
+        className="input input-xs font-mono text-xs flex-1 min-w-32 max-w-56 h-7"
+        value={selectorInput}
+        onChange={(e) => {
+          setSelectorInput(e.target.value);
+          setBookmarks([]);
+        }}
+      />
+      <input
+        type="text"
+        placeholder="Quick filter..."
+        aria-label="Quick filter"
+        className="input input-xs text-xs w-28 h-7"
+        value={labelFilter}
+        onChange={(e) => setLabelFilter(e.target.value)}
+      />
+      {!isLoading && !error && (
+        <span className="text-xs text-base-content/40">
+          {filteredSeries.length !== series.length && `${filteredSeries.length} of `}
+          {series.length} series
+          {paged && ' on this page'}
+        </span>
+      )}
+      {paged && (
+        <div className="join">
+          <button
+            className="join-item btn btn-xs btn-quiet"
+            aria-label="Previous page"
+            disabled={bookmarks.length === 0}
+            onClick={() => setBookmarks(bookmarks.slice(0, -1))}
+          >
+            ‹
+          </button>
+          <button
+            className="join-item btn btn-xs btn-quiet"
+            aria-label="Next page"
+            disabled={!next}
+            onClick={() => next && setBookmarks([...bookmarks, next])}
+          >
+            ›
+          </button>
+        </div>
+      )}
+      {selectedSeries.length > 0 && (
+        <button className="btn btn-ghost btn-xs text-base-content/60 ml-auto" onClick={clearSelectedSeries}>
+          Clear ({selectedSeries.length})
+        </button>
+      )}
+    </>
+  );
 
+  return (
+    <Panel
+      title={
+        <>
+          Series{' '}
+          <code
+            className="text-primary bg-primary/5 px-1 py-0.5 rounded text-xs font-mono inline-block max-w-32 truncate align-bottom"
+            title={selectedMetric}
+          >
+            {selectedMetric}
+          </code>
+        </>
+      }
+      controls={controls}
+    >
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
       {isLoading && <Loading />}
 
@@ -275,35 +328,9 @@ export function SeriesTable() {
               })}
             </tbody>
           </table>
-          <div className="sticky bottom-0 bg-base-100 flex items-center justify-between pt-2 text-xs text-base-content/40">
-            <span>
-              {filteredSeries.length} series
-              {filteredSeries.length !== series.length && ` (${series.length} on this page)`}
-            </span>
-            {(bookmarks.length > 0 || next) && (
-              <div className="join">
-                <button
-                  className="join-item btn btn-xs btn-quiet"
-                  aria-label="Previous page"
-                  disabled={bookmarks.length === 0}
-                  onClick={() => setBookmarks(bookmarks.slice(0, -1))}
-                >
-                  ‹
-                </button>
-                <button
-                  className="join-item btn btn-xs btn-quiet"
-                  aria-label="Next page"
-                  disabled={!next}
-                  onClick={() => next && setBookmarks([...bookmarks, next])}
-                >
-                  ›
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       )}
       </div>
-    </div>
+    </Panel>
   );
 }

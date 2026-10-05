@@ -39,7 +39,7 @@ export function TimeRangeSelector() {
   }
 
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-2 items-center">
+    <div className="contents">
       {/* Where the window is: back to the one before, earlier, wider, later */}
       <div className="join">
         <button
@@ -92,18 +92,18 @@ export function TimeRangeSelector() {
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-1 text-xs text-base-content/50">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5 text-xs text-base-content/50">
         <span>from</span>
         <input
           type="datetime-local"
-          className="input input-bordered input-xs text-xs h-7"
+          className="input input-xs text-xs h-7 w-44"
           value={toLocalDatetime(timeRange.start)}
           onChange={(e) => handleStartChange(e.target.value)}
         />
         <span>to</span>
         <input
           type="datetime-local"
-          className="input input-bordered input-xs text-xs h-7"
+          className="input input-xs text-xs h-7 w-44"
           value={toLocalDatetime(timeRange.end)}
           onChange={(e) => handleEndChange(e.target.value)}
         />
@@ -111,7 +111,7 @@ export function TimeRangeSelector() {
 
       <div className="flex items-center gap-1 sm:ml-auto">
         <select
-          className="select select-bordered select-xs text-xs h-7"
+          className="select select-xs text-xs h-7 w-auto"
           aria-label="Step"
           title="Step"
           value={step}
@@ -126,7 +126,7 @@ export function TimeRangeSelector() {
           ))}
         </select>
         <select
-          className="select select-bordered select-xs text-xs h-7"
+          className="select select-xs text-xs h-7 w-auto"
           aria-label="Aggregation"
           title="Aggregation"
           value={aggregation}

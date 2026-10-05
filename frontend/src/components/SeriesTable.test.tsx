@@ -77,6 +77,27 @@ describe('SeriesTable', () => {
     expect(screen.getByText('string')).toBeInTheDocument();
   });
 
+  it('counts the series in the row of the filters, and says when it is the page or the filter', async () => {
+    const user = userEvent.setup();
+    renderTable();
+    expect(await screen.findByText('2 series')).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText('Quick filter...'), 'beta');
+    expect(screen.getByText('1 of 2 series')).toBeInTheDocument();
+  });
+
+  it('has the pager in that row too, and counts the page', async () => {
+    mockListSeries.mockResolvedValue({
+      data: {
+        ...catalog,
+        'hydra:view': { '@type': 'hydra:PartialCollectionView', 'hydra:next': '/series?bookmark=p2', 'hydra:itemsPerPage': 2 },
+      },
+    });
+    renderTable();
+    expect(await screen.findByText('2 series on this page')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeEnabled();
+  });
+
   describe('sorting', () => {
     const hosts = () =>
       screen
@@ -229,7 +250,7 @@ describe('SeriesTable', () => {
       expect(first).toBeChecked();
       expect(first.style.getPropertyValue('--input-color')).toBe(SERIES_COLORS.light[0]);
       expect(second.style.getPropertyValue('--input-color')).toBe(SERIES_COLORS.light[1]);
-      expect(screen.getByText('2 selected')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Clear (2)' })).toBeInTheDocument();
     });
 
     it('does not decide for the user when there are too many series', async () => {

@@ -16,3 +16,14 @@ Branch: `frontend-good-enough`.
 
 Looked at in a browser, light and dark, at 1280 and 1600 px wide. Not looked at: the phone width, which these
 changes do not touch.
+
+## Vertical space (same day)
+
+- The controls of the chart (back, earlier, zoom out, later, presets, the two dates on one line, step, aggregation)
+  moved from a bar below the chart into its header, next to the style and the scale. This undoes the "below the
+  chart" of the fourth round, on purpose: the room is worth more to the chart.
+- `Panel` (`components/Panel.tsx`): the title and the controls of the Metrics and Series cards share one row. The
+  series count is there too ("3 of 12 series", "on this page" with a pager) and the footer of the list is gone;
+  "3 selected" went, `Clear (3)` says it.
+- A radio button on each metric. When the page opens on a metric (the address) the list scrolls to it, once; a
+  click does not move the list.
