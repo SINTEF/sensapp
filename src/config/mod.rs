@@ -89,6 +89,13 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_JWT_SECRET")]
     pub jwt_secret: Option<String>,
 
+    /// Previous secrets, separated by commas, that still verify tokens but never sign them: the
+    /// way to rotate `SENSAPP_JWT_SECRET`. Put the new secret in `SENSAPP_JWT_SECRET` and the
+    /// old one here until its tokens have expired, then remove it. Dropping a secret refuses
+    /// every token it signed, which is also how tokens are revoked.
+    #[config(env = "SENSAPP_JWT_PREVIOUS_SECRETS")]
+    pub jwt_previous_secrets: Option<String>,
+
     /// Run without authentication: every endpoint is open. The explicit opt-out for demos and
     /// networks that authenticate in front of SensApp. Ignored when `SENSAPP_JWT_SECRET` is set.
     #[config(env = "SENSAPP_AUTH_DISABLED", default = false)]
@@ -104,6 +111,18 @@ impl SensAppConfig {
         let c = SensAppConfig::builder().env().file(settings_file).load()?;
 
         Ok(c)
+    }
+
+    /// The secrets of `SENSAPP_JWT_PREVIOUS_SECRETS`, one per comma-separated item.
+    pub fn previous_jwt_secrets(&self) -> Vec<String> {
+        self.jwt_previous_secrets
+            .as_deref()
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|secret| !secret.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 
     pub fn parse_http_body_limit(&self) -> Result<usize, Error> {
@@ -176,6 +195,22 @@ mod tests {
         temp_env::with_var("SENSAPP_PORT", Some("8080"), || {
             let config = SensAppConfig::load().unwrap();
             assert_eq!(config.port, 8080);
+        });
+    }
+
+    #[test]
+    fn test_previous_jwt_secrets() {
+        temp_env::with_var("SENSAPP_JWT_PREVIOUS_SECRETS", None::<&str>, || {
+            assert!(
+                SensAppConfig::load()
+                    .unwrap()
+                    .previous_jwt_secrets()
+                    .is_empty()
+            );
+        });
+        temp_env::with_var("SENSAPP_JWT_PREVIOUS_SECRETS", Some(" one ,two,, "), || {
+            let secrets = SensAppConfig::load().unwrap().previous_jwt_secrets();
+            assert_eq!(secrets, vec!["one".to_string(), "two".to_string()]);
         });
     }
 

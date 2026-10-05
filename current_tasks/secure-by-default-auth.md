@@ -22,4 +22,6 @@ Until now authentication was opt-in (`SENSAPP_JWT_SECRET`), tokens came only fro
 
 ## Progress
 
-- Started.
+- Step 1 done: `resolve_auth_mode`, `SENSAPP_AUTH_DISABLED`, `generate-secret`. The dev token of a made secret has every scope (including `admin`) and lasts 24 hours, because the CLI cannot mint another one with a secret that only lives in the process.
+- Step 2 done: `admin` scope, `jti`, `iss`/`aud` (tokens made by hand need them), `kid` and `SENSAPP_JWT_PREVIOUS_SECRETS`, the `Token` scheme, `subject` and `token_id` in the request log span, `TokenRequest` shared by the CLI and the future endpoint.
+- Found: `http::server::tests::frontend_openapi_document_is_up_to_date` already failed before this task (the saved `frontend/openapi.json` is stale); step 3 regenerates it.

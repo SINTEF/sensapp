@@ -41,6 +41,7 @@ arrow-array = "60"
 anyhow = "1.0"
 async-trait = "0.1"
 thiserror = "2.0"
+sha2 = "0.10"
 axum = { version = "0.8", features = ["multipart", "macros"] }
 base64 = "0.22"
 futures = "0.3"

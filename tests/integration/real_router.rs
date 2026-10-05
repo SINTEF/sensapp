@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
-use jsonwebtoken::{EncodingKey, Header, encode};
 use sensapp::config::load_configuration_for_tests;
 use sensapp::datamodel::batch::Batch;
 use sensapp::datamodel::{Metric, SensAppDateTime, SensorData};
@@ -17,7 +16,6 @@ use sensapp::http::metrics::HttpMetrics;
 use sensapp::http::server::{RouterSettings, build_router};
 use sensapp::http::state::HttpServerState;
 use sensapp::storage::{LabelMatcher, ListSeriesResult, StorageInstance};
-use serde::Serialize;
 use serial_test::serial;
 use std::sync::Arc;
 use std::time::Duration;
@@ -159,31 +157,17 @@ async fn router_with(
     Ok((test_db, build_router(state, &settings)))
 }
 
-#[derive(Serialize)]
-struct Claims {
-    sub: String,
-    exp: u64,
-    scope: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sensors: Option<Vec<String>>,
-}
-
 fn token(scope: &str) -> String {
     token_for_sensors(scope, None)
 }
 
+/// A token made the way `sensapp generate-token` makes it.
 fn token_for_sensors(scope: &str, sensors: Option<Vec<String>>) -> String {
-    encode(
-        &Header::default(),
-        &Claims {
-            sub: "test".into(),
-            exp: 4_102_444_800,
-            scope: scope.into(),
-            sensors,
-        },
-        &EncodingKey::from_secret(SECRET.as_bytes()),
-    )
-    .expect("token")
+    AuthConfig::from_secret(SECRET)
+        .expect("secret")
+        .issue_token("test", scope, 3600, sensors)
+        .expect("token")
+        .token
 }
 
 fn write_request(token: Option<&str>) -> Request<Body> {

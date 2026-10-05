@@ -146,6 +146,9 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
                         uri = %request.uri(),
                         version = ?request.version(),
                         request_id = %request_id,
+                        // Filled by the authentication, to tell who did what
+                        subject = tracing::field::Empty,
+                        token_id = tracing::field::Empty,
                     )
                 })
                 .on_response(trace::DefaultOnResponse::new().level(Level::INFO))

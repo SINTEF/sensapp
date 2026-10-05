@@ -51,6 +51,9 @@ struct TestClaims {
     scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sensors: Option<Vec<String>>,
+    // The issuer and the audience SensApp requires, set by `TestClaims::new`
+    iss: &'static str,
+    aud: &'static str,
 }
 
 fn make_token(claims: &TestClaims) -> String {
@@ -70,6 +73,8 @@ fn read_write_token() -> String {
         iat: Some(0),
         scope: Some("read write".into()),
         sensors: None,
+        iss: "sensapp",
+        aud: "sensapp",
     })
 }
 
@@ -81,6 +86,8 @@ fn sensor_token(scope: &str, sensors: &[&str]) -> String {
         iat: None,
         scope: Some(scope.into()),
         sensors: Some(sensors.iter().map(|sensor| (*sensor).into()).collect()),
+        iss: "sensapp",
+        aud: "sensapp",
     })
 }
 
@@ -92,6 +99,8 @@ fn read_only_token() -> String {
         iat: Some(0),
         scope: Some("read".into()),
         sensors: None,
+        iss: "sensapp",
+        aud: "sensapp",
     })
 }
 
@@ -103,6 +112,8 @@ fn write_only_token() -> String {
         iat: Some(0),
         scope: Some("write".into()),
         sensors: None,
+        iss: "sensapp",
+        aud: "sensapp",
     })
 }
 
@@ -114,6 +125,8 @@ fn expired_token() -> String {
         iat: None,
         scope: Some("read write".into()),
         sensors: None,
+        iss: "sensapp",
+        aud: "sensapp",
     })
 }
 
@@ -125,6 +138,8 @@ fn not_yet_valid_token() -> String {
         iat: None,
         scope: Some("read write".into()),
         sensors: None,
+        iss: "sensapp",
+        aud: "sensapp",
     })
 }
 
@@ -400,6 +415,8 @@ async fn auth_rejects_wrong_secret() {
             iat: None,
             scope: Some("read write".into()),
             sensors: None,
+            iss: "sensapp",
+            aud: "sensapp",
         },
         &EncodingKey::from_secret(b"wrong-secret-that-is-long-enough!!"),
     )
@@ -565,6 +582,116 @@ async fn prometheus_metrics_is_always_public() {
 }
 
 // ---------------------------------------------------------------------------
+// Tests: token scheme, issuer and rotated secrets
+// ---------------------------------------------------------------------------
+
+async fn status_of(app: Router, request: Request<Body>) -> StatusCode {
+    app.oneshot(request).await.unwrap().status()
+}
+
+#[tokio::test]
+#[serial]
+async fn auth_accepts_the_token_scheme_of_influxdb_clients() {
+    let db = TestDb::new().await.expect("test db");
+    let auth = AuthConfig::from_secret(TEST_SECRET).unwrap();
+    let issued = auth
+        .issue_token("telegraf", "read write", 3600, None)
+        .unwrap();
+    let app = build_test_router(db.storage(), Some(auth));
+
+    let write = Request::post("/publish")
+        .header("authorization", format!("Token {}", issued.token))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"[{"n":"temperature","u":"Cel","v":22.5,"t":1700000000}]"#,
+        ))
+        .unwrap();
+    let status = status_of(app.clone(), write).await;
+    assert_ne!(status, StatusCode::UNAUTHORIZED);
+    assert_ne!(status, StatusCode::FORBIDDEN);
+
+    let read = Request::get("/metrics")
+        .header("authorization", format!("Token {}", issued.token))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(status_of(app.clone(), read).await, StatusCode::OK);
+
+    // Another scheme is still not a token
+    let basic = Request::get("/metrics")
+        .header("authorization", format!("Basic {}", issued.token))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(status_of(app, basic).await, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+#[serial]
+async fn auth_rejects_a_token_of_another_issuer() {
+    let db = TestDb::new().await.expect("test db");
+    let auth = AuthConfig::from_secret(TEST_SECRET).unwrap();
+    let app = build_test_router(db.storage(), Some(auth));
+
+    // Signed with the right secret, but by another system
+    let token = encode(
+        &Header::default(),
+        &TestClaims {
+            sub: "other-system".into(),
+            exp: 4_102_444_800,
+            nbf: None,
+            iat: None,
+            scope: Some("read write".into()),
+            sensors: None,
+            iss: "another-system",
+            aud: "sensapp",
+        },
+        &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+    )
+    .unwrap();
+    let request = Request::get("/metrics")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(status_of(app, request).await, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+#[serial]
+async fn auth_secret_rotation_keeps_then_drops_the_old_tokens() {
+    const OLD_SECRET: &str = "old-secret-0123456789abcdef0123456789";
+    let db = TestDb::new().await.expect("test db");
+    let old_token = AuthConfig::from_secret(OLD_SECRET)
+        .unwrap()
+        .issue_token("client", "read", 3600, None)
+        .unwrap()
+        .token;
+    let get_metrics = |token: &str| {
+        Request::get("/metrics")
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    // Rotation under way: the new secret signs, the old one still verifies
+    let rotating = AuthConfig::from_secret(TEST_SECRET)
+        .unwrap()
+        .with_previous_secrets(&[OLD_SECRET.to_string()])
+        .unwrap();
+    let app = build_test_router(db.storage(), Some(rotating));
+    assert_eq!(
+        status_of(app, get_metrics(&old_token)).await,
+        StatusCode::OK
+    );
+
+    // The old secret is dropped: its tokens are revoked
+    let rotated = AuthConfig::from_secret(TEST_SECRET).unwrap();
+    let app = build_test_router(db.storage(), Some(rotated));
+    assert_eq!(
+        status_of(app, get_metrics(&old_token)).await,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Tests: token creation via AuthConfig
 // ---------------------------------------------------------------------------
 
@@ -572,8 +699,9 @@ async fn prometheus_metrics_is_always_public() {
 fn auth_config_create_token_roundtrip() {
     let config = AuthConfig::from_secret(TEST_SECRET).unwrap();
     let token = config
-        .create_token("my-service", "read write", 3600, None)
-        .expect("token creation");
+        .issue_token("my-service", "read write", 3600, None)
+        .expect("token creation")
+        .token;
 
     // Validate it by decoding
     let mut headers = axum::http::HeaderMap::new();
@@ -592,13 +720,14 @@ fn auth_config_create_token_roundtrip() {
 fn auth_config_create_token_with_sensor_filter() {
     let config = AuthConfig::from_secret(TEST_SECRET).unwrap();
     let token = config
-        .create_token(
+        .issue_token(
             "sensor-reader",
             "read",
             3600,
             Some(vec!["cpu_temp".to_string(), "fan_speed".to_string()]),
         )
-        .expect("token creation");
+        .expect("token creation")
+        .token;
 
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(
@@ -836,6 +965,8 @@ fn delete_token() -> String {
         iat: None,
         scope: Some("delete".into()),
         sensors: None,
+        iss: "sensapp",
+        aud: "sensapp",
     })
 }
 
