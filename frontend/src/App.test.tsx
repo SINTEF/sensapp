@@ -93,7 +93,7 @@ describe('App integration', () => {
   it('renders the header with the name and the docs link', async () => {
     render(<App />, { wrapper: createWrapper() });
 
-    expect(screen.getByText('SensApp')).toBeInTheDocument();
+    expect(screen.getByAltText('SensApp')).toBeInTheDocument();
 
     const docsLink = screen.getByText('API Docs').closest('a');
     expect(docsLink).toHaveAttribute('href', '/docs');
@@ -135,7 +135,7 @@ describe('App integration', () => {
   it('renders the application shell', () => {
     render(<App />, { wrapper: createWrapper() });
 
-    expect(screen.getByText('SensApp')).toBeInTheDocument();
+    expect(screen.getByAltText('SensApp')).toBeInTheDocument();
     expect(screen.getByText('Sensor Data Explorer')).toBeInTheDocument();
   });
 });

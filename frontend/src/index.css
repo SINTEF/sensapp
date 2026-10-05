@@ -10,24 +10,65 @@
 }
 
 @plugin "daisyui" {
-  themes: light --default, dark --prefersdark;
+  themes: false;
   logs: false;
 }
 
+/*
+ * The colors come from the logo: its navy blue is the primary color, the grey of its dish the
+ * neutral one. The surfaces have a hint of that blue. The colors of the series are another matter
+ * (src/lib/palette.ts): they have to be told apart, not to match the logo.
+ */
 @plugin "daisyui/theme" {
   name: "light";
   default: true;
   color-scheme: light;
-  --color-primary: #2563eb;
-  --color-primary-content: #ffffff;
-  --color-secondary: #7c3aed;
-  --color-secondary-content: #ffffff;
-  --color-accent: #059669;
-  --color-accent-content: #ffffff;
-  --color-neutral: #1f2937;
   --color-base-100: #ffffff;
-  --color-base-200: #f8fafc;
-  --color-base-300: #e2e8f0;
+  --color-base-200: #f3f6fa;
+  --color-base-300: #dce4ed;
+  --color-base-content: #17222e;
+  --color-primary: #1d4f7f;
+  --color-primary-content: #ffffff;
+  --color-secondary: #5d6f83;
+  --color-secondary-content: #ffffff;
+  --color-accent: #0f7f86;
+  --color-accent-content: #ffffff;
+  --color-neutral: #1c2b3a;
+  --color-neutral-content: #f3f6fa;
+  --color-info: #2f78b8;
+  --color-info-content: #ffffff;
+  --color-success: #1f8a4c;
+  --color-success-content: #ffffff;
+  --color-warning: #d99a00;
+  --color-warning-content: #1f1600;
+  --color-error: #c93c3c;
+  --color-error-content: #ffffff;
+}
+
+@plugin "daisyui/theme" {
+  name: "dark";
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: #1d232a;
+  --color-base-200: #151a20;
+  --color-base-300: #2d3641;
+  --color-base-content: #e4eaf1;
+  --color-primary: #6aa8de;
+  --color-primary-content: #0b1a2a;
+  --color-secondary: #8fa0b3;
+  --color-secondary-content: #10161d;
+  --color-accent: #3cb4b8;
+  --color-accent-content: #08191a;
+  --color-neutral: #2d3641;
+  --color-neutral-content: #e4eaf1;
+  --color-info: #5aa0e0;
+  --color-info-content: #08182a;
+  --color-success: #3dbb78;
+  --color-success-content: #06180e;
+  --color-warning: #e0a919;
+  --color-warning-content: #1f1600;
+  --color-error: #e36767;
+  --color-error-content: #240808;
 }
 
 @theme {

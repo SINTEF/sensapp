@@ -198,7 +198,7 @@ export function SeriesTable() {
                     )}
                     {mixedTypes && (
                       <td>
-                        <span className="badge badge-xs badge-outline">{s['sensor:type']}</span>
+                        <span className="badge badge-xs badge-outline">{s['sensor:type'].toLowerCase()}</span>
                       </td>
                     )}
                     <td

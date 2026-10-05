@@ -2,6 +2,13 @@ import { Link, Outlet } from 'react-router-dom';
 import { AuthDialog } from './AuthDialog';
 import { AuthStatus } from './AuthStatus';
 
+// The files of public/, served next to the page (`BASE_URL` is `/ui/` when SensApp serves them)
+const base = import.meta.env.BASE_URL;
+const logo = `${base}sensapp_logo-fs8.png`;
+const logoWhite = `${base}sensapp_logo_white-fs8.png`;
+const logoSmall = `${base}sensapp_logo_small-fs8.png`;
+const logoSmallWhite = `${base}sensapp_logo_small_white-fs8.png`;
+
 export function Layout() {
   return (
     <div className="min-h-screen lg:h-screen flex flex-col bg-base-200 lg:overflow-hidden">
@@ -9,11 +16,14 @@ export function Layout() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-3 h-14">
             <div className="flex items-center gap-3">
-              <Link to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                </svg>
-                <span className="text-lg font-bold tracking-tight">SensApp</span>
+              <Link to="/" className="flex items-center hover:opacity-80 transition-opacity">
+                {/* The white logo on a dark page, the small one (no name) on a narrow screen */}
+                <picture>
+                  <source media="(min-width: 640px) and (prefers-color-scheme: dark)" srcSet={logoWhite} />
+                  <source media="(min-width: 640px)" srcSet={logo} />
+                  <source media="(prefers-color-scheme: dark)" srcSet={logoSmallWhite} />
+                  <img src={logoSmall} alt="SensApp" className="h-10 w-auto" />
+                </picture>
               </Link>
               <div className="hidden sm:block text-xs text-base-content/40 border-l border-base-300 pl-3 ml-1">
                 Sensor Data Explorer

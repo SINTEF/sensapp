@@ -115,6 +115,17 @@ describe('MetricsTable', () => {
     expect(within(table).getByText('string')).toBeInTheDocument();
   });
 
+  it('colors the type badge of a type that the server capitalizes', async () => {
+    const [cpu] = sampleMetrics['dcat:dataset'];
+    mockListMetrics.mockResolvedValue({
+      data: { ...sampleMetrics, 'dcat:dataset': [{ ...cpu, 'sensor:type': 'Float' }] },
+    });
+    render(<MetricsTable />, { wrapper: createWrapper() });
+
+    const badge = await within(await screen.findByRole('table')).findByText('float');
+    expect(badge).toHaveClass('badge-primary');
+  });
+
   it('selects a metric when clicking a row and updates store', async () => {
     const user = userEvent.setup();
     render(<MetricsTable />, { wrapper: createWrapper() });

@@ -37,8 +37,9 @@ export function MetricsTable() {
     }
   }
 
+  // The server says `Float`, the filter above `float`
   function sensorTypeBadgeClass(type: string): string {
-    switch (type) {
+    switch (type.toLowerCase()) {
       case 'float':
       case 'numeric':
         return 'badge-primary';
@@ -129,8 +130,9 @@ export function MetricsTable() {
                     }`}
                     onClick={() => handleSelectMetric(metric)}
                   >
-                    <td>
-                      <div className="max-w-64 truncate" title={name}>
+                    {/* Takes what the other columns leave, and cuts the name there (`max-w-0` is what lets it) */}
+                    <td className="w-full max-w-0">
+                      <div className="truncate" title={name}>
                         <span className="font-mono text-xs font-medium">{name}</span>
                         {metric['sensor:unit'] && (
                           <span className="text-xs text-base-content/40 ml-1">({metric['sensor:unit']})</span>
@@ -139,14 +141,14 @@ export function MetricsTable() {
                     </td>
                     <td>
                       <span className={`badge badge-sm ${sensorTypeBadgeClass(metric['sensor:type'])}`}>
-                        {metric['sensor:type']}
+                        {metric['sensor:type'].toLowerCase()}
                       </span>
                     </td>
                     <td className="tabular-nums text-xs">
                       {seriesCount ?? '—'}
                     </td>
                     <td className="hidden sm:table-cell">
-                      <div className="flex flex-wrap gap-1 max-w-56">
+                      <div className="flex flex-wrap gap-1 max-w-44">
                         {dimensions.slice(0, 5).map((dim) => (
                           <span key={dim} className="badge badge-xs badge-outline font-mono">
                             {dim}
