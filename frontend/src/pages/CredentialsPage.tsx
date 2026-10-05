@@ -10,6 +10,7 @@ import { Loading } from '../components/Feedback';
 import { useMetrics } from '../hooks/useMetrics';
 import { copyText } from '../lib/copyText';
 import { ADMIN_TOKEN_COMMAND, addSensor, tokenCommand, tokenScopes } from '../lib/credentials';
+import { randomName } from '../lib/names';
 import { describeToken, useAuthStore } from '../stores/useAuthStore';
 
 const DAY = 24 * 3600;
@@ -121,7 +122,8 @@ function SensorsField({
   );
 }
 
-function CreatedTokenRow({ created, onDone }: { created: CreatedToken; onDone: () => void }) {
+/** The token that was just made, under the button that made it. */
+function CreatedTokenResult({ created, onDone }: { created: CreatedToken; onDone: () => void }) {
   const [copied, setCopied] = useState<boolean | null>(null);
 
   async function handleCopy() {
@@ -130,7 +132,7 @@ function CreatedTokenRow({ created, onDone }: { created: CreatedToken; onDone: (
   }
 
   return (
-    <Row title="Your token" description="This is the only time it is shown: SensApp does not keep tokens. Copy it now.">
+    <div className="flex flex-col gap-3 rounded-box border border-base-300 p-3">
       <div className="flex gap-2">
         <input
           readOnly
@@ -143,6 +145,7 @@ function CreatedTokenRow({ created, onDone }: { created: CreatedToken; onDone: (
           {copied === true ? 'Copied' : copied === false ? 'Failed' : 'Copy'}
         </button>
       </div>
+      <p className="text-xs text-base-content/60">SensApp does not keep tokens, copy it now.</p>
 
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-base-content/60">For</dt>
@@ -171,7 +174,7 @@ function CreatedTokenRow({ created, onDone }: { created: CreatedToken; onDone: (
           Done
         </button>
       </div>
-    </Row>
+    </div>
   );
 }
 
@@ -222,20 +225,23 @@ function TokenMaker({ token, canRead, isAdmin }: { token: string | null; canRead
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col divide-y divide-base-300">
-      {mutation.isSuccess && <CreatedTokenRow created={mutation.data} onDone={() => mutation.reset()} />}
-
       <Row title="Name" description="Who or what the token is for. It is the subject of the token, and in the logs of every request it makes.">
-        <input
-          name="subject"
-          aria-label="Name"
-          required
-          maxLength={128}
-          autoComplete="off"
-          placeholder="edge-device-7"
-          className="input input-bordered input-sm w-full"
-          value={subject}
-          onChange={(event) => setSubject(event.target.value)}
-        />
+        <div className="flex gap-2">
+          <input
+            name="subject"
+            aria-label="Name"
+            required
+            maxLength={128}
+            autoComplete="off"
+            placeholder="edge-device-7"
+            className="input input-bordered input-sm w-full"
+            value={subject}
+            onChange={(event) => setSubject(event.target.value)}
+          />
+          <button type="button" className="btn btn-sm" aria-label="Random name" title="Random name" onClick={() => setSubject(randomName())}>
+            🎲
+          </button>
+        </div>
       </Row>
 
       <Row
@@ -275,26 +281,12 @@ function TokenMaker({ token, canRead, isAdmin }: { token: string | null; canRead
       </Row>
 
       <Row
-        title="Command line"
-        description={
-          <>
-            The same token, made where SensApp runs: it needs the secret. It is the only way to make an {code('admin')} token. In a container, put{' '}
-            {code('docker exec <container>')} in front, on Kubernetes {code('kubectl exec deploy/<release> --')}.
-          </>
-        }
-      >
-        <CodeBlock code={tokenCommand(wish) + '\n'} language="bash" label="Command that makes the token" />
-      </Row>
-
-      <Row
         title="Make it here"
         description={
-            isAdmin ? (
-              'The token is shown once, at the top of the page.'
-            ) : (
-              <>Needs a token with the {code('admin')} scope, which gives nothing else: the command has {code('read')} too, to browse the data with it.</>
-            )
-          }
+          isAdmin ? undefined : (
+            <>Needs a token with the {code('admin')} scope, which gives nothing else: the command has {code('read')} too, to browse the data with it.</>
+          )
+        }
       >
         {isAdmin ? (
           <>
@@ -309,6 +301,7 @@ function TokenMaker({ token, canRead, isAdmin }: { token: string | null; canRead
                 {mutation.isPending ? 'Making…' : 'Make the token'}
               </button>
             </div>
+            {mutation.isSuccess && <CreatedTokenResult created={mutation.data} onDone={() => mutation.reset()} />}
           </>
         ) : (
           <>
@@ -323,6 +316,18 @@ function TokenMaker({ token, canRead, isAdmin }: { token: string | null; canRead
             </div>
           </>
         )}
+      </Row>
+
+      <Row
+        title="Command line"
+        description={
+          <>
+            The same token, made where SensApp runs: it needs the secret. It is the only way to make an {code('admin')} token. In a container, put{' '}
+            {code('docker exec <container>')} in front, on Kubernetes {code('kubectl exec deploy/<release> --')}.
+          </>
+        }
+      >
+        <CodeBlock code={tokenCommand(wish) + '\n'} language="bash" label="Command that makes the token" />
       </Row>
     </form>
   );

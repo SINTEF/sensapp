@@ -78,7 +78,7 @@ describe('CredentialsPage', () => {
     renderPage();
     await screen.findByRole('textbox', { name: 'Name' });
     const titles = screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
-    expect(titles).toEqual(['Name', 'Valid for', 'What it may do', 'Only these sensors', 'Command line', 'Make it here']);
+    expect(titles).toEqual(['Name', 'Valid for', 'What it may do', 'Only these sensors', 'Make it here', 'Command line']);
   });
 
   it('shows the form and the command, and how to get an admin token, to a server that wants a token', async () => {
@@ -141,6 +141,18 @@ describe('CredentialsPage', () => {
     );
   });
 
+  it('fills the name with a random one, to click again for another', async () => {
+    const user = userEvent.setup();
+    useAuthStore.setState({ token: ADMIN });
+    renderPage();
+
+    const name = await screen.findByRole('textbox', { name: 'Name' });
+    await user.click(screen.getByRole('button', { name: 'Random name' }));
+    expect((name as HTMLInputElement).value).toMatch(/^[a-z]+-[a-z]+-[a-z]+-\d{1,2}$/);
+    expect(command()).toContain(`generate-token ${(name as HTMLInputElement).value} `);
+    expect(screen.getByRole('button', { name: 'Make the token' })).toBeEnabled();
+  });
+
   it('makes an admin token with the command only', async () => {
     const user = userEvent.setup();
     useAuthStore.setState({ token: ADMIN });
@@ -177,7 +189,9 @@ describe('CredentialsPage', () => {
       body: { subject: 'edge-7', scope: ['read', 'write'], sensors: ['temperature', 'cpu,usage'], duration_seconds: 3600 },
     });
 
-    expect(await screen.findByText(/only time it is shown/)).toBeInTheDocument();
+    expect(await screen.findByText(/does not keep tokens/)).toBeInTheDocument();
+    // The token is under the button, before the command line
+    expect(submit.compareDocumentPosition(screen.getByRole('textbox', { name: 'Token' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Token' })).toHaveValue('made.by.sensapp');
     expect(screen.getByLabelText('Export of the token')).toHaveTextContent('export SENSAPP_TOKEN=made.by.sensapp');
     expect(screen.getByText(created.jti)).toBeInTheDocument();
