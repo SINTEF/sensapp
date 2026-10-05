@@ -136,6 +136,6 @@ describe('App integration', () => {
     render(<App />, { wrapper: createWrapper() });
 
     expect(screen.getByAltText('SensApp')).toBeInTheDocument();
-    expect(screen.getByText('Sensor Data Explorer')).toBeInTheDocument();
+    expect(screen.getByText('Data Explorer')).toBeInTheDocument();
   });
 });

@@ -13,7 +13,7 @@ export function Layout() {
   return (
     <div className="min-h-screen lg:h-screen flex flex-col bg-base-200 lg:overflow-hidden">
       <header className="bg-base-100 border-b border-base-300 sticky top-0 z-50">
-        <div className="px-3 sm:px-4 lg:px-6">
+        <div className="px-3">
           <div className="flex items-center justify-between gap-3 h-14">
             <div className="flex items-center gap-3">
               <Link to="/" className="flex items-center hover:opacity-80 transition-opacity">
@@ -25,8 +25,8 @@ export function Layout() {
                   <img src={logoSmall} alt="SensApp" className="h-10 w-auto" />
                 </picture>
               </Link>
-              <div className="hidden sm:block text-xs text-base-content/40 border-l border-base-300 pl-3 ml-1">
-                Sensor Data Explorer
+              <div className="hidden sm:block font-display text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-base-content/45 border-l border-base-300 pl-3 ml-1">
+                Data Explorer
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -47,7 +47,7 @@ export function Layout() {
         </div>
       </header>
 
-      <main className="flex-1 lg:min-h-0 w-full px-3 sm:px-4 lg:px-6 py-3">
+      <main className="flex-1 lg:min-h-0 w-full p-3">
         <Outlet />
       </main>
       <AuthDialog />

@@ -9,6 +9,15 @@
   src: url("@fontsource-variable/roboto/files/roboto-latin-wght-normal.woff2") format("woff2-variations");
 }
 
+/* The display face, for the few words of the header that are not the logo. */
+@font-face {
+  font-family: "Sora Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("@fontsource-variable/sora/files/sora-latin-wght-normal.woff2") format("woff2-variations");
+}
+
 @plugin "daisyui" {
   themes: false;
   logs: false;
@@ -72,6 +81,7 @@
 }
 
 @theme {
+  --font-display: "Sora Variable", "Roboto Variable", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Roboto Variable", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
@@ -120,6 +130,13 @@ html, body, #root {
   background: color-mix(in oklab, var(--color-primary) 16%, transparent);
   border-color: color-mix(in oklab, var(--color-primary) 55%, transparent);
   color: var(--color-primary);
+}
+
+/* The ghost buttons (API Docs, Clear) get the wash of the quiet ones, nothing else */
+.btn.btn-ghost:hover:not(:disabled) {
+  background: var(--wash);
+  border-color: transparent;
+  box-shadow: none;
 }
 
 /* A label or a dimension: a wash, no frame */

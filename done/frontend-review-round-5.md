@@ -27,3 +27,13 @@ changes do not touch.
   "3 selected" went, `Clear (3)` says it.
 - A radio button on each metric. When the page opens on a metric (the address) the list scrolls to it, once; a
   click does not move the list.
+
+## Spacing, hover, title (same day)
+
+- The page had 24 px at the sides (`lg:px-6`) and 12 px between the cards and below: it is 12 px (`p-3`, `gap-3`)
+  all around now, the header included, so the logo lines up with the cards.
+- Hover: the ghost buttons (API Docs, Clear, Sign out) had daisyUI's hover, the bar buttons their own. Both use
+  the same wash now (`--wash`); the quiet ones also darken their border. "Sign in" was an outline in the primary
+  color that filled on hover: it is a quiet button too.
+- "Sensor Data Explorer" is "Data Explorer", in capitals with wide tracking, in Sora (variable, latin only,
+  34 kB, `@fontsource-variable/sora`), the one place it is used (`font-display`).

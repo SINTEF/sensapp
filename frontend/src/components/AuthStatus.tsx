@@ -31,7 +31,7 @@ export function AuthStatus() {
 
   if (authRequired) {
     return (
-      <button className="btn btn-outline btn-primary btn-xs" onClick={openDialog}>
+      <button className="btn btn-quiet btn-xs" onClick={openDialog}>
         Sign in
       </button>
     );
