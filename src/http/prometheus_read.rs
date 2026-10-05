@@ -187,6 +187,7 @@ fn verify_read_headers(headers: &HeaderMap) -> Result<(), AppError> {
 #[utoipa::path(
     post,
     path = "/api/v1/prometheus_remote_read",
+    security(("bearer" = ["read"])),
     tag = "Prometheus",
     request_body(
         content_type = "application/x-protobuf",

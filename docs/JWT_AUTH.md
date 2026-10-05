@@ -46,6 +46,9 @@ sensapp generate-token prometheus-scraper --scope read --duration 86400
 # Write-only, restricted to specific sensors
 sensapp generate-token edge-device --scope write --sensors "temperature,humidity,pressure"
 
+# A name with a comma in it: one --sensor for each name, kept as it is
+sensapp generate-token edge-device --scope write --sensor "cpu,usage" --sensor "mem used"
+
 # Permission to delete series and samples, never granted by default
 sensapp generate-token cleanup --scope delete --duration 900
 
@@ -63,6 +66,7 @@ The token is printed to stdout. In a container: `docker exec <container> sensapp
 | `--scope` | Comma-separated `read`, `write`, `delete`, `admin`, or `readwrite` (shorthand for `read,write`) | `read write` |
 | `--duration` | Token validity in seconds, at most ten years | `3600` (1 hour) |
 | `--sensors` | Comma-separated sensor name allow list | all sensors |
+| `--sensor` | One sensor name, as it is (a comma is part of the name); repeat it for several. Can be mixed with `--sensors` | all sensors |
 
 ### With an admin token
 
@@ -201,12 +205,16 @@ INFO request{method=POST uri=/api/v2/write … subject="telegraf" token_id="0ff6
 
 The token itself is never logged, and neither is the `Authorization` header.
 
+## API documentation
+
+The OpenAPI document (`/docs`) declares the bearer token as a security scheme and each protected operation names the scope it needs (`read`, `write`, `delete` or `admin`), `POST /api/v1/admin/tokens` included. `/prometheus/metrics` is public, and takes a `read` token for `include_latest_samples=true`.
+
 ## Security Notes
 
 - The secret must be kept private — anyone with the secret can create valid tokens, an admin token included. Use `sensapp generate-secret`, or any cryptographically random string of at least 32 characters.
 - Prefer short-lived tokens, rotate the secret now and then, and keep the admin token short.
 - Run SensApp behind TLS when it is reachable over a network: a token is a bearer credential.
-- The sensor allow list uses exact string matching on sensor names.
+- The sensor allow list uses exact string matching on sensor names, spaces and commas included: the names are kept exactly as given. The JSON array of the endpoint and `--sensor` can hold a name with a comma, `--sensors` splits on commas.
 - When present, the sensor allow list applies to all API reads and writes, including Prometheus and InfluxDB compatibility endpoints. Catalog and selector results omit other sensors; direct series requests for another sensor return 404, and writes to another sensor return 403.
 - With authentication enabled, `/prometheus/metrics?include_latest_samples=true` requires a read token and applies its sensor allow list. Plain `/prometheus/metrics` stays public for service monitoring.
 - Sensor-scoped tokens cannot run the database-wide `/api/v1/admin/vacuum` operation.

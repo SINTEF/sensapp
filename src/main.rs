@@ -199,7 +199,8 @@ fn build_auth(
 /// Usage: sensapp generate-token <subject> [OPTIONS]
 ///   --scope <read|write|delete|admin|readwrite,...>  (default: "read write")
 ///   --duration <seconds>            (default: 3600)
-///   --sensors <name1,name2,...>      (optional sensor allow list)
+///   --sensors <name1,name2,...>      (optional sensor allow list, comma separated)
+///   --sensor <name>                  (one sensor name as it is, commas included; repeat it)
 fn generate_token_command(args: &[String]) -> Result<()> {
     load_configuration().context("Failed to load configuration")?;
     let config = config::get().context("Failed to get configuration")?;
@@ -220,7 +221,12 @@ fn generate_token_command(args: &[String]) -> Result<()> {
             "  --scope <scopes>                Comma-separated read, write, delete, admin, or readwrite (default: \"read write\")"
         );
         eprintln!("  --duration <seconds>            Token validity duration (default: 3600)");
-        eprintln!("  --sensors <name1,name2,...>      Restrict to specific sensors");
+        eprintln!(
+            "  --sensors <name1,name2,...>      Restrict to specific sensors, comma separated"
+        );
+        eprintln!(
+            "  --sensor <name>                 Restrict to one sensor, named as it is (a comma is part of the name). Repeat it"
+        );
         eprintln!();
         eprintln!("Environment:");
         eprintln!("  SENSAPP_JWT_SECRET              Required. The shared secret for signing.");
@@ -249,13 +255,17 @@ fn generate_token_command(args: &[String]) -> Result<()> {
             "--sensors" => {
                 i += 1;
                 let raw = args.get(i).context("--sensors requires a value")?;
-                sensors = Some(
+                sensors.get_or_insert_with(Vec::new).extend(
                     raw.split(',')
                         .map(str::trim)
                         .filter(|name| !name.is_empty())
-                        .map(str::to_string)
-                        .collect(),
+                        .map(str::to_string),
                 );
+            }
+            "--sensor" => {
+                i += 1;
+                let name = args.get(i).context("--sensor requires a name")?;
+                sensors.get_or_insert_with(Vec::new).push(name.clone());
             }
             other => {
                 anyhow::bail!("Unknown option: {other}");

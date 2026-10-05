@@ -164,6 +164,7 @@ impl FromStr for Precision {
 #[utoipa::path(
     post,
     path = "/api/v2/write",
+    security(("bearer" = ["write"])),
     tag = "InfluxDB",
     request_body(
         content = String,

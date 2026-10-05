@@ -223,6 +223,14 @@
         ],
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "bearerFormat": "JWT",
+        "description": "A JWT signed with the secret of the server, sent as `Authorization: Bearer <token>` (`Authorization: Token <token>`, which InfluxDB clients send, works too). Each operation lists the scope it needs: `read`, `write`, `delete` or `admin`. Make one with `sensapp generate-token`, or with `POST /api/v1/admin/tokens` and an `admin` token (the Credentials tab of the web UI does). With authentication disabled (`SENSAPP_AUTH_DISABLED`) no token is needed.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -294,6 +302,13 @@
             "description": "Authentication is disabled: there is nothing to sign a token with"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "admin"
+            ]
+          }
+        ],
         "summary": "Create a token",
         "tags": [
           "Admin"
@@ -335,6 +350,13 @@
             "description": "The request took longer than SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS (one hour by default), and the storage backend may carry on after the answer"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "delete"
+            ]
+          }
+        ],
         "summary": "Database Vacuuming",
         "tags": [
           "Admin"
@@ -417,6 +439,13 @@
             "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Prometheus Remote Read API.",
         "tags": [
           "Prometheus"
@@ -506,6 +535,13 @@
             "description": "The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "write"
+            ]
+          }
+        ],
         "summary": "Prometheus Remote Write API.",
         "tags": [
           "Prometheus"
@@ -567,6 +603,13 @@
             "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Simple PromQL query endpoint.",
         "tags": [
           "SensApp"
@@ -670,6 +713,13 @@
             "description": "The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "write"
+            ]
+          }
+        ],
         "summary": "InfluxDB Compatible Write API.",
         "tags": [
           "InfluxDB"
@@ -778,6 +828,13 @@
             "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
         "summary": "List unique metrics (measurement types) with aggregated information in DCAT catalog format.",
         "tags": [
           "SensApp"
@@ -828,6 +885,14 @@
             "description": "Prometheus-compatible metrics"
           }
         },
+        "security": [
+          {},
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
         "tags": [
           "Observability"
         ]
@@ -896,6 +961,13 @@
             "description": "The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "write"
+            ]
+          }
+        ],
         "summary": "SensApp native data ingestion API supporting multiple formats.",
         "tags": [
           "SensApp"
@@ -960,6 +1032,13 @@
             "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
         "summary": "List all series (time series) in DCAT catalog format.",
         "tags": [
           "SensApp"
@@ -1004,6 +1083,13 @@
             "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "delete"
+            ]
+          }
+        ],
         "summary": "Delete a series: all its samples, its labels and the sensor itself.",
         "tags": [
           "Admin"
@@ -1127,6 +1213,13 @@
             "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Get series data in various formats based on query parameter.",
         "tags": [
           "SensApp"
@@ -1196,6 +1289,13 @@
             "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Get presence and optional bucket coverage for a series over a time window.",
         "tags": [
           "SensApp"
@@ -1256,6 +1356,13 @@
             "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Get the most recent sample for a series, optionally within a bounded time window.",
         "tags": [
           "SensApp"
@@ -1323,6 +1430,13 @@
             "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
           }
         },
+        "security": [
+          {
+            "bearer": [
+              "delete"
+            ]
+          }
+        ],
         "summary": "Delete the samples of a series between `start` and `end`, both inclusive.",
         "tags": [
           "Admin"

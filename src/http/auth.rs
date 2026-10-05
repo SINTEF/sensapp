@@ -398,10 +398,11 @@ impl TokenRequest {
                 if names.len() > MAX_SENSORS {
                     return Err(invalid(format!("More than {MAX_SENSORS} sensors")));
                 }
+                // A name is kept exactly as given, spaces and commas included: it is matched
+                // exactly against the names of the sensors
                 let mut cleaned: Vec<String> = Vec::with_capacity(names.len());
                 for name in names {
-                    let name = name.trim();
-                    if name.is_empty() {
+                    if name.trim().is_empty() {
                         return Err(invalid("A sensor name is empty".into()));
                     }
                     if name.chars().count() > MAX_SENSOR_NAME_LENGTH {
@@ -409,8 +410,8 @@ impl TokenRequest {
                             "A sensor name is longer than {MAX_SENSOR_NAME_LENGTH} characters"
                         )));
                     }
-                    if !cleaned.iter().any(|known| known == name) {
-                        cleaned.push(name.to_string());
+                    if !cleaned.contains(&name) {
+                        cleaned.push(name);
                     }
                 }
                 Some(cleaned)
@@ -1145,7 +1146,7 @@ mod tests {
         let request = TokenRequest::new(
             "  edge-7 ",
             "readwrite",
-            Some(vec![" temp ".into(), "humidity".into(), "temp".into()]),
+            Some(vec!["temp".into(), "humidity".into(), "temp".into()]),
             3600,
             &ENDPOINT_RULES,
         )
@@ -1157,6 +1158,28 @@ mod tests {
             Some(vec!["temp".to_string(), "humidity".to_string()])
         );
         assert_eq!(request.duration_seconds, 3600);
+    }
+
+    #[test]
+    fn sensor_names_are_kept_exactly_commas_and_spaces_included() {
+        let names = vec![
+            "cpu,usage".to_string(),
+            " padded ".to_string(),
+            "cpu usage_idle".to_string(),
+        ];
+        let request =
+            TokenRequest::new("a", "read", Some(names.clone()), 60, &ENDPOINT_RULES).unwrap();
+        assert_eq!(request.sensors, Some(names));
+
+        // ...and the token matches them exactly
+        let config = make_config();
+        let issued = request.issue(&config).unwrap();
+        let access = validate_token(&bearer_headers(&issued.token), &config).unwrap();
+        assert!(access.can_access_sensor("cpu,usage"));
+        assert!(access.can_access_sensor(" padded "));
+        assert!(!access.can_access_sensor("padded"));
+        assert!(!access.can_access_sensor("cpu"));
+        assert!(!access.can_access_sensor("usage"));
     }
 
     #[test]
@@ -1173,6 +1196,7 @@ mod tests {
         assert!(ask("a", "read", None, ENDPOINT_RULES.max_duration_seconds + 1).is_err());
         assert!(ask("a", "read", Some(vec![]), 60).is_err());
         assert!(ask("a", "read", Some(vec!["".into()]), 60).is_err());
+        assert!(ask("a", "read", Some(vec!["  ".into()]), 60).is_err());
         assert!(ask("a", "read", Some(vec!["x".repeat(257)]), 60).is_err());
         assert!(ask("a", "read", Some(vec!["s".into(); 1001]), 60).is_err());
     }

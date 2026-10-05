@@ -374,6 +374,7 @@ fn last_sample_json(samples: &crate::datamodel::TypedSamples) -> Option<(String,
 #[utoipa::path(
     get,
     path = "/metrics",
+    security(("bearer" = ["read"])),
     tag = "SensApp",
     params(
         ("name" = Option<String>, Query, description = "Filter metrics by name (substring match)"),
@@ -620,6 +621,7 @@ async fn list_filtered_series(
 #[utoipa::path(
     get,
     path = "/series",
+    security(("bearer" = ["read"])),
     tag = "SensApp",
     params(
         ("metric" = Option<String>, Query, description = "Filter series by metric name"),
@@ -829,6 +831,7 @@ pub async fn list_series(
 #[utoipa::path(
     get,
     path = "/series/{series_uuid}",
+    security(("bearer" = ["read"])),
     tag = "SensApp",
     params(
         ("series_uuid" = String, Path, description = "UUID of the series"),
@@ -1038,6 +1041,7 @@ pub async fn get_series_data(
 #[utoipa::path(
     get,
     path = "/series/{series_uuid}/last",
+    security(("bearer" = ["read"])),
     tag = "SensApp",
     params(
         ("series_uuid" = String, Path, description = "UUID of the series"),
@@ -1120,6 +1124,7 @@ pub async fn get_series_last_sample(
 #[utoipa::path(
     delete,
     path = "/series/{series_uuid}",
+    security(("bearer" = ["delete"])),
     tag = "Admin",
     params(
         ("series_uuid" = String, Path, description = "UUID of the series to delete")
@@ -1188,6 +1193,7 @@ pub async fn delete_series(
 #[utoipa::path(
     delete,
     path = "/series/{series_uuid}/samples",
+    security(("bearer" = ["delete"])),
     tag = "Admin",
     params(
         ("series_uuid" = String, Path, description = "UUID of the series"),
@@ -1277,6 +1283,7 @@ pub async fn delete_series_samples(
 #[utoipa::path(
     get,
     path = "/series/{series_uuid}/availability",
+    security(("bearer" = ["read"])),
     tag = "SensApp",
     params(
         ("series_uuid" = String, Path, description = "UUID of the series"),

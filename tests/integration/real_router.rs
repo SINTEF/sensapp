@@ -769,11 +769,12 @@ async fn an_admin_makes_tokens_that_do_what_they_were_made_for() -> Result<()> {
 
     // The sensors of the request limit the token
     let mut wish = token_wish("one-sensor", &["read", "write"], 60);
-    wish["sensors"] = serde_json::json!([" only_this ", "only_this"]);
+    wish["sensors"] = serde_json::json!(["only,this", "only,this"]);
     let (status, _, body) = send(&router, create_token_request(Some(&admin), wish)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let created: serde_json::Value = serde_json::from_str(&body)?;
-    assert_eq!(created["sensors"], serde_json::json!(["only_this"]));
+    // A comma is part of a name, and a repeated name is kept once
+    assert_eq!(created["sensors"], serde_json::json!(["only,this"]));
     assert_eq!(created["scope"], serde_json::json!(["read", "write"]));
     Ok(())
 }

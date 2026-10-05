@@ -59,8 +59,36 @@ use tracing::Level;
 use utoipa::{OpenApi, ToSchema};
 use utoipa_scalar::{Scalar, Servable as ScalarServable};
 
+/// Declares the bearer token every protected operation refers to (`security` of each path).
+struct SecurityAddon;
+
+impl utoipa::Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+        let components = openapi.components.get_or_insert_with(Default::default);
+        components.add_security_scheme(
+            "bearer",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("JWT")
+                    .description(Some(
+                        "A JWT signed with the secret of the server, sent as `Authorization: Bearer <token>` \
+                         (`Authorization: Token <token>`, which InfluxDB clients send, works too). Each operation \
+                         lists the scope it needs: `read`, `write`, `delete` or `admin`. Make one with \
+                         `sensapp generate-token`, or with `POST /api/v1/admin/tokens` and an `admin` token \
+                         (the Credentials tab of the web UI does). With authentication disabled \
+                         (`SENSAPP_AUTH_DISABLED`) no token is needed.",
+                    ))
+                    .build(),
+            ),
+        );
+    }
+}
+
 #[derive(OpenApi)]
 #[openapi(
+    modifiers(&SecurityAddon),
     tags(
         (name = "SensApp", description = "SensApp API"),
         (name = "InfluxDB", description = "InfluxDB Write API"),
@@ -373,6 +401,7 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
 #[utoipa::path(
     post,
     path = "/publish",
+    security(("bearer" = ["write"])),
     tag = "SensApp",
     request_body(
         content = String,
@@ -582,6 +611,7 @@ struct CreatedToken {
 #[utoipa::path(
     post,
     path = "/api/v1/admin/tokens",
+    security(("bearer" = ["admin"])),
     tag = "Admin",
     request_body = CreateTokenRequest,
     responses(
@@ -658,6 +688,7 @@ async fn create_token(
 #[utoipa::path(
     post,
     path = "/api/v1/admin/vacuum",
+    security(("bearer" = ["delete"])),
     tag = "Admin",
     responses(
         (status = 200, description = "Maintenance completed, with the number of duplicate samples removed", body = VacuumResponse),
@@ -792,6 +823,68 @@ mod tests {
         for (path, _) in writes {
             assert!(paths.contains_key(path), "missing OpenAPI path: {path}");
         }
+    }
+
+    #[test]
+    fn protected_operations_declare_the_scope_they_need() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI document");
+        assert_eq!(
+            document["components"]["securitySchemes"]["bearer"]["scheme"],
+            "bearer"
+        );
+
+        let public = ["/", "/health/live", "/health/ready", "/docs"];
+        for (path, operations) in document["paths"].as_object().expect("OpenAPI paths") {
+            for (method, operation) in operations.as_object().expect("operations") {
+                let security = operation.get("security");
+                if public.contains(&path.as_str()) {
+                    assert!(security.is_none(), "{method} {path} is public");
+                    continue;
+                }
+                let requirements = security
+                    .and_then(|security| security.as_array())
+                    .unwrap_or_else(|| panic!("{method} {path} does not declare its scope"));
+                // A token with one scope, or (the service metrics) no token at all
+                let scopes: Vec<&str> = requirements
+                    .iter()
+                    .filter_map(|requirement| requirement.get("bearer"))
+                    .flat_map(|scopes| scopes.as_array().unwrap())
+                    .filter_map(|scope| scope.as_str())
+                    .collect();
+                assert_eq!(scopes.len(), 1, "{method} {path}: {requirements:?}");
+                assert!(
+                    ["read", "write", "delete", "admin"].contains(&scopes[0]),
+                    "{method} {path}: {scopes:?}"
+                );
+            }
+        }
+
+        let scope_of = |path: &str, method: &str| -> String {
+            document["paths"][path][method]["security"]
+                .as_array()
+                .and_then(|requirements| {
+                    requirements
+                        .iter()
+                        .find_map(|requirement| requirement["bearer"][0].as_str())
+                })
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert_eq!(scope_of("/publish", "post"), "write");
+        assert_eq!(scope_of("/api/v2/write", "post"), "write");
+        assert_eq!(scope_of("/series/{series_uuid}", "get"), "read");
+        assert_eq!(scope_of("/series/{series_uuid}", "delete"), "delete");
+        assert_eq!(scope_of("/api/v1/admin/vacuum", "post"), "delete");
+        assert_eq!(scope_of("/api/v1/admin/tokens", "post"), "admin");
+        // Public, but a token with `read` gets the latest samples
+        let metrics = &document["paths"]["/prometheus/metrics"]["get"]["security"];
+        assert!(
+            metrics
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|requirement| requirement.as_object().unwrap().is_empty())
+        );
     }
 
     /// Helper to get test database URL - uses the centralized constant from test_utils
