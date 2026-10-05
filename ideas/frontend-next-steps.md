@@ -13,9 +13,13 @@ What was left out of `done/frontend-good-enough.md` on purpose, most useful firs
   series at a time, and the box would only add combining series (`avg by (room)`, through `/api/v1/query`).
   Revisit when someone asks for that.
 - Not planned: dashboards, alerting, a query builder (Grafana's job).
-- **More than 8 series at once.** The colors of the series are eight validated hues and are used again past
-  eight (a series list of 9 selected has two blue ones). The dataviz guidance says to fold into "Other" or
-  facet; today the user is trusted not to select that many. A warning past 8, or a small multiples view, if it
-  turns out to matter.
+- **An overview of the whole life of the series** in place of the echarts slider that was removed (the drag on the
+  chart and the bar below it do the zooming now): `/series/{uuid}/availability` could say where there is data, as
+  a thin strip above the time bar, clicking in it sets the window. A third thing to look at, so only if people
+  lose their way in long histories.
+- **Wheel zoom and pan by drag** on the chart. The drag is a selection (as in Grafana) and the wheel scrolls the
+  page on small screens; `‹ ›` and `−` cover them.
+- **More than 24 series** repeat colors. Past 8 the colors cannot say which is which anyway (see
+  `docs/FRONTEND.md`); small multiples, or a warning, would be the answer.
 - **Auto-refresh** was declined at first, but a preset range now follows the clock every minute (the end is now),
   which is the same thing for the chart. A refresh switch would only be needed to stop it.

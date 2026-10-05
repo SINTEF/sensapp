@@ -40,8 +40,23 @@ Decision: **the time window of the store is the only window.** The chart draws e
 
 ## Steps
 
-1. [ ] Header alignment
-2. [ ] Time: store (history, pan, zoom out), the bar below the chart, brush zoom, progress bar
-3. [ ] Series list: sort, placeholder, colored checkbox, shared labels
-4. [ ] 24 colors, hover highlight
-5. [ ] Docs, live check, done/
+1. [x] Header alignment (same padding as the cards)
+2. [x] Time: store (history, pan, zoom out), the bar below the chart, brush zoom, progress bar
+3. [x] Series list: sort, placeholder, colored checkbox, shared labels (also trimmed from the chart names)
+4. [x] 24 colors, hover highlight, select all
+5. [x] Docs, live check
+
+## Results
+
+Checked in a browser against a live SensApp: a drag on the chart sets the window (the address gets `from` and
+`to`), the data is read again and finer, Back is enabled; 12 series each with a color of its own; hovering a row
+makes its line stand out. `npm test` (171), lint, typecheck, build pass.
+
+The palette: the light one stays in the validated lightness band, the dark one goes outside it (up to L 0.84) for
+the 16 extra colors: inside it there was no room (neighbours 4 apart). Numbers in `docs/FRONTEND.md`. The skill's
+normal-vision floor (15 between neighbours) cannot hold past 8 colors, which is what the hover is for.
+
+Found on the way: echarts adds buttons for its brush to the toolbox whatever is said (`brush.toolbox: []` brings
+the defaults back), so the toolbox is off (and so the save-as-image button with it); the header says "Drag on
+the chart to zoom". `ideas/influxdb-labels-without-tags.md`: the importer adds org and bucket only to lines that
+have tags. Not looked at: the logo alignment on a phone.

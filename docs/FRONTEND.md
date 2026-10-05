@@ -16,7 +16,19 @@ Two selectors next to the time range control what the server computes, as in the
 - **Step**: `Auto`, `Raw`, or a fixed duration (`5s` … `1d`). `Auto` reads ranges under about 2.8 hours as they are, and above that cuts the range in at most 2 000 buckets of a round duration, because the server refuses more than 100 000 raw samples of a series ([HTTP_LIMITS.md](HTTP_LIMITS.md)). `Raw` on a range that is too wide gets that refusal.
 - **Aggregation**: `avg`, `min`, `max`, `sum`, `count`, `first`, `last`, applied to the samples of each step. Disabled on `Raw`.
 
-Series are drawn as a `line`, `step`, `area`, `stacked` or `bars` chart, on a linear or `log` scale. The chart has no legend of its own: the list of series shows the color of each selected series, which it keeps for as long as it is selected. A series that is selected or unselected comes and goes with an animation, the others and the zoom stay. Booleans are drawn as a 0/1 step line on an axis of their own, whatever the style, and always read as they are (the server cannot aggregate them). Strings and locations are listed but not drawn.
+Series are drawn as a `line`, `step`, `area`, `stacked` or `bars` chart, on a linear or `log` scale. The chart has no legend of its own: the list of series shows the color of each selected series, which it keeps for as long as it is selected. A series that is selected or unselected comes and goes with an animation, the others stay. Hovering a row of the list makes its series stand out in the chart.
+
+### The time window
+
+There is one time window, the one of the explorer, and the chart draws exactly that. The chart has no zoom of its own (a zoom on points that were cut for another window shows the same coarse points bigger):
+
+- **Drag on the chart** to choose a window: it is asked of the server again, at the step that fits it (raw samples when zoomed in far enough). The old points stay, on the new axis, until the new ones arrive; a thin bar over the chart says it is loading.
+- **Below the chart**: `↶` goes back to the window before (the last 20 windows the user left; what the clock does to a preset is not one), `‹` and `›` move by half a window (`›` never goes past now, and is off on a live preset), `−` shows twice the window (a live preset goes to the next one), then the presets, the dates, the step and the aggregation.
+- A preset window is **live**: its end is now, and moves every minute while the tab is on screen. A window that was dragged, moved or typed is not.
+
+### Colors
+
+The first 8 series have the eight hues of the dataviz palette, validated for color-blind readers (neighbours are 8.4 or more apart in OKLab ×100 under protan and deutan vision, 19 or more with normal vision). The 16 colors after them are there so that no series repeats a color: each was chosen as the farthest, under normal and color-blind vision, from the ones before it. They are not equally good: the 9th to 11th are 10 or more from the others, from the 12th it goes down to 5 or 6. Past about 8 series the colors do not say which line is which, which is why hovering a row of the list highlights its line. The 25th series and the following ones take the colors again. A selected series keeps its color while it is selected. The colors are in `src/lib/palette.ts`, for the light and the dark theme. Booleans are drawn as a 0/1 step line on an axis of their own, whatever the style, and always read as they are (the server cannot aggregate them). Strings and locations are listed but not drawn.
 
 ## Address
 
@@ -35,7 +47,7 @@ The address follows the explorer without adding history entries. What is wrong i
 
 A preset range ends now: it moves on every minute while the tab is on screen, and when the tab comes back. Dates that were typed do not move.
 
-The list of series has a column for each label dimension, and the uuid in small. The Type column is there only when the series of a name are not all of one type: the server groups the metrics by name and type, so a name that exists as a float and as a string is two rows of the metrics list and one list of series. Choosing a metric with at most 8 series (the size of the palette) selects them all, the ones that can be drawn (numbers and booleans); with more, the choice is the user's.
+The list of series has a column for each label dimension, sorted by the first one (numbers inside the values as numbers: `node-2` before `node-10`; a click on a header sorts by it, again reverses it; the server pages by creation order so the sort is of the page on screen), and the uuid in small. A label that every series has the same is said once above the list instead of a column: the InfluxDB endpoint adds `influxdb_org` and `influxdb_bucket` on purpose, they are part of the identity of a series. The selector box suggests a selector made of labels of the first series. The checkbox of a selected series has the color of its line, and the one of the header selects what is on screen. The Type column is there only when the series of a name are not all of one type: the server groups the metrics by name and type, so a name that exists as a float and as a string is two rows of the metrics list and one list of series. Choosing a metric with at most 8 series (the size of the palette) selects them all, the ones that can be drawn (numbers and booleans); with more, the choice is the user's.
 
 The list of series is paged by the server (256 per page, cursor based): Previous and Next appear when there is more than one page, and the selection is kept from page to page. The theme follows the OS (light or dark), the chart included.
 
