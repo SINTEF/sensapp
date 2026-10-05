@@ -20,7 +20,11 @@ const HIGHLIGHT_AS: Record<SnippetLanguage, string> = { python: 'python', curl: 
 export default function CodeDialog({ onClose }: { onClose: () => void }) {
   const [language, setLanguage] = useState<SnippetLanguage>('python');
   const [copied, setCopied] = useState<boolean | null>(null);
-  const { selectedMetric, selectedSeries, timeRange, relativeRange, step, aggregation } = useSelectionStore();
+  const { selectedMetric, selectedSeries, selector, timeRange, relativeRange, step, aggregation } = useSelectionStore();
+  // A selector that is typed in the series list is what the code asks for, unless the user prefers the series that are checked
+  const [bySelector, setBySelector] = useState(true);
+  const typedSelector = selector.trim();
+  const useSelector = typedSelector !== '' && bySelector;
   const { token, authRequired } = useAuthStore();
 
   const code = useMemo(
@@ -29,13 +33,14 @@ export default function CodeDialog({ onClose }: { onClose: () => void }) {
         baseUrl: import.meta.env.VITE_SENSAPP_API_URL || window.location.origin,
         authenticated: token !== null || authRequired,
         metric: selectedMetric,
+        selector: useSelector ? typedSelector : undefined,
         series: selectedSeries,
         timeRange,
         relativeRange,
         step: resolveStep(step, timeRange.start, timeRange.end),
         aggregation,
       }),
-    [language, selectedMetric, selectedSeries, timeRange, relativeRange, step, aggregation, token, authRequired],
+    [language, selectedMetric, selectedSeries, useSelector, typedSelector, timeRange, relativeRange, step, aggregation, token, authRequired],
   );
   // highlight.js escapes the text it is given: what it returns is safe to put in the page
   const html = useMemo(() => hljs.highlight(code, { language: HIGHLIGHT_AS[language] }).value, [code, language]);
@@ -106,10 +111,27 @@ export default function CodeDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <div id="code-panel" role="tabpanel" aria-labelledby={`code-tab-${language}`} className="p-3 min-h-0 flex flex-col gap-2">
+          {typedSelector !== '' && (
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                className="checkbox checkbox-xs checkbox-primary"
+                checked={bySelector}
+                onChange={(event) => setBySelector(event.target.checked)}
+              />
+              <span className="min-w-0">
+                Read every series matching{' '}
+                <code className="font-mono bg-base-200 px-1 rounded inline-block max-w-56 truncate align-bottom" title={typedSelector}>
+                  {typedSelector}
+                </code>
+                {selectedSeries.length > 0 && ` instead of the ${selectedSeries.length} selected`}
+              </span>
+            </label>
+          )}
           <pre className="code-block rounded-lg px-4 py-3 overflow-auto min-h-0 max-h-[60vh]">
             <code dangerouslySetInnerHTML={{ __html: html }} />
           </pre>
-          {nothingSelected && (
+          {nothingSelected && !useSelector && (
             <p className="text-xs text-base-content/60">
               {selectedMetric
                 ? 'No series is selected: this lists the series of the metric. Select some to get their data.'

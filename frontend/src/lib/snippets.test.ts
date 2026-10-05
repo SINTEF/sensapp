@@ -94,6 +94,84 @@ describe('pythonSnippet', () => {
   });
 });
 
+describe('the script header', () => {
+  it('lets `uv run` install the SDK (PEP 723), and keeps the install command for the others', () => {
+    const code = pythonSnippet(base);
+    expect(code.startsWith('# /// script\n# requires-python = ">=3.14"\n# dependencies = ["sensapp"]\n')).toBe(true);
+    expect(code).toContain(
+      '# [tool.uv.sources.sensapp]\n# git = "https://github.com/SINTEF/sensapp.git"\n# subdirectory = "python/sensapp"\n# branch = "main"\n# ///',
+    );
+    expect(code).toContain('# ///\n');
+    expect(code).toContain("#   uv pip install 'git+https://github.com/SINTEF/sensapp.git@main#subdirectory=python/sensapp'");
+    // The block closes before the code starts
+    expect(code.indexOf('# ///\n', 5)).toBeLessThan(code.indexOf('import asyncio'));
+  });
+});
+
+describe('a selector', () => {
+  const selected: SnippetInput = { ...base, selector: '{host="a"}', metric: 'cpu value' };
+
+  it('asks the server for the series that match, in Python', () => {
+    const code = pythonSnippet(selected);
+    expect(code).toContain('catalog = await client.list_series(\n            metric="cpu value",\n            selector=\'{host="a"}\',\n        )');
+    expect(code).toContain('for info in catalog.series:');
+    expect(code).toContain('info.uuid,');
+    expect(code).not.toContain(UUID_A);
+    expect(code).not.toContain('SERIES');
+    // No step: nothing to say about types
+    expect(code).not.toContain('numeric');
+  });
+
+  it('reads a step only for the numbers among the series, whose type is not known yet', () => {
+    const code = pythonSnippet({ ...selected, step: '5m', aggregation: 'max' });
+    expect(code).toContain('numeric = info.sensor_type.lower() in ("integer", "float", "numeric")');
+    expect(code).toContain('step="5m" if numeric else None,');
+    expect(code).toContain('aggregation="max" if numeric else None,');
+  });
+
+  it('keeps the window of the explorer', () => {
+    expect(pythonSnippet({ ...selected, relativeRange: '24h' })).toContain('start = end - timedelta(hours=24)');
+    expect(pythonSnippet(selected)).toContain('start = "2026-10-05T09:00:00Z"');
+  });
+
+  it('quotes the selector whatever it holds', () => {
+    const both = pythonSnippet({ ...selected, selector: `{host=~"a.*", note="it's"}` });
+    expect(both).toContain('selector="{host=~\\"a.*\\", note=\\"it\'s\\"}",');
+    const ugly = pythonSnippet({ ...selected, selector: '{a="\n1"}' });
+    expect(ugly.split('\n').filter((l) => l.startsWith('1"'))).toHaveLength(0);
+  });
+
+  it('lists with curl, then reads each series with jq and a loop', () => {
+    const code = curlSnippet({ ...selected, authenticated: true });
+    expect(code).toContain("  --data-urlencode 'metric=cpu value' \\\n  --data-urlencode 'selector={host=\"a\"}' \\\n  'http://localhost:3000/series' |");
+    expect(code).toContain(`jq -r '.["dcat:dataset"][]["dct:identifier"]' |`);
+    expect(code).toContain('while read -r uuid; do');
+    // $uuid is the one thing the shell has to read
+    expect(code).toContain('"http://localhost:3000/series/$uuid?format=csv&start=2026-10-05T09:00:00Z&end=2026-10-05T10:00:00Z"');
+    expect(code.match(/Authorization: Bearer \$SENSAPP_TOKEN/g)).toHaveLength(2);
+    expect(code).not.toContain(UUID_A);
+  });
+
+  it('leaves the series a step cannot average out of the curl loop, and says so', () => {
+    const code = curlSnippet({ ...selected, step: '5m', aggregation: 'max' });
+    expect(code).toContain('select(.["sensor:type"] | ascii_downcase | IN("integer", "float", "numeric"))');
+    expect(code).toContain('step=5m&aggregation=max"');
+    expect(code).toContain('the numeric ones');
+  });
+
+  it('is not tricked by the selector, or by the address, in the shell', () => {
+    const code = curlSnippet({ ...selected, baseUrl: 'http://h"$(rm -rf ~)`x', selector: `{a="it's"}\nrm -rf ~` });
+    expect(code).toContain(`--data-urlencode 'selector={a="it'\\''s"}\nrm -rf ~'`);
+    expect(code).toContain('"http://h\\"\\$(rm -rf ~)\\`x/series/$uuid?');
+    // The comment stays on its line: a newline in the selector is only ever inside quotes
+    expect(code).toContain(`# The series that match {a="it's"} rm -rf ~\n`);
+  });
+
+  it('is ignored when it is blank', () => {
+    expect(pythonSnippet({ ...selected, selector: '  ' })).toContain(UUID_A);
+  });
+});
+
 describe('what the series are called', () => {
   const two: SnippetInput = {
     ...base,

@@ -12,6 +12,7 @@ beforeEach(() => {
   useAuthStore.setState({ token: null, authRequired: false });
   useSelectionStore.setState({
     selectedMetric: 'cpu',
+    selector: '',
     selectedSeries: [{ uuid: UUID, name: 'cpu', labels: { host: 'a' }, type: 'float', slot: 0 }],
     timeRange: { start: '2026-10-05T09:00:00.000Z', end: '2026-10-05T10:00:00.000Z' },
     relativeRange: null,
@@ -115,5 +116,24 @@ describe('CodeButton', () => {
     await second.click(screen.getByRole('button', { name: 'Code' }));
     await screen.findByRole('dialog', { name: 'Code' });
     expect(code()).toContain('client.list_metrics()');
+  });
+
+  it('asks for what the selector of the series matches, unless the user prefers the series that are checked', async () => {
+    useSelectionStore.setState({ selector: '{host="a"}' });
+    const user = await openDialog();
+    expect(code()).toContain(`selector='{host="a"}'`);
+    expect(code()).not.toContain(UUID);
+    const box = screen.getByRole('checkbox', { name: /Read every series matching/ });
+    expect(box).toBeChecked();
+    expect(screen.getByText(/instead of the 1 selected/)).toBeInTheDocument();
+
+    await user.click(box);
+    expect(code()).toContain(UUID);
+    expect(code()).not.toContain('selector=');
+  });
+
+  it('has no checkbox when no selector is typed', async () => {
+    await openDialog();
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 });

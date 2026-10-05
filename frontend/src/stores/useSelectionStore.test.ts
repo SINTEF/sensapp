@@ -11,6 +11,15 @@ describe('useSelectionStore', () => {
     setLabelFilter('');
   });
 
+  it('forgets the selector of the series when the metric changes: it was written for the others', () => {
+    const { result } = renderHook(() => useSelectionStore());
+    act(() => result.current.setSelectedMetric('cpu'));
+    act(() => result.current.setSelector('{host="a"}'));
+    expect(result.current.selector).toBe('{host="a"}');
+    act(() => result.current.setSelectedMetric('memory'));
+    expect(result.current.selector).toBe('');
+  });
+
   it('should have sensible default state', () => {
     const { result } = renderHook(() => useSelectionStore());
     expect(result.current.selectedMetric).toBeNull();

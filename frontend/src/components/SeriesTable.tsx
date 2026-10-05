@@ -44,9 +44,10 @@ export function SeriesTable() {
     setHoveredSeries,
     labelFilter,
     setLabelFilter,
+    selector: selectorInput,
+    setSelector,
   } = useSelectionStore();
   const dark = usePrefersDark();
-  const [selectorInput, setSelectorInput] = useState('');
   // The cursor of every page shown so far: the server only goes forward, so Previous pops one
   const [bookmarks, setBookmarks] = useState<string[]>([]);
   // Sorted by the first column, until another one is clicked, and again to reverse it
@@ -137,7 +138,7 @@ export function SeriesTable() {
         className="input input-xs font-mono text-xs flex-1 min-w-32 max-w-56 h-7"
         value={selectorInput}
         onChange={(e) => {
-          setSelectorInput(e.target.value);
+          setSelector(e.target.value);
           setBookmarks([]);
         }}
       />

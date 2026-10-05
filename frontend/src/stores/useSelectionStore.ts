@@ -52,6 +52,8 @@ interface SelectionState {
   step: string;
   aggregation: Aggregation;
   labelFilter: string;
+  /** What is typed in the selector box of the series (`{host="a"}`): the server lists the series that match */
+  selector: string;
   setSelectedMetric: (metric: string | null) => void;
   toggleSeries: (series: SeriesInfo) => void;
   /** Shows these series too */
@@ -75,6 +77,7 @@ interface SelectionState {
   setChartStyle: (style: ChartStyle) => void;
   setLogScale: (log: boolean) => void;
   setLabelFilter: (filter: string) => void;
+  setSelector: (selector: string) => void;
   setStep: (step: string) => void;
   setAggregation: (aggregation: Aggregation) => void;
 }
@@ -102,11 +105,12 @@ export const useSelectionStore = create<SelectionState>((set) => ({
   chartStyle: 'line',
   logScale: false,
   labelFilter: '',
+  selector: '',
   step: 'auto',
   aggregation: 'avg',
 
   setSelectedMetric: (metric) =>
-    set({ selectedMetric: metric, selectedSeries: [], hoveredSeries: null }),
+    set({ selectedMetric: metric, selectedSeries: [], hoveredSeries: null, selector: '' }),
 
   toggleSeries: (series) =>
     set((state) => {
@@ -188,6 +192,8 @@ export const useSelectionStore = create<SelectionState>((set) => ({
   setLogScale: (logScale) => set({ logScale }),
 
   setLabelFilter: (filter) => set({ labelFilter: filter }),
+
+  setSelector: (selector) => set({ selector }),
 
   setStep: (step) => set({ step }),
 

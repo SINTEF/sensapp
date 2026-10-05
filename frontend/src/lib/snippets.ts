@@ -10,6 +10,8 @@ export interface SnippetInput {
   /** The server asked for a token: the snippet reads it from `SENSAPP_TOKEN`, it never contains one */
   authenticated: boolean;
   metric: string | null;
+  /** The selector of the series list (`{host="a"}`). Set, the code asks the server for the series that match it. */
+  selector?: string;
   series: Array<{ uuid: string; name: string; labels: Record<string, string>; type: string }>;
   timeRange: TimeRange;
   /** A preset such as `24h`: the window is written relative to now, as it is on screen */
@@ -22,8 +24,21 @@ export interface SnippetInput {
 export const SNIPPET_LANGUAGES = ['python', 'curl'] as const;
 export type SnippetLanguage = (typeof SNIPPET_LANGUAGES)[number];
 
-export const INSTALL_COMMENT =
-  "uv pip install 'git+https://github.com/SINTEF/sensapp.git@main#subdirectory=python/sensapp'";
+const GIT_URL = 'https://github.com/SINTEF/sensapp.git';
+export const INSTALL_COMMENT = `uv pip install 'git+${GIT_URL}@main#subdirectory=python/sensapp'`;
+
+/** The block that `uv run` reads (PEP 723): the script says what it needs, and where the SDK comes from. */
+const SCRIPT_METADATA = [
+  '# /// script',
+  '# requires-python = ">=3.14"',
+  '# dependencies = ["sensapp"]',
+  '#',
+  '# [tool.uv.sources.sensapp]',
+  `# git = "${GIT_URL}"`,
+  '# subdirectory = "python/sensapp"',
+  '# branch = "main"',
+  '# ///',
+];
 export const TOKEN_COMMENT = 'sensapp generate-token me --scope read';
 
 /** A line of text for a comment. A newline in a label must not turn the rest into code. */
@@ -57,6 +72,16 @@ function py(value: string): string {
   return JSON.stringify(value);
 }
 
+/** The same, in single quotes when that says it with fewer backslashes: `'{host="a"}'`. */
+function pyQuoted(value: string): string {
+  return value.includes('"') && !/['\\\p{Cc}\p{Zl}\p{Zp}]/u.test(value) ? `'${value}'` : py(value);
+}
+
+/** What goes inside double quotes in the shell, where `$uuid` is read: the rest has to be escaped. */
+function escapeDouble(value: string): string {
+  return value.replace(/[\\"$`]/g, '\\$&');
+}
+
 /** A shell word that is one word whatever it contains. */
 function sh(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -86,22 +111,29 @@ function groups(input: SnippetInput): Array<{ series: SnippetInput['series']; st
   ];
 }
 
+/** The selector to use, if the user typed one. */
+function selectorOf(input: SnippetInput): string | undefined {
+  return input.selector?.trim() || undefined;
+}
+
 export function pythonSnippet(input: SnippetInput): string {
   const delta = input.relativeRange ? timedelta(input.relativeRange) : undefined;
-  const lines: string[] = [];
+  const selector = selectorOf(input);
+  const reads = input.series.length > 0 || selector !== undefined;
+  const lines: string[] = [...SCRIPT_METADATA];
 
-  lines.push('import asyncio');
+  lines.push('#', '# Run it with `uv run script.py`, or install the SDK first:', `#   ${INSTALL_COMMENT}`);
+  if (input.authenticated) lines.push('#', '# The token comes from the environment, make one with:', `#   export SENSAPP_TOKEN=$(${TOKEN_COMMENT})`);
+  lines.push('', 'import asyncio');
   if (input.authenticated) lines.push('import os');
-  if (delta && input.series.length > 0) lines.push('from datetime import UTC, datetime, timedelta');
-  lines.push('', 'from sensapp import SensAppClient', '');
-  lines.push(`# ${INSTALL_COMMENT}`);
-  if (input.authenticated) lines.push(`# export SENSAPP_TOKEN=$(${TOKEN_COMMENT})`);
+  if (delta && reads) lines.push('from datetime import UTC, datetime, timedelta');
+  lines.push('', 'from sensapp import SensAppClient');
 
   const client = input.authenticated
     ? [`    async with SensAppClient(`, `        ${py(input.baseUrl)},`, `        token=os.environ["SENSAPP_TOKEN"],`, `    ) as client:`]
     : [`    async with SensAppClient(${py(input.baseUrl)}) as client:`];
 
-  if (input.series.length === 0) {
+  if (!reads) {
     lines.push('', '', 'async def main() -> None:', ...client);
     if (input.metric) {
       lines.push(
@@ -120,6 +152,51 @@ export function pythonSnippet(input: SnippetInput): string {
     return lines.join('\n') + '\n';
   }
 
+  // What the window is: now minus a duration, or the two dates
+  const window: string[] = delta
+    ? ['    end = datetime.now(UTC)', `    start = end - timedelta(${delta})`]
+    : [`    start = ${py(clean(input.timeRange.start))}`, `    end = ${py(clean(input.timeRange.end))}`];
+  const [start, end] = delta ? ['start.isoformat(timespec="seconds")', 'end.isoformat(timespec="seconds")'] : ['start', 'end'];
+  const read = (indent: string, id: string, step?: string[]) => [
+    `${indent}series = await client.get_series(`,
+    `${indent}    ${id},`,
+    `${indent}    start=${start},`,
+    `${indent}    end=${end},`,
+    ...(step ?? []).map((line) => `${indent}    ${line}`),
+    `${indent})`,
+    `${indent}print(series.name, series.labels)`,
+    `${indent}print(series.frame)  # a Polars DataFrame: timestamp, value`,
+  ];
+
+  if (selector !== undefined) {
+    // The series are known when the code runs, not now: a step is for the numbers among them
+    lines.push('', '', 'async def main() -> None:', ...window, ...client);
+    lines.push(
+      '        catalog = await client.list_series(',
+      ...(input.metric ? [`            metric=${py(input.metric)},`] : []),
+      `            selector=${pyQuoted(selector)},`,
+      '        )',
+      '        for info in catalog.series:',
+    );
+    if (input.step) {
+      lines.push(
+        '            # A step averages numbers: the other types are read as they are',
+        '            numeric = info.sensor_type.lower() in ("integer", "float", "numeric")',
+      );
+    }
+    lines.push(
+      ...read(
+        '            ',
+        'info.uuid',
+        input.step ? [`step=${py(input.step)} if numeric else None,`, `aggregation=${py(input.aggregation)} if numeric else None,`] : undefined,
+      ),
+      '',
+      '',
+      'asyncio.run(main())',
+    );
+    return lines.join('\n') + '\n';
+  }
+
   const parts = groups(input);
   const mixed = parts.length > 1;
   const variables = parts.map((part) => (mixed && !part.step ? 'RAW_SERIES' : 'SERIES'));
@@ -133,27 +210,11 @@ export function pythonSnippet(input: SnippetInput): string {
     lines.push(']');
   });
 
-  lines.push('', '', 'async def main() -> None:');
-  if (delta) {
-    lines.push('    end = datetime.now(UTC)', `    start = end - timedelta(${delta})`);
-  } else {
-    lines.push(`    start = ${py(clean(input.timeRange.start))}`, `    end = ${py(clean(input.timeRange.end))}`);
-  }
-  lines.push(...client);
-  const [start, end] = delta ? ['start.isoformat(timespec="seconds")', 'end.isoformat(timespec="seconds")'] : ['start', 'end'];
+  lines.push('', '', 'async def main() -> None:', ...window, ...client);
   parts.forEach((part, index) => {
     lines.push(
       `        for uuid in ${variables[index]}:`,
-      '            series = await client.get_series(',
-      '                uuid,',
-      `                start=${start},`,
-      `                end=${end},`,
-    );
-    if (part.step) lines.push(`                step=${py(part.step)},`, `                aggregation=${py(input.aggregation)},`);
-    lines.push(
-      '            )',
-      '            print(series.name, series.labels)',
-      '            print(series.frame)  # a Polars DataFrame: timestamp, value',
+      ...read('            ', 'uuid', part.step ? [`step=${py(part.step)},`, `aggregation=${py(input.aggregation)},`] : undefined),
     );
   });
   lines.push('', '', 'asyncio.run(main())');
@@ -162,37 +223,62 @@ export function pythonSnippet(input: SnippetInput): string {
 
 export function curlSnippet(input: SnippetInput): string {
   const lines: string[] = [];
+  const selector = selectorOf(input);
   const { label, shared } = names(input.series);
   if (input.authenticated) {
     lines.push('# SENSAPP_TOKEN holds a token, made with:', `#   ${TOKEN_COMMENT}`, '');
   }
-  if (shared) lines.push(`# ${shared}`, '');
-  const auth = input.authenticated ? ['  -H "Authorization: Bearer $SENSAPP_TOKEN"'] : [];
-  const request = (comment: string | null, url: string) => [
-    ...(comment ? [`# ${comment}`] : []),
-    'curl -sS --fail-with-body \\',
-    ...auth.map((line) => `${line} \\`),
-    `  ${sh(url)}`,
+  if (selector === undefined && shared) lines.push(`# ${shared}`, '');
+  const auth = input.authenticated ? ['-H "Authorization: Bearer $SENSAPP_TOKEN"'] : [];
+
+  /** The lines of a request: each option on its own line, the last one the address. */
+  const request = (indent: string, options: string[], url: string) => [
+    `${indent}curl -sS --fail-with-body \\`,
+    ...[...auth, ...options].map((line) => `${indent}  ${line} \\`),
+    `${indent}  ${url}`,
   ];
+  const readParams = (step: string | undefined) => {
+    const params = new URLSearchParams({ format: 'csv', start: clean(input.timeRange.start), end: clean(input.timeRange.end) });
+    if (step) {
+      params.set('step', step);
+      params.set('aggregation', input.aggregation);
+    }
+    // The colons of the dates are fine in a query: leave them readable
+    return params.toString().replace(/%3A/g, ':');
+  };
 
   const blocks: string[][] = [];
-  if (input.series.length === 0) {
+  if (selector !== undefined) {
+    // The series that match, one after the other. A step averages numbers: the others are left out of that read.
+    const jq = input.step
+      ? `.["dcat:dataset"][] | select(.["sensor:type"] | ascii_downcase | IN("integer", "float", "numeric")) | .["dct:identifier"]`
+      : '.["dcat:dataset"][]["dct:identifier"]';
+    const list = request(
+      '',
+      ['-G', ...(input.metric ? [`--data-urlencode ${sh(`metric=${input.metric}`)}`] : []), `--data-urlencode ${sh(`selector=${selector}`)}`],
+      `${sh(`${input.baseUrl}/series`)} |`,
+    );
+    const each = request('  ', [], `"${escapeDouble(input.baseUrl)}/series/$uuid?${readParams(input.step)}"`);
+    blocks.push([
+      `# The series that match ${oneLine(selector)}${input.step ? ' (the numeric ones: a step averages numbers)' : ''}`,
+      ...list,
+      `  jq -r ${sh(jq)} |`,
+      '  while read -r uuid; do',
+      ...each.map((line) => `  ${line}`),
+      '  done',
+    ]);
+  } else if (input.series.length === 0) {
     blocks.push(
-      input.metric
-        ? request(null, `${input.baseUrl}/series?${new URLSearchParams({ metric: input.metric })}`)
-        : request(null, `${input.baseUrl}/metrics`),
+      request(
+        '',
+        [],
+        sh(input.metric ? `${input.baseUrl}/series?${new URLSearchParams({ metric: input.metric })}` : `${input.baseUrl}/metrics`),
+      ),
     );
   } else {
     for (const part of groups(input)) {
       for (const s of part.series) {
-        const params = new URLSearchParams({ format: 'csv', start: clean(input.timeRange.start), end: clean(input.timeRange.end) });
-        if (part.step) {
-          params.set('step', part.step);
-          params.set('aggregation', input.aggregation);
-        }
-        // The colons of the dates are fine in a query: leave them readable
-        const query = params.toString().replace(/%3A/g, ':');
-        blocks.push(request(label(s), `${input.baseUrl}/series/${encodeURIComponent(s.uuid)}?${query}`));
+        blocks.push([`# ${label(s)}`, ...request('', [], sh(`${input.baseUrl}/series/${encodeURIComponent(s.uuid)}?${readParams(part.step)}`))]);
       }
     }
   }
