@@ -39,6 +39,8 @@ export function withSlots(series: SeriesInfo[], selected: SelectedSeries[] = [])
 interface SelectionState {
   selectedMetric: string | null;
   selectedSeries: SelectedSeries[];
+  /** The series under the pointer in the list, which the chart highlights */
+  hoveredSeries: string | null;
   timeRange: TimeRange;
   /** The preset the range comes from (`24h`), `null` once dates were typed */
   relativeRange: string | null;
@@ -54,7 +56,10 @@ interface SelectionState {
   toggleSeries: (series: SeriesInfo) => void;
   /** Shows these series too */
   selectSeries: (series: SeriesInfo[]) => void;
+  /** Hides these series, the others keep their colors */
+  unselectSeries: (series: SeriesInfo[]) => void;
   clearSelectedSeries: () => void;
+  setHoveredSeries: (uuid: string | null) => void;
   /** A window of dates: typed, or brushed on the chart */
   setTimeRange: (start: string, end: string) => void;
   /** A preset: the range ending now */
@@ -90,6 +95,7 @@ function remember(state: SelectionState): WindowState[] {
 export const useSelectionStore = create<SelectionState>((set) => ({
   selectedMetric: null,
   selectedSeries: [],
+  hoveredSeries: null,
   timeRange: defaultTimeRange(),
   relativeRange: DEFAULT_RANGE,
   rangeHistory: [],
@@ -100,7 +106,7 @@ export const useSelectionStore = create<SelectionState>((set) => ({
   aggregation: 'avg',
 
   setSelectedMetric: (metric) =>
-    set({ selectedMetric: metric, selectedSeries: [] }),
+    set({ selectedMetric: metric, selectedSeries: [], hoveredSeries: null }),
 
   toggleSeries: (series) =>
     set((state) => {
@@ -118,7 +124,14 @@ export const useSelectionStore = create<SelectionState>((set) => ({
   selectSeries: (series) =>
     set((state) => ({ selectedSeries: withSlots(series, state.selectedSeries) })),
 
+  unselectSeries: (series) =>
+    set((state) => ({
+      selectedSeries: state.selectedSeries.filter((s) => !series.some((gone) => gone.uuid === s.uuid)),
+    })),
+
   clearSelectedSeries: () => set({ selectedSeries: [] }),
+
+  setHoveredSeries: (hoveredSeries) => set({ hoveredSeries }),
 
   setTimeRange: (start, end) =>
     set((state) => ({

@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import { nextBookmark, useSeries } from '../hooks/useSeries';
 import type { SeriesDataset } from '../hooks/useSeries';
 import { isBooleanType, isNumericType } from '../lib/chartStep';
-import { readableOn, seriesColor, SLOTS } from '../lib/palette';
+import { DISTINCT_COLORS, readableOn, seriesColor } from '../lib/palette';
 import { exampleSelector, sharedLabels, sortByColumns } from '../lib/seriesLabels';
 import { usePrefersDark } from '../lib/usePrefersDark';
 import { useSelectionStore } from '../stores/useSelectionStore';
@@ -20,8 +20,8 @@ function labelsToRecord(
   );
 }
 
-/** A metric of at most this many series is shown whole when it is selected: there is a color for each. */
-const AUTO_SELECT_MAX = SLOTS;
+/** A metric of at most this many series is shown whole when it is selected: they have colors that are clearly apart. */
+const AUTO_SELECT_MAX = DISTINCT_COLORS;
 
 function toSeriesInfo(dataset: SeriesDataset): SeriesInfo {
   return {
@@ -38,6 +38,8 @@ export function SeriesTable() {
     selectedSeries,
     toggleSeries,
     selectSeries,
+    unselectSeries,
+    setHoveredSeries,
     labelFilter,
     setLabelFilter,
   } = useSelectionStore();
@@ -111,6 +113,8 @@ export function SeriesTable() {
     sort.descending,
   );
 
+  const visibleSelected = sortedSeries.filter((s) => selectedOf(s)).length;
+
   if (!selectedMetric) {
     return null;
   }
@@ -172,7 +176,19 @@ export function SeriesTable() {
             <thead>
               <tr className="text-xs text-base-content/50">
                 <th className="w-12 font-medium">
-                  <span className="sr-only">Select</span>
+                  {/* What is on screen, all at once: after the filter, or the selector, or on its own */}
+                  <input
+                    type="checkbox"
+                    className="checkbox checkbox-sm checkbox-primary"
+                    aria-label="Select all series"
+                    ref={(box) => {
+                      if (box) box.indeterminate = visibleSelected > 0 && visibleSelected < sortedSeries.length;
+                    }}
+                    checked={visibleSelected === sortedSeries.length}
+                    onChange={() =>
+                      visibleSelected === sortedSeries.length ? unselectSeries(sortedSeries.map(toSeriesInfo)) : selectSeries(sortedSeries.map(toSeriesInfo))
+                    }
+                  />
                 </th>
                 {columns.map((column) => (
                   <th
@@ -213,6 +229,8 @@ export function SeriesTable() {
                         : 'hover:bg-base-200/60'
                     }`}
                     onClick={() => toggleSeries(toSeriesInfo(s))}
+                    onMouseEnter={() => setHoveredSeries(uuid)}
+                    onMouseLeave={() => setHoveredSeries(null)}
                   >
                     <td>
                       {/* The checkbox is the color of the series in the chart */}

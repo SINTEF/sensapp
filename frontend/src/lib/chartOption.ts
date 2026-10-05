@@ -31,6 +31,7 @@ export function buildChartOption(
         step: 'end' as const,
         yAxisIndex: 1,
         data: s.points,
+        emphasis: { focus: 'series' as const },
         showSymbol: false,
         lineStyle: { width: 1.5 },
         color: s.color,
@@ -41,6 +42,8 @@ export function buildChartOption(
       name: s.name,
       type: style === 'bars' ? ('bar' as const) : ('line' as const),
       data: s.points,
+      // The series under the pointer in the list stands out, the others fade (EChart sends it)
+      emphasis: { focus: 'series' as const },
       smooth: false,
       step: style === 'step' ? ('end' as const) : undefined,
       stack: style === 'stacked' ? 'total' : undefined,

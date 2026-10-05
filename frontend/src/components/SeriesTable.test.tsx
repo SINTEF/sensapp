@@ -160,8 +160,57 @@ describe('SeriesTable', () => {
     expect(screen.getByPlaceholderText('{host="alpha", room=~"l.*"}')).toBeInTheDocument();
   });
 
+  it('tells the chart which series the pointer is on, and forgets it when it leaves', async () => {
+    const user = userEvent.setup();
+    renderTable();
+    await screen.findByText('uuid-a');
+    const row = screen.getByText('uuid-b').closest('tr')!;
+
+    await user.hover(row);
+    expect(useSelectionStore.getState().hoveredSeries).toBe('uuid-b');
+    await user.unhover(row);
+    expect(useSelectionStore.getState().hoveredSeries).toBeNull();
+  });
+
   describe('selection', () => {
     const uuids = () => useSelectionStore.getState().selectedSeries.map((s) => s.uuid);
+
+    it('selects, and unselects, what is on screen from the header', async () => {
+      const user = userEvent.setup();
+      const many = Array.from({ length: 10 }, (_, i) => dataset(`uuid-${i}`, `host-${i}`));
+      mockListSeries.mockResolvedValue({ data: { ...catalog, 'dcat:dataset': many } });
+      renderTable();
+      await screen.findByText('uuid-0');
+      const all = screen.getByRole('checkbox', { name: 'Select all series' });
+      expect(all).not.toBeChecked();
+
+      await user.click(all);
+      expect(uuids()).toHaveLength(10);
+      // Ten series, ten colors: none repeated
+      expect(new Set(useSelectionStore.getState().selectedSeries.map((s) => s.slot)).size).toBe(10);
+      expect(all).toBeChecked();
+
+      await user.click(screen.getByRole('checkbox', { name: 'Select series uuid-3' }));
+      expect(all).not.toBeChecked();
+      expect((all as HTMLInputElement).indeterminate).toBe(true);
+
+      await user.click(all);
+      expect(uuids()).toHaveLength(10);
+      await user.click(all);
+      expect(uuids()).toEqual([]);
+    });
+
+    it('selects only what the quick filter lets through', async () => {
+      const user = userEvent.setup();
+      const many = Array.from({ length: 10 }, (_, i) => dataset(`uuid-${i}`, i < 3 ? `lab-${i}` : `other-${i}`));
+      mockListSeries.mockResolvedValue({ data: { ...catalog, 'dcat:dataset': many } });
+      renderTable();
+      await screen.findByText('uuid-0');
+
+      await user.type(screen.getByPlaceholderText('Quick filter...'), 'lab');
+      await user.click(screen.getByRole('checkbox', { name: 'Select all series' }));
+      expect(uuids().sort()).toEqual(['uuid-0', 'uuid-1', 'uuid-2']);
+    });
 
     it('selects all the series of a metric that is not too big, with a color each', async () => {
       renderTable();
@@ -175,7 +224,8 @@ describe('SeriesTable', () => {
         slot: 0,
       });
       // The checkbox of a series has the color of its line
-      const [first, second] = screen.getAllByRole('checkbox');
+      const first = screen.getByRole('checkbox', { name: 'Select series uuid-a' });
+      const second = screen.getByRole('checkbox', { name: 'Select series uuid-b' });
       expect(first).toBeChecked();
       expect(first.style.getPropertyValue('--input-color')).toBe(SERIES_COLORS.light[0]);
       expect(second.style.getPropertyValue('--input-color')).toBe(SERIES_COLORS.light[1]);

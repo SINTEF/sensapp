@@ -1,14 +1,30 @@
 /**
- * The colors of the series, in the order they are given: eight hues, one step for each theme (the
- * steps of the light theme are too light on the dark surface). Checked with the dataviz skill's
- * `validate_palette.js`: worst neighbours 9.1 (light) and 8.4 (dark) of color-blind distance, 19+ for
- * normal vision, 3:1 on the dark surface. On the light surface three are under 3:1: the series list
- * says which color is which, so a color is never the only way to tell the series apart.
+ * The colors of the series, in the order they are given, one step of each for each theme.
+ *
+ * The first `DISTINCT_COLORS` are the eight hues of the dataviz skill's palette, validated with its
+ * `validate_palette.js` (color-blind distance 8.4 or more between neighbours, 19 for normal vision).
+ * The 16 after them are not a palette but the answer to "more than 8 series without repeating a color":
+ * each was picked, in OKLab, as the farthest from the ones before under normal, protan and deutan
+ * vision (docs/FRONTEND.md has the numbers). The ninth to eleventh are 11 (light) and 10 (dark) or more
+ * apart from the others; from the twelfth it goes down to 5: past eight colors alone does not say
+ * which series is which, hovering a row of the list highlights it in the chart for that.
+ * The dark steps are lighter than the skill's band for the same reason: there is no room in it.
  */
 export const SERIES_COLORS = {
-  light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'],
-  dark: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
+  light: [
+    '#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948',
+    '#58aefb', '#803a5b', '#ac5291', '#3d94e0', '#495e0d', '#5bc971', '#02aec6', '#c93a63',
+    '#324fcf', '#6b4988', '#1e86fe', '#1987bb', '#2bc4d1', '#b86e94', '#6f51ac', '#993f43',
+  ],
+  dark: [
+    '#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767',
+    '#65d8e3', '#fab72a', '#5ae297', '#b736a0', '#41b7c7', '#226dc9', '#70bffe', '#fa7ba7',
+    '#e6a05a', '#b072b5', '#c03978', '#5cacea', '#e46894', '#c74a49', '#3a70ee', '#4ac777',
+  ],
 };
+
+/** The colors that are clearly apart (the validated ones). */
+export const DISTINCT_COLORS = 8;
 
 export const SLOTS = SERIES_COLORS.light.length;
 
@@ -19,7 +35,8 @@ export function seriesColor(slot: number, dark: boolean): string {
 
 /**
  * The slot of a series that is selected: the first one nobody uses, so that a color follows its
- * series for as long as it is selected. Past `SLOTS` series the colors are used again.
+ * series for as long as it is selected. Past `SLOTS` (24) series the colors are used again: nobody
+ * reads a chart of 25 lines by color.
  */
 export function freeSlot(used: number[]): number {
   for (let slot = 0; slot < SLOTS; slot++) {

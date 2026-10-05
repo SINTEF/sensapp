@@ -262,4 +262,15 @@ describe('TimeSeriesChart', () => {
     await waitFor(() => expect(chart).toHaveAttribute('data-series-count', '1'));
     expect(JSON.parse(chart.getAttribute('data-option')!).series[0].name).toBe('temperature{org="sensapp", room="lab"}');
   });
+
+  it('highlights the series that the pointer is on in the list', async () => {
+    useSelectionStore.setState({ selectedSeries: [temperature], timeRange: { start: START, end: hours(1) }, hoveredSeries: null });
+    renderChart();
+    const chart = await screen.findByTestId('echarts');
+    expect(chart).not.toHaveAttribute('data-highlight');
+
+    act(() => useSelectionStore.getState().setHoveredSeries('uuid-temperature'));
+    expect(screen.getByTestId('echarts')).toHaveAttribute('data-highlight', 'uuid-temperature');
+    act(() => useSelectionStore.getState().setHoveredSeries(null));
+  });
 });

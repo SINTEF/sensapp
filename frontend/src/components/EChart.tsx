@@ -29,9 +29,12 @@ echarts.use([
 export default function EChart({
   option,
   onBrush,
+  highlight,
 }: {
   option: echarts.EChartsCoreOption;
   onBrush?: (fromMs: number, toMs: number) => void;
+  /** The id of a series to stand out, the others fading */
+  highlight?: string | null;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
@@ -79,6 +82,13 @@ export default function EChart({
       brushOption: { brushType: 'lineX', brushMode: 'single' },
     });
   }, [option, dark]);
+
+  useEffect(() => {
+    const instance = chart.current;
+    if (!instance) return;
+    instance.dispatchAction({ type: 'downplay' });
+    if (highlight) instance.dispatchAction({ type: 'highlight', seriesId: highlight });
+  }, [highlight, option, dark]);
 
   return <div ref={container} className="h-full w-full" />;
 }

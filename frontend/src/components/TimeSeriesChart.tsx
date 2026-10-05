@@ -60,6 +60,7 @@ interface Loaded {
 export function TimeSeriesChart() {
   const { selectedSeries, timeRange, setTimeRange, step: stepChoice, aggregation, chartStyle, logScale } =
     useSelectionStore();
+  const hoveredSeries = useSelectionStore((state) => state.hoveredSeries);
   const dark = usePrefersDark();
 
   const step = resolveStep(stepChoice, timeRange.start, timeRange.end);
@@ -139,7 +140,7 @@ export function TimeSeriesChart() {
           />
         )}
         <Suspense fallback={null}>
-          <EChart option={option} onBrush={handleBrush} />
+          <EChart option={option} onBrush={handleBrush} highlight={hoveredSeries} />
         </Suspense>
       </div>
     </div>
