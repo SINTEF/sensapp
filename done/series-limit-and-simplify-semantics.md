@@ -66,5 +66,5 @@ A client that wants a plot of a window has to pick `step` itself (window / numbe
 
 ## Related
 
-- `current_tasks/arrow-export-timestamp-offset.md`
-- `current_tasks/python-sdk-boolean-query-params.md`
+- `done/arrow-export-timestamp-offset.md`
+- `done/python-sdk-boolean-query-params.md`

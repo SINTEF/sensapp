@@ -11,7 +11,7 @@ Prometheus, InfluxDB and friends offer: delete by series and time range.
 - Deletes require a new `delete` JWT scope, never part of the default `read write`.
 - No retention yet (see `ideas/data-retention.md`).
 - Duplicate `(sensor, timestamp)` rows are by design; dedup is a separate task
-  (see `ideas/sample-deduplication-in-maintenance.md`).
+  (see `done/sample-deduplication-in-vacuum.md`).
 
 ## What was done
 
@@ -38,7 +38,7 @@ Prometheus, InfluxDB and friends offer: delete by series and time range.
   (`is_foreign_key_violation` in `src/storage/common.rs`, tested by
   `*_publish_recovers_from_stale_sensor_id`).
 - SenML and Arrow imports use random UUIDs, so each publish creates a new series. Not fixed here:
-  `ideas/senml-arrow-random-sensor-uuids.md`.
+  `done/senml-arrow-stable-sensor-uuids.md`.
 - ClickHouse: the `sensor_catalog_view` and `metrics_summary_view` materialized views are not
   read by any code and are not cleaned on delete.
 - DuckDB checks foreign keys against committed data, so `delete_series` commits the sample and

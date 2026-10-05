@@ -25,7 +25,7 @@ Done 2 Oct 2026.
 - `docs/BACKENDS.md`: status per backend (ClickHouse reference; PostgreSQL, TimescaleDB, SQLite maintained;
   DuckDB less mature; RRDCached and BigQuery experimental), what CI covers, a capability table filled from
   the code (delete, native aggregations, bulk write, bulk selector read: re-check after
-  `current_tasks/duckdb-sqlite-rrdcached-bulk-and-tests.md`), per-backend things to know, and the production-
+  `done/duckdb-sqlite-rrdcached-bulk-and-tests.md`), per-backend things to know, and the production-
   versus research-oriented features. Linked from `docs/CONFIGURATION.md`; the two TODO items are ticked.
 - OpenAPI: all 13 data endpoints document `503` and `504`; the four writes (`/publish`, InfluxDB write,
   Prometheus remote write, vacuum) document `503` with the `Retry-After` header and what it means. A unit

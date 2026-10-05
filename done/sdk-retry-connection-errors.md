@@ -5,7 +5,7 @@
 The SDK retries overload answers (`503`/`429`) with backoff and `Retry-After`. It must also retry
 connection errors and timeouts, the same way, for reads and writes. A write that timed out may have been
 stored: the duplicate it can create is accepted, vacuum removes duplicates
-(`current_tasks/sample-deduplication-in-vacuum.md`).
+(`done/sample-deduplication-in-vacuum.md`).
 
 ## Design
 
@@ -39,5 +39,5 @@ Done 2 Oct 2026.
 - Live drill (debug server on SQLite): nothing listening, 3 attempts, `ConnectionError` after 0.42 s; server
   started one second after the call, `publish` succeeds and the series is stored.
 - `docs/PYTHON_SDK.md` and `docs/CONFIGURATION.md` describe the new rule. They say that the vacuum removes
-  duplicates, which `current_tasks/sample-deduplication-in-vacuum.md` makes true: do not close that task
+  duplicates, which `done/sample-deduplication-in-vacuum.md` makes true: do not close that task
   without it.

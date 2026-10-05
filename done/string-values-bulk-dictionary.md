@@ -25,7 +25,7 @@ string. On PostgreSQL and TimescaleDB `publish_string_values` calls `get_string_
 
 ## Progress
 
-PostgreSQL and TimescaleDB done 2 Oct 2026; DuckDB is measured in `current_tasks/duckdb-sqlite-rrdcached-bulk-and-tests.md`.
+PostgreSQL and TimescaleDB done 2 Oct 2026; DuckDB is measured in `done/duckdb-sqlite-rrdcached-bulk-and-tests.md`.
 
 - New `src/storage/pg_strings.rs` (shared by both backends): `ensure_string_ids` inserts the sorted distinct
   strings of a batch with one `INSERT .. unnest .. ON CONFLICT DO NOTHING` and reads their ids back with one

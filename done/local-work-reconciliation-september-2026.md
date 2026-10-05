@@ -31,7 +31,7 @@ contents rather than ancestry counts against this checkout.
   samples for UUID reads. The local uncommitted changes add bounded/expiring
   caches, identifier validation, and parallel sample queries. The old code uses
   the pre-pagination storage trait and an older BigQuery client; it needs a
-  deliberate port with real-service tests. See `ideas/bigquery-backend-reconciliation.md`.
+  deliberate port with real-service tests. See `done/bigquery-back-in-sync.md`.
 - **Old TODO files:** `TODO_EXPORTERS.md` and `TODO_PROMQL.md` are planning
   notes. Current upstream implements multi-format query responses and has
   `tests/simple_promql.rs`; they are not code patches to import.

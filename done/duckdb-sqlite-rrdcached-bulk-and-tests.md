@@ -44,4 +44,4 @@
 
 - Decisions: SQLite is already fast (writes 0.42 s for 3000 new series, strings 0.35 s) and has the bulk
   reads, so nothing more. DuckDB bulk writes and aggregated bulk reads are recorded with their numbers in
-  `ideas/duckdb-bulk-writes.md` (not an ingestion backend).
+  `done/duckdb-bulk-writes.md` (not an ingestion backend).

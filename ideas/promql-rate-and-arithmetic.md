@@ -2,7 +2,7 @@
 
 ## Status
 
-Deliberately not implemented. `/api/v1/query` accepts selectors and cross-series `sum|avg|min|max|count` only (see `current_tasks/cross-series-aggregation.md`).
+Deliberately not implemented. `/api/v1/query` accepts selectors and cross-series `sum|avg|min|max|count` only (see `done/cross-series-aggregation.md`).
 
 ## Why Not
 
