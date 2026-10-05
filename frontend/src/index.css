@@ -117,12 +117,21 @@ html, body, #root {
   border-color: var(--control-border);
   color: color-mix(in oklab, var(--color-base-content) 80%, transparent);
 }
+/*
+ * A joined button overlaps its neighbor by one border, so the shared edge is one line. daisyUI skips that
+ * overlap on a disabled button, which then shows a double edge on its left: the line jumps as the state changes.
+ */
+.join > .btn.btn-quiet:not(:first-child) {
+  margin-inline-start: calc(var(--border, 1px) * -1);
+}
 .btn.btn-quiet:hover:not(:disabled) {
   background: var(--wash);
   border-color: var(--control-border-hover);
 }
 .btn.btn-quiet:disabled {
   background: transparent;
+  /* daisyUI drops the end border of a disabled joined button (the last one loses its right edge) */
+  border-inline-end-width: var(--border, 1px);
   border-color: var(--control-border);
   color: color-mix(in oklab, var(--color-base-content) 30%, transparent);
 }

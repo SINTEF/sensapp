@@ -41,7 +41,7 @@ export function TimeRangeSelector() {
   return (
     <div className="contents">
       {/* Where the window is: back to the one before, earlier, wider, later */}
-      <div className="join">
+      <div className="join [&>.btn]:w-7 [&>.btn]:px-0">
         <button
           className="join-item btn btn-xs btn-quiet"
           aria-label="Back to the previous window"
