@@ -178,7 +178,7 @@ impl ClickHouseStorage {
             .step_ms
             .checked_mul(1000)
             .context("step is too large")?;
-        let bucket_expr = Self::aggregated_bucket_expr(&AggregatedSamplesQuery {
+        let bucket_query = AggregatedSamplesQuery {
             sensor_id: 0,
             start_time_us: read.start_us,
             end_time_us: read.end_us,
@@ -186,12 +186,14 @@ impl ClickHouseStorage {
             origin_us: read.start_us.unwrap_or(0),
             aggregation: read.aggregation,
             limit: None,
-        });
+        };
+        let bucket_expr = Self::aggregated_bucket_select(&bucket_query);
+        let group_by = Self::aggregated_group_by(&bucket_query);
         let where_clause = clickhouse_time_where(read.start_us, read.end_us);
         let sql = format!(
             "SELECT sensor_id, {bucket_expr} AS bucket_us, {expression} AS value \
              FROM {table} WHERE sensor_id IN {{ids:Array(UInt64)}}{where_clause} \
-             GROUP BY sensor_id, bucket_us \
+             GROUP BY sensor_id, {group_by} \
              ORDER BY sensor_id ASC, bucket_us ASC LIMIT {limit}"
         );
 

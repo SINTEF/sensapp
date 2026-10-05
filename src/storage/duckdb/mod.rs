@@ -1187,10 +1187,12 @@ fn duckdb_first_last_query(
     aggregation: Aggregation,
     value_expression: &str,
 ) -> String {
-    let direction = match aggregation {
-        Aggregation::First => "ASC",
-        Aggregation::Last => "DESC",
-        _ => unreachable!("only first/last use duckdb_first_last_query"),
+    let (direction, stamp) = match aggregation {
+        Aggregation::First => ("ASC", "bucket_ts"),
+        Aggregation::Last => ("DESC", "bucket_ts"),
+        // The timestamp of the sample, not the start of the bucket
+        Aggregation::Latest => ("DESC", "sample_ts"),
+        _ => unreachable!("only first/last/latest use duckdb_first_last_query"),
     };
 
     format!(
@@ -1208,11 +1210,12 @@ fn duckdb_first_last_query(
         ranked AS (
             SELECT
                 bucket_ts,
+                timestamp_us AS sample_ts,
                 value,
                 ROW_NUMBER() OVER (PARTITION BY bucket_ts ORDER BY timestamp_us {direction}) AS row_num
             FROM bucketed
         )
-        SELECT epoch_us(bucket_ts) AS timestamp_us, value
+        SELECT epoch_us({stamp}) AS timestamp_us, value
         FROM ranked
         WHERE row_num = 1
         ORDER BY bucket_ts ASC
@@ -1289,7 +1292,7 @@ fn duckdb_query_integer_samples_aggregated(
             }
             Ok(TypedSamples::Integer(samples))
         }
-        Aggregation::First | Aggregation::Last => {
+        Aggregation::First | Aggregation::Last | Aggregation::Latest => {
             let sql = duckdb_first_last_query("integer_values", step_ms, aggregation, "value");
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
@@ -1390,7 +1393,7 @@ fn duckdb_query_float_samples_aggregated(
             }
             Ok(TypedSamples::Integer(samples))
         }
-        Aggregation::First | Aggregation::Last => {
+        Aggregation::First | Aggregation::Last | Aggregation::Latest => {
             let sql = duckdb_first_last_query("float_values", step_ms, aggregation, "value");
             let mut statement = connection.prepare(&sql)?;
             let mut rows = statement.query(duckdb::params![
@@ -1492,7 +1495,7 @@ fn duckdb_query_numeric_samples_aggregated(
             }
             Ok(TypedSamples::Integer(samples))
         }
-        Aggregation::First | Aggregation::Last => {
+        Aggregation::First | Aggregation::Last | Aggregation::Latest => {
             let sql = duckdb_first_last_query(
                 "numeric_values",
                 step_ms,

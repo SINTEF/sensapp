@@ -12,7 +12,8 @@ use anyhow::{Context, Result, bail};
 use gcp_bigquery_client::model::query_parameter::QueryParameter;
 use std::collections::HashMap;
 
-/// The aggregate of a bucket. `First` and `Last` take the value of the oldest and the newest sample.
+/// The aggregate of a bucket. `First` and `Last` (and `Latest`, which differs by its timestamp) take
+/// the value of the oldest and the newest sample.
 ///
 /// `AVG` is BigQuery's own: it is faster than a sum over a count, and floating point averages differ
 /// from the exact one in the last bits (`-5.5e-17` for integers that average to 0).
@@ -24,7 +25,7 @@ fn value_expression(aggregation: Aggregation) -> &'static str {
         Aggregation::Sum => "SUM(value)",
         Aggregation::Count => "COUNT(*)",
         Aggregation::First => "ANY_VALUE(value HAVING MIN timestamp)",
-        Aggregation::Last => "ANY_VALUE(value HAVING MAX timestamp)",
+        Aggregation::Last | Aggregation::Latest => "ANY_VALUE(value HAVING MAX timestamp)",
     }
 }
 
@@ -64,10 +65,16 @@ pub fn aggregated_sql(
         int_param("step", step_us),
     ];
     let conditions = window(read.start_us, read.end_us, &mut params);
+    // The timestamp of the bucket is its start, or for `Latest` the one of its last sample. The
+    // alias of an aggregate cannot be grouped by: `Latest` groups by the expression of the start.
+    let (stamp, group_by) = match read.aggregation {
+        Aggregation::Latest => ("MAX(UNIX_MICROS(timestamp))", BUCKET_EXPRESSION),
+        _ => (BUCKET_EXPRESSION, "bucket_us"),
+    };
     let sql = format!(
-        "SELECT sensor_id, {BUCKET_EXPRESSION} AS bucket_us, {} AS value FROM {table} \
+        "SELECT sensor_id, {stamp} AS bucket_us, {} AS value FROM {table} \
          WHERE sensor_id IN UNNEST(@ids){conditions} \
-         GROUP BY sensor_id, bucket_us ORDER BY sensor_id, bucket_us LIMIT {}",
+         GROUP BY sensor_id, {group_by} ORDER BY sensor_id, bucket_us LIMIT {}",
         value_expression(read.aggregation),
         limit.min(super::reads::MAX_LIMIT),
     );
@@ -174,6 +181,24 @@ mod tests {
     }
 
     #[test]
+    fn latest_is_stamped_with_the_timestamp_of_its_sample() {
+        let (sql, _) = aggregated_sql(
+            "`t`",
+            SensorType::Float,
+            &read(Aggregation::Latest, Some(1_000), Some(2_000)),
+            10,
+        )
+        .unwrap();
+        assert!(
+            sql.contains("MAX(UNIX_MICROS(timestamp)) AS bucket_us"),
+            "{sql}"
+        );
+        // Grouped by the start of the bucket, not by the alias of an aggregate
+        assert!(sql.contains("GROUP BY sensor_id, @origin + (DIV("), "{sql}");
+        assert!(sql.contains("ANY_VALUE(value HAVING MAX timestamp) AS value"));
+    }
+
+    #[test]
     fn without_a_window_the_buckets_start_at_zero() {
         let (sql, params) = aggregated_sql(
             "`t`",
@@ -200,6 +225,7 @@ mod tests {
             (Aggregation::Count, "COUNT(*)"),
             (Aggregation::First, "HAVING MIN timestamp"),
             (Aggregation::Last, "HAVING MAX timestamp"),
+            (Aggregation::Latest, "HAVING MAX timestamp"),
         ] {
             assert!(value_expression(aggregation).contains(expected));
         }

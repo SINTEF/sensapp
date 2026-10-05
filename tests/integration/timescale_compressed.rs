@@ -99,7 +99,7 @@ fn options(
     }
 }
 
-const AGGREGATIONS: [Aggregation; 7] = [
+const AGGREGATIONS: [Aggregation; 8] = [
     Aggregation::Avg,
     Aggregation::Min,
     Aggregation::Max,
@@ -107,6 +107,7 @@ const AGGREGATIONS: [Aggregation; 7] = [
     Aggregation::Count,
     Aggregation::First,
     Aggregation::Last,
+    Aggregation::Latest,
 ];
 
 /// A series as text. Floats are rounded: a sum added in another order, as it is on compressed

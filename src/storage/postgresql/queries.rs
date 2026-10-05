@@ -102,8 +102,9 @@ impl PostgresStorage {
 
                 let expression = integer_aggregate_expression(aggregation);
                 let sql = format!(
-                    "{} SELECT bucket_us AS timestamp_us, {} AS value {}",
+                    "{} SELECT {} AS timestamp_us, {} AS value {}",
                     integer_bucketed_cte(),
+                    bucket_timestamp_expression(aggregation),
                     expression,
                     integer_group_by_clause()
                 );
@@ -186,8 +187,9 @@ impl PostgresStorage {
 
                 let expression = float_aggregate_expression(aggregation);
                 let sql = format!(
-                    "{} SELECT bucket_us AS timestamp_us, {} AS value {}",
+                    "{} SELECT {} AS timestamp_us, {} AS value {}",
                     float_bucketed_cte(),
+                    bucket_timestamp_expression(aggregation),
                     expression,
                     integer_group_by_clause()
                 );
@@ -270,8 +272,9 @@ impl PostgresStorage {
 
                 let expression = numeric_aggregate_expression(aggregation);
                 let sql = format!(
-                    "{} SELECT bucket_us AS timestamp_us, {} AS value {}",
+                    "{} SELECT {} AS timestamp_us, {} AS value {}",
                     numeric_bucketed_cte(),
+                    bucket_timestamp_expression(aggregation),
                     expression,
                     integer_group_by_clause()
                 );
@@ -678,13 +681,24 @@ pub(super) fn group_by_clause(many_sensors: bool) -> &'static str {
     }
 }
 
+/// The timestamp of a bucket in the select list of a grouped query: its start, or for `Latest`
+/// the timestamp of the last sample it holds.
+pub(super) fn bucket_timestamp_expression(aggregation: Aggregation) -> &'static str {
+    match aggregation {
+        Aggregation::Latest => "MAX(timestamp_us)",
+        _ => "bucket_us",
+    }
+}
+
 pub(super) fn integer_aggregate_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Min => "MIN(value)",
         Aggregation::Max => "MAX(value)",
         Aggregation::Sum => "SUM(value)::bigint",
         Aggregation::First => "(array_agg(value ORDER BY timestamp_us ASC))[1]",
-        Aggregation::Last => "(array_agg(value ORDER BY timestamp_us DESC))[1]",
+        Aggregation::Last | Aggregation::Latest => {
+            "(array_agg(value ORDER BY timestamp_us DESC))[1]"
+        }
         Aggregation::Avg | Aggregation::Count => unreachable!("handled separately"),
     }
 }
@@ -696,7 +710,9 @@ pub(super) fn float_aggregate_expression(aggregation: Aggregation) -> &'static s
         Aggregation::Max => "MAX(value)",
         Aggregation::Sum => "SUM(value)",
         Aggregation::First => "(array_agg(value ORDER BY timestamp_us ASC))[1]",
-        Aggregation::Last => "(array_agg(value ORDER BY timestamp_us DESC))[1]",
+        Aggregation::Last | Aggregation::Latest => {
+            "(array_agg(value ORDER BY timestamp_us DESC))[1]"
+        }
         Aggregation::Count => unreachable!("handled separately"),
     }
 }
@@ -708,7 +724,9 @@ pub(super) fn numeric_aggregate_expression(aggregation: Aggregation) -> &'static
         Aggregation::Max => "MAX(value)",
         Aggregation::Sum => "SUM(value)",
         Aggregation::First => "(array_agg(value ORDER BY timestamp_us ASC))[1]",
-        Aggregation::Last => "(array_agg(value ORDER BY timestamp_us DESC))[1]",
+        Aggregation::Last | Aggregation::Latest => {
+            "(array_agg(value ORDER BY timestamp_us DESC))[1]"
+        }
         Aggregation::Count => unreachable!("handled separately"),
     }
 }

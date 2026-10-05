@@ -108,9 +108,9 @@ impl TimeScaleDBStorage {
         limit: usize,
     ) -> Result<HashMap<i64, TypedSamples>> {
         use super::{
-            timescaledb_bucketed_cte_for, timescaledb_float_expression,
-            timescaledb_group_by_clause_for, timescaledb_integer_expression,
-            timescaledb_numeric_expression,
+            timescaledb_bucket_time_expression, timescaledb_bucketed_cte_for,
+            timescaledb_float_expression, timescaledb_group_by_clause_for,
+            timescaledb_integer_expression, timescaledb_numeric_expression,
         };
         use crate::storage::Aggregation;
         use crate::storage::selector::{AggregatedKind, aggregated_kind};
@@ -145,9 +145,10 @@ impl TimeScaleDBStorage {
         // The fragments are static and the table comes from the match above; the ids, the window,
         // the step and the limit are bound.
         let sql = format!(
-            "{} SELECT sensor_id, bucket_time, {expression} AS value {}",
+            "{} SELECT sensor_id, {} AS bucket_time, {expression} AS value {}",
             timescaledb_bucketed_cte_for(table, true),
-            timescaledb_group_by_clause_for(true)
+            timescaledb_bucket_time_expression(read.aggregation),
+            timescaledb_group_by_clause_for(true, read.aggregation)
         );
         let start = read.start_us.map(micros_to_offset_datetime);
         let end = read.end_us.map(micros_to_offset_datetime);

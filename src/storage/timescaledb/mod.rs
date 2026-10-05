@@ -553,8 +553,24 @@ fn timescaledb_group_by_clause() -> &'static str {
     "FROM bucketed GROUP BY 1 ORDER BY 1 ASC LIMIT $6"
 }
 
-pub(super) fn timescaledb_group_by_clause_for(many_sensors: bool) -> &'static str {
-    if many_sensors {
+/// The timestamp of a bucket in the select list of a grouped query: its start, or for `Latest`
+/// the timestamp of the last sample it holds. It is selected under the name `bucket_time` either
+/// way, and `GROUP BY bucket_time` then still names the column of the CTE, not the aggregate.
+pub(super) fn timescaledb_bucket_time_expression(aggregation: Aggregation) -> &'static str {
+    match aggregation {
+        Aggregation::Latest => "MAX(time)",
+        _ => "bucket_time",
+    }
+}
+
+pub(super) fn timescaledb_group_by_clause_for(
+    many_sensors: bool,
+    aggregation: Aggregation,
+) -> &'static str {
+    if aggregation == Aggregation::Latest && !many_sensors {
+        // `GROUP BY 1` would be the aggregate selected as `bucket_time`
+        "FROM bucketed GROUP BY bucket_time ORDER BY bucket_time ASC LIMIT $6"
+    } else if many_sensors {
         "FROM bucketed GROUP BY sensor_id, bucket_time ORDER BY sensor_id, bucket_time ASC LIMIT $6"
     } else {
         timescaledb_group_by_clause()
@@ -568,7 +584,7 @@ pub(super) fn timescaledb_integer_expression(aggregation: Aggregation) -> &'stat
         // The sum of bigints is a numeric in PostgreSQL: it does not decode as an i64
         Aggregation::Sum => "SUM(value)::bigint",
         Aggregation::First => "first(value, time)",
-        Aggregation::Last => "last(value, time)",
+        Aggregation::Last | Aggregation::Latest => "last(value, time)",
         Aggregation::Avg | Aggregation::Count => unreachable!("handled separately"),
     }
 }
@@ -580,7 +596,7 @@ pub(super) fn timescaledb_float_expression(aggregation: Aggregation) -> &'static
         Aggregation::Max => "MAX(value)",
         Aggregation::Sum => "SUM(value)",
         Aggregation::First => "first(value, time)",
-        Aggregation::Last => "last(value, time)",
+        Aggregation::Last | Aggregation::Latest => "last(value, time)",
         Aggregation::Count => unreachable!("handled separately"),
     }
 }
@@ -592,7 +608,7 @@ pub(super) fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'stat
         Aggregation::Max => "MAX(value)",
         Aggregation::Sum => "SUM(value)",
         Aggregation::First => "first(value, time)",
-        Aggregation::Last => "last(value, time)",
+        Aggregation::Last | Aggregation::Latest => "last(value, time)",
         Aggregation::Count => unreachable!("handled separately"),
     }
 }
@@ -1755,10 +1771,11 @@ impl TimeScaleDBStorage {
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_time, {} AS value {}",
+                    "{} SELECT {} AS bucket_time, {} AS value {}",
                     timescaledb_bucketed_cte("integer_values"),
+                    timescaledb_bucket_time_expression(aggregation),
                     timescaledb_integer_expression(aggregation),
-                    timescaledb_group_by_clause()
+                    timescaledb_group_by_clause_for(false, aggregation)
                 )))
                 .bind(sensor_id)
                 .bind(start_time_ts)
@@ -1835,10 +1852,11 @@ impl TimeScaleDBStorage {
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_time, {} AS value {}",
+                    "{} SELECT {} AS bucket_time, {} AS value {}",
                     timescaledb_bucketed_cte("float_values"),
+                    timescaledb_bucket_time_expression(aggregation),
                     timescaledb_float_expression(aggregation),
-                    timescaledb_group_by_clause()
+                    timescaledb_group_by_clause_for(false, aggregation)
                 )))
                 .bind(sensor_id)
                 .bind(start_time_ts)
@@ -1915,10 +1933,11 @@ impl TimeScaleDBStorage {
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_time, {} AS value {}",
+                    "{} SELECT {} AS bucket_time, {} AS value {}",
                     timescaledb_bucketed_cte("numeric_values"),
+                    timescaledb_bucket_time_expression(aggregation),
                     timescaledb_numeric_expression(aggregation),
-                    timescaledb_group_by_clause()
+                    timescaledb_group_by_clause_for(false, aggregation)
                 )))
                 .bind(sensor_id)
                 .bind(start_time_ts)

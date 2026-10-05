@@ -175,7 +175,7 @@ fn options(
     }
 }
 
-const ALL: [Aggregation; 7] = [
+const ALL: [Aggregation; 8] = [
     Aggregation::Avg,
     Aggregation::Min,
     Aggregation::Max,
@@ -183,6 +183,7 @@ const ALL: [Aggregation; 7] = [
     Aggregation::Count,
     Aggregation::First,
     Aggregation::Last,
+    Aggregation::Latest,
 ];
 const BIG: usize = 1_000_000;
 
@@ -370,5 +371,49 @@ async fn limits_are_exact() -> Result<()> {
         case.both(&options, 1, 1).await?,
         Err(SelectorLimitExceeded::Series)
     );
+    Ok(())
+}
+
+/// `Latest` is `Last` stamped with the timestamp of the sample instead of the start of its bucket:
+/// the samples are 15 s apart, so the last one of each minute is 45 s after the start.
+#[tokio::test]
+#[serial]
+async fn latest_is_last_with_the_timestamp_of_its_sample() -> Result<()> {
+    let (test_db, fixture) = setup().await?;
+    let storage = test_db.storage();
+    let case = Case {
+        storage: &storage,
+        matchers: vec![LabelMatcher::eq("run", fixture.run.clone())],
+    };
+
+    let last = case
+        .both(
+            &options(Some(0.0), Some(600.0), 60_000, Aggregation::Last),
+            BIG,
+            BIG,
+        )
+        .await?
+        .expect("within limits");
+    let latest = case
+        .both(
+            &options(Some(0.0), Some(600.0), 60_000, Aggregation::Latest),
+            BIG,
+            BIG,
+        )
+        .await?
+        .expect("within limits");
+
+    assert_eq!(latest.len(), 12);
+    assert_eq!(latest.len(), last.len());
+    for ((latest_name, latest_samples), (last_name, last_samples)) in latest.iter().zip(&last) {
+        assert_eq!(latest_name, last_name);
+        assert_eq!(latest_samples.len(), 10, "{latest_name}");
+        for ((latest_us, latest_value), (last_us, last_value)) in
+            latest_samples.iter().zip(last_samples)
+        {
+            assert_eq!(latest_value, last_value, "{latest_name}");
+            assert_eq!(*latest_us, last_us + 45_000_000, "{latest_name}");
+        }
+    }
     Ok(())
 }

@@ -86,6 +86,24 @@ impl ClickHouseStorage {
         )
     }
 
+    /// What is selected as the timestamp of a bucket (`AS bucket_us`): its start, or for `Latest`
+    /// the timestamp of the last sample it holds.
+    fn aggregated_bucket_select(query: &AggregatedSamplesQuery) -> String {
+        match query.aggregation {
+            Aggregation::Latest => "max(timestamp_us)".to_string(),
+            _ => Self::aggregated_bucket_expr(query),
+        }
+    }
+
+    /// What the buckets are grouped by: the alias of the start of the bucket, or for `Latest`,
+    /// whose alias is an aggregate, the expression of the start.
+    fn aggregated_group_by(query: &AggregatedSamplesQuery) -> String {
+        match query.aggregation {
+            Aggregation::Latest => Self::aggregated_bucket_expr(query),
+            _ => "bucket_us".to_string(),
+        }
+    }
+
     pub async fn connect(connection_string: &str) -> Result<Self> {
         let ConnectionParams {
             endpoint_url,
@@ -1199,7 +1217,8 @@ impl ClickHouseStorage {
         query: &AggregatedSamplesQuery,
     ) -> Result<TypedSamples> {
         let limit = query.limit.unwrap_or(DEFAULT_QUERY_LIMIT);
-        let bucket_expr = Self::aggregated_bucket_expr(query);
+        let bucket_expr = Self::aggregated_bucket_select(query);
+        let group_by = Self::aggregated_group_by(query);
         let where_clause = clickhouse_time_where(query.start_time_us, query.end_time_us);
 
         match query.aggregation {
@@ -1211,7 +1230,7 @@ impl ClickHouseStorage {
                 }
 
                 let sql = format!(
-                    "SELECT {bucket_expr} AS bucket_us, avg(value) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, avg(value) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY {group_by} ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1240,7 +1259,7 @@ impl ClickHouseStorage {
                 }
 
                 let sql = format!(
-                    "SELECT {bucket_expr} AS bucket_us, toInt64(count()) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, toInt64(count()) AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY {group_by} ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1270,7 +1289,7 @@ impl ClickHouseStorage {
 
                 let expression = clickhouse_integer_expression(query.aggregation);
                 let sql = format!(
-                    "SELECT {bucket_expr} AS bucket_us, {expression} AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, {expression} AS value FROM integer_values WHERE sensor_id = ?{where_clause} GROUP BY {group_by} ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1299,7 +1318,8 @@ impl ClickHouseStorage {
         query: &AggregatedSamplesQuery,
     ) -> Result<TypedSamples> {
         let limit = query.limit.unwrap_or(DEFAULT_QUERY_LIMIT);
-        let bucket_expr = Self::aggregated_bucket_expr(query);
+        let bucket_expr = Self::aggregated_bucket_select(query);
+        let group_by = Self::aggregated_group_by(query);
         let where_clause = clickhouse_time_where(query.start_time_us, query.end_time_us);
 
         match query.aggregation {
@@ -1311,7 +1331,7 @@ impl ClickHouseStorage {
                 }
 
                 let sql = format!(
-                    "SELECT {bucket_expr} AS bucket_us, toInt64(count()) AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, toInt64(count()) AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY {group_by} ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1341,7 +1361,7 @@ impl ClickHouseStorage {
 
                 let expression = clickhouse_float_expression(query.aggregation);
                 let sql = format!(
-                    "SELECT {bucket_expr} AS bucket_us, {expression} AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, {expression} AS value FROM float_values WHERE sensor_id = ?{where_clause} GROUP BY {group_by} ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1370,7 +1390,8 @@ impl ClickHouseStorage {
         query: &AggregatedSamplesQuery,
     ) -> Result<TypedSamples> {
         let limit = query.limit.unwrap_or(DEFAULT_QUERY_LIMIT);
-        let bucket_expr = Self::aggregated_bucket_expr(query);
+        let bucket_expr = Self::aggregated_bucket_select(query);
+        let group_by = Self::aggregated_group_by(query);
         let where_clause = clickhouse_time_where(query.start_time_us, query.end_time_us);
 
         match query.aggregation {
@@ -1382,7 +1403,7 @@ impl ClickHouseStorage {
                 }
 
                 let sql = format!(
-                    "SELECT {bucket_expr} AS bucket_us, toInt64(count()) AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, toInt64(count()) AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY {group_by} ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1412,7 +1433,7 @@ impl ClickHouseStorage {
 
                 let expression = clickhouse_numeric_expression(query.aggregation);
                 let sql = format!(
-                    "SELECT {bucket_expr} AS bucket_us, {expression} AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY bucket_us ORDER BY bucket_us ASC LIMIT {limit}"
+                    "SELECT {bucket_expr} AS bucket_us, {expression} AS value FROM numeric_values WHERE sensor_id = ?{where_clause} GROUP BY {group_by} ORDER BY bucket_us ASC LIMIT {limit}"
                 );
                 let mut cursor = self.client.query(&sql).bind(query.sensor_id);
                 if let Some(start_time_us) = query.start_time_us {
@@ -1723,7 +1744,7 @@ fn clickhouse_integer_expression(aggregation: Aggregation) -> &'static str {
         Aggregation::Max => "max(value)",
         Aggregation::Sum => "sum(value)",
         Aggregation::First => "argMin(value, timestamp_us)",
-        Aggregation::Last => "argMax(value, timestamp_us)",
+        Aggregation::Last | Aggregation::Latest => "argMax(value, timestamp_us)",
         Aggregation::Avg | Aggregation::Count => unreachable!("handled separately"),
     }
 }
@@ -1735,7 +1756,7 @@ fn clickhouse_float_expression(aggregation: Aggregation) -> &'static str {
         Aggregation::Max => "max(value)",
         Aggregation::Sum => "sum(value)",
         Aggregation::First => "argMin(value, timestamp_us)",
-        Aggregation::Last => "argMax(value, timestamp_us)",
+        Aggregation::Last | Aggregation::Latest => "argMax(value, timestamp_us)",
         Aggregation::Count => unreachable!("handled separately"),
     }
 }
@@ -1747,7 +1768,7 @@ fn clickhouse_numeric_expression(aggregation: Aggregation) -> &'static str {
         Aggregation::Max => "max(value)",
         Aggregation::Sum => "sum(value)",
         Aggregation::First => "argMin(value, timestamp_us)",
-        Aggregation::Last => "argMax(value, timestamp_us)",
+        Aggregation::Last | Aggregation::Latest => "argMax(value, timestamp_us)",
         Aggregation::Count => unreachable!("handled separately"),
     }
 }
