@@ -1,6 +1,7 @@
 import { Link, Outlet } from 'react-router-dom';
 import { AuthDialog } from './AuthDialog';
 import { AuthStatus } from './AuthStatus';
+import { CodeButton } from './CodeButton';
 
 // The files of public/, served next to the page (`BASE_URL` is `/ui/` when SensApp serves them)
 const base = import.meta.env.BASE_URL;
@@ -31,6 +32,7 @@ export function Layout() {
             </div>
             <div className="flex items-center gap-3">
               <AuthStatus />
+              <CodeButton />
               <a
                 href="/docs"
                 target="_blank"

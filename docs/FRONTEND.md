@@ -30,6 +30,18 @@ There is one time window, the one of the explorer, and the chart draws exactly t
 
 The first 8 series have the eight hues of the dataviz palette, validated for color-blind readers (neighbours are 8.4 or more apart in OKLab ×100 under protan and deutan vision, 19 or more with normal vision). The 16 colors after them are there so that no series repeats a color: each was chosen as the farthest, under normal and color-blind vision, from the ones before it. They are not equally good: the 9th to 11th are 10 or more from the others, from the 12th it goes down to 5 or 6. Past about 8 series the colors do not say which line is which, which is why hovering a row of the list highlights its line. The 25th series and the following ones take the colors again. A selected series keeps its color while it is selected. The colors are in `src/lib/palette.ts`, for the light and the dark theme. Booleans are drawn as a 0/1 step line on an axis of their own, whatever the style, and always read as they are (the server cannot aggregate them). Strings and locations are listed but not drawn.
 
+## Code
+
+The **Code** button of the header opens the code that loads what the explorer shows, in two tabs: the [Python SDK](../python/sensapp/README.md) (`get_series`, which gives a Polars DataFrame) and `curl` (one request for each series, as CSV). A button copies it.
+
+- It is made from the state of the explorer: the selected series (their uuid, named in a comment: what every series has is said once, as in the list), the time window, the step and the aggregation. A series the step cannot average (booleans, strings) is read as it is, as in the chart.
+- A preset window is **relative to now** in Python (`datetime.now(UTC) - timedelta(hours=24)`), so the script can be run again later; a window of dates, and every curl request, have the dates written out.
+- The server is the origin of the page. When the server asked for a token, or one is in use, the code reads it from `SENSAPP_TOKEN` (`os.environ["SENSAPP_TOKEN"]`, `$SENSAPP_TOKEN`) and says how to make one. **The token of the session is never written in the code**: a snippet is meant to be pasted, saved and shared.
+- With no series selected it lists the series of the metric, and with no metric the metrics.
+- Whatever a label or a name says is quoted (Python and shell) or put on one line (comments): a hostile label cannot add a line of code to what is copied.
+- The code is always on a dark ground, in both themes, in JetBrains Mono, coloured by highlight.js (Python and Bash only). The dialog, the highlighter and the font are loaded when it is first opened: 13 kB gzipped and 40 kB of font, nothing for a page that never opens it. The copy works on a page served by plain http too, where the clipboard API does not exist.
+- The Python SDK is not on PyPI yet: the snippet installs it from GitHub, `uv pip install 'git+https://github.com/SINTEF/sensapp.git@main#subdirectory=python/sensapp'`. Change `INSTALL_COMMENT` in `src/lib/snippets.ts` when it is published.
+
 ## Address
 
 The explorer is in the address, so a link shares a view and a reload keeps it: `/ui/?metric=cpu&series=<uuid>&series=<uuid>&range=24h&step=5m&agg=max&style=area&log=1`.

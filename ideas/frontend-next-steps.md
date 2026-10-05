@@ -23,3 +23,7 @@ What was left out of `done/frontend-good-enough.md` on purpose, most useful firs
   `docs/FRONTEND.md`); small multiples, or a warning, would be the answer.
 - **Auto-refresh** was declined at first, but a preset range now follows the clock every minute (the end is now),
   which is the same thing for the chart. A refresh switch would only be needed to stop it.
+- **More in the Code dialog.** Only reading is covered (Python, curl). Left out on purpose: writing (`publish`), other
+  languages (JavaScript, R), a PromQL query (`client.query('cpu{host="a"}[24h]')`, which would also work for a
+  window that follows the clock), and a Polars/pandas plot at the end of the Python code. A format choice for curl
+  (SenML and JSON Lines besides CSV) if someone needs it.
