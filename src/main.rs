@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 use anyhow::{Context, Result};
 use sensapp::config::{self, load_configuration};
-use sensapp::http::auth::AuthConfig;
+use sensapp::http::auth::{AuthConfig, AuthMode, generate_secret, resolve_auth_mode};
 use sensapp::http::metrics::HttpMetrics;
 use sensapp::http::server::run_http_server;
 use sensapp::http::state::HttpServerState;
@@ -16,6 +16,10 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && args[1] == "generate-token" {
         return generate_token_command(&args[2..]);
+    }
+    if args.len() > 1 && args[1] == "generate-secret" {
+        println!("{}", generate_secret()?);
+        return Ok(());
     }
 
     rustls::crypto::aws_lc_rs::default_provider()
@@ -42,6 +46,15 @@ async fn async_main() -> Result<()> {
     // Load configuration
     load_configuration().context("Failed to load configuration")?;
     let config = config::get().context("Failed to get configuration")?;
+
+    // Decide how to authenticate before anything else: SensApp refuses to start, before it
+    // connects to the storage, when it would be open by mistake
+    let auth_mode = resolve_auth_mode(
+        config.jwt_secret.as_deref(),
+        config.auth_disabled,
+        config.endpoint,
+    )
+    .context("Authentication is not configured")?;
 
     // Initialize Sentry if DSN is provided
     let _sentry = config.sentry_dsn.as_ref().map(|dsn| {
@@ -87,19 +100,7 @@ async fn async_main() -> Result<()> {
     let address = SocketAddr::from((endpoint, port));
 
     println!("📡 Starting HTTP server on http://{}...", address);
-    // Build optional JWT authentication config
-    let auth = match &config.jwt_secret {
-        Some(secret) => {
-            let auth_config = AuthConfig::from_secret(secret)
-                .context("Failed to configure JWT authentication")?;
-            println!("🔐 JWT authentication enabled");
-            Some(auth_config)
-        }
-        None => {
-            println!("🔓 No JWT secret configured — all endpoints are open");
-            None
-        }
-    };
+    let auth = build_auth(&auth_mode, config.auth_disabled, address, config.ui_enabled)?;
 
     match run_http_server(
         HttpServerState {
@@ -121,6 +122,57 @@ async fn async_main() -> Result<()> {
         Err(err) => {
             event!(Level::ERROR, "HTTP server failed to start: {}", err);
             Err(err)
+        }
+    }
+}
+
+/// How long the token printed at the start of a run with a made secret is valid. The secret is
+/// lost with the process, so the CLI cannot mint another one: it has to last a working day.
+const EPHEMERAL_TOKEN_SECONDS: u64 = 24 * 3600;
+
+/// Build the authentication of the server from the decided mode, and tell the operator about it.
+fn build_auth(
+    mode: &AuthMode,
+    auth_disabled: bool,
+    address: SocketAddr,
+    ui_enabled: bool,
+) -> Result<Option<AuthConfig>> {
+    match mode {
+        AuthMode::Secret(secret) => {
+            if auth_disabled {
+                println!("⚠️  SENSAPP_AUTH_DISABLED is ignored: SENSAPP_JWT_SECRET is set");
+            }
+            let auth_config = AuthConfig::from_secret(secret)
+                .context("Failed to configure JWT authentication")?;
+            println!("🔐 JWT authentication enabled");
+            Ok(Some(auth_config))
+        }
+        AuthMode::Ephemeral(secret) => {
+            let auth_config = AuthConfig::from_secret(secret)
+                .context("Failed to configure JWT authentication")?;
+            let token = auth_config
+                .create_token(
+                    "local-dev",
+                    "read write delete",
+                    EPHEMERAL_TOKEN_SECONDS,
+                    None,
+                )
+                .context("Failed to create the local token")?;
+            println!("🔐 JWT authentication enabled, with a secret made for this run");
+            println!("   It is lost when SensApp stops, and tokens made before are refused.");
+            println!("   Set SENSAPP_JWT_SECRET to keep it (`sensapp generate-secret` makes one).");
+            println!("   Token for this run, valid for 24 hours:");
+            println!("   {token}");
+            if ui_enabled {
+                println!("   Open the UI signed in: http://{address}/ui/#token={token}");
+            }
+            Ok(Some(auth_config))
+        }
+        AuthMode::Disabled => {
+            println!(
+                "🔓 SENSAPP_AUTH_DISABLED is set: every endpoint is open, to anyone who can reach this server"
+            );
+            Ok(None)
         }
     }
 }

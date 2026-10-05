@@ -78,6 +78,73 @@ impl AuthConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Startup mode
+// ---------------------------------------------------------------------------
+
+/// How the server authenticates, decided once at startup by [`resolve_auth_mode`].
+#[derive(Clone, PartialEq, Eq)]
+pub enum AuthMode {
+    /// The operator configured the secret.
+    Secret(String),
+    /// No secret was configured on a loopback address: this one is made for the run, and lost
+    /// when the process stops.
+    Ephemeral(String),
+    /// `SENSAPP_AUTH_DISABLED`: every endpoint is open.
+    Disabled,
+}
+
+impl std::fmt::Debug for AuthMode {
+    // Never print a secret, even by mistake in a log
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            AuthMode::Secret(_) => "AuthMode::Secret(…)",
+            AuthMode::Ephemeral(_) => "AuthMode::Ephemeral(…)",
+            AuthMode::Disabled => "AuthMode::Disabled",
+        })
+    }
+}
+
+/// Make a random secret of 48 characters (288 bits), which `sensapp generate-secret` prints.
+pub fn generate_secret() -> Result<String, anyhow::Error> {
+    use base64::Engine;
+    let mut bytes = [0u8; 36];
+    getrandom::fill(&mut bytes)
+        .map_err(|e| anyhow::anyhow!("Cannot get random bytes for a secret: {e}"))?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+}
+
+/// Decide how to authenticate. SensApp is not open unless asked to be:
+///
+/// - a configured secret always wins, even when `auth_disabled` is also set;
+/// - without a secret, `auth_disabled` opens everything, explicitly;
+/// - without a secret on a loopback address (a developer's machine, where only the local user
+///   can connect) a secret is made for this run;
+/// - without a secret on any other address (a container, a server) it is an error: a secret made
+///   per process would differ between instances, and silently open is what this prevents.
+pub fn resolve_auth_mode(
+    secret: Option<&str>,
+    auth_disabled: bool,
+    endpoint: std::net::IpAddr,
+) -> Result<AuthMode, anyhow::Error> {
+    if let Some(secret) = secret {
+        return Ok(AuthMode::Secret(secret.to_string()));
+    }
+    if auth_disabled {
+        return Ok(AuthMode::Disabled);
+    }
+    if endpoint.is_loopback() {
+        return Ok(AuthMode::Ephemeral(generate_secret()?));
+    }
+    anyhow::bail!(
+        "SensApp listens on {endpoint}, which other machines can reach, and has no \
+         authentication configured. Choose one:\n  \
+         - set SENSAPP_JWT_SECRET to a secret of at least 32 characters (`sensapp generate-secret` makes one),\n  \
+         - listen on 127.0.0.1 for a local run, where SensApp makes a secret and prints an admin token,\n  \
+         - set SENSAPP_AUTH_DISABLED=true to run with every endpoint open."
+    )
+}
+
+// ---------------------------------------------------------------------------
 // JWT Claims
 // ---------------------------------------------------------------------------
 
@@ -517,5 +584,77 @@ mod tests {
         assert!(access.can_access_sensor("cpu"));
         assert!(access.can_access_sensor("mem"));
         assert!(!access.can_access_sensor("disk"));
+    }
+
+    // -- startup mode --
+
+    const LOOPBACK: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+    const EXPOSED: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED);
+
+    #[test]
+    fn a_configured_secret_wins_everywhere() {
+        for endpoint in [LOOPBACK, EXPOSED] {
+            for disabled in [false, true] {
+                let mode = resolve_auth_mode(Some(TEST_SECRET), disabled, endpoint).unwrap();
+                assert_eq!(mode, AuthMode::Secret(TEST_SECRET.to_string()));
+            }
+        }
+    }
+
+    #[test]
+    fn disabling_authentication_is_an_explicit_choice() {
+        for endpoint in [LOOPBACK, EXPOSED] {
+            let mode = resolve_auth_mode(None, true, endpoint).unwrap();
+            assert_eq!(mode, AuthMode::Disabled);
+        }
+    }
+
+    #[test]
+    fn loopback_without_secret_makes_one_for_the_run() {
+        for endpoint in [
+            LOOPBACK,
+            std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+        ] {
+            let AuthMode::Ephemeral(secret) = resolve_auth_mode(None, false, endpoint).unwrap()
+            else {
+                panic!("expected an ephemeral secret on {endpoint}");
+            };
+            // It is usable as a signing secret
+            AuthConfig::from_secret(&secret).expect("the made secret is accepted");
+        }
+    }
+
+    #[test]
+    fn exposed_address_without_secret_refuses_to_start() {
+        for endpoint in [
+            EXPOSED,
+            "192.168.1.10".parse().unwrap(),
+            "::".parse().unwrap(),
+        ] {
+            let error = resolve_auth_mode(None, false, endpoint).expect_err("must refuse");
+            let message = error.to_string();
+            assert!(message.contains("SENSAPP_JWT_SECRET"), "{message}");
+            assert!(message.contains("SENSAPP_AUTH_DISABLED"), "{message}");
+            assert!(message.contains("generate-secret"), "{message}");
+        }
+    }
+
+    #[test]
+    fn generated_secrets_are_long_and_different() {
+        let first = generate_secret().unwrap();
+        let second = generate_secret().unwrap();
+        assert_eq!(first.len(), 48);
+        assert_ne!(first, second);
+        assert!(
+            first
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        );
+    }
+
+    #[test]
+    fn the_mode_never_prints_its_secret() {
+        let mode = AuthMode::Secret(TEST_SECRET.to_string());
+        assert!(!format!("{mode:?}").contains(TEST_SECRET));
     }
 }

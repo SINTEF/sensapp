@@ -79,12 +79,20 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_INFLUXDB_WITH_NUMERIC", default = false)]
     pub influxdb_with_numeric: bool,
 
-    /// JWT secret for optional authentication.
-    /// When set, all protected endpoints require a valid JWT bearer token.
-    /// Must be at least 32 characters long.
-    /// When unset, all endpoints are open (no security).
+    /// Secret that signs and verifies the JWTs. Must be at least 32 characters long
+    /// (`sensapp generate-secret` makes one). When set, the protected endpoints require a valid
+    /// JWT bearer token.
+    ///
+    /// When unset, SensApp does not run open by default: on a loopback address it makes a random
+    /// secret for this run and prints an admin token, on any other address it refuses to start,
+    /// unless `SENSAPP_AUTH_DISABLED` is true.
     #[config(env = "SENSAPP_JWT_SECRET")]
     pub jwt_secret: Option<String>,
+
+    /// Run without authentication: every endpoint is open. The explicit opt-out for demos and
+    /// networks that authenticate in front of SensApp. Ignored when `SENSAPP_JWT_SECRET` is set.
+    #[config(env = "SENSAPP_AUTH_DISABLED", default = false)]
+    pub auth_disabled: bool,
 }
 
 impl SensAppConfig {

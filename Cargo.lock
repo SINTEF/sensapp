@@ -4582,6 +4582,7 @@ dependencies = [
  "futures",
  "gcp-bigquery-client",
  "geo",
+ "getrandom 0.3.4",
  "hifitime",
  "hybridmap",
  "influxdb-line-protocol",
