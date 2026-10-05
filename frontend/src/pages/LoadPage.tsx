@@ -54,19 +54,7 @@ export function LoadPage() {
   });
 
   return (
-    <div className="flex flex-col gap-5 px-1 sm:px-2 pt-2 pb-8">
-      <div>
-        <h1 className="font-display text-xl font-semibold">Load data into SensApp</h1>
-        <p className="text-sm text-base-content/65 mt-1">
-          Pick the way that fits your data, copy the code, and run it. The address in it is the one of this server. Everything else SensApp
-          reads is in the{' '}
-          <a className="link" href="/docs" target="_blank" rel="noopener noreferrer">
-            API docs
-          </a>
-          .
-        </p>
-      </div>
-
+    <div className="flex flex-col gap-3 px-1 sm:px-2 pb-8">
       <div role="tablist" aria-label="Way to load data" className="flex gap-1 sm:gap-3 border-b border-base-300" onKeyDown={handleTabKey}>
         {LOAD_WAYS.map((item) => (
           <button

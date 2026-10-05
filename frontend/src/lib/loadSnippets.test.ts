@@ -27,7 +27,7 @@ describe('load snippets', () => {
 
   it('python: three scripts that tell uv what they need, each opening the client', () => {
     const sections = sectionsFor('python', open);
-    expect(sections.map((s) => s.title)).toEqual(['A whole DataFrame', 'One sample at a time', 'A few samples at a time']);
+    expect(sections.map((s) => s.title)).toEqual(['DataFrame', 'One sample at a time', 'Batches']);
     for (const section of sections) {
       expect(section.language).toBe('python');
       expect(section.code.startsWith('# /// script')).toBe(true);

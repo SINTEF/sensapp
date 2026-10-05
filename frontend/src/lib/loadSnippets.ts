@@ -60,9 +60,9 @@ export function pythonSections(input: LoadInput): LoadSection[] {
   const frame = [
     ...pythonHead(input, 'load.py', ['import asyncio', 'from datetime import UTC, datetime, timedelta', ...os, '', 'import polars as pl', 'from sensapp import SensAppClient']),
     '',
-    '# A table of samples: a "timestamp" column with a time zone, and a "value" column.',
-    '# Read yours instead: pl.read_csv("measurements.csv", try_parse_dates=True), pl.read_parquet(...)',
-    '# or pl.from_pandas(df). A timestamp with no time zone is UTC after .dt.replace_time_zone("UTC").',
+    '# One row per sample: "timestamp" (with a time zone) and "value".',
+    '# Or read yours: pl.read_csv("data.csv", try_parse_dates=True), pl.read_parquet(...), pl.from_pandas(df).',
+    '# A timestamp with no time zone needs .dt.replace_time_zone("UTC").',
     'start = datetime.now(UTC) - timedelta(days=30)',
     'frame = pl.DataFrame(',
     '    {',
@@ -74,7 +74,7 @@ export function pythonSections(input: LoadInput): LoadSection[] {
     '',
     'async def main() -> None:',
     ...pythonClient(input, '    '),
-    '        # A history goes by slices: a request is not meant to carry everything',
+    '        # Slices keep each request small',
     '        for part in frame.iter_slices(100_000):',
     '            await client.publish("temperature", part)',
     '',
@@ -88,7 +88,7 @@ export function pythonSections(input: LoadInput): LoadSection[] {
     '',
     'async def main() -> None:',
     ...pythonClient(input, '    '),
-    '        # The sample is stamped with the time it is sent',
+    '        # The timestamp is the time of the call',
     '        await client.publish("temperature", 21.5)',
     '',
     '',
@@ -120,20 +120,20 @@ export function pythonSections(input: LoadInput): LoadSection[] {
 
   return [
     {
-      title: 'A whole DataFrame',
-      description: 'A history, or a file you have: send the table, SensApp keeps its timestamps. Publishing the same name again adds to the same series.',
+      title: 'DataFrame',
+      description: 'Send a table of timestamps and values. Publishing the same name again appends to the same series.',
       language: 'python',
       code: frame.join('\n') + '\n',
     },
     {
       title: 'One sample at a time',
-      description: 'The simplest thing that works, for a sensor that reports now and then.',
+      description: 'The sample is stamped with the time of the call.',
       language: 'python',
       code: one.join('\n') + '\n',
     },
     {
-      title: 'A few samples at a time',
-      description: 'A sensor that reports often: keep the samples for a moment and send them together, which costs the server less than a request each.',
+      title: 'Batches',
+      description: 'Keep the samples and send ten at a time: fewer requests than one per sample.',
       language: 'python',
       code: few.join('\n') + '\n',
     },
@@ -176,13 +176,13 @@ export function telegrafSections(input: LoadInput): LoadSection[] {
     {
       title: 'telegraf.conf',
       description:
-        'Telegraf writes as it would to InfluxDB. A measurement and a field make the name of a series (`cpu` and `usage_idle` give `cpu usage_idle`), the tags become its labels, and `organization` and `bucket` are kept as the labels `influxdb_org` and `influxdb_bucket`.',
+        'Telegraf writes through the InfluxDB v2 API. The measurement and the field make the series name (`cpu usage_idle`), the tags become labels, and `organization` and `bucket` are kept as the labels `influxdb_org` and `influxdb_bucket`.',
       language: 'toml',
       code: config.join('\n') + '\n',
     },
     {
       title: 'Run it',
-      description: 'Check it with one collection, then leave it running.',
+      description: 'One collection to test, then the daemon.',
       language: 'bash',
       code: [
         ...(input.authenticated ? [`export SENSAPP_TOKEN=$(${WRITE_TOKEN_COMMAND})`] : []),
@@ -219,7 +219,7 @@ export function prometheusSections(input: LoadInput): LoadSection[] {
       ? [
           {
             title: 'A token',
-            description: 'This server asks for one. Prometheus reads it from a file; this one writes and reads, and is good for a year (the default is an hour).',
+            description: 'This server asks for a token. Prometheus reads it from a file. This one can read and write, and lasts a year (the default is an hour).',
             language: 'bash' as const,
             code: PROMETHEUS_TOKEN_COMMAND + '\n',
           },
@@ -228,13 +228,13 @@ export function prometheusSections(input: LoadInput): LoadSection[] {
     {
       title: 'prometheus.yml',
       description:
-        'Every sample Prometheus scrapes is also sent to SensApp. The labels are kept as they are, and the metric name is the name of the series. Add the remote_read to query SensApp from Prometheus and Grafana too; `read_recent` makes Prometheus ask it for recent data as well, not only for what its own storage has dropped.',
+        '`remote_write` sends every scraped sample to SensApp, `remote_read` queries it back. Labels are kept, the metric name is the series name. `read_recent` reads recent data from SensApp too, not only what local storage no longer has.',
       language: 'yaml',
       code: config.join('\n') + '\n',
     },
     {
       title: 'Prometheus in a container',
-      description: 'A container does not reach SensApp at `localhost`: use `host.docker.internal` (Docker Desktop) or the name of the SensApp service in the same network.',
+      description: 'In a container `localhost` is the container: use `host.docker.internal`, or the name of the SensApp service.',
       language: 'yaml',
       code: ['remote_write:', '  - url: http://host.docker.internal:3000/api/v1/prometheus_remote_write', ''].join('\n'),
     },
@@ -251,25 +251,22 @@ export function curlSections(input: LoadInput): LoadSection[] {
 
   const senml = [
     ...token,
-    '# "n" is the name, "u" the unit and "v" the value. "t" is a Unix time in seconds: left out, it is now.',
     ...request(['--json ' + sh('[{"n":"temperature","u":"Cel","v":21.5},{"n":"humidity","u":"%RH","v":41,"t":1767225600}]')], publish),
   ];
   const csv = [
     ...token,
-    '# A file with a datetime column, a sensor_name column and a value column (and a unit one, if you like)',
     "printf 'datetime,sensor_name,value,unit\\n2026-01-01T12:00:00Z,temperature,21.5,Cel\\n2026-01-01T12:01:00Z,temperature,21.7,Cel\\n' > measurements.csv",
     '',
     ...request(['-H ' + sh('content-type: text/csv'), '--data-binary @measurements.csv'], publish),
   ];
   const line = [
     ...token,
-    '# measurement,tag=value field=value timestamp: the tags become labels. precision=s says the timestamp is in seconds.',
     ...request(['--data-binary ' + sh('weather,location=oslo temperature=21.5,humidity=41i 1767225600')], write),
   ];
   return [
-    { title: 'SenML JSON', description: 'The standard format for sensor data (RFC 8428), and the one that needs the least.', language: 'bash', code: senml.join('\n') + '\n' },
-    { title: 'CSV', description: 'A file out of a spreadsheet or a logger. SensApp finds the columns by their names.', language: 'bash', code: csv.join('\n') + '\n' },
-    { title: 'InfluxDB line protocol', description: 'What Telegraf and many devices speak. `org` and `bucket` are required, as for InfluxDB.', language: 'bash', code: line.join('\n') + '\n' },
+    { title: 'SenML JSON', description: 'RFC 8428. `n` is the name, `u` the unit, `v` the value, `t` a Unix time in seconds (now when missing).', language: 'bash', code: senml.join('\n') + '\n' },
+    { title: 'CSV', description: 'The columns are found by name: a datetime, a `sensor_name`, a `value`, and optionally a `unit`.', language: 'bash', code: csv.join('\n') + '\n' },
+    { title: 'InfluxDB line protocol', description: '`measurement,tag=value field=value timestamp`. The tags become labels. `org` and `bucket` are required, `precision=s` makes the timestamp seconds.', language: 'bash', code: line.join('\n') + '\n' },
   ];
 }
 

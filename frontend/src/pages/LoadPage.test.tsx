@@ -40,7 +40,7 @@ describe('LoadPage', () => {
     expect(screen.getByRole('button', { name: 'Code' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('link', { name: 'Load Data' }));
-    expect(await screen.findByRole('heading', { name: 'Load data into SensApp' })).toBeInTheDocument();
+    expect(await screen.findByRole('tablist', { name: 'Way to load data' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Load Data' })).toHaveAttribute('aria-current', 'page');
     // The Code button is about the explorer
     expect(screen.queryByRole('button', { name: 'Code' })).toBeNull();

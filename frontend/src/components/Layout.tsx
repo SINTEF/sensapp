@@ -71,7 +71,7 @@ export function Layout() {
         </div>
       </header>
 
-      <main className="flex-1 lg:min-h-0 w-full p-3">
+      <main className={`flex-1 lg:min-h-0 w-full p-3 ${explorer ? '' : 'lg:overflow-y-auto'}`}>
         <Outlet />
       </main>
       <AuthDialog />
