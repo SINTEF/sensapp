@@ -165,7 +165,7 @@ export function SeriesTable() {
             <div className="flex flex-wrap items-center gap-1 pb-1.5 text-xs text-base-content/50">
               <span>on every series</span>
               {Object.entries(shared).map(([key, value]) => (
-                <span key={key} className="inline-flex gap-0.5 rounded bg-base-200 px-1.5 py-0.5">
+                <span key={key} className="chip">
                   <span>{key}=</span>
                   <span className="font-medium text-base-content/70">{value}</span>
                 </span>
@@ -226,7 +226,7 @@ export function SeriesTable() {
                     className={`cursor-pointer transition-colors ${
                       selected
                         ? 'bg-primary/8'
-                        : 'hover:bg-base-200/60'
+                        : 'hover:bg-base-content/5'
                     }`}
                     onClick={() => toggleSeries(toSeriesInfo(s))}
                     onMouseEnter={() => setHoveredSeries(uuid)}
@@ -261,7 +261,7 @@ export function SeriesTable() {
                     )}
                     {mixedTypes && (
                       <td>
-                        <span className="badge badge-xs badge-outline">{s['sensor:type'].toLowerCase()}</span>
+                        <span className="chip">{s['sensor:type'].toLowerCase()}</span>
                       </td>
                     )}
                     <td
@@ -283,7 +283,7 @@ export function SeriesTable() {
             {(bookmarks.length > 0 || next) && (
               <div className="join">
                 <button
-                  className="join-item btn btn-xs btn-outline"
+                  className="join-item btn btn-xs btn-quiet"
                   aria-label="Previous page"
                   disabled={bookmarks.length === 0}
                   onClick={() => setBookmarks(bookmarks.slice(0, -1))}
@@ -291,7 +291,7 @@ export function SeriesTable() {
                   ‹
                 </button>
                 <button
-                  className="join-item btn btn-xs btn-outline"
+                  className="join-item btn btn-xs btn-quiet"
                   aria-label="Next page"
                   disabled={!next}
                   onClick={() => next && setBookmarks([...bookmarks, next])}

@@ -43,7 +43,7 @@ export function TimeRangeSelector() {
       {/* Where the window is: back to the one before, earlier, wider, later */}
       <div className="join">
         <button
-          className="join-item btn btn-xs btn-outline"
+          className="join-item btn btn-xs btn-quiet"
           aria-label="Back to the previous window"
           title="Back to the previous window"
           disabled={rangeHistory.length === 0}
@@ -52,7 +52,7 @@ export function TimeRangeSelector() {
           ↶
         </button>
         <button
-          className="join-item btn btn-xs btn-outline"
+          className="join-item btn btn-xs btn-quiet"
           aria-label="Earlier"
           title="Half a window earlier"
           onClick={() => panRange(-1)}
@@ -60,7 +60,7 @@ export function TimeRangeSelector() {
           ‹
         </button>
         <button
-          className="join-item btn btn-xs btn-outline"
+          className="join-item btn btn-xs btn-quiet"
           aria-label="Zoom out"
           title="Twice the window"
           onClick={zoomOutRange}
@@ -68,7 +68,7 @@ export function TimeRangeSelector() {
           −
         </button>
         <button
-          className="join-item btn btn-xs btn-outline"
+          className="join-item btn btn-xs btn-quiet"
           aria-label="Later"
           title="Half a window later"
           // A live window is at now already
@@ -83,7 +83,7 @@ export function TimeRangeSelector() {
         {PRESETS.map((preset) => (
           <button
             key={preset.label}
-            className={`join-item btn btn-xs btn-outline ${relativeRange === preset.label ? 'btn-active' : ''}`}
+            className={`join-item btn btn-xs btn-quiet ${relativeRange === preset.label ? 'btn-active' : ''}`}
             onClick={() => setRelativeRange(preset.label)}
             aria-pressed={relativeRange === preset.label}
           >

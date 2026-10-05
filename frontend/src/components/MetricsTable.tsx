@@ -126,12 +126,12 @@ export function MetricsTable() {
                     className={`cursor-pointer transition-colors ${
                       isSelected
                         ? 'bg-primary/8 border-l-2 border-primary'
-                        : 'hover:bg-base-200/60'
+                        : 'hover:bg-base-content/5'
                     }`}
                     onClick={() => handleSelectMetric(metric)}
                   >
                     {/* Takes what the other columns leave, and cuts the name there (`max-w-0` is what lets it) */}
-                    <td className="w-full max-w-0">
+                    <td className="w-2/5 max-w-0">
                       <div className="truncate" title={name}>
                         <span className="font-mono text-xs font-medium">{name}</span>
                         {metric['sensor:unit'] && (
@@ -140,7 +140,7 @@ export function MetricsTable() {
                       </div>
                     </td>
                     <td>
-                      <span className={`badge badge-sm ${sensorTypeBadgeClass(metric['sensor:type'])}`}>
+                      <span className={`badge badge-sm badge-soft ${sensorTypeBadgeClass(metric['sensor:type'])}`}>
                         {metric['sensor:type'].toLowerCase()}
                       </span>
                     </td>
@@ -148,9 +148,9 @@ export function MetricsTable() {
                       {seriesCount ?? '—'}
                     </td>
                     <td className="hidden sm:table-cell">
-                      <div className="flex flex-wrap gap-1 max-w-44">
+                      <div className="flex flex-wrap gap-1 max-w-72">
                         {dimensions.slice(0, 5).map((dim) => (
-                          <span key={dim} className="badge badge-xs badge-outline font-mono">
+                          <span key={dim} className="chip font-mono">
                             {dim}
                           </span>
                         ))}

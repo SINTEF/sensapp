@@ -20,11 +20,8 @@ export function ExplorerPage() {
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 border-b border-base-300">
           <h2 className="text-sm font-semibold">Chart</h2>
           <ChartOptions />
-          {selectedSeries.length > 0 && (
-            <span className="ml-auto text-xs text-base-content/40 max-sm:hidden">Drag on the chart to zoom</span>
-          )}
         </div>
-        <div className="px-2 py-1" style={{ height: '260px' }}>
+        <div className="px-2 py-1" style={{ height: 'clamp(260px, 40vh, 640px)' }}>
           {selectedSeries.length > 0 ? (
             <TimeSeriesChart />
           ) : (

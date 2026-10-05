@@ -22,7 +22,7 @@ export function ChartOptions() {
         ))}
       </select>
       <button
-        className={`btn btn-xs btn-outline h-7 ${logScale ? 'btn-active' : ''}`}
+        className={`btn btn-xs btn-quiet h-7 ${logScale ? 'btn-active' : ''}`}
         aria-pressed={logScale}
         title="Logarithmic scale"
         onClick={() => setLogScale(!logScale)}

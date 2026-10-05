@@ -86,3 +86,74 @@ html, body, #root {
     overflow: hidden;
   }
 }
+
+/*
+ * One look for the controls, in both themes. The borders are a hint of the text color, so they follow the
+ * theme (daisyUI's outline buttons and badges are drawn in the full text color: white frames on the dark one).
+ * Written outside the layers: they must win over daisyUI's.
+ */
+:root {
+  --control-border: color-mix(in oklab, var(--color-base-content) 18%, transparent);
+  --control-border-hover: color-mix(in oklab, var(--color-base-content) 32%, transparent);
+  --wash: color-mix(in oklab, var(--color-base-content) 7%, transparent);
+}
+
+/* A button of the bars: quiet, and tinted with the primary color when it is on */
+.btn.btn-quiet {
+  background: transparent;
+  box-shadow: none;
+  background-image: none;
+  border-color: var(--control-border);
+  color: color-mix(in oklab, var(--color-base-content) 80%, transparent);
+}
+.btn.btn-quiet:hover:not(:disabled) {
+  background: var(--wash);
+  border-color: var(--control-border-hover);
+}
+.btn.btn-quiet:disabled {
+  background: transparent;
+  border-color: var(--control-border);
+  color: color-mix(in oklab, var(--color-base-content) 30%, transparent);
+}
+.btn.btn-quiet.btn-active,
+.btn.btn-quiet[aria-pressed="true"] {
+  background: color-mix(in oklab, var(--color-primary) 16%, transparent);
+  border-color: color-mix(in oklab, var(--color-primary) 55%, transparent);
+  color: var(--color-primary);
+}
+
+/* A label or a dimension: a wash, no frame */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  border-radius: 0.25rem;
+  padding: 0.0625rem 0.375rem;
+  font-size: 0.6875rem;
+  line-height: 1.25rem;
+  background: var(--wash);
+  color: color-mix(in oklab, var(--color-base-content) 75%, transparent);
+  white-space: nowrap;
+}
+
+/* The fields share the border of the buttons */
+.input,
+.select {
+  border-color: var(--control-border);
+  box-shadow: none;
+}
+.input:hover,
+.select:hover {
+  border-color: var(--control-border-hover);
+}
+.input:focus,
+.input:focus-within,
+.select:focus {
+  border-color: var(--color-primary);
+}
+
+/* Thin scrollbars that are not brighter than the page */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--color-base-content) 28%, transparent) transparent;
+}
