@@ -668,8 +668,10 @@ mod rrdcached_tests {
         // archive of ten seconds
         let db = connect().await?;
         let storage = db.storage();
+        // The end is in the middle of a ten minutes interval, wherever the clock is: the
+        // outcome depends on it (see the next test). The clock does not matter to the daemon.
+        let end = now() - now() % 600 - 300;
         let sensor = new_sensor();
-        let end = now();
         // Twenty-five minutes of data: the rows of ten minutes before the last one are complete
         let points = ramp(end - 1500, 10, 151, 1.0);
         publish(&storage, &sensor, &points).await?;
@@ -679,6 +681,27 @@ mod rrdcached_tests {
         // The older rows are the averages of ten minutes, the newest ones are rows of ten seconds
         assert!(rows.contains(&(end - 10, 149.0)), "{rows:?}");
         assert!(rows.len() >= 3 && rows[0].0 % 600 == 0, "{rows:?}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_last_update_at_the_end_of_a_ten_minutes_interval_is_in_the_coarse_row() -> Result<()>
+    {
+        // The row of ten minutes that ends with the last update is complete: there is nothing
+        // fresher to read, and its value is the average of the ten minutes, not the last sample
+        let db = connect().await?;
+        let storage = db.storage();
+        let end = now() - now() % 600 - 600;
+        let sensor = new_sensor();
+        let points = ramp(end - 1500, 10, 151, 1.0);
+        publish(&storage, &sensor, &points).await?;
+
+        let rows = read(&storage, &sensor, end - 3 * 86400, end).await?;
+        let last = rows.last().unwrap();
+        assert_eq!(last.0, end, "{rows:?}");
+        // 91 to 150: the samples of the interval (end - 600, end]
+        assert_eq!(last.1, (91..=150).sum::<i64>() as f64 / 60.0, "{rows:?}");
         Ok(())
     }
 
