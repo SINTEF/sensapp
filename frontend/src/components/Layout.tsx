@@ -44,7 +44,7 @@ export function Layout() {
                     to={tab.to}
                     end={tab.end}
                     className={({ isActive }) =>
-                      `flex items-center whitespace-nowrap px-1.5 sm:px-3 border-b-2 font-display text-[0.65rem] sm:text-[0.7rem] font-semibold uppercase tracking-[0.06em] sm:tracking-[0.2em] transition-colors ${
+                      `flex items-center whitespace-nowrap px-1.5 sm:px-3 pt-1 border-b-2 font-display text-[0.65rem] sm:text-[0.7rem] font-semibold uppercase tracking-[0.06em] sm:tracking-[0.2em] transition-colors ${
                         isActive
                           ? 'border-primary text-base-content'
                           : 'border-transparent text-base-content/45 hover:text-base-content/80'
