@@ -37,6 +37,19 @@ describe('load snippets', () => {
     expect(sections[2].code).toContain('SamplePoint(datetime.now(UTC)');
   });
 
+  it('open with a token section, the same for every way, that links to Credentials', () => {
+    for (const way of LOAD_WAYS) {
+      expect(sectionsFor(way.id, open).map((s) => s.title), way.id).not.toContain('A token');
+      const [first] = sectionsFor(way.id, secured);
+      expect(first.title, way.id).toBe('A token');
+      expect(first.link, way.id).toEqual({ to: '/credentials', label: 'Make a token in Credentials' });
+      // The other sections do not repeat how to make one
+      for (const section of sectionsFor(way.id, secured).slice(1)) {
+        expect(section.code, way.id).not.toContain('generate-token');
+      }
+    }
+  });
+
   it('python: the client takes the token of the environment', () => {
     const code = codeOf('python', secured);
     expect(code).toContain('import os');

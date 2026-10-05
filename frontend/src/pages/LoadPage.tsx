@@ -1,8 +1,8 @@
 import { Fragment, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { CodeBlock } from '../components/CodeBlock';
-import { LOAD_WAYS, WRITE_TOKEN_COMMAND, sectionsFor } from '../lib/loadSnippets';
+import { LOAD_WAYS, sectionsFor } from '../lib/loadSnippets';
 import type { LoadWay } from '../lib/loadSnippets';
 import { useAuthStore } from '../stores/useAuthStore';
 
@@ -78,18 +78,17 @@ export function LoadPage() {
       </div>
 
       <div id="load-panel" role="tabpanel" aria-labelledby={`load-tab-${way}`} className="flex flex-col">
-        {authenticated && (
-          <p className="text-sm border-l-4 border-primary/60 pl-3 py-1 mb-2">
-            This server asks for a token. Loading needs the <code className="font-mono">write</code> scope: make one with{' '}
-            <code className="font-mono">{WRITE_TOKEN_COMMAND}</code>. The code reads it from <code className="font-mono">SENSAPP_TOKEN</code>.
-          </p>
-        )}
         <div className="flex flex-col divide-y divide-base-300">
           {sections.map((section) => (
             <section key={section.title} className="grid gap-x-8 gap-y-3 py-6 first:pt-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
               <div>
                 <h2 className="text-base font-semibold">{section.title}</h2>
                 <p className="text-sm text-base-content/70 mt-1 leading-relaxed">{withCode(section.description)}</p>
+                {section.link && (
+                  <Link to={section.link.to} className="link link-primary text-sm inline-block mt-2">
+                    {section.link.label}
+                  </Link>
+                )}
               </div>
               <CodeBlock code={section.code} language={section.language} label={section.title} />
             </section>

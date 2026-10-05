@@ -94,11 +94,26 @@ describe('LoadPage', () => {
     expect(await screen.findByRole('button', { name: 'Copy SenML JSON' })).toHaveTextContent('Copied');
   });
 
-  it('says how to make a token when the server asks for one', async () => {
+  it('says how to make a token when the server asks for one, and links to where it is made', async () => {
+    const user = userEvent.setup();
     useAuthStore.setState({ token: null, authRequired: true });
     renderAt('/load');
     await screen.findByRole('tabpanel');
     expect(screen.getByRole('tabpanel')).toHaveTextContent('sensapp generate-token me --scope write');
     expect(code()).toContain('os.environ["SENSAPP_TOKEN"]');
+
+    // Every way starts with the same section
+    for (const way of ['Telegraf', 'Prometheus', 'curl']) {
+      await user.click(screen.getByRole('tab', { name: way }));
+      expect(screen.getByRole('heading', { name: 'A token' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Make a token in Credentials' })).toHaveAttribute('href', '/credentials');
+    }
+  });
+
+  it('says nothing of tokens when the server is open', async () => {
+    renderAt('/load');
+    await screen.findByRole('tabpanel');
+    expect(screen.queryByRole('link', { name: 'Make a token in Credentials' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'A token' })).toBeNull();
   });
 });

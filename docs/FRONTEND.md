@@ -51,22 +51,27 @@ The second tab of the header (`/ui/load`) explains how to get data into SensApp,
 - **Telegraf**: `outputs.influxdb_v2` against `/api/v2/write` with a few inputs (see [INFLUX_DB.md](INFLUX_DB.md)), and how to check it (`--once`).
 - **Prometheus**: `remote_write` and `remote_read` (`read_recent: true`), and the address to use from a container.
 - **curl**: SenML JSON, CSV and InfluxDB line protocol, to `/publish` and `/api/v2/write`.
-- The server is the origin of the page. When it asked for a token (or one is in use) the code reads it from `SENSAPP_TOKEN` and the page says how to make a `write` one (`sensapp generate-token me --scope write`); **no token is ever written in the code**. Prometheus reads its token from a file, so its tab gives the command that writes it (a year long, for reading and writing).
+- The server is the origin of the page. When it asked for a token (or one is in use) every way starts with the same **A token** section: where the code finds it (`SENSAPP_TOKEN`), the command that makes a `write` one (`sensapp generate-token me --scope write`) and a link to the [Credentials](#credentials) tab; **no token is ever written in the code**. Prometheus reads its token from a file, so its section gives the command that writes it (a year long, for reading and writing). With an open server there is no such section.
 - **Telegraf and tokens.** Telegraf sends its `token` as `Authorization: Token …`, the InfluxDB way, and SensApp reads that scheme as well as `Bearer …`. The snippet gives Telegraf its own `token = "${SENSAPP_TOKEN}"`, no header to rewrite. Checked against a server with a secret.
 - The snippets are in `src/lib/loadSnippets.ts` (one function for each way, tested), the page in `src/pages/LoadPage.tsx`. The page is loaded when its tab is first opened (5 kB gzipped, the highlighter is shared with the Code dialog).
 - All of them were run against a real SensApp (PostgreSQL), with and without a JWT secret (the Telegraf one before SensApp read the `Token` scheme, with a `Bearer` header): the Python scripts, the curl commands, Telegraf (`--once`), and the Prometheus configuration with `promtool check config`.
 
 ## Credentials
 
-The third tab (`/ui/credentials`) makes tokens for the clients of SensApp (see [JWT_AUTH.md](JWT_AUTH.md)). What it shows depends on the token in use:
+The third tab (`/ui/credentials`) makes tokens for the clients of SensApp (see [JWT_AUTH.md](JWT_AUTH.md)). It has the layout of Load Data: a title and a sentence on the left, the choice on the right, the whole width, no card. The choices, by weight:
 
-- **No token, and the server answers without one**: "Authentication is disabled", with how to turn it on.
-- **No token, or a token without the `admin` scope**: "An admin token is needed", with the command that makes one (`sensapp generate-token me --scope admin`) and a button that opens the sign-in dialog (which then suggests that command instead of a read token). A local SensApp without a secret prints a token with every scope, admin included, when it starts.
-- **An admin token**: a form with the name of the token (it is in the logs of its requests), the scopes (`read` and `write` by default, `delete` on demand, never `admin`), the sensors it is limited to (names separated by commas; the sensors of the server are offered to click when the token in use can read them, which an admin-only token cannot), and the validity (1 hour, 1 day, 30 days, 1 year; a day by default). The server's own cap (`SENSAPP_TOKEN_MAX_DURATION_SECONDS`) and checks answer in the form.
+1. **Name**: who or what the token is for. It is the `sub` of the token, so it is in the logs of every request the token makes; it grants nothing.
+2. **Valid for**: 1 hour, 1 day (the default), 30 days, 1 year. A token cannot be revoked, so this is the main safeguard.
+3. **What it may do**: `read` and `write` by default, `delete` on demand, and `admin`, which only the command line makes.
+4. **Only these sensors**: type a name and press Enter (or Add), remove it with its ×. A name is kept exactly as typed, spaces and commas included, and the sensors of the server are offered to click when the token in use can read them (an admin-only token cannot).
+5. **Command line**: the `sensapp generate-token …` command for what the form says, updated as it changes, with a `--sensor` for each name and everything quoted for the shell. It works without an admin token, needs the secret (so it runs where SensApp runs: `docker exec`, `kubectl exec`), and is the only way to make an admin token.
+6. **Make it here**: the button, for an admin token (`POST /api/v1/admin/tokens`). Without one the section says how to make one and opens the sign-in dialog, which then suggests the admin command instead of a read token.
 
-The token is then **shown once**, with a Copy button, what it was made with and the `export SENSAPP_TOKEN=…` line that the code of [Load Data](#load-data) reads. SensApp keeps nothing: the page has no list of tokens and cannot revoke one (rotating the secret does, see [JWT_AUTH.md](JWT_AUTH.md#rotating-the-secret-and-revoking-tokens)). The page does not keep the token either: it is dropped from the cache of the requests as soon as the page is left, and a refresh forgets it.
+The token is then **shown once** at the top of the page, with a Copy button, what it was made with and the `export SENSAPP_TOKEN=…` line that [Load Data](#load-data) reads. SensApp keeps nothing: the page has no list of tokens and cannot revoke one (rotating the secret does, see [JWT_AUTH.md](JWT_AUTH.md#rotating-the-secret-and-revoking-tokens)). The page does not keep the token either: it is dropped from the cache of the requests when the page is left, and a refresh forgets it.
 
-The page is in `src/pages/CredentialsPage.tsx` and loaded when its tab is first opened (it shows the token as code, with the highlighter). With an admin token the catalog is not read, because an admin token cannot read: the refusal would ask for a token again.
+With no token, a server that answers anyway has authentication disabled: the page says so and shows nothing else. With an admin token the catalog is not read, because an admin token cannot read and the refusal would ask for a token again.
+
+The page is in `src/pages/CredentialsPage.tsx` (the command and the checks of a name in `src/lib/credentials.ts`) and loaded when its tab is first opened (it shows code, with the highlighter).
 
 ## Address
 

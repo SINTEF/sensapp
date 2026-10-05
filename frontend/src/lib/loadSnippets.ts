@@ -16,6 +16,8 @@ export interface LoadSection {
   description: string;
   language: LoadLanguage;
   code: string;
+  /** A page of the UI that goes with the section */
+  link?: { to: string; label: string };
 }
 
 export const LOAD_WAYS = [
@@ -28,6 +30,27 @@ export type LoadWay = (typeof LOAD_WAYS)[number]['id'];
 
 /** What makes a token that can write. The read one of the Code dialog cannot. */
 export const WRITE_TOKEN_COMMAND = 'sensapp generate-token me --scope write';
+
+/** Where a token is made in the UI. */
+const CREDENTIALS_LINK = { to: '/credentials', label: 'Make a token in Credentials' };
+
+/**
+ * The first section of a way when the server asks for a token: where the code finds it, and how to
+ * make one. The code never contains a token, it reads `SENSAPP_TOKEN`.
+ */
+function tokenSection(input: LoadInput): LoadSection[] {
+  if (!input.authenticated) return [];
+  return [
+    {
+      title: 'A token',
+      description:
+        'This server asks for a token. The code reads it from `SENSAPP_TOKEN`. Make one with the `write` scope in the Credentials tab, or with the command line, and keep it in the environment.',
+      language: 'bash',
+      code: `export SENSAPP_TOKEN=$(${WRITE_TOKEN_COMMAND})\n`,
+      link: CREDENTIALS_LINK,
+    },
+  ];
+}
 
 /** A Python string literal. A JSON string is one, with its escapes. */
 const py = (value: string) => JSON.stringify(value);
@@ -43,12 +66,11 @@ function pythonClient(input: LoadInput, indent: string): string[] {
 }
 
 /** The head of a script: the block `uv run` reads, then the imports. */
-function pythonHead(input: LoadInput, file: string, imports: string[]): string[] {
+function pythonHead(file: string, imports: string[]): string[] {
   return [
     ...SCRIPT_METADATA,
     '#',
     `# Run it with \`uv run ${file}\``,
-    ...(input.authenticated ? ['#', '# The token comes from the environment, make one with:', `#   export SENSAPP_TOKEN=$(${WRITE_TOKEN_COMMAND})`] : []),
     '',
     ...imports,
   ];
@@ -58,7 +80,7 @@ export function pythonSections(input: LoadInput): LoadSection[] {
   const os = input.authenticated ? ['import os'] : [];
 
   const frame = [
-    ...pythonHead(input, 'load.py', ['import asyncio', 'from datetime import UTC, datetime, timedelta', ...os, '', 'import polars as pl', 'from sensapp import SensAppClient']),
+    ...pythonHead('load.py', ['import asyncio', 'from datetime import UTC, datetime, timedelta', ...os, '', 'import polars as pl', 'from sensapp import SensAppClient']),
     '',
     '# One row per sample: "timestamp" (with a time zone) and "value".',
     '# Or read yours: pl.read_csv("data.csv", try_parse_dates=True), pl.read_parquet(...), pl.from_pandas(df).',
@@ -83,7 +105,7 @@ export function pythonSections(input: LoadInput): LoadSection[] {
   ];
 
   const one = [
-    ...pythonHead(input, 'sample.py', ['import asyncio', ...os, '', 'from sensapp import SensAppClient']),
+    ...pythonHead('sample.py', ['import asyncio', ...os, '', 'from sensapp import SensAppClient']),
     '',
     '',
     'async def main() -> None:',
@@ -96,7 +118,7 @@ export function pythonSections(input: LoadInput): LoadSection[] {
   ];
 
   const few = [
-    ...pythonHead(input, 'stream.py', ['import asyncio', 'import random', 'from datetime import UTC, datetime', ...os, '', 'from sensapp import SamplePoint, SensAppClient']),
+    ...pythonHead('stream.py', ['import asyncio', 'import random', 'from datetime import UTC, datetime', ...os, '', 'from sensapp import SamplePoint, SensAppClient']),
     '',
     '',
     'def read_temperature() -> float:',
@@ -119,6 +141,7 @@ export function pythonSections(input: LoadInput): LoadSection[] {
   ];
 
   return [
+    ...tokenSection(input),
     {
       title: 'DataFrame',
       description: 'Send a table of timestamps and values. Publishing the same name again appends to the same series.',
@@ -155,8 +178,6 @@ export function telegrafSections(input: LoadInput): LoadSection[] {
     '  influx_uint_support = true',
     ...(input.authenticated
       ? [
-          '  # Make a token with:  ' + WRITE_TOKEN_COMMAND,
-          '  # and start Telegraf with it in SENSAPP_TOKEN.',
           '  token = "${SENSAPP_TOKEN}"',
         ]
       : []),
@@ -172,6 +193,7 @@ export function telegrafSections(input: LoadInput): LoadSection[] {
     '  ignore_fs = ["tmpfs", "devtmpfs", "devfs", "overlay", "squashfs"]',
   ];
   return [
+    ...tokenSection(input),
     {
       title: 'telegraf.conf',
       description:
@@ -183,11 +205,7 @@ export function telegrafSections(input: LoadInput): LoadSection[] {
       title: 'Run it',
       description: 'One collection to test, then the daemon.',
       language: 'bash',
-      code: [
-        ...(input.authenticated ? [`export SENSAPP_TOKEN=$(${WRITE_TOKEN_COMMAND})`] : []),
-        'telegraf --config telegraf.conf --once',
-        'telegraf --config telegraf.conf',
-      ].join('\n') + '\n',
+      code: ['telegraf --config telegraf.conf --once', 'telegraf --config telegraf.conf'].join('\n') + '\n',
     },
   ];
 }
@@ -218,9 +236,11 @@ export function prometheusSections(input: LoadInput): LoadSection[] {
       ? [
           {
             title: 'A token',
-            description: 'This server asks for a token. Prometheus reads it from a file. This one can read and write, and lasts a year (the default is an hour).',
+            description:
+              'This server asks for a token. Prometheus reads it from a file, not from the environment. Make one that can read and write, and lasts a year, in the Credentials tab (and write it to the file), or with the command line:',
             language: 'bash' as const,
             code: PROMETHEUS_TOKEN_COMMAND + '\n',
+            link: CREDENTIALS_LINK,
           },
         ]
       : []),
@@ -242,27 +262,24 @@ export function prometheusSections(input: LoadInput): LoadSection[] {
 
 export function curlSections(input: LoadInput): LoadSection[] {
   const header = input.authenticated ? ['-H "Authorization: Bearer $SENSAPP_TOKEN"'] : [];
-  const token = input.authenticated ? [`# SENSAPP_TOKEN holds a token, made with:`, `#   ${WRITE_TOKEN_COMMAND}`, ''] : [];
   /** One request: each option on its own line, the address last. */
   const request = (options: string[], url: string) => ['curl -sS --fail-with-body \\', ...[...header, ...options].map((line) => `  ${line} \\`), `  ${url}`];
   const publish = sh(`${input.baseUrl}/publish`);
   const write = sh(`${input.baseUrl}/api/v2/write?org=sensapp&bucket=home&precision=s`);
 
   const senml = [
-    ...token,
     ...request(['--json ' + sh('[{"n":"temperature","u":"Cel","v":21.5},{"n":"humidity","u":"%RH","v":41,"t":1767225600}]')], publish),
   ];
   const csv = [
-    ...token,
     "printf 'datetime,sensor_name,value,unit\\n2026-01-01T12:00:00Z,temperature,21.5,Cel\\n2026-01-01T12:01:00Z,temperature,21.7,Cel\\n' > measurements.csv",
     '',
     ...request(['-H ' + sh('content-type: text/csv'), '--data-binary @measurements.csv'], publish),
   ];
   const line = [
-    ...token,
     ...request(['--data-binary ' + sh('weather,location=oslo temperature=21.5,humidity=41i 1767225600')], write),
   ];
   return [
+    ...tokenSection(input),
     { title: 'SenML JSON', description: 'RFC 8428. `n` is the name, `u` the unit, `v` the value, `t` a Unix time in seconds (now when missing).', language: 'bash', code: senml.join('\n') + '\n' },
     { title: 'CSV', description: 'The columns are found by name: a datetime, a `sensor_name`, a `value`, and optionally a `unit`.', language: 'bash', code: csv.join('\n') + '\n' },
     { title: 'InfluxDB line protocol', description: '`measurement,tag=value field=value timestamp`. The tags become labels. `org` and `bucket` are required, `precision=s` makes the timestamp seconds.', language: 'bash', code: line.join('\n') + '\n' },

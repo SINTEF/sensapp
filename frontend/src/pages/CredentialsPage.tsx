@@ -9,7 +9,7 @@ import { CodeBlock } from '../components/CodeBlock';
 import { Loading } from '../components/Feedback';
 import { useMetrics } from '../hooks/useMetrics';
 import { copyText } from '../lib/copyText';
-import { ADMIN_TOKEN_COMMAND, parseSensorNames, tokenScopes } from '../lib/credentials';
+import { ADMIN_TOKEN_COMMAND, addSensor, tokenCommand, tokenScopes } from '../lib/credentials';
 import { describeToken, useAuthStore } from '../stores/useAuthStore';
 
 const DAY = 24 * 3600;
@@ -24,71 +24,104 @@ const SCOPES = [
   { id: 'read', help: 'Read the series and the samples' },
   { id: 'write', help: 'Send samples' },
   { id: 'delete', help: 'Delete series and samples, and run the maintenance' },
+  { id: 'admin', help: 'Make tokens, nothing else. Only with the command line' },
 ] as const;
 
 /** How many sensor names are offered to click, not to fill a page of a large server. */
 const SUGGESTED_SENSORS = 40;
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
+/** A part of the page, as on Load Data: a title and a sentence on the left, the content on the right. */
+function Row({ title, description, children }: { title: string; description?: ReactNode; children: ReactNode }) {
   return (
-    <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm">
-      <h2 className="text-sm font-semibold px-4 py-2 border-b border-base-300">{title}</h2>
-      <div className="p-4 flex flex-col gap-3">{children}</div>
+    <section className="grid gap-x-8 gap-y-3 py-6 first:pt-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+      <div>
+        <h2 className="text-base font-semibold">{title}</h2>
+        {description && <p className="text-sm text-base-content/70 mt-1 leading-relaxed">{description}</p>}
+      </div>
+      <div className="flex flex-col gap-3 min-w-0">{children}</div>
     </section>
   );
 }
 
-/** The command that makes an admin token, and the way to give it to the UI. */
-function NeedAdmin({ signedIn }: { signedIn: boolean }) {
-  const openDialog = useAuthStore((state) => state.openDialog);
+const code = (text: string) => <code className="font-mono text-[0.8em] bg-base-200 px-0.5 py-0.5 rounded">{text}</code>;
+
+function SensorsField({
+  sensors,
+  onChange,
+  offered,
+}: {
+  sensors: string[];
+  onChange: (sensors: string[]) => void;
+  /** Names of the sensors of the server, to click in */
+  offered: string[];
+}) {
+  const [draft, setDraft] = useState('');
+
+  function add() {
+    onChange(addSensor(sensors, draft));
+    setDraft('');
+  }
+
+  const suggestions = offered.filter((name) => !sensors.includes(name));
   return (
-    <Card title="An admin token is needed">
-      <p className="text-sm text-base-content/80 leading-relaxed">
-        {signedIn ? 'The token in use does not have the ' : 'Making a token needs a token with the '}
-        <code className="font-mono">admin</code> scope. It gives nothing else: it cannot read nor write data. Make one where SensApp runs, with the secret:
-      </p>
-      <CodeBlock code={ADMIN_TOKEN_COMMAND + '\n'} language="bash" label="Command that makes an admin token" />
-      <p className="text-sm text-base-content/70 leading-relaxed">
-        An admin token lasts an hour unless asked otherwise; make another when it expires. On a local run without a secret, the token SensApp
-        prints when it starts is one.
-      </p>
-      <div>
-        <button type="button" className="btn btn-primary btn-sm" onClick={openDialog}>
-          Use an admin token
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-2">
+        <input
+          aria-label="Sensor name"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="all of them"
+          className="input input-bordered input-sm w-full font-mono"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            // Enter adds the name, it does not submit the form
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button type="button" className="btn btn-sm" disabled={draft.trim() === ''} onClick={add}>
+          Add
         </button>
       </div>
-    </Card>
-  );
-}
 
-function AuthenticationDisabled() {
-  return (
-    <Card title="Authentication is disabled">
-      <p className="text-sm text-base-content/80 leading-relaxed">
-        This server answers everyone, so nothing needs a token. To require tokens, give SensApp a secret with{' '}
-        <code className="font-mono">SENSAPP_JWT_SECRET</code> (<code className="font-mono">sensapp generate-secret</code> makes one) and remove{' '}
-        <code className="font-mono">SENSAPP_AUTH_DISABLED</code>.
-      </p>
-    </Card>
-  );
-}
+      {sensors.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5" aria-label="Allowed sensors">
+          {sensors.map((name) => (
+            <li key={name} className="badge badge-outline badge-lg gap-1.5 font-mono whitespace-pre">
+              {name}
+              <button
+                type="button"
+                className="cursor-pointer opacity-60 hover:opacity-100"
+                aria-label={`Remove ${name}`}
+                onClick={() => onChange(sensors.filter((item) => item !== name))}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
-function SensorChoices({ names, chosen, onAdd }: { names: string[]; chosen: string[]; onAdd: (name: string) => void }) {
-  const offered = names.filter((name) => !chosen.includes(name)).slice(0, SUGGESTED_SENSORS);
-  if (offered.length === 0) return null;
-  return (
-    <div className="flex flex-wrap gap-1.5" aria-label="Sensors of this server">
-      {offered.map((name) => (
-        <button key={name} type="button" className="btn btn-quiet btn-xs font-mono" onClick={() => onAdd(name)}>
-          {name}
-        </button>
-      ))}
-      {names.length > SUGGESTED_SENSORS && <span className="text-xs text-base-content/50 self-center">and {names.length - SUGGESTED_SENSORS} more</span>}
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap gap-1.5" aria-label="Sensors of this server">
+          {suggestions.slice(0, SUGGESTED_SENSORS).map((name) => (
+            <button key={name} type="button" className="btn btn-quiet btn-xs font-mono" onClick={() => onChange(addSensor(sensors, name))}>
+              {name}
+            </button>
+          ))}
+          {suggestions.length > SUGGESTED_SENSORS && (
+            <span className="text-xs text-base-content/50 self-center">and {suggestions.length - SUGGESTED_SENSORS} more</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function CreatedTokenView({ created, onAnother }: { created: CreatedToken; onAnother: () => void }) {
+function CreatedTokenRow({ created, onDone }: { created: CreatedToken; onDone: () => void }) {
   const [copied, setCopied] = useState<boolean | null>(null);
 
   async function handleCopy() {
@@ -97,11 +130,7 @@ function CreatedTokenView({ created, onAnother }: { created: CreatedToken; onAno
   }
 
   return (
-    <Card title="Your token">
-      <div role="status" className="alert alert-warning alert-soft py-2 text-sm">
-        This is the only time the token is shown: SensApp does not keep it. Copy it now.
-      </div>
-
+    <Row title="Your token" description="This is the only time it is shown: SensApp does not keep tokens. Copy it now.">
       <div className="flex gap-2">
         <input
           readOnly
@@ -121,7 +150,7 @@ function CreatedTokenView({ created, onAnother }: { created: CreatedToken; onAno
         <dt className="text-base-content/60">Scope</dt>
         <dd>{created.scope.join(', ')}</dd>
         <dt className="text-base-content/60">Sensors</dt>
-        <dd>{created.sensors?.length ? created.sensors.join(', ') : 'all'}</dd>
+        <dd>{created.sensors?.length ? created.sensors.join(' · ') : 'all'}</dd>
         <dt className="text-base-content/60">Expires</dt>
         <dd>{new Date(created.expires_at * 1000).toLocaleString()}</dd>
         <dt className="text-base-content/60">Id</dt>
@@ -129,30 +158,44 @@ function CreatedTokenView({ created, onAnother }: { created: CreatedToken; onAno
       </dl>
 
       <p className="text-sm text-base-content/70 leading-relaxed">
-        Clients take it as <code className="font-mono">Authorization: Bearer</code>. The code of{' '}
-        <Link to="/load" className="link">
+        Clients send it as {code('Authorization: Bearer')}. The code of{' '}
+        <Link to="/load" className="link link-primary">
           Load Data
         </Link>{' '}
-        reads it from <code className="font-mono">SENSAPP_TOKEN</code>:
+        reads it from {code('SENSAPP_TOKEN')}:
       </p>
       <CodeBlock code={`export SENSAPP_TOKEN=${created.token}\n`} language="bash" label="Export of the token" />
 
       <div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onAnother}>
-          Make another token
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onDone}>
+          Done
         </button>
       </div>
-    </Card>
+    </Row>
   );
 }
 
-/** `canRead`: the token may read the catalog, which gives the sensors to choose from. An admin token alone cannot. */
-function TokenForm({ canRead }: { canRead: boolean }) {
+/** Where a token is made when this page cannot: the command line, with the secret. */
+function AuthenticationDisabled() {
+  return (
+    <Row title="Authentication is disabled" description="This server answers everyone, so nothing needs a token.">
+      <p className="text-sm text-base-content/80 leading-relaxed">
+        To require tokens, give SensApp a secret with {code('SENSAPP_JWT_SECRET')} ({code('sensapp generate-secret')} makes one) and remove{' '}
+        {code('SENSAPP_AUTH_DISABLED')}.
+      </p>
+    </Row>
+  );
+}
+
+/** What the page offers: the form, the command that makes the same token, and the button when the token in use is an admin's. */
+function TokenMaker({ token, canRead, isAdmin }: { token: string | null; canRead: boolean; isAdmin: boolean }) {
   const metrics = useMetrics(undefined, { enabled: canRead });
+  const openDialog = useAuthStore((state) => state.openDialog);
+
   const [subject, setSubject] = useState('');
+  const [durationSeconds, setDuration] = useState<number>(DAY);
   const [scope, setScope] = useState<string[]>(['read', 'write']);
-  const [sensorsText, setSensorsText] = useState('');
-  const [duration, setDuration] = useState<number>(DAY);
+  const [sensors, setSensors] = useState<string[]>([]);
 
   const mutation = useMutation({
     mutationFn: async (body: Parameters<typeof createToken>[0]['body']) => unwrap(await createToken({ body })),
@@ -160,12 +203,10 @@ function TokenForm({ canRead }: { canRead: boolean }) {
     gcTime: 0,
   });
 
-  const sensors = parseSensorNames(sensorsText);
+  const wish = { subject, scope, sensors, durationSeconds };
   const names = (metrics.data?.['dcat:dataset'] ?? []).map((dataset) => dataset['dct:title']);
-
-  if (mutation.isSuccess) {
-    return <CreatedTokenView created={mutation.data} onAnother={() => mutation.reset()} />;
-  }
+  const wantsAdmin = scope.includes('admin');
+  const ready = subject.trim() !== '' && scope.length > 0;
 
   function toggle(id: string) {
     setScope((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
@@ -173,34 +214,52 @@ function TokenForm({ canRead }: { canRead: boolean }) {
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    mutation.mutate({
-      subject: subject.trim(),
-      scope,
-      sensors: sensors.length > 0 ? sensors : null,
-      duration_seconds: duration,
-    });
+    if (!ready || wantsAdmin) return;
+    mutation.mutate({ subject: subject.trim(), scope, sensors: sensors.length > 0 ? sensors : null, duration_seconds: durationSeconds });
   }
 
-  return (
-    <Card title="Make a token">
-      <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-base-content/60">Name</span>
-          <input
-            name="subject"
-            required
-            maxLength={128}
-            autoComplete="off"
-            placeholder="edge-device-7"
-            className="input input-bordered input-sm w-full"
-            value={subject}
-            onChange={(event) => setSubject(event.target.value)}
-          />
-          <span className="text-xs text-base-content/55">Who or what it is for. It is in the logs of every request the token makes.</span>
-        </label>
+  const refused = mutation.error instanceof ApiError && mutation.error.isAuthError;
 
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col divide-y divide-base-300">
+      {mutation.isSuccess && <CreatedTokenRow created={mutation.data} onDone={() => mutation.reset()} />}
+
+      <Row title="Name" description="Who or what the token is for. It is the subject of the token, and in the logs of every request it makes.">
+        <input
+          name="subject"
+          aria-label="Name"
+          required
+          maxLength={128}
+          autoComplete="off"
+          placeholder="edge-device-7"
+          className="input input-bordered input-sm w-full"
+          value={subject}
+          onChange={(event) => setSubject(event.target.value)}
+        />
+      </Row>
+
+      <Row
+        title="Valid for"
+        description="A token cannot be revoked: it works until it expires, or until the secret that signed it is rotated out. Prefer short."
+      >
+        <div className="join" role="radiogroup" aria-label="Valid for">
+          {DURATIONS.map((item) => (
+            <input
+              key={item.seconds}
+              type="radio"
+              name="duration"
+              aria-label={item.label}
+              className="join-item btn btn-sm"
+              checked={durationSeconds === item.seconds}
+              onChange={() => setDuration(item.seconds)}
+            />
+          ))}
+        </div>
+      </Row>
+
+      <Row title="What it may do" description="None of the scopes gives another.">
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="text-xs font-medium text-base-content/60 mb-1">What it may do</legend>
+          <legend className="sr-only">Scopes</legend>
           {SCOPES.map((item) => (
             <label key={item.id} className="flex items-center gap-2 text-sm cursor-pointer">
               <input type="checkbox" className="checkbox checkbox-sm" checked={scope.includes(item.id)} onChange={() => toggle(item.id)} />
@@ -209,55 +268,57 @@ function TokenForm({ canRead }: { canRead: boolean }) {
             </label>
           ))}
         </fieldset>
+      </Row>
 
-        <div className="flex flex-col gap-1.5">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-base-content/60">Only these sensors</span>
-            <input
-              name="sensors"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="all of them"
-              className="input input-bordered input-sm w-full font-mono"
-              value={sensorsText}
-              onChange={(event) => setSensorsText(event.target.value)}
-            />
-            <span className="text-xs text-base-content/55">Names separated by commas. Left empty, the token reaches every sensor.</span>
-          </label>
-          <SensorChoices
-            names={names}
-            chosen={sensors}
-            onAdd={(name) => setSensorsText((text) => (text.trim() === '' ? name : `${text.trim().replace(/,$/, '')}, ${name}`))}
-          />
-        </div>
+      <Row title="Only these sensors" description="Names as the sensors have them. Left empty, the token reaches every sensor.">
+        <SensorsField sensors={sensors} onChange={setSensors} offered={names} />
+      </Row>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-base-content/60">Valid for</span>
-          <select className="select select-bordered select-sm w-full max-w-xs" value={duration} onChange={(event) => setDuration(Number(event.target.value))}>
-            {DURATIONS.map((item) => (
-              <option key={item.seconds} value={item.seconds}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          <span className="text-xs text-base-content/55">
-            A token cannot be revoked: it works until then, or until the secret that signed it is rotated out. Prefer short.
-          </span>
-        </label>
+      <Row
+        title="Command line"
+        description={
+          <>
+            The same token, made where SensApp runs: it needs the secret. It is the only way to make an {code('admin')} token. In a container, put{' '}
+            {code('docker exec <container>')} in front, on Kubernetes {code('kubectl exec deploy/<release> --')}.
+          </>
+        }
+      >
+        <CodeBlock code={tokenCommand(wish) + '\n'} language="bash" label="Command that makes the token" />
+      </Row>
 
-        {mutation.isError && !(mutation.error instanceof ApiError && mutation.error.isAuthError) && (
-          <div role="alert" className="alert alert-error alert-soft py-2 text-sm">
-            {mutation.error instanceof Error ? mutation.error.message : 'The token was not made'}
-          </div>
+      <Row
+        title="Make it here"
+        description={isAdmin ? 'The token is shown once, at the top of the page.' : <>Needs a token with the {code('admin')} scope. It reads and writes nothing.</>}
+      >
+        {isAdmin ? (
+          <>
+            {mutation.isError && !refused && (
+              <div role="alert" className="alert alert-error alert-soft py-2 text-sm">
+                {mutation.error instanceof Error ? mutation.error.message : 'The token was not made'}
+              </div>
+            )}
+            {wantsAdmin && <p className="text-sm text-base-content/70">An admin token is only made with the command line.</p>}
+            <div>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={mutation.isPending || !ready || wantsAdmin}>
+                {mutation.isPending ? 'Making…' : 'Make the token'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-base-content/80 leading-relaxed">
+              {token !== null ? 'The token in use does not have it. ' : ''}Make an admin token with the command line, it lasts an hour:
+            </p>
+            <CodeBlock code={ADMIN_TOKEN_COMMAND + '\n'} language="bash" label="Command that makes an admin token" />
+            <div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={openDialog}>
+                Use an admin token
+              </button>
+            </div>
+          </>
         )}
-
-        <div>
-          <button type="submit" className="btn btn-primary btn-sm" disabled={mutation.isPending || subject.trim() === '' || scope.length === 0}>
-            {mutation.isPending ? 'Making…' : 'Make the token'}
-          </button>
-        </div>
-      </form>
-    </Card>
+      </Row>
+    </form>
   );
 }
 
@@ -265,25 +326,24 @@ function TokenForm({ canRead }: { canRead: boolean }) {
 export function CredentialsPage() {
   const token = useAuthStore((state) => state.token);
   // Without a token, the catalog tells whether the server asks for one. With one, it is not
-  // asked: an admin token cannot read, and the refusal would ask for a token again.
-  const metrics = useMetrics(undefined, { enabled: token === null });
+  // asked here: an admin token cannot read, and the refusal would ask for a token again.
+  const probe = useMetrics(undefined, { enabled: token === null });
   const scopes = token === null ? [] : tokenScopes(describeToken(token));
-  const isAdmin = scopes.includes('admin');
 
-  let content;
-  if (isAdmin) {
-    content = <TokenForm canRead={scopes.includes('read')} />;
-  } else if (token !== null) {
-    content = <NeedAdmin signedIn />;
-  } else if (metrics.isPending) {
+  let content: ReactNode;
+  if (token === null && probe.isPending) {
     content = <Loading />;
-  } else if (metrics.isSuccess) {
+  } else if (token === null && probe.isSuccess) {
     content = <AuthenticationDisabled />;
   } else {
-    content = <NeedAdmin signedIn={false} />;
+    content = <TokenMaker token={token} canRead={scopes.includes('read')} isAdmin={scopes.includes('admin')} />;
   }
 
-  return <div className="flex flex-col gap-3 px-1 sm:px-2 pb-8 max-w-2xl">{content}</div>;
+  return (
+    <div className="flex flex-col gap-3 px-1 sm:px-2 pb-8">
+      {content}
+    </div>
+  );
 }
 
 export default CredentialsPage;
