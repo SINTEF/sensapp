@@ -1,6 +1,6 @@
 # ![SensApp](./docs/sensapp_logo.png)
 
-SensApp is an open-source sensor data platform developed by SINTEF.
+SensApp is an open-source sensor data platform developed by [SINTEF](https://www.sintef.no/).
 
 It handles time-series data ingestion, storage, and retrieval. From small edge devices to big data digital twins, SensApp *may* be useful.
 
@@ -10,22 +10,23 @@ SensApp is compatible with Prometheus and InfluxDB, but with an alternative arch
 
 Dealing with system statistics for the last 24 hours? InfluxDB or Prometheus are excellent choices. Fetching average bathroom temperatures over the last 10 years grouped by day? SensApp will compute that instantly while InfluxDB or Prometheus will take a little while.
 
-But you don't have to chose, both InfluxDB and Prometheus can replicate their data to SensApp for long-term storage and analysis. So you get the best of both worlds.
+But you don't have to chose, both InfluxDB and Prometheus can replicate their data to SensApp for long-term storage and analysis. So you can get the best of both worlds.
 
-You can also use SensApp as a standalone time-series database.
+You can also use SensApp as a standalone time-series database. It's designed to work from the edge to the big data workloads in the cloud, by relying on different databases.
+
+![GUI Screenshot](./docs/screenshot.png)
 
 ## Quickstart
 
-The quickest way to run SensApp is with SQLite so no external database is required.
-
-Start SensApp with SQLite:
+The simplest way to test SensApp is using it with SQLite and no authentication:
 
 ```bash
-SENSAPP_STORAGE_CONNECTION_STRING=sqlite://sensapp.db \
-cargo run
+export SENSAPP_STORAGE_CONNECTION_STRING=sqlite://sensapp.db
+export SENSAPP_AUTH_DISABLED=true
+cargo run --release
 ```
 
-By default, SensApp listens on [http://127.0.0.1:3000](http://127.0.0.1:3000).
+By default, SensApp listens on [http://127.0.0.1:3000](http://127.0.0.1:3000) for both its API and user interface.
 
 Ingest one sample:
 
@@ -59,7 +60,7 @@ async def main():
 asyncio.run(main())
 ```
 
-### Using Containers
+## Software Containers and Kubernetes
 
 ```bash
 docker compose up
@@ -76,6 +77,7 @@ Published releases also provide the chart through GHCR as an OCI package; see th
 ## Features
 
 - **HTTP REST API**
+- **Graphical User Interface**
 - **Prometheus Compatibility**
   - **Prometheus Remote Write**: Prometheus can push data to SensApp.
   - **Prometheus Remote Read**: Prometheus can also read data from SensApp.
@@ -102,7 +104,7 @@ SensApp's architecture is relatively simple as the complex problems are delegate
 
 Most of the complexity lies in the [database schema design](docs/DATAMODEL.md). After that, it's mostly some code glue.
 
-- On the **edge**, SensApp can be deployed as a single lightweight instance with an embedded SQLite database.
+- On the **edge**, SensApp can be deployed as a single instance with a SQLite database.
 - For **medium** deployments, SensApp can be deployed with a PostgreSQL database.
 - For **larger** deployments, many SensApp instances can be deployed behind a load balancer, connected to a ClickHouse database cluster. A message queue and some middleware can be considered to ingest data at scale.
 
@@ -112,11 +114,13 @@ Check the [ARCHITECTURE.md](docs/ARCHITECTURE.md) file for more details.
 
 ## Authentication
 
-SensApp supports **optional JWT authentication**. By default, all endpoints are open. Visit [docs/JWT_AUTH.md](./docs/JWT_AUTH.md) for the authentication documentation.
+SensApp uses JSON Web Tokens (JWT) for its authentication. Visit [docs/JWT_AUTH.md](./docs/JWT_AUTH.md) for the detailed authentication documentation.
+
+While you can start sensapp with authentication disabled, it is recommended to use the authentication feature, in command line or through the web interface. By default, SensApp will print an admin token and a link that you can use to generate more tokens.
 
 ## Built With Rust™️
 
-SensApp is developed using Rust, a language known for its performance, memory safety, and annoying borrow checker. SensApp used to be written in Scala, but the new author prefers Rust.
+SensApp is developed using Rust, a language known for its performance, memory safety, and annoying borrow checker. SensApp used to be written in Scala, but the new authors prefers Rust.
 
 Another reason is from the results from the paper [Energy efficiency across programming languages: how do energy, time, and memory relate?](https://dl.acm.org/doi/10.1145/3136014.3136031), which shows Rust as one of the most energy-efficient programming languages while having memory safety.
 
@@ -136,7 +140,7 @@ The SensApp software is provided "as is," with no warranties, and the creators o
 
 ## You May Not Want to Use It in Production (Yet)
 
-SensApp is currently under development. It is not ready for production.
+SensApp is currently under development. It is getting ready for production.
 
 ## Acknowledgements
 
