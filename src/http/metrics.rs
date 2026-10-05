@@ -566,6 +566,8 @@ mod tests {
     use smallvec::smallvec;
 
     fn create_sensor(name: &str, sensor_type: SensorType, labels: Vec<(&str, &str)>) -> Sensor {
+        // The sensor constructor reads the configuration.
+        _ = crate::config::load_configuration_for_tests();
         Sensor::new_without_uuid(
             name.to_string(),
             sensor_type,
