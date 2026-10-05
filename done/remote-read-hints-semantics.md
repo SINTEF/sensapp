@@ -34,3 +34,9 @@ shift of one bucket I feared does not happen.
 
 - Prometheus 2.x: not supported or tested (the harness runs the 3.x LTS line).
 - A big range at a small step with raw fallback is now an error above the sample limits (HTTP 400, "narrow the selector") instead of a wrong answer.
+
+## Update (5 October 2026)
+
+A plain selector (and the aggregation operators over one) is no longer answered with raw samples: it gets the last
+sample of each step with its own timestamp, see [remote-read-plain-selector-latest.md](remote-read-plain-selector-latest.md).
+The "raw samples" rows of the table above for `sum`, `avg`, `min`, `max` and a plain selector no longer apply.
