@@ -1,14 +1,12 @@
 import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 import { createToken } from '../client';
 import type { CreatedToken } from '../client';
 import { ApiError, unwrap } from '../api/clientConfig';
 import { CodeBlock } from '../components/CodeBlock';
 import { Loading } from '../components/Feedback';
 import { useMetrics } from '../hooks/useMetrics';
-import { copyText } from '../lib/copyText';
 import { ADMIN_TOKEN_COMMAND, addSensor, tokenCommand, tokenScopes } from '../lib/credentials';
 import { randomName } from '../lib/names';
 import { describeToken, useAuthStore } from '../stores/useAuthStore';
@@ -124,27 +122,10 @@ function SensorsField({
 
 /** The token that was just made, under the button that made it. */
 function CreatedTokenResult({ created, onDone }: { created: CreatedToken; onDone: () => void }) {
-  const [copied, setCopied] = useState<boolean | null>(null);
-
-  async function handleCopy() {
-    setCopied(await copyText(created.token));
-    window.setTimeout(() => setCopied(null), 2000);
-  }
-
   return (
     <div className="flex flex-col gap-3 rounded-box border border-base-300 p-3">
-      <div className="flex gap-2">
-        <input
-          readOnly
-          aria-label="Token"
-          value={created.token}
-          className="input input-bordered input-sm w-full font-mono text-xs"
-          onFocus={(event) => event.currentTarget.select()}
-        />
-        <button type="button" className="btn btn-primary btn-sm min-w-16" onClick={() => void handleCopy()}>
-          {copied === true ? 'Copied' : copied === false ? 'Failed' : 'Copy'}
-        </button>
-      </div>
+      <CodeBlock code={created.token} language="bash" label="Token" />
+      <CodeBlock code={`export SENSAPP_TOKEN=${created.token}\n`} language="bash" label="Export of the token" />
       <p className="text-xs text-base-content/60">SensApp does not keep tokens, copy it now.</p>
 
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
@@ -159,15 +140,6 @@ function CreatedTokenResult({ created, onDone }: { created: CreatedToken; onDone
         <dt className="text-base-content/60">Id</dt>
         <dd className="font-mono text-xs self-center break-all">{created.jti}</dd>
       </dl>
-
-      <p className="text-sm text-base-content/70 leading-relaxed">
-        Clients send it as {code('Authorization: Bearer')}. The code of{' '}
-        <Link to="/load" className="link link-primary">
-          Load Data
-        </Link>{' '}
-        reads it from {code('SENSAPP_TOKEN')}:
-      </p>
-      <CodeBlock code={`export SENSAPP_TOKEN=${created.token}\n`} language="bash" label="Export of the token" />
 
       <div>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onDone}>

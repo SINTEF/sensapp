@@ -191,17 +191,17 @@ describe('CredentialsPage', () => {
 
     expect(await screen.findByText(/does not keep tokens/)).toBeInTheDocument();
     // The token is under the button, before the command line
-    expect(submit.compareDocumentPosition(screen.getByRole('textbox', { name: 'Token' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole('textbox', { name: 'Token' })).toHaveValue('made.by.sensapp');
+    expect(submit.compareDocumentPosition(screen.getByLabelText('Token')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByLabelText('Token')).toHaveTextContent('made.by.sensapp');
     expect(screen.getByLabelText('Export of the token')).toHaveTextContent('export SENSAPP_TOKEN=made.by.sensapp');
     expect(screen.getByText(created.jti)).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Copy' }));
-    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Copy Token' }));
+    expect(await screen.findByText('Copied to the clipboard')).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toBe('made.by.sensapp');
 
     await user.click(screen.getByRole('button', { name: 'Done' }));
-    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Token' })).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText('Token')).toBeNull());
     // The form is still there, with what was typed
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('  edge-7 ');
   });
