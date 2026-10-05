@@ -1,6 +1,6 @@
 # Web UI
 
-SensApp ships a small explorer: pick a metric, pick series, draw them over a time range. It is a React single page application in [`frontend/`](../frontend), built to static files that SensApp serves itself. There is no separate container.
+SensApp ships a small explorer: pick a metric, pick series, draw them over a time range. A second tab, **Load Data**, explains how to get data in. It is a React single page application in [`frontend/`](../frontend), built to static files that SensApp serves itself. There is no separate container.
 
 ## Serving
 
@@ -42,6 +42,19 @@ The **Code** button of the header opens the code that loads what the explorer sh
 - Whatever a label or a name says is quoted (Python and shell) or put on one line (comments): a hostile label cannot add a line of code to what is copied.
 - The code is always on a dark ground, in both themes, in JetBrains Mono, coloured by highlight.js (Python and Bash only). Long lines wrap instead of scrolling sideways (a uuid or an address with no space breaks where it must); the copied text is unchanged. The dialog, the highlighter and the font are loaded when it is first opened: 13 kB gzipped and 40 kB of font, nothing for a page that never opens it. The copy works on a page served by plain http too, where the clipboard API does not exist.
 - The Python SDK is not on PyPI yet. The script starts with a [PEP 723](https://peps.python.org/pep-0723/) block (`# /// script`) that says it needs `sensapp` and that it comes from GitHub (`[tool.uv.sources.sensapp]`), so `uv run script.py` is enough: uv makes the environment. The `uv pip install` command is there too, for an environment of one's own. Both are in `src/lib/snippets.ts` (`SCRIPT_METADATA`, `INSTALL_COMMENT`): change them when the SDK is published, and the Python the block asks for follows `requires-python` of the SDK.
+
+## Load Data
+
+The second tab of the header (`/ui/load`) explains how to get data into SensApp, with code to copy (the same dark block and copy button as the Code dialog). It is short on purpose, enough to start; `/docs` is the reference. The way is a tab of the page and is in the address (`/ui/load?via=telegraf`; `python`, `telegraf`, `prometheus`, `curl`; Python when it is missing or unknown).
+
+- **Python SDK**: a whole DataFrame (sent by slices of 100 000 samples, as [PYTHON_SDK.md](PYTHON_SDK.md#timeouts) advises), one sample at a time, a few samples at a time. Same `uv run` header as the Code dialog.
+- **Telegraf**: `outputs.influxdb_v2` against `/api/v2/write` with a few inputs (see [INFLUX_DB.md](INFLUX_DB.md)), and how to check it (`--once`).
+- **Prometheus**: `remote_write` and `remote_read` (`read_recent: true`), and the address to use from a container.
+- **curl**: SenML JSON, CSV and InfluxDB line protocol, to `/publish` and `/api/v2/write`.
+- The server is the origin of the page. When it asked for a token (or one is in use) the code reads it from `SENSAPP_TOKEN` and the page says how to make a `write` one (`sensapp generate-token me --scope write`); **no token is ever written in the code**. Prometheus reads its token from a file, so its tab gives the command that writes it (a year long, for reading and writing).
+- **Telegraf and tokens.** Telegraf sends its `token` as `Authorization: Token …`, the InfluxDB way, and SensApp only reads `Bearer …` (it answers `401`). The snippet therefore sets `http_headers = {"Authorization" = "Bearer ${SENSAPP_TOKEN}"}`, which Telegraf applies after its own header. Checked against a server with `SENSAPP_JWT_SECRET`.
+- The snippets are in `src/lib/loadSnippets.ts` (one function for each way, tested), the page in `src/pages/LoadPage.tsx`. The page is loaded when its tab is first opened (5 kB gzipped, the highlighter is shared with the Code dialog).
+- All of them were run against a real SensApp (PostgreSQL), with and without a JWT secret: the Python scripts, the curl commands, Telegraf (`--once`), and the Prometheus configuration with `promtool check config`.
 
 ## Address
 

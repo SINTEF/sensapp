@@ -1,4 +1,4 @@
-import { Link, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { AuthDialog } from './AuthDialog';
 import { AuthStatus } from './AuthStatus';
 import { CodeButton } from './CodeButton';
@@ -10,7 +10,14 @@ const logoWhite = `${base}sensapp_logo_white-fs8.png`;
 const logoSmall = `${base}sensapp_logo_small-fs8.png`;
 const logoSmallWhite = `${base}sensapp_logo_small_white-fs8.png`;
 
+const TABS = [
+  { to: '/', label: 'Data Explorer', end: true },
+  { to: '/load', label: 'Load Data', end: false },
+];
+
 export function Layout() {
+  // The Code button is about what the explorer shows
+  const explorer = useLocation().pathname === '/';
   return (
     <div className="min-h-screen lg:h-screen flex flex-col bg-base-200 lg:overflow-hidden">
       <header className="bg-base-100 border-b border-base-300 sticky top-0 z-50">
@@ -26,13 +33,28 @@ export function Layout() {
                   <img src={logoSmall} alt="SensApp" className="h-10 w-auto" />
                 </picture>
               </Link>
-              <div className="hidden sm:block font-display text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-base-content/45 border-l border-base-300 pl-3 ml-1">
-                Data Explorer
-              </div>
+              <nav aria-label="Pages" className="flex items-stretch sm:gap-1 border-l border-base-300 pl-1 sm:pl-2 ml-0 sm:ml-1 self-stretch">
+                {TABS.map((tab) => (
+                  <NavLink
+                    key={tab.to}
+                    to={tab.to}
+                    end={tab.end}
+                    className={({ isActive }) =>
+                      `flex items-center whitespace-nowrap px-1.5 sm:px-3 border-b-2 font-display text-[0.65rem] sm:text-[0.7rem] font-semibold uppercase tracking-[0.06em] sm:tracking-[0.2em] transition-colors ${
+                        isActive
+                          ? 'border-primary text-base-content'
+                          : 'border-transparent text-base-content/45 hover:text-base-content/80'
+                      }`
+                    }
+                  >
+                    {tab.label}
+                  </NavLink>
+                ))}
+              </nav>
             </div>
             <div className="flex items-center gap-3">
               <AuthStatus />
-              <CodeButton />
+              {explorer && <CodeButton />}
               <a
                 href="/docs"
                 target="_blank"

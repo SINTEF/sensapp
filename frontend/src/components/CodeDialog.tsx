@@ -1,20 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import hljs from 'highlight.js/lib/core';
-import bash from 'highlight.js/lib/languages/bash';
-import python from 'highlight.js/lib/languages/python';
 import { resolveStep } from '../lib/chartStep';
 import { copyText } from '../lib/copyText';
+import { highlight } from '../lib/highlight';
 import { SNIPPET_LANGUAGES, snippetFor } from '../lib/snippets';
 import type { SnippetLanguage } from '../lib/snippets';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
-hljs.registerLanguage('python', python);
-hljs.registerLanguage('bash', bash);
-
 const LABELS: Record<SnippetLanguage, string> = { python: 'Python', curl: 'curl' };
-const HIGHLIGHT_AS: Record<SnippetLanguage, string> = { python: 'python', curl: 'bash' };
+const HIGHLIGHT_AS = { python: 'python', curl: 'bash' } as const;
 
 /** Code that loads what the explorer shows: the Python SDK, or curl. */
 export default function CodeDialog({ onClose }: { onClose: () => void }) {
@@ -42,8 +37,7 @@ export default function CodeDialog({ onClose }: { onClose: () => void }) {
       }),
     [language, selectedMetric, selectedSeries, useSelector, typedSelector, timeRange, relativeRange, step, aggregation, token, authRequired],
   );
-  // highlight.js escapes the text it is given: what it returns is safe to put in the page
-  const html = useMemo(() => hljs.highlight(code, { language: HIGHLIGHT_AS[language] }).value, [code, language]);
+  const html = useMemo(() => highlight(code, HIGHLIGHT_AS[language]), [code, language]);
 
   const timer = useRef<number>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);

@@ -28,7 +28,7 @@ const GIT_URL = 'https://github.com/SINTEF/sensapp.git';
 export const INSTALL_COMMENT = `uv pip install 'git+${GIT_URL}@main#subdirectory=python/sensapp'`;
 
 /** The block that `uv run` reads (PEP 723): the script says what it needs, and where the SDK comes from. */
-const SCRIPT_METADATA = [
+export const SCRIPT_METADATA = [
   '# /// script',
   '# requires-python = ">=3.14"',
   '# dependencies = ["sensapp"]',
