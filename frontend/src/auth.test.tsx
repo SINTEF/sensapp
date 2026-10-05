@@ -17,7 +17,6 @@ vi.mock('./client', () => ({
   listMetrics: (...args: unknown[]) => mockListMetrics(...args),
   listSeries: vi.fn().mockResolvedValue({ data: { 'dcat:dataset': [] } }),
   getSeriesData: vi.fn().mockResolvedValue({ data: [] }),
-  readiness: vi.fn().mockResolvedValue({ data: { status: 'ready', database: 'sqlite' } }),
 }));
 
 const GOOD_TOKEN = fakeToken({ sub: 'alice', scope: 'read', exp: 4_102_444_800 });

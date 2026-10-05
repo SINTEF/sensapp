@@ -10,13 +10,11 @@ import { useSelectionStore } from './stores/useSelectionStore';
 // Mock the API client with controllable responses
 const mockListMetrics = vi.fn();
 const mockListSeries = vi.fn();
-const mockReadiness = vi.fn();
 const mockGetSeriesData = vi.fn();
 
 vi.mock('./client', () => ({
   listMetrics: (...args: unknown[]) => mockListMetrics(...args),
   listSeries: (...args: unknown[]) => mockListSeries(...args),
-  readiness: (...args: unknown[]) => mockReadiness(...args),
   getSeriesData: (...args: unknown[]) => mockGetSeriesData(...args),
 }));
 
@@ -84,7 +82,6 @@ describe('App integration', () => {
     vi.clearAllMocks();
     mockListMetrics.mockResolvedValue({ data: catalogWithMetrics });
     mockListSeries.mockResolvedValue({ data: seriesCatalog });
-    mockReadiness.mockResolvedValue({ data: { status: 'ready', database: 'sqlite' } });
     mockGetSeriesData.mockResolvedValue({ data: [] });
     useSelectionStore.setState({
       selectedMetric: null,
@@ -93,11 +90,10 @@ describe('App integration', () => {
     });
   });
 
-  it('renders the header with logo, health badge, and docs link', async () => {
+  it('renders the header with the name and the docs link', async () => {
     render(<App />, { wrapper: createWrapper() });
 
     expect(screen.getByText('SensApp')).toBeInTheDocument();
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
 
     const docsLink = screen.getByText('API Docs').closest('a');
     expect(docsLink).toHaveAttribute('href', '/docs');

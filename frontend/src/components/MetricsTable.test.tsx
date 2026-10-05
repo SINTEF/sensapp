@@ -97,6 +97,24 @@ describe('MetricsTable', () => {
     expect(screen.getByText('region')).toBeInTheDocument();
   });
 
+  it('shows a name that exists with two types as two rows, the full name on hover', async () => {
+    const [cpu] = sampleMetrics['dcat:dataset'];
+    mockListMetrics.mockResolvedValue({
+      data: {
+        ...sampleMetrics,
+        'dcat:dataset': [cpu, { ...cpu, 'sensor:type': 'string' }],
+      },
+    });
+    render(<MetricsTable />, { wrapper: createWrapper() });
+
+    const names = await screen.findAllByText('cpu_usage');
+    expect(names).toHaveLength(2);
+    expect(names[0].closest('[title]')).toHaveAttribute('title', 'cpu_usage');
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('float')).toBeInTheDocument();
+    expect(within(table).getByText('string')).toBeInTheDocument();
+  });
+
   it('selects a metric when clicking a row and updates store', async () => {
     const user = userEvent.setup();
     render(<MetricsTable />, { wrapper: createWrapper() });

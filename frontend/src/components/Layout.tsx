@@ -1,7 +1,6 @@
 import { Link, Outlet } from 'react-router-dom';
 import { AuthDialog } from './AuthDialog';
 import { AuthStatus } from './AuthStatus';
-import { HealthBadge } from './HealthBadge';
 
 export function Layout() {
   return (
@@ -21,7 +20,6 @@ export function Layout() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <HealthBadge />
               <AuthStatus />
               <a
                 href="/docs"

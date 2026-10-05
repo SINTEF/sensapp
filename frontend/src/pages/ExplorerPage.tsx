@@ -17,11 +17,6 @@ export function ExplorerPage() {
       <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm shrink-0">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 border-b border-base-300">
           <h2 className="text-sm font-semibold">Chart</h2>
-          {selectedSeries.length > 0 && (
-            <span className="text-xs text-base-content/40">
-              {selectedSeries.length} series
-            </span>
-          )}
           <ChartOptions />
           <div className="ml-auto">
             <TimeRangeSelector />

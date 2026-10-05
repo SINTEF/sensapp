@@ -121,7 +121,7 @@ export function MetricsTable() {
                 const dimensions = metric['sensor:labelDimensions'] ?? [];
                 return (
                   <tr
-                    key={metric['@id']}
+                    key={`${name}/${metric['sensor:type']}`}
                     className={`cursor-pointer transition-colors ${
                       isSelected
                         ? 'bg-primary/8 border-l-2 border-primary'
@@ -130,10 +130,12 @@ export function MetricsTable() {
                     onClick={() => handleSelectMetric(metric)}
                   >
                     <td>
-                      <span className="font-mono text-xs font-medium">{name}</span>
-                      {metric['sensor:unit'] && (
-                        <span className="text-xs text-base-content/40 ml-1">({metric['sensor:unit']})</span>
-                      )}
+                      <div className="max-w-64 truncate" title={name}>
+                        <span className="font-mono text-xs font-medium">{name}</span>
+                        {metric['sensor:unit'] && (
+                          <span className="text-xs text-base-content/40 ml-1">({metric['sensor:unit']})</span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <span className={`badge badge-sm ${sensorTypeBadgeClass(metric['sensor:type'])}`}>
@@ -144,7 +146,7 @@ export function MetricsTable() {
                       {seriesCount ?? '—'}
                     </td>
                     <td className="hidden sm:table-cell">
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1 max-w-56">
                         {dimensions.slice(0, 5).map((dim) => (
                           <span key={dim} className="badge badge-xs badge-outline font-mono">
                             {dim}
