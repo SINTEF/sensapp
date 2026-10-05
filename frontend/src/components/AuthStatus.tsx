@@ -22,7 +22,7 @@ export function AuthStatus() {
     return (
       <div className="flex items-center gap-1.5" title={details.join(' · ') || undefined}>
         <span className="text-xs font-medium opacity-70">{info?.subject ?? 'token'}</span>
-        <button className="btn btn-ghost btn-xs" onClick={handleSignOut}>
+        <button className="btn btn-ghost btn-sm text-xs font-medium" onClick={handleSignOut}>
           Sign out
         </button>
       </div>
@@ -31,7 +31,7 @@ export function AuthStatus() {
 
   if (authRequired) {
     return (
-      <button className="btn btn-quiet btn-xs" onClick={openDialog}>
+      <button className="btn btn-quiet btn-sm text-xs font-medium" onClick={openDialog}>
         Sign in
       </button>
     );

@@ -23,8 +23,9 @@ export function Layout() {
     <div className="min-h-screen lg:h-screen flex flex-col bg-base-200 lg:overflow-hidden">
       <header className="bg-base-100 border-b border-base-300 sticky top-0 z-50">
         <div className="px-3">
-          <div className="flex items-center justify-between gap-3 h-14">
-            <div className="flex items-center gap-3">
+          {/* The row covers the border of the header, so the line under the current tab sits on it */}
+          <div className="flex items-center justify-between gap-3 h-14 -mb-px">
+            <div className="flex items-center gap-2 sm:gap-3 self-stretch min-w-0">
               <Link to="/" className="flex items-center hover:opacity-80 transition-opacity">
                 {/* The white logo on a dark page, the small one (no name) on a narrow screen */}
                 <picture>
@@ -34,7 +35,9 @@ export function Layout() {
                   <img src={logoSmall} alt="SensApp" className="h-10 w-auto" />
                 </picture>
               </Link>
-              <nav aria-label="Pages" className="flex items-stretch sm:gap-1 border-l border-base-300 pl-1 sm:pl-2 ml-0 sm:ml-1 self-stretch">
+              <span aria-hidden="true" className="self-center h-6 w-px bg-base-300 shrink-0" />
+              {/* On a narrow screen the tabs scroll rather than push the page wider */}
+              <nav aria-label="Pages" className="flex items-stretch sm:gap-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
                 {TABS.map((tab) => (
                   <NavLink
                     key={tab.to}
@@ -53,7 +56,7 @@ export function Layout() {
                 ))}
               </nav>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 sm:gap-3 shrink-0">
               <AuthStatus />
               {explorer && <CodeButton />}
               <a
