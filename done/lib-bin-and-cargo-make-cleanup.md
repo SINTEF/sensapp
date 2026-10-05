@@ -29,7 +29,7 @@ Done 2 Oct 2026.
 - 53 `#[allow(dead_code)]` removed. Method: turn all 54 into `#[expect(dead_code)]`, run `cargo check
   --all-targets` on the default build, each of the six backends alone and `--all-features`, keep an
   attribute only if it was not reported unfulfilled everywhere it is compiled. One is left
-  (`deduplicate()` of SQLite, used by `current_tasks/sample-deduplication-in-vacuum.md`), and the two
+  (`deduplicate()` of SQLite, used by `done/sample-deduplication-in-vacuum.md`), and the two
   `cfg_attr(not(test), allow(dead_code))` of `http/auth.rs` went too. `clippy -D warnings` shows 0 on the
   eight configurations.
 - cargo-make: `setup-dev`, the four `migrate-*` and the three `prepare-*` tasks removed (no `.sqlx`

@@ -24,7 +24,7 @@ query, then per numeric type one aggregated query (`GROUP BY sensor_id, bucket`)
 ## Progress
 
 Done 2 Oct 2026 for ClickHouse, PostgreSQL, TimescaleDB and SQLite (DuckDB: see
-`current_tasks/duckdb-sqlite-rrdcached-bulk-and-tests.md`; BigQuery and RRDCached keep the portable read).
+`done/duckdb-sqlite-rrdcached-bulk-and-tests.md`; BigQuery and RRDCached keep the portable read).
 
 - Characterised first: the existing remote read tests (14) pass before and after, and the new backend-generic
   tests compare the bulk read with the portable one.

@@ -2,7 +2,7 @@
 
 ## Goal
 
-`avg by (room) (temperature[24h])` over a few hundred series was impossible on every backend, although its output is tiny: the aggregation fetched the raw samples, so it was bound by the selector limits (256 series, 100 000 samples in total), and a larger `step` did not help. Raised by the review of the `storage-hardening-and-bulk-io` branch (see `current_tasks/pr-44-review-corrections.md`, item M6).
+`avg by (room) (temperature[24h])` over a few hundred series was impossible on every backend, although its output is tiny: the aggregation fetched the raw samples, so it was bound by the selector limits (256 series, 100 000 samples in total), and a larger `step` did not help. Raised by the review of the `storage-hardening-and-bulk-io` branch (see `done/pr-44-review-corrections.md`, item M6).
 
 ## Delivered
 

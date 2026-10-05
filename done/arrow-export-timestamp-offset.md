@@ -48,8 +48,8 @@ No Arrow exporter test asserts a timestamp value. `test_data_helpers` builds sam
 
 ## Related
 
-- `current_tasks/python-sdk-boolean-query-params.md`
-- `current_tasks/series-limit-and-simplify-semantics.md`
+- `done/python-sdk-boolean-query-params.md`
+- `done/series-limit-and-simplify-semantics.md`
 
 ## Outcome
 

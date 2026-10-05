@@ -31,7 +31,7 @@ DuckDB). With the SDK retrying timeouts the duplicates become likelier.
 ## Progress
 
 Done 2 Oct 2026 for SQLite, PostgreSQL, TimescaleDB and ClickHouse. DuckDB is done in
-`current_tasks/duckdb-sqlite-rrdcached-bulk-and-tests.md` (its columns may change with the precision fix);
+`done/duckdb-sqlite-rrdcached-bulk-and-tests.md` (its columns may change with the precision fix);
 BigQuery and RRDCached answer "unsupported".
 
 - Trait method `StorageInstance::deduplicate_samples() -> Result<u64>` (default: `StorageError::Unsupported`),

@@ -13,7 +13,7 @@ The next phase is not to add more features. It is to make the existing system so
 Code, tests and docs for this exist (see `docs/CLICKHOUSE.md`, `done/clickhouse-*.md`). What remains is evidence from a real environment:
 
 - [ ] Verify the revised CI on GitHub: backend matrix, DuckDB and Docker smoke durations, cache sizes (`done/ci-build-time.md`)
-- [x] ClickHouse review: duplicated labels and sensors, unstable ids, 100-month insert limit, connection string, outage statuses, TLS with private CAs, bulk registration (`current_tasks/clickhouse-preproduction-readiness.md`)
+- [x] ClickHouse review: duplicated labels and sensors, unstable ids, 100-month insert limit, connection string, outage statuses, TLS with private CAs, bulk registration (`done/clickhouse-preproduction-readiness.md`)
 - [ ] Stage a deployment of the image and Helm chart against an external persistent ClickHouse
 - [ ] Exercise operations: restart SensApp, interrupt and recover ClickHouse, practise backup and restore on disposable data
 - [ ] Review dependency audit findings, align Cargo and chart versions, write the changelog, publish from a reviewed tag, smoke-test the published artifacts

@@ -5,8 +5,9 @@
 Use the clean `sensapp-sep-26` clone of upstream `main`. The older local
 checkouts have been reviewed in `done/local-work-reconciliation-september-2026.md`;
 none is a safe release base. The BigQuery backend was rewritten on the current
-storage interface (`docs/BIGQUERY.md`) and is outside the first ClickHouse
-release.
+storage interface (`docs/BIGQUERY.md`), and its integration suite passed on a
+real dataset on 4 October 2026. It stays outside the ClickHouse release as an
+experimental backend.
 
 ClickHouse already has migration, health, HTTP lifecycle, and query coverage.
 The remaining release risk is operational: running the packaged image against a
@@ -34,7 +35,7 @@ parser accepts a patched version itself.
 | 2. Stage a ClickHouse deployment | Deploy the built image and chart with external persistent ClickHouse; document configuration, credentials, resource limits, and logs for the actual environment. | 1–2 days |
 | 3. Exercise operations | Verify ingest, series listing, query, and export with representative data; restart SensApp; interrupt/recover ClickHouse; practice backup and restore on disposable data. Confirm readiness and data survival. | 1–2 days |
 | 4. Prepare the first release | Review dependency audit findings, version and changelog; align Cargo and chart versions; publish the GitHub Release from a reviewed tag; verify the pushed image and crate, then repeat a smoke check using those artifacts. | 0.5–2 days |
-| 5. Clear frontend security findings | Upgrade the OpenAPI generator, regenerate its client, verify API compatibility, and make the high-severity npm audit a release gate if the frontend ships with this release. | 1–3 days |
+| 5. Clear frontend security findings (done: npm audit is at zero and a gate in CI) | Upgrade the OpenAPI generator, regenerate its client, verify API compatibility, and make the high-severity npm audit a release gate if the frontend ships with this release. | 1–3 days |
 
 **Planning range: 5–11 engineer-days** for a frontend-inclusive pre-production
 release, assuming
@@ -48,5 +49,5 @@ backend-only release could defer step 5.
 Ship the ClickHouse-backed pre-production build when all four steps have
 evidence. Treat PostgreSQL, SQLite, TimescaleDB, DuckDB, and RRDCached as tested
 compatibility paths rather than equal deployment promises for this release.
-Keep BigQuery experimental until its integration suite has been run against a
-real isolated dataset.
+Keep BigQuery and RRDCached experimental: their integration suites pass, but
+they are research backends, not deployment promises (`docs/BACKENDS.md`).

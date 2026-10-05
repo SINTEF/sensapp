@@ -46,5 +46,5 @@ The release build is 4 times faster than debug, so most of the original 70 s was
 
 ## Related
 
-- `ideas/sample-deduplication-in-maintenance.md`: re-importing the same samples duplicates them, so benchmarks must use a fresh series each time.
+- `done/sample-deduplication-in-vacuum.md`: re-importing the same samples duplicates them, so benchmarks must use a fresh series each time.
 - `docs/HTTP_LIMITS.md` (64 MiB body limit) and `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS` (default 30) bound what one request can carry. The timeout is not documented in `HTTP_LIMITS.md` yet.

@@ -31,7 +31,7 @@ When the server asks for a token the snippets read it from `SENSAPP_TOKEN` and s
   accepts the Prometheus files. (No live Prometheus run: the endpoints are covered by the server tests.)
 - **Telegraf's `token` does not work with JWT**: it sends `Authorization: Token ...`, SensApp wants `Bearer`, and
   answered `401`. The snippet overrides the header with `http_headers`, checked live. Written in
-  `ideas/influxdb-token-authorization-scheme.md`.
+  `done/influxdb-token-authorization-scheme.md`.
 - InfluxDB measurement and field make the series name with a space (`cpu usage_idle`), not an underscore.
 - Prometheus's token is a file: the tab gives the command, with a year of validity (the default is an hour).
 - The Code button is about the explorer, so it is hidden on the Load Data tab.
