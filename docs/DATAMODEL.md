@@ -223,4 +223,4 @@ A remote read query carries the hints of the PromQL query that asks for it: the 
 
 When the range is several steps, `min`, `max`, `sum`, `first` and `last` are exact. `avg_over_time` averages the averages of the buckets of its window: exact when they hold as many samples each, an approximation otherwise (a series with gaps, the edges of the data). This is a compromise, the price of sending a year of data at a one hour step as 8,760 values instead of all the samples.
 
-This was measured with a real Prometheus 3.x (`tests/prometheus_live`). Prometheus 3 evaluates the window `(t - range, t]` and asks from `t - range + 1 ms`; the windows of Prometheus 2 include their start, which was not checked.
+This was measured with real Prometheus 3.8 and 3.15 (`tests/prometheus_live`). Prometheus 3 evaluates the window `(t - range, t]` and asks from `t - range + 1 ms`; the windows of Prometheus 2 include their start, which was not checked.

@@ -5,7 +5,7 @@
 When Prometheus asks for `avg_over_time(x[1h])` over a year with a one hour step, does SensApp send all the
 samples, or aggregate in the database?
 
-## Findings (Prometheus v3.8.0, SensApp on PostgreSQL, 6 hours of one sample a minute)
+## Findings (Prometheus v3.8.0 then v3.15.0, SensApp on PostgreSQL, 6 hours of one sample a minute)
 
 SensApp aggregated in the database (one bucket per `step`, bulk on every SQL backend and BigQuery). But
 Prometheus evaluates the query again on what it receives, and the buckets only gave the right answer in
@@ -27,7 +27,7 @@ shift of one bucket I feared does not happen.
 - [x] `query_options_from_read_hints` requires `range_ms` to be a positive multiple of `step_ms`; otherwise raw samples.
 - [x] Unit tests of both rules; the existing backend-generic hint test (range = step) still passes.
 - [x] `tests/prometheus_live/test_live.py::test_remote_read_hints`: 20 queries through a real Prometheus compared with the raw samples (it
-  failed on 8 of them before the change). `run.sh` now takes `PROMETHEUS_IMAGE` and defaults to v3.8.0.
+  failed on 8 of them before the change). `run.sh` now takes `PROMETHEUS_IMAGE` and defaults to v3.15.0.
 - [x] Documented in `docs/DATAMODEL.md`.
 
 ## Not checked
