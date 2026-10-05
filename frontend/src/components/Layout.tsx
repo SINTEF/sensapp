@@ -57,7 +57,6 @@ export function Layout() {
               </nav>
             </div>
             <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-              <AuthStatus />
               {explorer && <CodeButton />}
               <a
                 href="/docs"
@@ -70,6 +69,7 @@ export function Layout() {
                 </svg>
                 <span className="max-sm:sr-only">API Docs</span>
               </a>
+              <AuthStatus />
             </div>
           </div>
         </div>
