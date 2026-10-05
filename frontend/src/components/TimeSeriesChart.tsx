@@ -1,7 +1,8 @@
-import { lazy, Suspense, useMemo } from 'react';
-import { keepPreviousData, useQueries } from '@tanstack/react-query';
+import { lazy, Suspense, useMemo, useState } from 'react';
+import { useQueries } from '@tanstack/react-query';
 import { getSeriesData } from '../client';
 import { useSelectionStore } from '../stores/useSelectionStore';
+import type { SelectedSeries } from '../stores/useSelectionStore';
 import { unwrap } from '../api/clientConfig';
 import { isBooleanType, isNumericType, resolveStep } from '../lib/chartStep';
 import { buildChartOption } from '../lib/chartOption';
@@ -53,6 +54,13 @@ function parseSenMLToTimeSeries(
   return points.sort((a, b) => a[0] - b[0]);
 }
 
+/** What a query returns: the records of a series, and the color slot it was drawn with. */
+interface Loaded {
+  records: SenMLRecord[];
+  series: SelectedSeries;
+  colorIndex: number;
+}
+
 export function TimeSeriesChart() {
   const { selectedSeries, timeRange, step: stepChoice, aggregation, chartStyle, logScale } =
     useSelectionStore();
@@ -80,29 +88,34 @@ export function TimeSeriesChart() {
         };
       },
       enabled: !!s.uuid,
-      // The range moves every minute: the chart keeps what it shows until the new data is there
-      placeholderData: keepPreviousData,
     })),
   });
 
   const isLoading = queries.some((q) => q.isLoading);
   const errors = queries.filter((q) => q.error);
 
+  // The range moves every minute and a query has a key per range: the chart keeps what it shows
+  // until the data of the new range is there. (`placeholderData` cannot do it for `useQueries`.)
+  const [shown, setShown] = useState<Record<string, Loaded>>({});
+  const loaded = queries.flatMap((q) => (q.data ? [q.data] : []));
+  if (loaded.some((data) => shown[data.series.uuid] !== data)) {
+    setShown({ ...shown, ...Object.fromEntries(loaded.map((data) => [data.series.uuid, data])) });
+  }
+
   const option = useMemo(() => {
-    const series = queries
-      // What is kept while loading belongs to the series that had this place: not to another
-      .filter((q, i) => q.data && q.data.series.uuid === selectedSeries[i]?.uuid)
-      .map((q) => {
-        const { records, series, colorIndex } = q.data!;
+    const series = selectedSeries
+      .filter((s) => shown[s.uuid])
+      .map((s) => {
+        const { records, colorIndex } = shown[s.uuid];
         return {
-          name: buildSeriesLabel(series.name, series.labels),
+          name: buildSeriesLabel(s.name, s.labels),
           points: parseSenMLToTimeSeries(records),
-          boolean: isBooleanType(series.type),
+          boolean: isBooleanType(s.type),
           color: COLORS[colorIndex % COLORS.length],
         };
       });
     return buildChartOption(series, chartStyle, logScale, timeRange);
-  }, [queries, selectedSeries, timeRange, chartStyle, logScale]);
+  }, [shown, selectedSeries, timeRange, chartStyle, logScale]);
 
   if (selectedSeries.length === 0) {
     return null;
