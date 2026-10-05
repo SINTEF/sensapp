@@ -1,6 +1,6 @@
 # Web UI
 
-SensApp ships a small explorer: pick a metric, pick series, draw them over a time range. A second tab, **Load Data**, explains how to get data in. It is a React single page application in [`frontend/`](../frontend), built to static files that SensApp serves itself. There is no separate container.
+SensApp ships a small explorer: pick a metric, pick series, draw them over a time range. A second tab, **Load Data**, explains how to get data in, and a third, **Credentials**, makes tokens. It is a React single page application in [`frontend/`](../frontend), built to static files that SensApp serves itself. There is no separate container.
 
 ## Serving
 
@@ -52,9 +52,21 @@ The second tab of the header (`/ui/load`) explains how to get data into SensApp,
 - **Prometheus**: `remote_write` and `remote_read` (`read_recent: true`), and the address to use from a container.
 - **curl**: SenML JSON, CSV and InfluxDB line protocol, to `/publish` and `/api/v2/write`.
 - The server is the origin of the page. When it asked for a token (or one is in use) the code reads it from `SENSAPP_TOKEN` and the page says how to make a `write` one (`sensapp generate-token me --scope write`); **no token is ever written in the code**. Prometheus reads its token from a file, so its tab gives the command that writes it (a year long, for reading and writing).
-- **Telegraf and tokens.** Telegraf sends its `token` as `Authorization: Token …`, the InfluxDB way, and SensApp only reads `Bearer …` (it answers `401`). The snippet therefore sets `http_headers = {"Authorization" = "Bearer ${SENSAPP_TOKEN}"}`, which Telegraf applies after its own header. Checked against a server with `SENSAPP_JWT_SECRET`.
+- **Telegraf and tokens.** Telegraf sends its `token` as `Authorization: Token …`, the InfluxDB way, and SensApp reads that scheme as well as `Bearer …`. The snippet gives Telegraf its own `token = "${SENSAPP_TOKEN}"`, no header to rewrite. Checked against a server with a secret.
 - The snippets are in `src/lib/loadSnippets.ts` (one function for each way, tested), the page in `src/pages/LoadPage.tsx`. The page is loaded when its tab is first opened (5 kB gzipped, the highlighter is shared with the Code dialog).
-- All of them were run against a real SensApp (PostgreSQL), with and without a JWT secret: the Python scripts, the curl commands, Telegraf (`--once`), and the Prometheus configuration with `promtool check config`.
+- All of them were run against a real SensApp (PostgreSQL), with and without a JWT secret (the Telegraf one before SensApp read the `Token` scheme, with a `Bearer` header): the Python scripts, the curl commands, Telegraf (`--once`), and the Prometheus configuration with `promtool check config`.
+
+## Credentials
+
+The third tab (`/ui/credentials`) makes tokens for the clients of SensApp (see [JWT_AUTH.md](JWT_AUTH.md)). What it shows depends on the token in use:
+
+- **No token, and the server answers without one**: "Authentication is disabled", with how to turn it on.
+- **No token, or a token without the `admin` scope**: "An admin token is needed", with the command that makes one (`sensapp generate-token me --scope admin`) and a button that opens the sign-in dialog (which then suggests that command instead of a read token). A local SensApp without a secret prints a token with every scope, admin included, when it starts.
+- **An admin token**: a form with the name of the token (it is in the logs of its requests), the scopes (`read` and `write` by default, `delete` on demand, never `admin`), the sensors it is limited to (names separated by commas; the sensors of the server are offered to click when the token in use can read them, which an admin-only token cannot), and the validity (1 hour, 1 day, 30 days, 1 year; a day by default). The server's own cap (`SENSAPP_TOKEN_MAX_DURATION_SECONDS`) and checks answer in the form.
+
+The token is then **shown once**, with a Copy button, what it was made with and the `export SENSAPP_TOKEN=…` line that the code of [Load Data](#load-data) reads. SensApp keeps nothing: the page has no list of tokens and cannot revoke one (rotating the secret does, see [JWT_AUTH.md](JWT_AUTH.md#rotating-the-secret-and-revoking-tokens)). The page does not keep the token either: it is dropped from the cache of the requests as soon as the page is left, and a refresh forgets it.
+
+The page is in `src/pages/CredentialsPage.tsx` and loaded when its tab is first opened (it shows the token as code, with the highlighter). With an admin token the catalog is not read, because an admin token cannot read: the refusal would ask for a token again.
 
 ## Address
 
@@ -81,10 +93,11 @@ The list of series is paged by the server (256 per page, cursor based): Previous
 
 ## Authentication
 
-With `SENSAPP_JWT_SECRET` unset the UI works without further ado. When it is set, the API answers `401` and the UI shows a dialog asking for a token: paste the output of `sensapp generate-token <name> --scope read`. See [JWT_AUTH.md](JWT_AUTH.md).
+SensApp is not open by default (see [JWT_AUTH.md](JWT_AUTH.md)). When authentication is on, the API answers `401` and the UI shows a dialog asking for a token: paste the output of `sensapp generate-token <name> --scope read`. With authentication disabled (`SENSAPP_AUTH_DISABLED`) the UI works without further ado.
 
+- **A local SensApp without a secret prints a link** (`http://127.0.0.1:3000/ui/#token=…`) that opens the UI signed in. The token is in the *fragment* of the address, which the browser never sends to the server, so it is not logged. The UI takes it out of the address as soon as the page loads (`src/lib/tokenFromAddress.ts`), so that it stays out of the history and out of a copied link.
 - The token is kept in `sessionStorage`: it is gone when the tab closes and never shared with other tabs.
-- An expired or invalid token (`401`), or a token without the `read` scope (`403`), shows the dialog again with the answer of the server.
+- An expired or invalid token (`401`), or a token without the `read` scope (`403`), shows the dialog again with the answer of the server. So does a refused request to make a token.
 - "Sign out" in the header forgets the token.
 - A token with a sensor allow list shows only its sensors, as with any client.
 
@@ -99,7 +112,7 @@ npm run dev        # http://localhost:5173/ui/, proxies the API to http://localh
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-Run SensApp on port 3000 next to it (`cargo run`).
+Run SensApp on port 3000 next to it (`cargo run`: it prints a token and a link on a local run, or start it with `SENSAPP_AUTH_DISABLED=true` to work without one).
 
 `src/client` is generated from `openapi.json`, and both are committed. `openapi.json` is the OpenAPI document of the server: a Rust test fails when it is out of date. After an API change:
 
@@ -108,4 +121,4 @@ UPDATE_OPENAPI=1 cargo test frontend_openapi_document   # rewrites frontend/open
 cd frontend && npm run openapi-ts                       # regenerates src/client
 ```
 
-`VITE_SENSAPP_LIVE_URL=http://localhost:3000 npm test` also runs the test that talks to a running SensApp (without authentication).
+`VITE_SENSAPP_LIVE_URL=http://localhost:3000 npm test` also runs the test that talks to a running SensApp (without authentication: start it with `SENSAPP_AUTH_DISABLED=true`).

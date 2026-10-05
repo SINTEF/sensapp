@@ -91,6 +91,8 @@ RUN ldconfig
 # Served under /ui/, see SENSAPP_UI_ENABLED
 COPY --from=frontend /frontend/dist /usr/share/sensapp/ui
 
+# The image listens on every address, so it does not start without authentication: give it
+# SENSAPP_JWT_SECRET (`sensapp generate-secret` makes one), or SENSAPP_AUTH_DISABLED=true.
 ENV SENSAPP_ENDPOINT=0.0.0.0 \
     SENSAPP_PORT=3000 \
     SENSAPP_UI_DIR=/usr/share/sensapp/ui \

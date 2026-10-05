@@ -53,7 +53,10 @@ See [FRONTEND.md](FRONTEND.md).
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SENSAPP_JWT_SECRET` | unset | Enables JWT authentication when set (at least 32 characters). Unset means every endpoint is open. See [JWT_AUTH.md](JWT_AUTH.md). |
+| `SENSAPP_JWT_SECRET` | unset | Secret that signs and verifies the JWTs (at least 32 characters, `sensapp generate-secret` makes one). When unset, SensApp does not run open: on a loopback address it makes a secret for the run and prints an admin token, on any other address (the container image) it refuses to start, unless `SENSAPP_AUTH_DISABLED` is true. See [JWT_AUTH.md](JWT_AUTH.md). |
+| `SENSAPP_AUTH_DISABLED` | `false` | Run with every endpoint open: the explicit opt-out for demos, tests, and networks that authenticate in front of SensApp. Ignored when `SENSAPP_JWT_SECRET` is set. |
+| `SENSAPP_JWT_PREVIOUS_SECRETS` | unset | Comma-separated secrets that still verify tokens but never sign them: the way to rotate the secret, or revoke the tokens of one. See [JWT_AUTH.md](JWT_AUTH.md#rotating-the-secret-and-revoking-tokens). |
+| `SENSAPP_TOKEN_MAX_DURATION_SECONDS` | `31536000` | Longest validity of a token made with `POST /api/v1/admin/tokens` (a year). The command line is not capped by it. |
 
 ### Data
 

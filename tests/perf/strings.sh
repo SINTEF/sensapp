@@ -16,7 +16,7 @@ PORT=${PORT:-3981}
 WORK=$(mktemp -d)
 trap 'kill "$PID" 2>/dev/null; wait "$PID" 2>/dev/null; rm -rf "$WORK"' EXIT
 
-SENSAPP_PORT=$PORT SENSAPP_STORAGE_CONNECTION_STRING="$CONN" SENSAPP_SETTINGS_FILE=/nonexistent.toml \
+SENSAPP_AUTH_DISABLED=true SENSAPP_PORT=$PORT SENSAPP_STORAGE_CONNECTION_STRING="$CONN" SENSAPP_SETTINGS_FILE=/nonexistent.toml \
   SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS=300 SENSAPP_HTTP_MAX_CONCURRENT_WRITES=0 "$BIN" > "$WORK/server.log" 2>&1 &
 PID=$!
 for _ in $(seq 1 60); do curl -sf "localhost:$PORT/health/ready" >/dev/null && break; sleep 0.5; done

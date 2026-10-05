@@ -2,7 +2,7 @@
 
 This file tracks the main remaining work for SensApp. Detailed task history lives in `current_tasks/`, `ideas/` and `done/`.
 
-The core is in place: HTTP-only ingestion, DCAT/query/export endpoints, Prometheus and InfluxDB compatibility, health endpoints, Prometheus service metrics, JWT sensor authorization, HTTP resource limits, data lifecycle controls, cross-series aggregation, a Python SDK, Helm chart and container images, and a broad integration test suite run against every backend in CI.
+The core is in place: HTTP-only ingestion, DCAT/query/export endpoints, Prometheus and InfluxDB compatibility, health endpoints, Prometheus service metrics, secure-by-default JWT authentication (sensor authorization, an admin scope, secret rotation, a Credentials tab), HTTP resource limits, data lifecycle controls, cross-series aggregation, a Python SDK, Helm chart and container images, and a broad integration test suite run against every backend in CI.
 
 The next phase is not to add more features. It is to make the existing system solid enough for pre-production, with ClickHouse as the reference backend. The acceptance criteria and sequencing are in [docs/PREPRODUCTION_RELEASE_PLAN.md](docs/PREPRODUCTION_RELEASE_PLAN.md).
 

@@ -30,7 +30,8 @@ trap cleanup EXIT
 cd "$repo_root"
 cargo build --locked --no-default-features --features postgres
 
-SENSAPP_ENDPOINT=0.0.0.0 SENSAPP_PORT=3017 \
+# The test clients send no token: run open, explicitly
+SENSAPP_AUTH_DISABLED=true SENSAPP_ENDPOINT=0.0.0.0 SENSAPP_PORT=3017 \
   "$repo_root/target/debug/sensapp" >"$work_dir/sensapp.log" 2>&1 &
 sensapp_pid=$!
 

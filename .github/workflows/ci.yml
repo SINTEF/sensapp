@@ -393,10 +393,22 @@ jobs:
           cache-from: type=gha,scope=runtime-smoke
           cache-to: type=gha,scope=runtime-smoke,mode=max
 
+      - name: The image refuses to start without authentication
+        if: matrix.name == 'runtime'
+        run: |
+          # No secret and no SENSAPP_AUTH_DISABLED: the image listens on 0.0.0.0, which is not safe open
+          if docker run --rm sensapp-ci:runtime > refusal.log 2>&1; then
+            echo "The image started without authentication"
+            exit 1
+          fi
+          cat refusal.log
+          grep -q SENSAPP_JWT_SECRET refusal.log
+
       - name: Start runtime image against ClickHouse
         if: matrix.name == 'runtime'
         run: >-
           docker run --detach --name sensapp-ci-runtime --network host
+          --env SENSAPP_AUTH_DISABLED=true
           --env SENSAPP_STORAGE_CONNECTION_STRING=clickhouse://default:password@127.0.0.1:8123/sensapp_test
           sensapp-ci:runtime
 

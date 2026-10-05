@@ -43,14 +43,14 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "sensapp.fullname" . }}
-            {{- if or (not .Values.storage.existingSecret) .Values.auth.jwtSecret .Values.secretEnv }}
+            {{- if include "sensapp.hasSecret" . }}
             - secretRef:
                 name: {{ include "sensapp.fullname" . }}
             {{- end }}
           {{- with .Values.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.storage.existingSecret .Values.extraEnv }}
+          {{- if or .Values.storage.existingSecret .Values.auth.existingSecret .Values.extraEnv }}
           env:
             {{- if .Values.storage.existingSecret }}
             - name: SENSAPP_STORAGE_CONNECTION_STRING
@@ -58,6 +58,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.storage.existingSecret | quote }}
                   key: {{ .Values.storage.existingSecretKey | quote }}
+            {{- end }}
+            {{- if .Values.auth.existingSecret }}
+            - name: SENSAPP_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret | quote }}
+                  key: {{ .Values.auth.existingSecretKey | quote }}
             {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
