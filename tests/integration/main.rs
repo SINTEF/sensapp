@@ -33,6 +33,7 @@ mod rrdcached_integration;
 mod selector_aggregated;
 mod selector_reads;
 mod simple_promql;
+mod time_window_reads;
 #[cfg(feature = "timescaledb")]
 mod timescale_compressed;
 #[cfg(feature = "timescaledb")]

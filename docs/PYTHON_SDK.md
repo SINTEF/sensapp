@@ -64,6 +64,12 @@ You can upload either simple scalar values, explicit `SamplePoint` lists, or a P
 
 If you want the frame itself to carry upload metadata, `build_upload_table_from_polars()` also accepts uniform `sensor_name` and optional `sensor_id` columns. `sensor_id` must be a valid UUID, otherwise the server rejects the upload.
 
+## Timeouts
+
+`SensAppClient(timeout=125, write_timeout=330)`: a read may take 125 s and a write 330 s. They sit a little above the server's own timeouts (120 s and 300 s, see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts)), so that the server's `504` answer reaches you instead of a client-side timeout. Sending a large history is slower than reading it back: prefer requests of 100,000 to 200,000 samples to one huge `publish`. If you change the timeouts of the server, change the ones of the client with them.
+
+A request that took longer than `RetryPolicy.total_timeout` (60 s) is not retried, see below.
+
 ## Retries
 
 When SensApp is overloaded or unreachable the client retries, within limits (`RetryPolicy`, three attempts by default). It retries the answers `503`, `429` and `504`, and the connection errors and timeouts (`ConnectionError`, connect and read timeouts, a connection cut while the response is read), for reads and writes:

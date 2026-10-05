@@ -905,6 +905,7 @@ mod rrdcached_tests {
             &RouterSettings {
                 max_body_bytes: 64 * 1024 * 1024,
                 request_timeout: Duration::from_secs(30),
+                write_timeout: Duration::from_secs(300),
                 maintenance_timeout: Duration::from_secs(3600),
                 max_concurrent_writes: 16,
                 ui_dir: None,

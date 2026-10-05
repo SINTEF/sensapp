@@ -77,6 +77,9 @@ pub struct RouterSettings {
     pub max_body_bytes: usize,
     /// Time a request may take before it is answered with a 504
     pub request_timeout: Duration,
+    /// Same for the write requests (`/publish`, InfluxDB and Prometheus writes), which are slower
+    /// than a read on a large body
+    pub write_timeout: Duration,
     /// Time the maintenance request (the vacuum) may take before it is answered with a 504
     pub maintenance_timeout: Duration,
     /// Write requests handled at the same time, 0 for no limit
@@ -90,6 +93,7 @@ impl RouterSettings {
         Ok(Self {
             max_body_bytes: config.parse_http_body_limit()?,
             request_timeout: Duration::from_secs(config.http_server_timeout_seconds),
+            write_timeout: Duration::from_secs(config.http_write_timeout_seconds),
             maintenance_timeout: Duration::from_secs(config.http_maintenance_timeout_seconds),
             max_concurrent_writes: config.http_max_concurrent_writes,
             ui_dir: ui_directory(config),
@@ -215,7 +219,8 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
         .route_layer(axum::middleware::from_fn_with_state(
             state.auth.clone(),
             require_write_auth,
-        ));
+        ))
+        .layer(timeout_layer(settings.write_timeout));
 
     // Delete-protected routes — require a valid JWT with "delete" scope when auth is enabled.
     // The delete scope is never part of the default "read write" scope.
@@ -240,11 +245,13 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
         ))
         .layer(timeout_layer(settings.maintenance_timeout));
 
+    // The writes and the maintenance have timeouts of their own, merged after the layer of the
+    // other requests so that this one does not apply to them.
     public_routes
         .merge(read_routes)
-        .merge(write_routes)
         .merge(delete_routes)
         .layer(timeout_layer(settings.request_timeout))
+        .merge(write_routes)
         .merge(maintenance_routes)
         .layer(axum::middleware::from_fn_with_state(
             state.metrics.clone(),
@@ -365,7 +372,7 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
             description = "The storage backend is unavailable, or SensApp is busy writing and sheds the write. A `Retry-After` header (seconds, randomised) means the request was not processed at all and can be sent again after that delay",
             headers(("Retry-After" = u32, description = "Seconds to wait before sending the write again"))
         ),
-        (status = 504, description = "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs")
+        (status = 504, description = "The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice")
     )
 )]
 async fn publish_sensors_data(

@@ -59,7 +59,7 @@ impl BulkSelectorBackend for SqliteStorage {
         let sql = format!(
             "SELECT sensor_id, timestamp_us, value FROM {table} \
              WHERE sensor_id IN ({placeholders}) \
-             AND (? IS NULL OR timestamp_us >= ?) AND (? IS NULL OR timestamp_us <= ?) \
+             AND timestamp_us >= COALESCE(?, -9223372036854775807) AND timestamp_us <= COALESCE(?, 9223372036854775807) \
              ORDER BY sensor_id, timestamp_us LIMIT ?"
         );
 
@@ -77,8 +77,6 @@ impl BulkSelectorBackend for SqliteStorage {
                 }
                 let rows = query
                     .bind(start_us)
-                    .bind(start_us)
-                    .bind(end_us)
                     .bind(end_us)
                     .bind(i64::try_from(limit).unwrap_or(i64::MAX))
                     .fetch_all(&self.pool)
@@ -169,8 +167,8 @@ impl SqliteStorage {
                               (?4 + ((timestamp_us - ?4) / ?3) * ?3) AS bucket_us
                        FROM {table}
                        WHERE sensor_id IN ({placeholders})
-                         AND (?1 IS NULL OR timestamp_us >= ?1)
-                         AND (?2 IS NULL OR timestamp_us <= ?2)
+                         AND timestamp_us >= COALESCE(?1, -9223372036854775807)
+                         AND timestamp_us <= COALESCE(?2, 9223372036854775807)
                      ), ranked AS (
                        SELECT sensor_id, bucket_us, value,
                               ROW_NUMBER() OVER (PARTITION BY sensor_id, bucket_us ORDER BY timestamp_us {direction}) AS row_num
@@ -201,8 +199,8 @@ impl SqliteStorage {
                               (?4 + ((timestamp_us - ?4) / ?3) * ?3) AS bucket_us
                        FROM {table}
                        WHERE sensor_id IN ({placeholders})
-                         AND (?1 IS NULL OR timestamp_us >= ?1)
-                         AND (?2 IS NULL OR timestamp_us <= ?2)
+                         AND timestamp_us >= COALESCE(?1, -9223372036854775807)
+                         AND timestamp_us <= COALESCE(?2, 9223372036854775807)
                      )
                      SELECT sensor_id, bucket_us AS timestamp_us, {expression} AS value
                      FROM bucketed GROUP BY sensor_id, bucket_us
