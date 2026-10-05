@@ -1,13 +1,30 @@
 import { create } from 'zustand';
 import type { Aggregation } from '../lib/chartStep';
 import type { ChartStyle } from '../lib/chartOption';
+import { freeSlot } from '../lib/palette';
 import { DEFAULT_RANGE, rangeFor } from '../lib/timeRange';
 
-export interface SelectedSeries {
+/** What the server says of a series. */
+export interface SeriesInfo {
   uuid: string;
   name: string;
   labels: Record<string, string>;
   type: string;
+}
+
+/** A series that is shown, with the color slot it keeps for as long as it is. */
+export interface SelectedSeries extends SeriesInfo {
+  slot: number;
+}
+
+/** The series with a slot each, the ones that have one keeping it. */
+export function withSlots(series: SeriesInfo[], selected: SelectedSeries[] = []): SelectedSeries[] {
+  const result = [...selected];
+  for (const info of series) {
+    if (result.some((s) => s.uuid === info.uuid)) continue;
+    result.push({ ...info, slot: freeSlot(result.map((s) => s.slot)) });
+  }
+  return result;
 }
 
 interface SelectionState {
@@ -26,7 +43,9 @@ interface SelectionState {
   aggregation: Aggregation;
   labelFilter: string;
   setSelectedMetric: (metric: string | null) => void;
-  toggleSeries: (series: SelectedSeries) => void;
+  toggleSeries: (series: SeriesInfo) => void;
+  /** Shows these series too */
+  selectSeries: (series: SeriesInfo[]) => void;
   clearSelectedSeries: () => void;
   setTimeRange: (start: string, end: string) => void;
   /** A preset: the range ending now */
@@ -71,10 +90,11 @@ export const useSelectionStore = create<SelectionState>((set) => ({
           ),
         };
       }
-      return {
-        selectedSeries: [...state.selectedSeries, series],
-      };
+      return { selectedSeries: withSlots([series], state.selectedSeries) };
     }),
+
+  selectSeries: (series) =>
+    set((state) => ({ selectedSeries: withSlots(series, state.selectedSeries) })),
 
   clearSelectedSeries: () => set({ selectedSeries: [] }),
 

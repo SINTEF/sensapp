@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { TimeSeriesChart } from './TimeSeriesChart';
+import { SERIES_COLORS } from '../lib/palette';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
 const mockGetSeriesData = vi.fn();
@@ -13,9 +14,9 @@ vi.mock('../client', () => ({
 const START = '2026-10-04T00:00:00.000Z';
 const hours = (n: number) => new Date(Date.parse(START) + n * 3600_000).toISOString();
 
-const temperature = { uuid: 'uuid-temperature', name: 'temperature', labels: {}, type: 'float' };
-const state = { uuid: 'uuid-state', name: 'state', labels: {}, type: 'string' };
-const door = { uuid: 'uuid-door', name: 'door', labels: {}, type: 'boolean' };
+const temperature = { uuid: 'uuid-temperature', name: 'temperature', labels: {}, type: 'float', slot: 0 };
+const state = { uuid: 'uuid-state', name: 'state', labels: {}, type: 'string', slot: 0 };
+const door = { uuid: 'uuid-door', name: 'door', labels: {}, type: 'boolean', slot: 0 };
 
 function renderChart() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -194,5 +195,19 @@ describe('TimeSeriesChart', () => {
     await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(2));
 
     expect(screen.getByTestId('echarts')).toHaveAttribute('data-series-count', '1');
+  });
+
+  it('draws each series with the color of its slot, the one of its swatch in the list', async () => {
+    useSelectionStore.setState({
+      selectedSeries: [{ ...temperature, slot: 3 }],
+      timeRange: { start: START, end: hours(1) },
+    });
+    renderChart();
+
+    const chart = await screen.findByTestId('echarts');
+    await waitFor(() => expect(chart).toHaveAttribute('data-series-count', '1'));
+    const option = JSON.parse(chart.getAttribute('data-option')!);
+    expect(option.series[0]).toMatchObject({ id: 'uuid-temperature', color: SERIES_COLORS.light[3] });
+    expect(option.legend).toBeUndefined();
   });
 });

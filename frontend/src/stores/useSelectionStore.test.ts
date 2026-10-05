@@ -105,4 +105,28 @@ describe('useSelectionStore', () => {
     });
     expect(result.current.selectedSeries).toHaveLength(0);
   });
+
+  describe('colors', () => {
+    const info = (uuid: string) => ({ uuid, name: 'cpu', labels: {}, type: 'float' });
+    const slots = () => useSelectionStore.getState().selectedSeries.map((s) => [s.uuid, s.slot]);
+
+    it('keeps the color of a series as long as it is selected', () => {
+      const { toggleSeries } = useSelectionStore.getState();
+      act(() => ['a', 'b', 'c'].forEach((uuid) => toggleSeries(info(uuid))));
+      expect(slots()).toEqual([['a', 0], ['b', 1], ['c', 2]]);
+
+      // The first one goes: the others keep theirs, and the next one takes the free one
+      act(() => toggleSeries(info('a')));
+      expect(slots()).toEqual([['b', 1], ['c', 2]]);
+      act(() => toggleSeries(info('d')));
+      expect(slots()).toEqual([['b', 1], ['c', 2], ['d', 0]]);
+    });
+
+    it('selects many series at once, those that are already selected staying as they are', () => {
+      const { toggleSeries, selectSeries } = useSelectionStore.getState();
+      act(() => toggleSeries(info('b')));
+      act(() => selectSeries([info('a'), info('b'), info('c')]));
+      expect(slots()).toEqual([['b', 0], ['a', 1], ['c', 2]]);
+    });
+  });
 });

@@ -77,10 +77,10 @@ describe('useUrlState', () => {
       chartStyle: 'area',
       logScale: true,
     });
-    // The name, the labels and the type come from the first sample of each series
+    // The name, the labels and the type come from the first sample of each series, a color slot each
     expect(state.selectedSeries).toEqual([
-      { uuid: 'uuid-t', name: 'temperature', labels: { room: 'lab' }, type: 'float' },
-      { uuid: 'uuid-door', name: 'door', labels: {}, type: 'boolean' },
+      { uuid: 'uuid-t', name: 'temperature', labels: { room: 'lab' }, type: 'float', slot: 0 },
+      { uuid: 'uuid-door', name: 'door', labels: {}, type: 'boolean', slot: 1 },
     ]);
     const hours = (Date.parse(state.timeRange.end) - Date.parse(state.timeRange.start)) / 3_600_000;
     expect(hours).toBe(24);

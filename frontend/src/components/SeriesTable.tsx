@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { nextBookmark, useSeries } from '../hooks/useSeries';
 import type { SeriesDataset } from '../hooks/useSeries';
+import { isBooleanType, isNumericType } from '../lib/chartStep';
+import { seriesColor, SLOTS } from '../lib/palette';
+import { usePrefersDark } from '../lib/usePrefersDark';
 import { useSelectionStore } from '../stores/useSelectionStore';
+import type { SeriesInfo } from '../stores/useSelectionStore';
 import { ErrorAlert, Loading } from './Feedback';
 
 function labelsToRecord(
@@ -14,14 +18,28 @@ function labelsToRecord(
   );
 }
 
+/** A metric of at most this many series is shown whole when it is selected: there is a color for each. */
+const AUTO_SELECT_MAX = SLOTS;
+
+function toSeriesInfo(dataset: SeriesDataset): SeriesInfo {
+  return {
+    uuid: dataset['dct:identifier'],
+    name: dataset['dct:title'],
+    labels: labelsToRecord(dataset['sensor:labels']),
+    type: dataset['sensor:type'],
+  };
+}
+
 export function SeriesTable() {
   const {
     selectedMetric,
     selectedSeries,
     toggleSeries,
+    selectSeries,
     labelFilter,
     setLabelFilter,
   } = useSelectionStore();
+  const dark = usePrefersDark();
   const [selectorInput, setSelectorInput] = useState('');
   // The cursor of every page shown so far: the server only goes forward, so Previous pops one
   const [bookmarks, setBookmarks] = useState<string[]>([]);
@@ -37,20 +55,30 @@ export function SeriesTable() {
 
   const series = data?.['dcat:dataset'] ?? [];
 
-  function isSelected(dataset: SeriesDataset): boolean {
-    return selectedSeries.some(
-      (s) => s.uuid === dataset['dct:identifier']
+  // A metric that is not too big is shown whole, once: clearing it afterwards is the choice of the
+  // user. What the address already shows is left alone, and so are the series that cannot be drawn.
+  const autoSelected = useRef(false);
+  useEffect(() => {
+    if (!data || autoSelected.current) return;
+    autoSelected.current = true;
+    const all = data['dcat:dataset'];
+    if (nextBookmark(data) || all.length > AUTO_SELECT_MAX) return;
+    if (useSelectionStore.getState().selectedSeries.length > 0) return;
+    selectSeries(
+      all
+        .map(toSeriesInfo)
+        .filter((s) => isNumericType(s.type) || isBooleanType(s.type)),
     );
+  }, [data, selectSeries]);
+
+  function selectedOf(dataset: SeriesDataset) {
+    return selectedSeries.find((s) => s.uuid === dataset['dct:identifier']);
   }
 
-  function handleToggle(dataset: SeriesDataset) {
-    toggleSeries({
-      uuid: dataset['dct:identifier'],
-      name: dataset['dct:title'],
-      labels: labelsToRecord(dataset['sensor:labels']),
-      type: dataset['sensor:type'],
-    });
-  }
+  // One column per label dimension
+  const dimensions = [...new Set(series.flatMap((s) => Object.keys(labelsToRecord(s['sensor:labels']))))].sort();
+  // The type is said when there is something to tell: a name can exist with more than one
+  const mixedTypes = new Set(series.map((s) => s['sensor:type'])).size > 1;
 
   // Client-side label text filtering
   const filteredSeries = labelFilter
@@ -113,62 +141,71 @@ export function SeriesTable() {
           <table className="table table-xs w-full">
             <thead>
               <tr className="text-xs text-base-content/50">
-                <th className="w-8 font-medium">
+                <th className="w-12 font-medium">
                   <span className="sr-only">Select</span>
                 </th>
-                <th className="font-medium">Series ID</th>
-                <th className="font-medium">Type</th>
-                <th className="font-medium">Labels</th>
+                {dimensions.map((dimension) => (
+                  <th key={dimension} className="font-medium">
+                    {dimension}
+                  </th>
+                ))}
+                {dimensions.length === 0 && <th className="font-medium">Series</th>}
+                {mixedTypes && <th className="font-medium">Type</th>}
+                <th className="font-medium text-right">
+                  <span className="sr-only">Series ID</span>
+                </th>
               </tr>
             </thead>
             <tbody>
               {filteredSeries.map((s) => {
-                const checked = isSelected(s);
+                const uuid = s['dct:identifier'];
+                const selected = selectedOf(s);
+                const labels = labelsToRecord(s['sensor:labels']);
                 return (
                   <tr
-                    key={s['dct:identifier']}
+                    key={uuid}
                     className={`cursor-pointer transition-colors ${
-                      checked
+                      selected
                         ? 'bg-primary/8'
                         : 'hover:bg-base-200/60'
                     }`}
-                    onClick={() => handleToggle(s)}
+                    onClick={() => toggleSeries(toSeriesInfo(s))}
                   >
                     <td>
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-primary checkbox-xs"
-                        aria-label={`Select series ${s['dct:identifier']}`}
-                        checked={checked}
-                        onChange={() => handleToggle(s)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </td>
-                    <td className="font-mono text-xs text-base-content/60 max-w-[10rem] truncate">
-                      {s['dct:identifier']}
-                    </td>
-                    <td>
-                      <span className="badge badge-xs badge-outline">
-                        {s['sensor:type']}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="flex flex-wrap gap-1">
-                        {(s['sensor:labels'] ?? []).map((labelObj, i) =>
-                          Object.entries(labelObj).map(([k, v]) => (
-                            <span
-                              key={`${i}-${k}`}
-                              className="inline-flex items-center gap-0.5 text-xs bg-base-200 rounded px-1.5 py-0.5"
-                            >
-                              <span className="text-base-content/50">{k}=</span>
-                              <span className="font-medium">{v}</span>
-                            </span>
-                          ))
-                        )}
-                        {(!s['sensor:labels'] || s['sensor:labels'].length === 0) && (
-                          <span className="text-xs text-base-content/30">no labels</span>
-                        )}
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          className="checkbox checkbox-primary checkbox-xs"
+                          aria-label={`Select series ${uuid}`}
+                          checked={!!selected}
+                          onChange={() => toggleSeries(toSeriesInfo(s))}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <span
+                          className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+                          data-testid={selected ? 'series-color' : undefined}
+                          style={{ background: selected ? seriesColor(selected.slot, dark) : 'transparent' }}
+                        />
                       </div>
+                    </td>
+                    {dimensions.map((dimension) => (
+                      <td key={dimension} className="text-xs max-w-40 truncate" title={labels[dimension]}>
+                        {labels[dimension] ?? <span className="text-base-content/30">—</span>}
+                      </td>
+                    ))}
+                    {dimensions.length === 0 && (
+                      <td className="text-xs text-base-content/30">no labels</td>
+                    )}
+                    {mixedTypes && (
+                      <td>
+                        <span className="badge badge-xs badge-outline">{s['sensor:type']}</span>
+                      </td>
+                    )}
+                    <td
+                      className="font-mono text-[10px] text-base-content/40 text-right max-w-28 truncate"
+                      title={uuid}
+                    >
+                      {uuid}
                     </td>
                   </tr>
                 );

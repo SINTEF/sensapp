@@ -2,19 +2,14 @@ import { lazy, Suspense, useMemo, useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { getSeriesData } from '../client';
 import { useSelectionStore } from '../stores/useSelectionStore';
-import type { SelectedSeries } from '../stores/useSelectionStore';
 import { unwrap } from '../api/clientConfig';
 import { isBooleanType, isNumericType, resolveStep } from '../lib/chartStep';
 import { buildChartOption } from '../lib/chartOption';
+import { seriesColor } from '../lib/palette';
+import { usePrefersDark } from '../lib/usePrefersDark';
 
 // echarts is large: load it when the first chart is drawn.
 const EChart = lazy(() => import('./EChart'));
-
-// Color palette for multiple series
-const COLORS = [
-  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
-  '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
-];
 
 function buildSeriesLabel(name: string, labels: Record<string, string>): string {
   const labelStr = Object.entries(labels)
@@ -54,21 +49,21 @@ function parseSenMLToTimeSeries(
   return points.sort((a, b) => a[0] - b[0]);
 }
 
-/** What a query returns: the records of a series, and the color slot it was drawn with. */
+/** What a query returns: the records of a series. */
 interface Loaded {
+  uuid: string;
   records: SenMLRecord[];
-  series: SelectedSeries;
-  colorIndex: number;
 }
 
 export function TimeSeriesChart() {
-  const { selectedSeries, timeRange, step: stepChoice, aggregation, chartStyle, logScale } =
+  const { selectedSeries, timeRange, relativeRange, step: stepChoice, aggregation, chartStyle, logScale } =
     useSelectionStore();
+  const dark = usePrefersDark();
 
   const step = resolveStep(stepChoice, timeRange.start, timeRange.end);
 
   const queries = useQueries({
-    queries: selectedSeries.map((s, index) => ({
+    queries: selectedSeries.map((s) => ({
       queryKey: ['seriesData', s.uuid, timeRange, step, aggregation] as const,
       queryFn: async () => {
         const result = await getSeriesData({
@@ -81,11 +76,7 @@ export function TimeSeriesChart() {
             ...(step && isNumericType(s.type) ? { step, aggregation } : {}),
           },
         });
-        return {
-          records: unwrap(result) as unknown as SenMLRecord[],
-          series: s,
-          colorIndex: index,
-        };
+        return { uuid: s.uuid, records: unwrap(result) as unknown as SenMLRecord[] };
       },
       enabled: !!s.uuid,
     })),
@@ -98,24 +89,24 @@ export function TimeSeriesChart() {
   // until the data of the new range is there. (`placeholderData` cannot do it for `useQueries`.)
   const [shown, setShown] = useState<Record<string, Loaded>>({});
   const loaded = queries.flatMap((q) => (q.data ? [q.data] : []));
-  if (loaded.some((data) => shown[data.series.uuid] !== data)) {
-    setShown({ ...shown, ...Object.fromEntries(loaded.map((data) => [data.series.uuid, data])) });
+  if (loaded.some((data) => shown[data.uuid] !== data)) {
+    setShown({ ...shown, ...Object.fromEntries(loaded.map((data) => [data.uuid, data])) });
   }
 
   const option = useMemo(() => {
     const series = selectedSeries
       .filter((s) => shown[s.uuid])
       .map((s) => {
-        const { records, colorIndex } = shown[s.uuid];
         return {
+          id: s.uuid,
           name: buildSeriesLabel(s.name, s.labels),
-          points: parseSenMLToTimeSeries(records),
+          points: parseSenMLToTimeSeries(shown[s.uuid].records),
           boolean: isBooleanType(s.type),
-          color: COLORS[colorIndex % COLORS.length],
+          color: seriesColor(s.slot, dark),
         };
       });
     return buildChartOption(series, chartStyle, logScale, timeRange);
-  }, [shown, selectedSeries, timeRange, chartStyle, logScale]);
+  }, [shown, selectedSeries, dark, timeRange, chartStyle, logScale]);
 
   if (selectedSeries.length === 0) {
     return null;
@@ -138,7 +129,8 @@ export function TimeSeriesChart() {
 
       <div className="flex-1 min-h-0">
         <Suspense fallback={null}>
-          <EChart option={option} />
+          {/* A preset slides with the time, zoom is kept; another range starts from the whole of it */}
+          <EChart option={option} resetZoomKey={relativeRange ?? `${timeRange.start}/${timeRange.end}`} />
         </Suspense>
       </div>
     </div>

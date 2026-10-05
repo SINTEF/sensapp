@@ -6,7 +6,8 @@ import { ApiError, unwrap } from '../api/clientConfig';
 import { fromSearchParams, toSearchParams } from '../lib/urlState';
 import { rangeFor } from '../lib/timeRange';
 import { useSelectionStore } from '../stores/useSelectionStore';
-import type { SelectedSeries } from '../stores/useSelectionStore';
+import { withSlots } from '../stores/useSelectionStore';
+import type { SeriesInfo } from '../stores/useSelectionStore';
 
 /** The type of a series, from the value its first record carries. */
 function typeOf(record: Record<string, unknown>): string {
@@ -20,7 +21,7 @@ function typeOf(record: Record<string, unknown>): string {
  * What the chart needs to know of a series that an address names by its uuid: its first sample
  * carries the name and the labels. `null` for a series that is gone.
  */
-async function probeSeries(uuid: string): Promise<SelectedSeries | null> {
+async function probeSeries(uuid: string): Promise<SeriesInfo | null> {
   try {
     const result = await getSeriesData({
       path: { series_uuid: uuid },
@@ -89,7 +90,7 @@ export function useUrlState() {
   useEffect(() => {
     if (!settled) return;
     const series = probesRef.current.flatMap((probe) => (probe.data ? [probe.data] : []));
-    if (series.length > 0) useSelectionStore.setState({ selectedSeries: series });
+    if (series.length > 0) useSelectionStore.setState({ selectedSeries: withSlots(series) });
 
     const write = (state: ReturnType<typeof useSelectionStore.getState>) =>
       setParamsRef.current(

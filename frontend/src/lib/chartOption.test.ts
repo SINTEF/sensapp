@@ -3,8 +3,8 @@ import { buildChartOption } from './chartOption';
 import type { ChartSeries } from './chartOption';
 
 const RANGE = { start: '2026-10-04T00:00:00.000Z', end: '2026-10-04T01:00:00.000Z' };
-const temperature: ChartSeries = { name: 'temperature', points: [[1, 20], [2, 21]], boolean: false, color: '#111' };
-const door: ChartSeries = { name: 'door', points: [[1, 0], [2, 1]], boolean: true, color: '#222' };
+const temperature: ChartSeries = { id: 'uuid-t', name: 'temperature', points: [[1, 20], [2, 21]], boolean: false, color: '#111' };
+const door: ChartSeries = { id: 'uuid-d', name: 'door', points: [[1, 0], [2, 1]], boolean: true, color: '#222' };
 
 type Option = { series: Array<Record<string, unknown>>; yAxis: Array<Record<string, unknown>>; grid: { right: number } };
 const build = (series: ChartSeries[], style: Parameters<typeof buildChartOption>[1] = 'line', log = false) =>
@@ -17,6 +17,22 @@ describe('buildChartOption', () => {
     expect(buildChartOption([temperature], 'line', false, RANGE)).toMatchObject({
       xAxis: { min: Date.parse(RANGE.start), max: Date.parse(RANGE.end) },
     });
+  });
+
+  it('has no legend (the list of series has the colors), and tells its series by id', () => {
+    const option = build([temperature, door]) as unknown as { legend?: unknown };
+    expect(option.legend).toBeUndefined();
+    expect(build([temperature, door]).series.map((s) => s.id)).toEqual(['uuid-t', 'uuid-d']);
+  });
+
+  it('leaves the zoom to the user: it has no start and no end to undo it', () => {
+    const { dataZoom } = buildChartOption([temperature], 'line', false, RANGE) as unknown as {
+      dataZoom: Array<Record<string, unknown>>;
+    };
+    for (const zoom of dataZoom) {
+      expect(zoom).not.toHaveProperty('start');
+      expect(zoom).not.toHaveProperty('end');
+    }
   });
 
   it('knows its styles', () => {

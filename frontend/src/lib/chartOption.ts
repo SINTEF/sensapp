@@ -4,6 +4,8 @@ export type ChartStyle = 'line' | 'step' | 'area' | 'stacked' | 'bars';
 export const CHART_STYLES: ChartStyle[] = ['line', 'step', 'area', 'stacked', 'bars'];
 
 export interface ChartSeries {
+  /** What echarts tells the series by when the option changes: a series that stays is not redrawn */
+  id: string;
   name: string;
   points: Array<[number, number]>;
   /** Drawn as a 0/1 step line on an axis of its own, whatever the style */
@@ -23,6 +25,7 @@ export function buildChartOption(
   const lines = series.map((s) => {
     if (s.boolean) {
       return {
+        id: s.id,
         name: s.name,
         type: 'line' as const,
         step: 'end' as const,
@@ -34,6 +37,7 @@ export function buildChartOption(
       };
     }
     return {
+      id: s.id,
       name: s.name,
       type: style === 'bars' ? ('bar' as const) : ('line' as const),
       data: s.points,
@@ -51,8 +55,7 @@ export function buildChartOption(
 
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-    legend: { data: series.map((s) => s.name), type: 'scroll', bottom: 0 },
-    grid: { top: 40, right: hasBoolean ? 60 : 40, bottom: 60, left: 60 },
+    grid: { top: 40, right: hasBoolean ? 60 : 40, bottom: 50, left: 60 },
     xAxis: {
       type: 'time',
       min: new Date(range.start).getTime(),
@@ -75,8 +78,9 @@ export function buildChartOption(
         : []),
     ],
     dataZoom: [
-      { type: 'inside', start: 0, end: 100 },
-      { type: 'slider', start: 0, end: 100, bottom: 30, height: 20 },
+      // No start and end: the zoom of the user is not undone when the data changes
+      { type: 'inside' },
+      { type: 'slider', bottom: 8, height: 20 },
     ],
     toolbox: { feature: { saveAsImage: {}, dataZoom: {}, restore: {} } },
     series: lines,

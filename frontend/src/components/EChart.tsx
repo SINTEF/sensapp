@@ -4,7 +4,6 @@ import { BarChart, LineChart } from 'echarts/charts';
 import {
   DataZoomComponent,
   GridComponent,
-  LegendComponent,
   ToolboxComponent,
   TooltipComponent,
 } from 'echarts/components';
@@ -17,14 +16,23 @@ echarts.use([
   LineChart,
   DataZoomComponent,
   GridComponent,
-  LegendComponent,
   ToolboxComponent,
   TooltipComponent,
   CanvasRenderer,
 ]);
 
-/** Minimal echarts wrapper: one instance per mount, resized with its container. */
-export default function EChart({ option }: { option: echarts.EChartsCoreOption }) {
+/**
+ * Minimal echarts wrapper: one instance per mount, resized with its container. A new option is merged
+ * into what is drawn, so that a series that is added or removed comes and goes with an animation
+ * while the others stay (and the zoom with them). `resetZoomKey` is what the zoom belongs to.
+ */
+export default function EChart({
+  option,
+  resetZoomKey,
+}: {
+  option: echarts.EChartsCoreOption;
+  resetZoomKey?: string;
+}) {
   const container = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
   const dark = usePrefersDark();
@@ -46,8 +54,16 @@ export default function EChart({ option }: { option: echarts.EChartsCoreOption }
 
   useEffect(() => {
     // The theme brings a background of its own: the card has one already
-    chart.current?.setOption({ backgroundColor: 'transparent', ...option }, true);
+    chart.current?.setOption(
+      { backgroundColor: 'transparent', ...option },
+      // What a merge would keep of a series or an axis that is gone
+      { replaceMerge: ['series', 'yAxis'] },
+    );
   }, [option, dark]);
+
+  useEffect(() => {
+    chart.current?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
+  }, [resetZoomKey]);
 
   return <div ref={container} className="h-full w-full" />;
 }
