@@ -16,7 +16,7 @@ Two selectors next to the time range control what the server computes, as in the
 - **Step**: `Auto`, `Raw`, or a fixed duration (`5s` … `1d`). `Auto` reads ranges under about 2.8 hours as they are, and above that cuts the range in at most 2 000 buckets of a round duration, because the server refuses more than 100 000 raw samples of a series ([HTTP_LIMITS.md](HTTP_LIMITS.md)). `Raw` on a range that is too wide gets that refusal.
 - **Aggregation**: `avg`, `min`, `max`, `sum`, `count`, `first`, `last`, applied to the samples of each step. Disabled on `Raw`.
 
-Series are drawn as a `line`, `step`, `area`, `stacked` or `bars` chart, on a linear or `log` scale. Booleans are drawn as a 0/1 step line on an axis of their own, whatever the style, and always read as they are (the server cannot aggregate them). Strings and locations are listed but not drawn.
+Series are drawn as a `line`, `step`, `area`, `stacked` or `bars` chart, on a linear or `log` scale. The chart has no legend of its own: the list of series shows the color of each selected series, which it keeps for as long as it is selected. A series that is selected or unselected comes and goes with an animation, the others and the zoom stay. Booleans are drawn as a 0/1 step line on an axis of their own, whatever the style, and always read as they are (the server cannot aggregate them). Strings and locations are listed but not drawn.
 
 ## Address
 
@@ -26,12 +26,16 @@ The explorer is in the address, so a link shares a view and a reload keeps it: `
 | --- | --- | --- |
 | `metric` | the selected metric | none |
 | `series` | a selected series, repeated | none |
-| `range` | a preset (`15m`, `1h`, `6h`, `24h`, `7d`, `30d`), ending when the page opens | `1h` |
+| `range` | a preset (`15m`, `1h`, `6h`, `24h`, `7d`, `30d`), ending now | `1h` |
 | `from`, `to` | an absolute range (ISO 8601), once dates were typed | a preset is used |
 | `step`, `agg` | the step (`raw` or a duration) and the aggregation | `auto`, `avg` |
 | `style`, `log` | the chart style, `log=1` for the log scale | `line`, linear |
 
 The address follows the explorer without adding history entries. What is wrong in an address is ignored; a series that no longer exists is dropped. A series is named by its uuid only: the UI asks the server for the first sample of each one (its name, labels and type), and on a server with authentication a link asks for a token like any other page.
+
+A preset range ends now: it moves on every minute while the tab is on screen, and when the tab comes back. Dates that were typed do not move.
+
+The list of series has a column for each label dimension, and the uuid in small. The Type column is there only when the series of a name are not all of one type: the server groups the metrics by name and type, so a name that exists as a float and as a string is two rows of the metrics list and one list of series. Choosing a metric with at most 8 series (the size of the palette) selects them all, the ones that can be drawn (numbers and booleans); with more, the choice is the user's.
 
 The list of series is paged by the server (256 per page, cursor based): Previous and Next appear when there is more than one page, and the selection is kept from page to page. The theme follows the OS (light or dark), the chart included.
 

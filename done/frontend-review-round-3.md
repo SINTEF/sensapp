@@ -25,9 +25,27 @@ Branch: `frontend-good-enough`. Comments from the user after using the UI.
 
 ## Steps
 
-1. [ ] Small cleanups: header count, health badge, metric name width, metric row keys
-2. [ ] Live range
-3. [ ] Series list: dimension columns, small uuid, type when mixed, colour swatch, auto-select
-4. [ ] Chart: no legend, animated toggles, stable colours
-5. [ ] Logo, favicon, theme, palette
-6. [ ] Docs (`docs/FRONTEND.md`), live check in a browser, move to `done/`
+1. [x] Small cleanups: header count, health badge, metric name width, metric row keys
+2. [x] Live range (`hooks/useLiveRange.ts`). `keepPreviousData` does not work with `useQueries` (a new key is a
+   new observer), so the chart keeps the last data of each series itself.
+3. [x] Series list: dimension columns, small uuid, type when mixed, colour swatch, auto-select
+4. [x] Chart: no legend, animated toggles, stable colours (`lib/palette.ts`)
+5. [x] Logo, favicon, theme, palette
+6. [x] Docs (`docs/FRONTEND.md`), live check in a browser
+
+## Results
+
+Verified in a browser against a live SensApp (SQLite, Influx-written data, dark and light, 1280 and 375 px):
+auto-select of a 3-series metric with swatches matching the chart, no auto-select of a 12-series one,
+unselecting a series leaves the colours of the others and reselecting gives it its colour back, a zoom
+survives toggling, the range moved by itself after a minute, the metrics table does not scroll sideways.
+`npm test` (130), lint, typecheck and build pass.
+
+Found on the way: the server sends `Float` and `String`, so the colours of the metric type badges, chosen on
+`float` and `string`, never applied. Fixed. Not looked at: the animation itself (only its result), the dark
+logo in the pane at 1280 px.
+
+Left (in `ideas/`): `frontend-constant-label-columns.md` (the Influx importer adds `influxdb_org` and
+`influxdb_bucket` to every series, two useless columns), and more than 8 series at once (`frontend-next-steps.md`).
+The original logo files in `frontend/public/` (`sensapp_logo.png`, `_white`, `_small`, `_small_white`) are not
+committed: the page uses the `-fs8` ones.
