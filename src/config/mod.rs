@@ -36,6 +36,13 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS", default = 3600)]
     pub http_maintenance_timeout_seconds: u64,
 
+    /// Most samples a read may return: a series read (`GET /series/{uuid}`), the series of a
+    /// selector in total (simple PromQL, Prometheus remote read), and the buckets of a
+    /// cross-series aggregation. Over it the request is rejected with a 400 instead of being
+    /// truncated. Raise it on a machine with memory to spare, lower it to try the limit.
+    #[config(env = "SENSAPP_HTTP_MAX_QUERY_SAMPLES", default = 100000)]
+    pub http_max_query_samples: usize,
+
     /// Maximum number of write requests handled at the same time (`/publish`, InfluxDB and
     /// Prometheus writes, admin). Extra writes get `503` with `Retry-After`. `0` disables the limit.
     #[config(env = "SENSAPP_HTTP_MAX_CONCURRENT_WRITES", default = 16)]
@@ -200,6 +207,22 @@ mod tests {
         temp_env::with_var("SENSAPP_PORT", Some("8080"), || {
             let config = SensAppConfig::load().unwrap();
             assert_eq!(config.port, 8080);
+        });
+    }
+
+    #[test]
+    fn test_http_max_query_samples() {
+        temp_env::with_var("SENSAPP_HTTP_MAX_QUERY_SAMPLES", None::<&str>, || {
+            assert_eq!(
+                SensAppConfig::load().unwrap().http_max_query_samples,
+                crate::http::limits::DEFAULT_MAX_QUERY_SAMPLES
+            );
+        });
+        temp_env::with_var("SENSAPP_HTTP_MAX_QUERY_SAMPLES", Some("2500000"), || {
+            assert_eq!(
+                SensAppConfig::load().unwrap().http_max_query_samples,
+                2_500_000
+            );
         });
     }
 

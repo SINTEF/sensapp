@@ -11,7 +11,7 @@ SensApp bounds HTTP work to keep one request from using excessive memory.
 - Selector queries and Prometheus remote read allow at most 256 series and 100,000 samples total. A query over a limit returns a client error instead of a truncated result. Cross-series aggregations (`avg by (room) (temperature[24h])`) are computed by the database, which returns buckets and not raw samples, so they have their own limits: at most 10,000 series, and 100,000 buckets in total. Without a `step` a series makes one bucket, and a larger `step` makes fewer buckets, so it raises what a query can cover: 300 series over 24 hours at one sample a minute are 432,000 samples, and 300 buckets with a `step` of one day.
 - `/prometheus/metrics?include_latest_samples=true` allows at most 10,000 matching series. Filter by `metric` or `selector` when needed.
 
-These limits are fixed for now. Operators can change the request body size with `SENSAPP_HTTP_BODY_LIMIT`; query limits are intentionally simple and shared across deployments.
+The 100,000 samples are the default of `SENSAPP_HTTP_MAX_QUERY_SAMPLES`, which applies to every limit above that counts samples or buckets: raise it on a machine with memory to spare, lower it to try the limit. The series limits (256 and 10,000) and the other query limits are fixed. Operators can also change the request body size with `SENSAPP_HTTP_BODY_LIMIT`.
 
 ## Timeouts
 

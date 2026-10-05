@@ -5,25 +5,25 @@ use std::sync::Arc;
 
 use super::app_error::AppError;
 
-pub const MAX_DIRECT_SAMPLES: usize = 100_000;
+/// Default of `SENSAPP_HTTP_MAX_QUERY_SAMPLES`: the most samples a read may return, for a series,
+/// for the series of a selector in total, and for the buckets of a cross-series aggregation.
+pub const DEFAULT_MAX_QUERY_SAMPLES: usize = 100_000;
 pub const MAX_SELECTOR_SERIES: usize = 256;
-pub const MAX_SELECTOR_SAMPLES_PER_SERIES: usize = 100_000;
-pub const MAX_SELECTOR_SAMPLES_TOTAL: usize = 100_000;
 /// Series a cross-series aggregation may combine. The raw samples are aggregated by the database,
-/// so only buckets come back (at most `MAX_SELECTOR_SAMPLES_TOTAL` of them), and the number of
+/// so only buckets come back (at most the sample limit of them), and the number of
 /// series is bounded by the labels and sensors held in memory, not by the volume of samples.
 pub const MAX_AGGREGATED_SELECTOR_SERIES: usize = 10_000;
 
-pub fn validate_direct_sample_count(count: usize) -> Result<(), AppError> {
-    if count > MAX_DIRECT_SAMPLES {
+pub fn validate_direct_sample_count(count: usize, max_samples: usize) -> Result<(), AppError> {
+    if count > max_samples {
         return Err(AppError::bad_request(anyhow::anyhow!(
-            "Query exceeds {MAX_DIRECT_SAMPLES} samples; narrow the time range or use aggregation"
+            "Query exceeds {max_samples} samples; narrow the time range or use aggregation"
         )));
     }
     Ok(())
 }
 
-pub fn validate_selector_result(result: &[SensorData]) -> Result<(), AppError> {
+pub fn validate_selector_result(result: &[SensorData], max_samples: usize) -> Result<(), AppError> {
     if result.len() > MAX_SELECTOR_SERIES {
         return Err(AppError::bad_request(anyhow::anyhow!(
             "Query exceeds {MAX_SELECTOR_SERIES} series; narrow the selector"
@@ -31,15 +31,15 @@ pub fn validate_selector_result(result: &[SensorData]) -> Result<(), AppError> {
     }
     let mut total = 0usize;
     for data in result {
-        if data.samples.len() > MAX_SELECTOR_SAMPLES_PER_SERIES {
+        if data.samples.len() > max_samples {
             return Err(AppError::bad_request(anyhow::anyhow!(
-                "Query exceeds {MAX_SELECTOR_SAMPLES_PER_SERIES} samples per series; narrow the time range or use aggregation"
+                "Query exceeds {max_samples} samples per series; narrow the time range or use aggregation"
             )));
         }
         total = total.saturating_add(data.samples.len());
-        if total > MAX_SELECTOR_SAMPLES_TOTAL {
+        if total > max_samples {
             return Err(AppError::bad_request(anyhow::anyhow!(
-                "Query exceeds {MAX_SELECTOR_SAMPLES_TOTAL} samples in total; narrow the selector or time range"
+                "Query exceeds {max_samples} samples in total; narrow the selector or time range"
             )));
         }
     }
@@ -53,6 +53,7 @@ pub async fn query_selector_bounded(
     start_time: Option<SensAppDateTime>,
     end_time: Option<SensAppDateTime>,
     numeric_only: bool,
+    max_samples: usize,
 ) -> Result<Vec<SensorData>, AppError> {
     let result = storage
         .query_selector(
@@ -61,7 +62,7 @@ pub async fn query_selector_bounded(
             end_time,
             numeric_only,
             MAX_SELECTOR_SERIES,
-            MAX_SELECTOR_SAMPLES_TOTAL,
+            max_samples,
         )
         .await?;
     let result = match result {
@@ -73,22 +74,23 @@ pub async fn query_selector_bounded(
         }
         Err(SelectorLimitExceeded::Samples) => {
             return Err(AppError::bad_request(anyhow::anyhow!(
-                "Query exceeds {MAX_SELECTOR_SAMPLES_TOTAL} samples in total; narrow the selector or time range"
+                "Query exceeds {max_samples} samples in total; narrow the selector or time range"
             )));
         }
     };
-    validate_selector_result(&result)?;
+    validate_selector_result(&result, max_samples)?;
     Ok(result)
 }
 
 /// Aggregate the numeric series of a selector across series, within
-/// `MAX_AGGREGATED_SELECTOR_SERIES` series and `MAX_SELECTOR_SAMPLES_TOTAL` buckets.
+/// `MAX_AGGREGATED_SELECTOR_SERIES` series and `max_buckets` buckets.
 pub async fn query_cross_series_bounded(
     storage: &Arc<dyn StorageInstance>,
     matchers: &[LabelMatcher],
     start_time: Option<SensAppDateTime>,
     end_time: Option<SensAppDateTime>,
     query: &CrossSeriesQuery,
+    max_buckets: usize,
 ) -> Result<(Vec<SensorData>, CrossSeriesStats), AppError> {
     query.validate().map_err(AppError::bad_request)?;
     let read = read_cross_series(
@@ -98,7 +100,7 @@ pub async fn query_cross_series_bounded(
         end_time,
         query,
         MAX_AGGREGATED_SELECTOR_SERIES,
-        MAX_SELECTOR_SAMPLES_TOTAL,
+        max_buckets,
     )
     .await?;
     match read {
@@ -107,7 +109,7 @@ pub async fn query_cross_series_bounded(
             "Query exceeds {MAX_AGGREGATED_SELECTOR_SERIES} series; narrow the selector"
         ))),
         Err(SelectorLimitExceeded::Samples) => Err(AppError::bad_request(anyhow::anyhow!(
-            "Query exceeds {MAX_SELECTOR_SAMPLES_TOTAL} buckets in total; use a larger step or narrow the selector or time range"
+            "Query exceeds {max_buckets} buckets in total; use a larger step or narrow the selector or time range"
         ))),
     }
 }
@@ -120,8 +122,12 @@ mod tests {
 
     #[test]
     fn direct_sample_limit_has_an_explicit_boundary() {
-        assert!(validate_direct_sample_count(MAX_DIRECT_SAMPLES).is_ok());
-        assert!(validate_direct_sample_count(MAX_DIRECT_SAMPLES + 1).is_err());
+        let max = DEFAULT_MAX_QUERY_SAMPLES;
+        assert!(validate_direct_sample_count(max, max).is_ok());
+        assert!(validate_direct_sample_count(max + 1, max).is_err());
+        // A lowered limit moves the boundary
+        assert!(validate_direct_sample_count(50, 50).is_ok());
+        assert!(validate_direct_sample_count(51, 50).is_err());
     }
 
     #[test]
@@ -140,6 +146,6 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        assert!(validate_selector_result(&series).is_err());
+        assert!(validate_selector_result(&series, DEFAULT_MAX_QUERY_SAMPLES).is_err());
     }
 }

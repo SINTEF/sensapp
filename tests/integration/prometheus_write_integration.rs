@@ -33,6 +33,7 @@ fn create_test_app(storage: Arc<dyn sensapp::storage::StorageInstance>) -> Route
         storage,
         metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
+        max_query_samples: sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
         auth: None,
     };
 

@@ -47,7 +47,10 @@ fn aggregation_from_read_hints(hints: &ReadHints) -> Option<Aggregation> {
 /// evaluations. Prometheus starts the window at the end of the first range, so buckets of one
 /// step that start there fit the windows of the evaluations when the range is a whole number of
 /// steps. A shorter range would be answered with a bucket wider than the window it asks for.
-fn query_options_from_read_hints(query: &Query) -> Option<SensorDataQueryOptions> {
+fn query_options_from_read_hints(
+    query: &Query,
+    max_samples: usize,
+) -> Option<SensorDataQueryOptions> {
     let hints = query.hints.as_ref()?;
     let aggregation = aggregation_from_read_hints(hints)?;
 
@@ -62,7 +65,7 @@ fn query_options_from_read_hints(query: &Query) -> Option<SensorDataQueryOptions
         end_time: Some(SensAppDateTime::from_unix_milliseconds_i64(
             query.end_timestamp_ms,
         )),
-        limit: Some(crate::http::limits::MAX_SELECTOR_SAMPLES_PER_SERIES + 1),
+        limit: Some(max_samples.saturating_add(1)),
         step_ms: Some(hints.step_ms),
         aggregation: Some(aggregation),
         simplify: None,
@@ -77,7 +80,7 @@ async fn query_sensor_data_for_prometheus(
     let start_time = SensAppDateTime::from_unix_milliseconds_i64(query.start_timestamp_ms);
     let end_time = SensAppDateTime::from_unix_milliseconds_i64(query.end_timestamp_ms);
 
-    if let Some(options) = query_options_from_read_hints(query) {
+    if let Some(options) = query_options_from_read_hints(query, state.max_query_samples) {
         if let Some(hints) = &query.hints {
             info!(
                 "Prometheus remote read: applying hints func='{}' step={}ms",
@@ -91,7 +94,7 @@ async fn query_sensor_data_for_prometheus(
                 &matchers,
                 &options,
                 crate::http::limits::MAX_SELECTOR_SERIES,
-                crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL,
+                state.max_query_samples,
             )
             .await?;
         let aggregated = match aggregated {
@@ -105,12 +108,12 @@ async fn query_sensor_data_for_prometheus(
             Err(SelectorLimitExceeded::Samples) => {
                 return Err(AppError::bad_request(anyhow::anyhow!(
                     "Remote read exceeds {} samples in total",
-                    crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL
+                    state.max_query_samples
                 )));
             }
         };
 
-        crate::http::limits::validate_selector_result(&aggregated)?;
+        crate::http::limits::validate_selector_result(&aggregated, state.max_query_samples)?;
         return Ok(aggregated);
     }
 
@@ -120,6 +123,7 @@ async fn query_sensor_data_for_prometheus(
         Some(start_time),
         Some(end_time),
         true,
+        state.max_query_samples,
     )
     .await
 }
@@ -316,10 +320,10 @@ async fn handle_samples_response(
             .iter()
             .map(|series| series.samples.len())
             .sum::<usize>();
-        if sample_count > crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL {
+        if sample_count > state.max_query_samples {
             return Err(AppError::bad_request(anyhow::anyhow!(
                 "Remote read exceeds {} samples in total",
-                crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL
+                state.max_query_samples
             )));
         }
 
@@ -384,12 +388,10 @@ async fn handle_streamed_response(
             .iter()
             .map(|series| series.samples.len())
             .sum::<usize>();
-        if sample_count.saturating_add(query_samples)
-            > crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL
-        {
+        if sample_count.saturating_add(query_samples) > state.max_query_samples {
             return Err(AppError::bad_request(anyhow::anyhow!(
                 "Remote read exceeds {} samples in total",
-                crate::http::limits::MAX_SELECTOR_SAMPLES_TOTAL
+                state.max_query_samples
             )));
         }
 
@@ -673,37 +675,31 @@ mod tests {
         }
     }
 
+    fn options_of(query: &Query) -> Option<SensorDataQueryOptions> {
+        query_options_from_read_hints(query, 100_000)
+    }
+
     #[test]
     fn test_query_options_from_read_hints_follow_the_range_and_the_step() {
-        let options =
-            query_options_from_read_hints(&query_with(hints("max_over_time", 2_000, 2_000)))
-                .unwrap();
+        let options = options_of(&query_with(hints("max_over_time", 2_000, 2_000))).unwrap();
         assert_eq!(options.step_ms, Some(2_000));
         assert_eq!(options.aggregation, Some(Aggregation::Max));
 
         // Several steps in a range keep the buckets inside the windows.
-        assert!(
-            query_options_from_read_hints(&query_with(hints("max_over_time", 2_000, 6_000)))
-                .is_some()
-        );
+        assert!(options_of(&query_with(hints("max_over_time", 2_000, 6_000))).is_some());
 
         // A range shorter than the step, a range that is not a whole number of steps, an instant
         // selector (no range) or no step cannot be answered with buckets.
         for (step_ms, range_ms) in [(2_000, 1_000), (2_000, 3_000), (2_000, 0), (0, 2_000)] {
             assert!(
-                query_options_from_read_hints(&query_with(hints(
-                    "max_over_time",
-                    step_ms,
-                    range_ms
-                )))
-                .is_none(),
+                options_of(&query_with(hints("max_over_time", step_ms, range_ms))).is_none(),
                 "step {step_ms} range {range_ms}"
             );
         }
 
-        assert!(query_options_from_read_hints(&query_with(hints("rate", 2_000, 2_000))).is_none());
+        assert!(options_of(&query_with(hints("rate", 2_000, 2_000))).is_none());
         assert!(
-            query_options_from_read_hints(&Query {
+            options_of(&Query {
                 hints: None,
                 ..query_with(hints("max_over_time", 2_000, 2_000))
             })

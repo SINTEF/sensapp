@@ -36,6 +36,7 @@ The Helm chart sets variables through `env:` in `values.yaml` (see the [chart RE
 | `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS` | `120` | Time a request may take before it is answered with `504 Gateway Timeout`. Applies to everything except the writes and the vacuum. |
 | `SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS` | `300` | Same as above for the writes (`/publish`, InfluxDB write, Prometheus remote write). Their work grows with the body, see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts). |
 | `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS` | `3600` | Same as above for `POST /api/v1/admin/vacuum` only, which scans every value table and is expected to be slow on a large database. |
+| `SENSAPP_HTTP_MAX_QUERY_SAMPLES` | `100000` | Most samples a read may return: one series (`GET /series/{uuid}`), the series of a selector in total (simple PromQL, Prometheus remote read) and the buckets of a cross-series aggregation. A read over it gets a `400` instead of a truncated answer. The samples are held in memory while the response is built: raise it on a machine with memory to spare, lower it to try the limit. See [HTTP limits](HTTP_LIMITS.md). |
 | `SENSAPP_HTTP_MAX_CONCURRENT_WRITES` | `16` | Write requests (`/publish`, InfluxDB write, Prometheus remote write, admin) handled at the same time. See [Backpressure](#backpressure). `0` disables the limit. |
 
 Details on what the limits protect against are in [HTTP_LIMITS.md](HTTP_LIMITS.md).

@@ -929,11 +929,11 @@ pub async fn get_series_data(
 
         if query
             .limit
-            .is_some_and(|limit| limit > crate::http::limits::MAX_DIRECT_SAMPLES)
+            .is_some_and(|limit| limit > state.max_query_samples)
         {
             return Err(AppError::bad_request(anyhow::anyhow!(
                 "limit cannot exceed {}",
-                crate::http::limits::MAX_DIRECT_SAMPLES
+                state.max_query_samples
             )));
         }
 
@@ -943,7 +943,7 @@ pub async fn get_series_data(
             limit: Some(
                 query
                     .limit
-                    .unwrap_or(crate::http::limits::MAX_DIRECT_SAMPLES + 1),
+                    .unwrap_or(state.max_query_samples.saturating_add(1)),
             ),
             step_ms,
             aggregation,
@@ -974,7 +974,10 @@ pub async fn get_series_data(
             }
         };
 
-        crate::http::limits::validate_direct_sample_count(series_data.samples.len())?;
+        crate::http::limits::validate_direct_sample_count(
+            series_data.samples.len(),
+            state.max_query_samples,
+        )?;
 
         let series_data = match query_options.simplify {
             Some(simplify_options) => {

@@ -105,11 +105,20 @@ async fn publish_test_sensors(
 
 /// Create a test app with the Prometheus remote read endpoint
 fn create_test_app(storage: Arc<dyn sensapp::storage::StorageInstance>) -> Router {
+    create_test_app_with_limit(storage, sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES)
+}
+
+/// The same, with `SENSAPP_HTTP_MAX_QUERY_SAMPLES` set to `max_query_samples`
+fn create_test_app_with_limit(
+    storage: Arc<dyn sensapp::storage::StorageInstance>,
+    max_query_samples: usize,
+) -> Router {
     let state = HttpServerState {
         name: Arc::new("SensApp Test".to_string()),
         storage,
         metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
+        max_query_samples,
         auth: None,
     };
 
@@ -1012,6 +1021,86 @@ async fn test_remote_read_default_response_type() -> Result<()> {
     let response = parse_remote_read_response(&response_body)?;
     assert_eq!(response.results.len(), 1);
     assert_eq!(response.results[0].timeseries.len(), 1);
+
+    Ok(())
+}
+
+/// The sample limit of a remote read is `SENSAPP_HTTP_MAX_QUERY_SAMPLES`: a read of exactly the
+/// limit works, one sample more is a 400 for the raw samples (and for a response of either type),
+/// and the same series read with hints that give one bucket per step fits under the same limit.
+#[tokio::test]
+#[serial]
+async fn test_remote_read_sample_limit_is_configurable() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let limit = 50usize;
+    let sensor = create_sensor_with_labels("limited_metric", SensorType::Float, vec![]);
+    let sample_count = limit + 1;
+    let times_ms: Vec<i64> = (0..sample_count)
+        .map(|index| BASE_TS_MS + index as i64 * 1000)
+        .collect();
+    let values: Vec<f64> = (0..sample_count).map(|index| index as f64).collect();
+    publish_test_sensors(
+        &storage,
+        vec![(sensor, create_float_samples_at_times(&times_ms, &values))],
+    )
+    .await?;
+
+    let query = |end_offset_ms: i64, hints: Option<ReadHints>| Query {
+        start_timestamp_ms: BASE_TS_MS,
+        end_timestamp_ms: BASE_TS_MS + end_offset_ms,
+        matchers: vec![PromLabelMatcher {
+            r#type: label_matcher::Type::Eq as i32,
+            name: "__name__".to_string(),
+            value: "limited_metric".to_string(),
+        }],
+        hints,
+    };
+    let app = create_test_app_with_limit(storage, limit);
+
+    // Exactly the limit: the samples at +0 s .. +49 s
+    for response_type in [
+        read_request::ResponseType::Samples,
+        read_request::ResponseType::StreamedXorChunks,
+    ] {
+        let body =
+            build_remote_read_request(vec![query(49_000, None)], vec![response_type as i32])?;
+        let (status, _) = send_remote_read_request(&app, body).await?;
+        assert_eq!(status, StatusCode::OK, "{response_type:?} at the limit");
+
+        // One sample more
+        let body =
+            build_remote_read_request(vec![query(50_000, None)], vec![response_type as i32])?;
+        let (status, body) = send_remote_read_request(&app, body).await?;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{response_type:?} over the limit"
+        );
+        let body = String::from_utf8_lossy(&body);
+        assert!(
+            body.contains("Query exceeds 50 samples in total"),
+            "unexpected body: {body}"
+        );
+    }
+
+    // Buckets of 10 s: 6 buckets for the 51 samples, which fit under the same limit
+    let hints = ReadHints {
+        step_ms: 10_000,
+        func: "max_over_time".to_string(),
+        start_ms: BASE_TS_MS,
+        end_ms: BASE_TS_MS + 50_000,
+        grouping: vec![],
+        by: false,
+        range_ms: 10_000,
+    };
+    let body = build_remote_read_request(vec![query(50_000, Some(hints))], vec![])?;
+    let (status, response_body) = send_remote_read_request(&app, body).await?;
+    assert_eq!(status, StatusCode::OK);
+    let response = parse_remote_read_response(&response_body)?;
+    assert_eq!(response.results[0].timeseries[0].samples.len(), 6);
 
     Ok(())
 }

@@ -27,11 +27,22 @@ impl TestApp {
     /// Create a new test app with the provided storage
     #[allow(dead_code)] // Test helper method
     pub async fn new(storage: Arc<dyn StorageInstance>) -> Self {
+        Self::with_max_query_samples(storage, sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES)
+            .await
+    }
+
+    /// The same, with `SENSAPP_HTTP_MAX_QUERY_SAMPLES` set to `max_query_samples`
+    #[allow(dead_code)] // Test helper method
+    pub async fn with_max_query_samples(
+        storage: Arc<dyn StorageInstance>,
+        max_query_samples: usize,
+    ) -> Self {
         let state = HttpServerState {
             name: Arc::new("SensApp Test".to_string()),
             storage,
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
+            max_query_samples,
             auth: None,
         };
 

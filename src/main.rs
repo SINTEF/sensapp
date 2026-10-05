@@ -110,6 +110,7 @@ async fn async_main() -> Result<()> {
             storage,
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: config.influxdb_with_numeric,
+            max_query_samples: config.http_max_query_samples,
             auth,
         },
         address,
