@@ -199,6 +199,9 @@ html, body, #root {
   line-height: 1.65;
   font-variant-ligatures: none;
   tab-size: 4;
+  /* Long lines wrap (no sideways scroll); a token with no space, such as a uuid or an address, breaks where it must */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .code-block .hljs-comment { color: #8a98aa; font-style: italic; }
 .code-block .hljs-keyword,
