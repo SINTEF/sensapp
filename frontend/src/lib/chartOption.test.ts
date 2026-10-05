@@ -25,14 +25,13 @@ describe('buildChartOption', () => {
     expect(build([temperature, door]).series.map((s) => s.id)).toEqual(['uuid-t', 'uuid-d']);
   });
 
-  it('leaves the zoom to the user: it has no start and no end to undo it', () => {
-    const { dataZoom } = buildChartOption([temperature], 'line', false, RANGE) as unknown as {
-      dataZoom: Array<Record<string, unknown>>;
+  it('has no zoom of its own: the window is the explorer\'s, a drag on the chart asks for another', () => {
+    const option = buildChartOption([temperature], 'line', false, RANGE) as unknown as {
+      dataZoom?: unknown;
+      brush: Record<string, unknown>;
     };
-    for (const zoom of dataZoom) {
-      expect(zoom).not.toHaveProperty('start');
-      expect(zoom).not.toHaveProperty('end');
-    }
+    expect(option.dataZoom).toBeUndefined();
+    expect(option.brush).toMatchObject({ xAxisIndex: 0, brushType: 'lineX', brushMode: 'single' });
   });
 
   it('knows its styles', () => {

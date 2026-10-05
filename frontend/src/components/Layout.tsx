@@ -13,7 +13,7 @@ export function Layout() {
   return (
     <div className="min-h-screen lg:h-screen flex flex-col bg-base-200 lg:overflow-hidden">
       <header className="bg-base-100 border-b border-base-300 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6">
           <div className="flex items-center justify-between gap-3 h-14">
             <div className="flex items-center gap-3">
               <Link to="/" className="flex items-center hover:opacity-80 transition-opacity">

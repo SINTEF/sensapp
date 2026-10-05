@@ -13,7 +13,7 @@ export function useLiveRange() {
   useEffect(() => {
     if (!relativeRange) return;
     const refresh = () => {
-      if (!document.hidden) useSelectionStore.getState().setRelativeRange(relativeRange);
+      if (!document.hidden) useSelectionStore.getState().refreshRelativeRange();
     };
     const timer = setInterval(refresh, REFRESH_MS);
     document.addEventListener('visibilitychange', refresh);

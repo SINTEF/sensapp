@@ -4,8 +4,20 @@ import { PRESETS } from '../lib/timeRange';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
 export function TimeRangeSelector() {
-  const { timeRange, relativeRange, setTimeRange, setRelativeRange, step, setStep, aggregation, setAggregation } =
-    useSelectionStore();
+  const {
+    timeRange,
+    relativeRange,
+    rangeHistory,
+    setTimeRange,
+    setRelativeRange,
+    panRange,
+    zoomOutRange,
+    undoRange,
+    step,
+    setStep,
+    aggregation,
+    setAggregation,
+  } = useSelectionStore();
 
   function handleStartChange(value: string) {
     if (value) {
@@ -27,7 +39,46 @@ export function TimeRangeSelector() {
   }
 
   return (
-    <div className="flex flex-wrap gap-2 items-center">
+    <div className="flex flex-wrap gap-x-3 gap-y-2 items-center">
+      {/* Where the window is: back to the one before, earlier, wider, later */}
+      <div className="join">
+        <button
+          className="join-item btn btn-xs btn-outline"
+          aria-label="Back to the previous window"
+          title="Back to the previous window"
+          disabled={rangeHistory.length === 0}
+          onClick={undoRange}
+        >
+          ↶
+        </button>
+        <button
+          className="join-item btn btn-xs btn-outline"
+          aria-label="Earlier"
+          title="Half a window earlier"
+          onClick={() => panRange(-1)}
+        >
+          ‹
+        </button>
+        <button
+          className="join-item btn btn-xs btn-outline"
+          aria-label="Zoom out"
+          title="Twice the window"
+          onClick={zoomOutRange}
+        >
+          −
+        </button>
+        <button
+          className="join-item btn btn-xs btn-outline"
+          aria-label="Later"
+          title="Half a window later"
+          // A live window is at now already
+          disabled={relativeRange !== null}
+          onClick={() => panRange(1)}
+        >
+          ›
+        </button>
+      </div>
+
       <div className="join">
         {PRESETS.map((preset) => (
           <button
@@ -58,7 +109,7 @@ export function TimeRangeSelector() {
         />
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 sm:ml-auto">
         <select
           className="select select-bordered select-xs text-xs h-7"
           aria-label="Step"

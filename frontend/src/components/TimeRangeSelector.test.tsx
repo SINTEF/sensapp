@@ -91,4 +91,45 @@ describe('TimeRangeSelector', () => {
     expect(useSelectionStore.getState().relativeRange).toBeNull();
     expect(screen.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'false');
   });
+
+  describe('moving the window', () => {
+    const typed = { start: '2026-10-04T10:00:00.000Z', end: '2026-10-04T12:00:00.000Z' };
+    const range = () => useSelectionStore.getState().timeRange;
+
+    beforeEach(() => {
+      useSelectionStore.setState({ rangeHistory: [], relativeRange: null, timeRange: typed });
+    });
+
+    it('goes earlier and later by half a window', async () => {
+      const user = userEvent.setup();
+      render(<TimeRangeSelector />);
+
+      await user.click(screen.getByRole('button', { name: 'Earlier' }));
+      expect(range()).toEqual({ start: '2026-10-04T09:00:00.000Z', end: '2026-10-04T11:00:00.000Z' });
+      await user.click(screen.getByRole('button', { name: 'Later' }));
+      expect(range()).toEqual(typed);
+    });
+
+    it('zooms out, and goes back', async () => {
+      const user = userEvent.setup();
+      render(<TimeRangeSelector />);
+      const back = screen.getByRole('button', { name: 'Back to the previous window' });
+      expect(back).toBeDisabled();
+
+      await user.click(screen.getByRole('button', { name: 'Zoom out' }));
+      expect(range()).toEqual({ start: '2026-10-04T09:00:00.000Z', end: '2026-10-04T13:00:00.000Z' });
+      expect(back).toBeEnabled();
+      await user.click(back);
+      expect(range()).toEqual(typed);
+      expect(back).toBeDisabled();
+    });
+
+    it('has no later for a live window: it is at now', async () => {
+      const user = userEvent.setup();
+      render(<TimeRangeSelector />);
+      await user.click(screen.getByRole('button', { name: '1h' }));
+      expect(screen.getByRole('button', { name: 'Later' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Earlier' })).toBeEnabled();
+    });
+  });
 });

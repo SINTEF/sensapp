@@ -54,8 +54,14 @@ export function buildChartOption(
   });
 
   return {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-    grid: { top: 40, right: hasBoolean ? 60 : 40, bottom: 50, left: 60 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      // Long names must not leave the chart, and 23.99055599 is 24 for the eye
+      confine: true,
+      valueFormatter: (value: unknown) => (typeof value === 'number' ? String(Number(value.toPrecision(6))) : String(value ?? '-')),
+    },
+    grid: { top: 40, right: hasBoolean ? 60 : 40, bottom: 30, left: 60 },
     xAxis: {
       type: 'time',
       min: new Date(range.start).getTime(),
@@ -77,12 +83,19 @@ export function buildChartOption(
           ]
         : []),
     ],
-    dataZoom: [
-      // No start and end: the zoom of the user is not undone when the data changes
-      { type: 'inside' },
-      { type: 'slider', bottom: 8, height: 20 },
-    ],
-    toolbox: { feature: { saveAsImage: {}, dataZoom: {}, restore: {} } },
+    // The time window is the one of the explorer, and a drag on the chart asks for another (EChart
+    // listens to it): there is no zoom of the chart on its own, which would zoom into points that
+    // were cut for the window before.
+    brush: {
+      xAxisIndex: 0,
+      brushType: 'lineX',
+      brushMode: 'single',
+      transformable: false,
+      removeOnClick: true,
+      brushStyle: { borderWidth: 1, color: 'rgba(100, 150, 220, 0.15)', borderColor: 'rgba(100, 150, 220, 0.7)' },
+    },
+    // echarts brings buttons for the brush with it (a drag does it, and the header says so)
+    toolbox: { show: false },
     series: lines,
   };
 }

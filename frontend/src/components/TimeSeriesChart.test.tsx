@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -209,5 +210,39 @@ describe('TimeSeriesChart', () => {
     const option = JSON.parse(chart.getAttribute('data-option')!);
     expect(option.series[0]).toMatchObject({ id: 'uuid-temperature', color: SERIES_COLORS.light[3] });
     expect(option.legend).toBeUndefined();
+  });
+
+  it('shows the window that was brushed on the chart, and reads it again', async () => {
+    const user = userEvent.setup();
+    useSelectionStore.setState({
+      selectedSeries: [temperature],
+      timeRange: { start: START, end: hours(1) },
+      relativeRange: null,
+    });
+    renderChart();
+    await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(1));
+
+    await user.click(await screen.findByTestId('echarts-brush'));
+
+    // In whole seconds, outwards
+    expect(useSelectionStore.getState().timeRange).toEqual({
+      start: '2026-10-04T00:10:00.000Z',
+      end: '2026-10-04T00:20:01.000Z',
+    });
+    expect(useSelectionStore.getState().relativeRange).toBeNull();
+    await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(2));
+    expect(mockGetSeriesData.mock.lastCall?.[0].query).toMatchObject({
+      start: '2026-10-04T00:10:00.000Z',
+      end: '2026-10-04T00:20:01.000Z',
+    });
+  });
+
+  it('says it is loading without moving the chart', async () => {
+    mockGetSeriesData.mockReturnValue(new Promise(() => {}));
+    useSelectionStore.setState({ selectedSeries: [temperature], timeRange: { start: START, end: hours(1) } });
+    renderChart();
+
+    expect(await screen.findByRole('progressbar', { name: 'Loading chart data' })).toBeInTheDocument();
+    expect(screen.getByTestId('echarts')).toBeInTheDocument();
   });
 });

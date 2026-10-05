@@ -6,6 +6,7 @@ import { unwrap } from '../api/clientConfig';
 import { isBooleanType, isNumericType, resolveStep } from '../lib/chartStep';
 import { buildChartOption } from '../lib/chartOption';
 import { seriesColor } from '../lib/palette';
+import { brushedRange } from '../lib/timeRange';
 import { usePrefersDark } from '../lib/usePrefersDark';
 
 // echarts is large: load it when the first chart is drawn.
@@ -56,7 +57,7 @@ interface Loaded {
 }
 
 export function TimeSeriesChart() {
-  const { selectedSeries, timeRange, relativeRange, step: stepChoice, aggregation, chartStyle, logScale } =
+  const { selectedSeries, timeRange, setTimeRange, step: stepChoice, aggregation, chartStyle, logScale } =
     useSelectionStore();
   const dark = usePrefersDark();
 
@@ -82,7 +83,7 @@ export function TimeSeriesChart() {
     })),
   });
 
-  const isLoading = queries.some((q) => q.isLoading);
+  const isFetching = queries.some((q) => q.isFetching);
   const errors = queries.filter((q) => q.error);
 
   // The range moves every minute and a query has a key per range: the chart keeps what it shows
@@ -108,29 +109,34 @@ export function TimeSeriesChart() {
     return buildChartOption(series, chartStyle, logScale, timeRange);
   }, [shown, selectedSeries, dark, timeRange, chartStyle, logScale]);
 
+  // A drag on the chart is the window to show
+  function handleBrush(fromMs: number, toMs: number) {
+    const range = brushedRange(fromMs, toMs);
+    if (range) setTimeRange(range.start, range.end);
+  }
+
   if (selectedSeries.length === 0) {
     return null;
   }
 
   return (
     <div className="flex flex-col h-full">
-      {isLoading && (
-        <div className="flex items-center justify-center gap-2 py-2 shrink-0">
-          <span className="loading loading-spinner loading-sm text-primary" />
-          <span className="text-sm text-base-content/50">Loading chart data...</span>
-        </div>
-      )}
-
       {errors.length > 0 && (
         <div className="alert alert-warning shrink-0">
           <span>Some series failed to load: {errors.map(q => q.error instanceof Error ? q.error.message : 'Unknown error').join(', ')}</span>
         </div>
       )}
 
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 relative">
+        {/* Over the chart, so that the chart does not move when it loads */}
+        {isFetching && (
+          <progress
+            className="progress progress-primary absolute top-0 left-0 w-full h-0.5 z-10"
+            aria-label="Loading chart data"
+          />
+        )}
         <Suspense fallback={null}>
-          {/* A preset slides with the time, zoom is kept; another range starts from the whole of it */}
-          <EChart option={option} resetZoomKey={relativeRange ?? `${timeRange.start}/${timeRange.end}`} />
+          <EChart option={option} onBrush={handleBrush} />
         </Suspense>
       </div>
     </div>
