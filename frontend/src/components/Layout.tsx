@@ -37,7 +37,7 @@ export function Layout() {
               </Link>
               <span aria-hidden="true" className="self-center h-6 w-px bg-base-300 shrink-0" />
               {/* On a narrow screen the tabs scroll rather than push the page wider */}
-              <nav aria-label="Pages" className="flex items-stretch sm:gap-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
+              <nav aria-label="Pages" className="flex items-stretch self-stretch sm:gap-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
                 {TABS.map((tab) => (
                   <NavLink
                     key={tab.to}
