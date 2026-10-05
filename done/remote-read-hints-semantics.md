@@ -5,7 +5,7 @@
 When Prometheus asks for `avg_over_time(x[1h])` over a year with a one hour step, does SensApp send all the
 samples, or aggregate in the database?
 
-## Findings (Prometheus v3.8.0 then v3.15.0, SensApp on PostgreSQL, 6 hours of one sample a minute)
+## Findings (Prometheus v3.8.0, v3.13.4 and v3.15.0, SensApp on PostgreSQL, 6 hours of one sample a minute)
 
 SensApp aggregated in the database (one bucket per `step`, bulk on every SQL backend and BigQuery). But
 Prometheus evaluates the query again on what it receives, and the buckets only gave the right answer in
@@ -27,11 +27,10 @@ shift of one bucket I feared does not happen.
 - [x] `query_options_from_read_hints` requires `range_ms` to be a positive multiple of `step_ms`; otherwise raw samples.
 - [x] Unit tests of both rules; the existing backend-generic hint test (range = step) still passes.
 - [x] `tests/prometheus_live/test_live.py::test_remote_read_hints`: 20 queries through a real Prometheus compared with the raw samples (it
-  failed on 8 of them before the change). `run.sh` now takes `PROMETHEUS_IMAGE` and defaults to v3.15.0.
+  failed on 8 of them before the change). `run.sh` now takes `PROMETHEUS_IMAGE` and defaults to v3.13.4 (the LTS line, supported until July 2027; v3.15.0, the latest release, passes too).
 - [x] Documented in `docs/DATAMODEL.md`.
 
 ## Not checked
 
-- Prometheus 2.x (the harness used to pin v2.55.1, not pulled locally): its windows include their start, so a bucket per step probably does not
-  fit. If 2.x matters, run `PROMETHEUS_IMAGE=prom/prometheus:v2.55.1 bash tests/prometheus_live/run.sh`.
+- Prometheus 2.x: not supported or tested (the harness runs the 3.x LTS line).
 - A big range at a small step with raw fallback is now an error above the sample limits (HTTP 400, "narrow the selector") instead of a wrong answer.
