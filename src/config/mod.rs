@@ -96,6 +96,11 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_JWT_PREVIOUS_SECRETS")]
     pub jwt_previous_secrets: Option<String>,
 
+    /// Longest validity, in seconds, of a token made with `POST /api/v1/admin/tokens` (one year
+    /// by default). `sensapp generate-token` has the secret and is not capped by it.
+    #[config(env = "SENSAPP_TOKEN_MAX_DURATION_SECONDS", default = 31536000)]
+    pub token_max_duration_seconds: u64,
+
     /// Run without authentication: every endpoint is open. The explicit opt-out for demos and
     /// networks that authenticate in front of SensApp. Ignored when `SENSAPP_JWT_SECRET` is set.
     #[config(env = "SENSAPP_AUTH_DISABLED", default = false)]

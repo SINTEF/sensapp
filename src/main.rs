@@ -102,13 +102,7 @@ async fn async_main() -> Result<()> {
     let address = SocketAddr::from((endpoint, port));
 
     println!("📡 Starting HTTP server on http://{}...", address);
-    let auth = build_auth(
-        &auth_mode,
-        &config.previous_jwt_secrets(),
-        config.auth_disabled,
-        address,
-        config.ui_enabled,
-    )?;
+    let auth = build_auth(&auth_mode, &config, address)?;
 
     match run_http_server(
         HttpServerState {
@@ -141,19 +135,19 @@ const EPHEMERAL_TOKEN_SECONDS: u64 = 24 * 3600;
 /// Build the authentication of the server from the decided mode, and tell the operator about it.
 fn build_auth(
     mode: &AuthMode,
-    previous_secrets: &[String],
-    auth_disabled: bool,
+    config: &config::SensAppConfig,
     address: SocketAddr,
-    ui_enabled: bool,
 ) -> Result<Option<AuthConfig>> {
+    let previous_secrets = config.previous_jwt_secrets();
     match mode {
         AuthMode::Secret(secret) => {
-            if auth_disabled {
+            if config.auth_disabled {
                 println!("⚠️  SENSAPP_AUTH_DISABLED is ignored: SENSAPP_JWT_SECRET is set");
             }
             let auth_config = AuthConfig::from_secret(secret)
                 .context("Failed to configure JWT authentication")?
-                .with_previous_secrets(previous_secrets)?;
+                .with_previous_secrets(&previous_secrets)?
+                .with_max_token_duration(config.token_max_duration_seconds);
             println!("🔐 JWT authentication enabled");
             if !previous_secrets.is_empty() {
                 println!(
@@ -186,7 +180,7 @@ fn build_auth(
             println!("   Set SENSAPP_JWT_SECRET to keep it (`sensapp generate-secret` makes one).");
             println!("   Token for this run, valid for 24 hours:");
             println!("   {token}");
-            if ui_enabled {
+            if config.ui_enabled {
                 println!("   Open the UI signed in: http://{address}/ui/#token={token}");
             }
             Ok(Some(auth_config))

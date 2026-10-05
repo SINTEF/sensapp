@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { DeleteSeriesData, DeleteSeriesErrors, DeleteSeriesResponses, DeleteSeriesSamplesData, DeleteSeriesSamplesErrors, DeleteSeriesSamplesResponses, FrontpageData, FrontpageResponses, GetSeriesAvailabilityData, GetSeriesAvailabilityErrors, GetSeriesAvailabilityResponses, GetSeriesDataData, GetSeriesDataErrors, GetSeriesDataResponses, GetSeriesLastSampleData, GetSeriesLastSampleErrors, GetSeriesLastSampleResponses, ListMetricsData, ListMetricsErrors, ListMetricsResponses, ListSeriesData, ListSeriesErrors, ListSeriesResponses, LivenessData, LivenessResponses, PrometheusMetricsData, PrometheusMetricsResponses, PrometheusRemoteReadData, PrometheusRemoteReadErrors, PrometheusRemoteReadResponses, PublishInfluxdbData, PublishInfluxdbErrors, PublishInfluxdbResponses, PublishPrometheusData, PublishPrometheusErrors, PublishPrometheusResponses, PublishSensorsDataData, PublishSensorsDataErrors, PublishSensorsDataResponses, ReadinessData, ReadinessErrors, ReadinessResponses, SimplePromqlQueryData, SimplePromqlQueryErrors, SimplePromqlQueryResponses, VacuumDatabaseData, VacuumDatabaseErrors, VacuumDatabaseResponses } from './types.gen';
+import type { CreateTokenData, CreateTokenErrors, CreateTokenResponses, DeleteSeriesData, DeleteSeriesErrors, DeleteSeriesResponses, DeleteSeriesSamplesData, DeleteSeriesSamplesErrors, DeleteSeriesSamplesResponses, FrontpageData, FrontpageResponses, GetSeriesAvailabilityData, GetSeriesAvailabilityErrors, GetSeriesAvailabilityResponses, GetSeriesDataData, GetSeriesDataErrors, GetSeriesDataResponses, GetSeriesLastSampleData, GetSeriesLastSampleErrors, GetSeriesLastSampleResponses, ListMetricsData, ListMetricsErrors, ListMetricsResponses, ListSeriesData, ListSeriesErrors, ListSeriesResponses, LivenessData, LivenessResponses, PrometheusMetricsData, PrometheusMetricsResponses, PrometheusRemoteReadData, PrometheusRemoteReadErrors, PrometheusRemoteReadResponses, PublishInfluxdbData, PublishInfluxdbErrors, PublishInfluxdbResponses, PublishPrometheusData, PublishPrometheusErrors, PublishPrometheusResponses, PublishSensorsDataData, PublishSensorsDataErrors, PublishSensorsDataResponses, ReadinessData, ReadinessErrors, ReadinessResponses, SimplePromqlQueryData, SimplePromqlQueryErrors, SimplePromqlQueryResponses, VacuumDatabaseData, VacuumDatabaseErrors, VacuumDatabaseResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -19,6 +19,24 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 };
 
 export const frontpage = <ThrowOnError extends boolean = false>(options?: Options<FrontpageData, ThrowOnError>): RequestResult<FrontpageResponses, unknown, ThrowOnError> => (options?.client ?? client).get<FrontpageResponses, unknown, ThrowOnError>({ url: '/', ...options });
+
+/**
+ * Create a token
+ *
+ * Makes a signed token for a client. SensApp does not keep tokens: the answer is the only time
+ * the token is shown, it cannot be listed or revoked, and it is valid until it expires or until
+ * the secret that signed it is rotated out (see `SENSAPP_JWT_PREVIOUS_SECRETS`). Requires the
+ * `admin` scope. An `admin` token cannot make another `admin` token: those come from
+ * `sensapp generate-token`, which needs the secret. Not available when authentication is disabled.
+ */
+export const createToken = <ThrowOnError extends boolean = false>(options: Options<CreateTokenData, ThrowOnError>): RequestResult<CreateTokenResponses, CreateTokenErrors, ThrowOnError> => (options.client ?? client).post<CreateTokenResponses, CreateTokenErrors, ThrowOnError>({
+    url: '/api/v1/admin/tokens',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Database Vacuuming

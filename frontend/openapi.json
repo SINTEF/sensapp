@@ -77,6 +77,98 @@
           }
         ]
       },
+      "CreateTokenRequest": {
+        "description": "What to put in a token: who it is for, what it may do, for how long.",
+        "properties": {
+          "duration_seconds": {
+            "description": "Validity of the token, in seconds, at most `SENSAPP_TOKEN_MAX_DURATION_SECONDS` (a year by\ndefault).",
+            "example": 86400,
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scope": {
+            "description": "What the token may do, among `read`, `write` and `delete`. `admin` tokens are only made with\n`sensapp generate-token`.",
+            "example": [
+              "read",
+              "write"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sensors": {
+            "description": "Names of the sensors the token may access. Leave it out for every sensor.",
+            "example": [
+              "temperature",
+              "humidity"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "subject": {
+            "description": "Who or what the token is for: a service, a device, a person. It is in the logs of every\nrequest the token makes.",
+            "example": "edge-device-7",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "scope",
+          "duration_seconds"
+        ],
+        "type": "object"
+      },
+      "CreatedToken": {
+        "properties": {
+          "expires_at": {
+            "description": "Expiration time, Unix timestamp in seconds",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "jti": {
+            "description": "Unique id of the token, in the logs of the requests it makes",
+            "type": "string"
+          },
+          "scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sensors": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "subject": {
+            "type": "string"
+          },
+          "token": {
+            "description": "The token, to use as `Authorization: Bearer <token>`. This is the only time it is shown:\nSensApp does not keep tokens.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "subject",
+          "scope",
+          "expires_at",
+          "jti"
+        ],
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "status": {
@@ -161,6 +253,50 @@
         },
         "tags": [
           "SensApp"
+        ]
+      }
+    },
+    "/api/v1/admin/tokens": {
+      "post": {
+        "description": "Makes a signed token for a client. SensApp does not keep tokens: the answer is the only time\nthe token is shown, it cannot be listed or revoked, and it is valid until it expires or until\nthe secret that signed it is rotated out (see `SENSAPP_JWT_PREVIOUS_SECRETS`). Requires the\n`admin` scope. An `admin` token cannot make another `admin` token: those come from\n`sensapp generate-token`, which needs the secret. Not available when authentication is disabled.",
+        "operationId": "create_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedToken"
+                }
+              }
+            },
+            "description": "The token"
+          },
+          "400": {
+            "description": "The request is not valid: empty subject, unknown scope, too long a duration"
+          },
+          "401": {
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "description": "The token does not have the admin scope, or the request asks for an admin token"
+          },
+          "404": {
+            "description": "Authentication is disabled: there is nothing to sign a token with"
+          }
+        },
+        "summary": "Create a token",
+        "tags": [
+          "Admin"
         ]
       }
     },
@@ -367,7 +503,7 @@
             }
           },
           "504": {
-            "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
+            "description": "The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice"
           }
         },
         "summary": "Prometheus Remote Write API.",
@@ -531,7 +667,7 @@
             }
           },
           "504": {
-            "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
+            "description": "The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice"
           }
         },
         "summary": "InfluxDB Compatible Write API.",
@@ -757,7 +893,7 @@
             }
           },
           "504": {
-            "description": "The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs"
+            "description": "The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice"
           }
         },
         "summary": "SensApp native data ingestion API supporting multiple formats.",

@@ -18,6 +18,50 @@ export type AppError = {
     Storage: string;
 };
 
+/**
+ * What to put in a token: who it is for, what it may do, for how long.
+ */
+export type CreateTokenRequest = {
+    /**
+     * Validity of the token, in seconds, at most `SENSAPP_TOKEN_MAX_DURATION_SECONDS` (a year by
+     * default).
+     */
+    duration_seconds: number;
+    /**
+     * What the token may do, among `read`, `write` and `delete`. `admin` tokens are only made with
+     * `sensapp generate-token`.
+     */
+    scope: Array<string>;
+    /**
+     * Names of the sensors the token may access. Leave it out for every sensor.
+     */
+    sensors?: Array<string> | null;
+    /**
+     * Who or what the token is for: a service, a device, a person. It is in the logs of every
+     * request the token makes.
+     */
+    subject: string;
+};
+
+export type CreatedToken = {
+    /**
+     * Expiration time, Unix timestamp in seconds
+     */
+    expires_at: number;
+    /**
+     * Unique id of the token, in the logs of the requests it makes
+     */
+    jti: string;
+    scope: Array<string>;
+    sensors?: Array<string> | null;
+    subject: string;
+    /**
+     * The token, to use as `Authorization: Bearer <token>`. This is the only time it is shown:
+     * SensApp does not keep tokens.
+     */
+    token: string;
+};
+
 export type HealthResponse = {
     status: string;
 };
@@ -58,6 +102,41 @@ export type FrontpageResponses = {
 };
 
 export type FrontpageResponse = FrontpageResponses[keyof FrontpageResponses];
+
+export type CreateTokenData = {
+    body: CreateTokenRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/tokens';
+};
+
+export type CreateTokenErrors = {
+    /**
+     * The request is not valid: empty subject, unknown scope, too long a duration
+     */
+    400: unknown;
+    /**
+     * Missing or invalid token
+     */
+    401: unknown;
+    /**
+     * The token does not have the admin scope, or the request asks for an admin token
+     */
+    403: unknown;
+    /**
+     * Authentication is disabled: there is nothing to sign a token with
+     */
+    404: unknown;
+};
+
+export type CreateTokenResponses = {
+    /**
+     * The token
+     */
+    200: CreatedToken;
+};
+
+export type CreateTokenResponse = CreateTokenResponses[keyof CreateTokenResponses];
 
 export type VacuumDatabaseData = {
     body?: never;
@@ -186,7 +265,7 @@ export type PublishPrometheusErrors = {
      */
     503: unknown;
     /**
-     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     * The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice
      */
     504: unknown;
 };
@@ -289,7 +368,7 @@ export type PublishInfluxdbErrors = {
      */
     503: unknown;
     /**
-     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     * The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice
      */
     504: unknown;
 };
@@ -437,7 +516,7 @@ export type PublishSensorsDataErrors = {
      */
     503: unknown;
     /**
-     * The request took longer than SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS, usually because the storage backend hangs
+     * The request took longer than SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (five minutes by default), usually because the storage backend hangs. The batches of samples already written stay stored, so a retry can store them twice
      */
     504: unknown;
 };

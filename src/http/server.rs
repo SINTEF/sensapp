@@ -1,5 +1,8 @@
 use super::app_error::AppError;
-use super::auth::{require_delete_auth, require_read_auth, require_write_auth};
+use super::auth::{
+    TokenRequest, TokenRequestError, TokenRules, require_admin_auth, require_delete_auth,
+    require_read_auth, require_write_auth,
+};
 use super::backpressure::{WriteLimiter, limit_concurrent_writes};
 use super::crud::{
     delete_series, delete_series_samples, get_series_availability, get_series_data,
@@ -41,7 +44,7 @@ use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
 use futures::TryStreamExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -66,7 +69,7 @@ use utoipa_scalar::{Scalar, Servable as ScalarServable};
         (name = "Admin", description = "Administrative operations"),
         (name = "Health", description = "Health check endpoints"),
     ),
-    paths(frontpage, publish_sensors_data, prometheus_metrics, list_metrics, list_series, get_series_data, get_series_last_sample, get_series_availability, delete_series, delete_series_samples, publish_influxdb, publish_prometheus, prometheus_remote_read, simple_promql_query, vacuum_database, liveness, readiness),
+    paths(frontpage, publish_sensors_data, prometheus_metrics, list_metrics, list_series, get_series_data, get_series_last_sample, get_series_availability, delete_series, delete_series_samples, publish_influxdb, publish_prometheus, prometheus_remote_read, simple_promql_query, vacuum_database, create_token, liveness, readiness),
 )]
 struct ApiDoc;
 
@@ -248,11 +251,20 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
         ))
         .layer(timeout_layer(settings.maintenance_timeout));
 
+    // Making tokens needs the admin scope, which gives nothing else
+    let admin_routes = Router::new()
+        .route("/api/v1/admin/tokens", post(create_token))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.auth.clone(),
+            require_admin_auth,
+        ));
+
     // The writes and the maintenance have timeouts of their own, merged after the layer of the
     // other requests so that this one does not apply to them.
     public_routes
         .merge(read_routes)
         .merge(delete_routes)
+        .merge(admin_routes)
         .layer(timeout_layer(settings.request_timeout))
         .merge(write_routes)
         .merge(maintenance_routes)
@@ -526,6 +538,117 @@ struct VacuumResponse {
     duplicates_removed: Option<u64>,
 }
 
+/// What to put in a token: who it is for, what it may do, for how long.
+#[derive(Debug, Deserialize, ToSchema)]
+struct CreateTokenRequest {
+    /// Who or what the token is for: a service, a device, a person. It is in the logs of every
+    /// request the token makes.
+    #[schema(example = "edge-device-7")]
+    subject: String,
+    /// What the token may do, among `read`, `write` and `delete`. `admin` tokens are only made with
+    /// `sensapp generate-token`.
+    #[schema(example = json!(["read", "write"]))]
+    scope: Vec<String>,
+    /// Names of the sensors the token may access. Leave it out for every sensor.
+    #[schema(example = json!(["temperature", "humidity"]))]
+    sensors: Option<Vec<String>>,
+    /// Validity of the token, in seconds, at most `SENSAPP_TOKEN_MAX_DURATION_SECONDS` (a year by
+    /// default).
+    #[schema(example = 86400)]
+    duration_seconds: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct CreatedToken {
+    /// The token, to use as `Authorization: Bearer <token>`. This is the only time it is shown:
+    /// SensApp does not keep tokens.
+    token: String,
+    subject: String,
+    scope: Vec<String>,
+    sensors: Option<Vec<String>>,
+    /// Expiration time, Unix timestamp in seconds
+    expires_at: u64,
+    /// Unique id of the token, in the logs of the requests it makes
+    jti: String,
+}
+
+/// Create a token
+///
+/// Makes a signed token for a client. SensApp does not keep tokens: the answer is the only time
+/// the token is shown, it cannot be listed or revoked, and it is valid until it expires or until
+/// the secret that signed it is rotated out (see `SENSAPP_JWT_PREVIOUS_SECRETS`). Requires the
+/// `admin` scope. An `admin` token cannot make another `admin` token: those come from
+/// `sensapp generate-token`, which needs the secret. Not available when authentication is disabled.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/tokens",
+    tag = "Admin",
+    request_body = CreateTokenRequest,
+    responses(
+        (status = 200, description = "The token", body = CreatedToken),
+        (status = 400, description = "The request is not valid: empty subject, unknown scope, too long a duration"),
+        (status = 401, description = "Missing or invalid token"),
+        (status = 403, description = "The token does not have the admin scope, or the request asks for an admin token"),
+        (status = 404, description = "Authentication is disabled: there is nothing to sign a token with")
+    )
+)]
+async fn create_token(
+    State(state): State<HttpServerState>,
+    access: Option<axum::Extension<crate::http::auth::AccessContext>>,
+    Json(request): Json<CreateTokenRequest>,
+) -> Result<([(header::HeaderName, &'static str); 1], Json<CreatedToken>), AppError> {
+    let Some(auth) = &state.auth else {
+        return Err(AppError::NotFound(anyhow::anyhow!(
+            "Authentication is disabled: there is nothing to sign a token with"
+        )));
+    };
+
+    let rules = TokenRules {
+        max_duration_seconds: auth.max_token_duration_seconds(),
+        allow_admin: false,
+    };
+    let checked = TokenRequest::new(
+        &request.subject,
+        &request.scope.join(" "),
+        request.sensors,
+        request.duration_seconds,
+        &rules,
+    )
+    .map_err(|error| match error {
+        TokenRequestError::AdminNotAllowed => AppError::Forbidden(error.to_string()),
+        TokenRequestError::Invalid(message) => AppError::BadRequest(anyhow::anyhow!(message)),
+    })?;
+    let issued = checked.issue(auth).map_err(AppError::InternalServerError)?;
+
+    // Who made which token, for the audit. Never the token itself.
+    let creator = access
+        .as_ref()
+        .map(|extension| extension.0.subject.as_str());
+    tracing::info!(
+        creator,
+        subject = %checked.subject,
+        scope = %checked.scope,
+        sensors = ?checked.sensors,
+        expires_at = issued.expires_at,
+        jti = %issued.jti,
+        "token created"
+    );
+
+    let scope = checked.scope.split(' ').map(str::to_string).collect();
+    Ok((
+        // A token must not stay in a cache
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(CreatedToken {
+            token: issued.token,
+            subject: checked.subject,
+            scope,
+            sensors: checked.sensors,
+            expires_at: issued.expires_at,
+            jti: issued.jti,
+        }),
+    ))
+}
+
 /// Database Vacuuming
 ///
 /// Removes the duplicate samples (a retried write, a client that sends twice, a crash in the middle
@@ -636,6 +759,8 @@ mod tests {
             "/health/live",
             "/health/ready",
             "/docs",
+            // Signs a token, never touches the storage
+            "/api/v1/admin/tokens",
         ];
         let writes = [
             ("/publish", "post"),

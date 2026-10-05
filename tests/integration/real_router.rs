@@ -680,3 +680,235 @@ async fn the_root_is_the_name_of_the_instance_without_the_ui() -> Result<()> {
     assert_eq!(status, StatusCode::NOT_FOUND);
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Making tokens: POST /api/v1/admin/tokens
+// ---------------------------------------------------------------------------
+
+fn create_token_request(token: Option<&str>, body: serde_json::Value) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri("/api/v1/admin/tokens")
+        .header("content-type", "application/json");
+    if let Some(token) = token {
+        builder = builder.header("authorization", format!("Bearer {token}"));
+    }
+    builder.body(Body::from(body.to_string())).unwrap()
+}
+
+fn bearer_get(path: &str, token: &str) -> Request<Body> {
+    Request::builder()
+        .method("GET")
+        .uri(path)
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap()
+}
+
+fn token_wish(subject: &str, scope: &[&str], duration_seconds: u64) -> serde_json::Value {
+    serde_json::json!({
+        "subject": subject,
+        "scope": scope,
+        "duration_seconds": duration_seconds,
+    })
+}
+
+#[tokio::test]
+#[serial]
+async fn an_admin_makes_tokens_that_do_what_they_were_made_for() -> Result<()> {
+    let auth = Some(AuthConfig::from_secret(SECRET)?);
+    let (_db, router) = router(Duration::ZERO, auth, settings()).await?;
+    let admin = token("admin");
+
+    let (status, headers, body) = send(
+        &router,
+        create_token_request(Some(&admin), token_wish("dashboard", &["read"], 3600)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // A token does not stay in a cache
+    assert_eq!(headers.get("cache-control").unwrap(), "no-store");
+
+    let created: serde_json::Value = serde_json::from_str(&body)?;
+    assert_eq!(created["subject"], "dashboard");
+    assert_eq!(created["scope"], serde_json::json!(["read"]));
+    assert!(created["sensors"].is_null());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let expires_at = created["expires_at"].as_u64().unwrap();
+    assert!(
+        expires_at.abs_diff(now + 3600) < 10,
+        "{expires_at} vs {now}"
+    );
+    let made = created["token"].as_str().unwrap();
+
+    // The token reads, and does not write or make tokens
+    let (status, _, _) = send(&router, bearer_get("/metrics", made)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = send(&router, write_request(Some(made))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, _) = send(
+        &router,
+        create_token_request(Some(made), token_wish("more", &["read"], 60)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The id of the answer is the one in the token, which the logs of its requests carry
+    let validated = sensapp::http::auth::validate_token(
+        &{
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", format!("Bearer {made}").parse()?);
+            headers
+        },
+        &AuthConfig::from_secret(SECRET)?,
+    )
+    .expect("the made token validates");
+    assert_eq!(validated.token_id.as_deref(), created["jti"].as_str());
+
+    // The sensors of the request limit the token
+    let mut wish = token_wish("one-sensor", &["read", "write"], 60);
+    wish["sensors"] = serde_json::json!([" only_this ", "only_this"]);
+    let (status, _, body) = send(&router, create_token_request(Some(&admin), wish)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let created: serde_json::Value = serde_json::from_str(&body)?;
+    assert_eq!(created["sensors"], serde_json::json!(["only_this"]));
+    assert_eq!(created["scope"], serde_json::json!(["read", "write"]));
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn only_admin_tokens_make_tokens_and_admin_tokens_do_nothing_else() -> Result<()> {
+    let auth = Some(AuthConfig::from_secret(SECRET)?);
+    let (_db, router) = router(Duration::ZERO, auth, settings()).await?;
+    let wish = || token_wish("someone", &["read"], 60);
+
+    let (status, _, _) = send(&router, create_token_request(None, wish())).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    for scope in ["read", "write", "delete", "read write delete"] {
+        let (status, _, _) = send(&router, create_token_request(Some(&token(scope)), wish())).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "scope {scope}");
+    }
+
+    // Admin is not read, write or delete either
+    let admin = token("admin");
+    let (status, _, _) = send(&router, bearer_get("/metrics", &admin)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, _) = send(&router, write_request(Some(&admin))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, _) = send(&router, vacuum_request(Some(&admin))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn the_endpoint_checks_the_request() -> Result<()> {
+    let auth = Some(AuthConfig::from_secret(SECRET)?.with_max_token_duration(3600));
+    let (_db, router) = router(Duration::ZERO, auth, settings()).await?;
+    let admin = token("admin");
+    let ask = |wish: serde_json::Value| {
+        let router = router.clone();
+        let admin = admin.clone();
+        async move {
+            let (status, _, body) = send(&router, create_token_request(Some(&admin), wish)).await;
+            (status, body)
+        }
+    };
+
+    // An admin token is never made here, even among others: it takes the secret
+    for scope in [&["admin"][..], &["read", "admin"][..]] {
+        let (status, body) = ask(token_wish("x", scope, 60)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    }
+
+    let invalid = [
+        token_wish("", &["read"], 60),
+        token_wish("   ", &["read"], 60),
+        token_wish("x", &[], 60),
+        token_wish("x", &["root"], 60),
+        token_wish("x", &["read"], 0),
+        // The configured maximum
+        token_wish("x", &["read"], 3601),
+        token_wish("x", &["read"], u64::MAX),
+        {
+            let mut wish = token_wish("x", &["read"], 60);
+            wish["sensors"] = serde_json::json!([]);
+            wish
+        },
+        {
+            let mut wish = token_wish("x", &["read"], 60);
+            wish["sensors"] = serde_json::json!([""]);
+            wish
+        },
+    ];
+    for wish in invalid {
+        let (status, body) = ask(wish.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{wish} gave {body}");
+    }
+    let (status, body) = ask(token_wish("x", &["read"], 3600)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Not JSON of the right shape
+    let (status, _, _) = send(
+        &router,
+        create_token_request(Some(&admin), serde_json::json!({"subject": "x"})),
+    )
+    .await;
+    assert!(status.is_client_error());
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn without_authentication_there_is_nothing_to_sign_with() -> Result<()> {
+    let (_db, router) = router(Duration::ZERO, None, settings()).await?;
+    let (status, _, body) = send(
+        &router,
+        create_token_request(None, token_wish("x", &["read"], 60)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body.contains("disabled"), "{body}");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn creating_a_token_is_logged_without_the_token() -> Result<()> {
+    let auth = Some(AuthConfig::from_secret(SECRET)?);
+    let (_db, router) = router(Duration::ZERO, auth, settings()).await?;
+    let (logs, _guard) = capture_logs();
+
+    let (status, _, body) = send(
+        &router,
+        create_token_request(Some(&token("admin")), token_wish("audited", &["write"], 60)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let created: serde_json::Value = serde_json::from_str(&body)?;
+    let made = created["token"].as_str().unwrap();
+    let jti = created["jti"].as_str().unwrap();
+
+    let lines = logs.lines();
+    let line = lines
+        .iter()
+        .find(|line| line.contains("token created"))
+        .unwrap_or_else(|| panic!("no log of the creation in {lines:#?}"));
+    // Who asked, for whom, with what, and which token
+    assert!(
+        line.contains("creator=\"test\"") || line.contains("creator=Some(\"test\")"),
+        "{line}"
+    );
+    assert!(line.contains("audited"), "{line}");
+    assert!(line.contains(jti), "{line}");
+    // The request span carries who asked
+    assert!(line.contains("subject=\"test\""), "{line}");
+    // No line shows the token, nor the header that carried the admin one
+    for line in &lines {
+        assert!(!line.contains(made), "{line}");
+    }
+    Ok(())
+}

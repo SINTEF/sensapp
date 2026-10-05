@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, queryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
 import { client } from '../client.gen';
-import { deleteSeries, deleteSeriesSamples, frontpage, getSeriesAvailability, getSeriesData, getSeriesLastSample, listMetrics, listSeries, liveness, type Options, prometheusMetrics, prometheusRemoteRead, publishInfluxdb, publishPrometheus, publishSensorsData, readiness, simplePromqlQuery, vacuumDatabase } from '../sdk.gen';
-import type { DeleteSeriesData, DeleteSeriesResponse, DeleteSeriesSamplesData, FrontpageData, FrontpageResponse, GetSeriesAvailabilityData, GetSeriesDataData, GetSeriesLastSampleData, ListMetricsData, ListSeriesData, LivenessData, LivenessResponse, PrometheusMetricsData, PrometheusMetricsResponse, PrometheusRemoteReadData, PrometheusRemoteReadError, PublishInfluxdbData, PublishInfluxdbError, PublishInfluxdbResponse, PublishPrometheusData, PublishPrometheusError, PublishPrometheusResponse, PublishSensorsDataData, PublishSensorsDataError, PublishSensorsDataResponse, ReadinessData, ReadinessError, ReadinessResponse2, SimplePromqlQueryData, VacuumDatabaseData, VacuumDatabaseError, VacuumDatabaseResponse } from '../types.gen';
+import { createToken, deleteSeries, deleteSeriesSamples, frontpage, getSeriesAvailability, getSeriesData, getSeriesLastSample, listMetrics, listSeries, liveness, type Options, prometheusMetrics, prometheusRemoteRead, publishInfluxdb, publishPrometheus, publishSensorsData, readiness, simplePromqlQuery, vacuumDatabase } from '../sdk.gen';
+import type { CreateTokenData, CreateTokenResponse, DeleteSeriesData, DeleteSeriesResponse, DeleteSeriesSamplesData, FrontpageData, FrontpageResponse, GetSeriesAvailabilityData, GetSeriesDataData, GetSeriesLastSampleData, ListMetricsData, ListSeriesData, LivenessData, LivenessResponse, PrometheusMetricsData, PrometheusMetricsResponse, PrometheusRemoteReadData, PrometheusRemoteReadError, PublishInfluxdbData, PublishInfluxdbError, PublishInfluxdbResponse, PublishPrometheusData, PublishPrometheusError, PublishPrometheusResponse, PublishSensorsDataData, PublishSensorsDataError, PublishSensorsDataResponse, ReadinessData, ReadinessError, ReadinessResponse2, SimplePromqlQueryData, VacuumDatabaseData, VacuumDatabaseError, VacuumDatabaseResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -53,6 +53,29 @@ export const frontpageOptions = (options?: Options<FrontpageData>) => queryOptio
     },
     queryKey: frontpageQueryKey(options)
 });
+
+/**
+ * Create a token
+ *
+ * Makes a signed token for a client. SensApp does not keep tokens: the answer is the only time
+ * the token is shown, it cannot be listed or revoked, and it is valid until it expires or until
+ * the secret that signed it is rotated out (see `SENSAPP_JWT_PREVIOUS_SECRETS`). Requires the
+ * `admin` scope. An `admin` token cannot make another `admin` token: those come from
+ * `sensapp generate-token`, which needs the secret. Not available when authentication is disabled.
+ */
+export const createTokenMutation = (options?: Partial<Options<CreateTokenData>>): UseMutationOptions<CreateTokenResponse, DefaultError, Options<CreateTokenData>> => {
+    const mutationOptions: UseMutationOptions<CreateTokenResponse, DefaultError, Options<CreateTokenData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await createToken({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
 
 /**
  * Database Vacuuming

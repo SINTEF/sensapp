@@ -20,6 +20,9 @@ pub const TOKEN_AUDIENCE: &str = "sensapp";
 
 const MIN_SECRET_LENGTH: usize = 32;
 
+/// Longest token the HTTP endpoint makes unless configured otherwise: one year.
+pub const DEFAULT_MAX_TOKEN_DURATION_SECONDS: u64 = 365 * 24 * 3600;
+
 // ---------------------------------------------------------------------------
 // Auth configuration
 // ---------------------------------------------------------------------------
@@ -40,6 +43,8 @@ pub struct AuthConfig {
     /// Every key that verifies tokens by `kid`: the signing secret and the previous ones.
     decoding_keys: Arc<HashMap<String, DecodingKey>>,
     validation: Arc<Validation>,
+    /// Longest validity of the tokens the HTTP endpoint makes.
+    max_token_duration_seconds: u64,
 }
 
 impl std::fmt::Debug for AuthConfig {
@@ -97,7 +102,19 @@ impl AuthConfig {
             decoding_key: Arc::new(decoding_key.clone()),
             decoding_keys: Arc::new(HashMap::from([(kid, decoding_key)])),
             validation: Arc::new(validation),
+            max_token_duration_seconds: DEFAULT_MAX_TOKEN_DURATION_SECONDS,
         })
+    }
+
+    /// Cap the validity of the tokens made through the HTTP endpoint (the command line has the
+    /// secret, so it is not capped by this).
+    pub fn with_max_token_duration(mut self, seconds: u64) -> Self {
+        self.max_token_duration_seconds = seconds;
+        self
+    }
+
+    pub fn max_token_duration_seconds(&self) -> u64 {
+        self.max_token_duration_seconds
     }
 
     /// Also verify the tokens signed with these previous secrets, which never sign. This is how
