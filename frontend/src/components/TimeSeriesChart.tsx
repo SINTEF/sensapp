@@ -1,16 +1,17 @@
-import { useMemo } from 'react';
-import ReactECharts from 'echarts-for-react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { getSeriesData } from '../client';
 import { useSelectionStore } from '../stores/useSelectionStore';
-import { extractErrorMessage } from '../api/clientConfig';
-import type { SenMLRecord } from '../hooks/useSeriesData';
+import { unwrap } from '../api/clientConfig';
+import { isBooleanType, isNumericType, resolveStep } from '../lib/chartStep';
+import { buildChartOption } from '../lib/chartOption';
+import { seriesColor } from '../lib/palette';
+import { sharedLabels, withoutShared } from '../lib/seriesLabels';
+import { brushedRange } from '../lib/timeRange';
+import { usePrefersDark } from '../lib/usePrefersDark';
 
-// Color palette for multiple series
-const COLORS = [
-  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
-  '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
-];
+// echarts is large: load it when the first chart is drawn.
+const EChart = lazy(() => import('./EChart'));
 
 function buildSeriesLabel(name: string, labels: Record<string, string>): string {
   const labelStr = Object.entries(labels)
@@ -19,23 +20,28 @@ function buildSeriesLabel(name: string, labels: Record<string, string>): string 
   return labelStr ? `${name}{${labelStr}}` : name;
 }
 
+/** One SenML record. Only the first of a pack has the base time (`bt`), the others are relative to it. */
+interface SenMLRecord {
+  bt?: number;
+  t?: number;
+  v?: number;
+  vs?: string;
+  vb?: boolean;
+}
+
 function parseSenMLToTimeSeries(
   records: SenMLRecord[]
 ): Array<[number, number]> {
-  let baseName = '';
   let baseTime = 0;
 
   const points: Array<[number, number]> = [];
 
   for (const rec of records) {
-    if (rec.bn !== undefined) baseName = rec.bn;
     if (rec.bt !== undefined) baseTime = rec.bt;
 
-    // We only care about re-assigning baseName for multi-record packs
-    void baseName;
-
     const time = (baseTime + (rec.t ?? 0)) * 1000; // Convert to ms
-    const value = rec.v ?? (rec.vs ? parseFloat(rec.vs) : NaN);
+    // A boolean is 0 or 1
+    const value = rec.vb !== undefined ? Number(rec.vb) : (rec.v ?? (rec.vs ? parseFloat(rec.vs) : NaN));
 
     if (!isNaN(value) && isFinite(time)) {
       points.push([time, value]);
@@ -45,12 +51,23 @@ function parseSenMLToTimeSeries(
   return points.sort((a, b) => a[0] - b[0]);
 }
 
+/** What a query returns: the records of a series. */
+interface Loaded {
+  uuid: string;
+  records: SenMLRecord[];
+}
+
 export function TimeSeriesChart() {
-  const { selectedSeries, timeRange } = useSelectionStore();
+  const { selectedSeries, timeRange, setTimeRange, step: stepChoice, aggregation, chartStyle, logScale } =
+    useSelectionStore();
+  const hoveredSeries = useSelectionStore((state) => state.hoveredSeries);
+  const dark = usePrefersDark();
+
+  const step = resolveStep(stepChoice, timeRange.start, timeRange.end);
 
   const queries = useQueries({
-    queries: selectedSeries.map((s, index) => ({
-      queryKey: ['seriesData', s.uuid, timeRange] as const,
+    queries: selectedSeries.map((s) => ({
+      queryKey: ['seriesData', s.uuid, timeRange, step, aggregation] as const,
       queryFn: async () => {
         const result = await getSeriesData({
           path: { series_uuid: s.uuid },
@@ -58,94 +75,49 @@ export function TimeSeriesChart() {
             format: 'senml',
             start: timeRange.start,
             end: timeRange.end,
+            // Only numbers can be aggregated. The server refuses more than 100 000 raw samples.
+            ...(step && isNumericType(s.type) ? { step, aggregation } : {}),
           },
         });
-        if (result.error) {
-          throw new Error(extractErrorMessage(result.error));
-        }
-        return {
-          records: result.data as unknown as SenMLRecord[],
-          series: s,
-          colorIndex: index,
-        };
+        return { uuid: s.uuid, records: unwrap(result) as unknown as SenMLRecord[] };
       },
       enabled: !!s.uuid,
     })),
   });
 
-  const isLoading = queries.some((q) => q.isLoading);
+  const isFetching = queries.some((q) => q.isFetching);
   const errors = queries.filter((q) => q.error);
 
+  // The range moves every minute and a query has a key per range: the chart keeps what it shows
+  // until the data of the new range is there. (`placeholderData` cannot do it for `useQueries`.)
+  const [shown, setShown] = useState<Record<string, Loaded>>({});
+  const loaded = queries.flatMap((q) => (q.data ? [q.data] : []));
+  if (loaded.some((data) => shown[data.uuid] !== data)) {
+    setShown({ ...shown, ...Object.fromEntries(loaded.map((data) => [data.uuid, data])) });
+  }
+
   const option = useMemo(() => {
-    const seriesData = queries
-      .filter((q) => q.data)
-      .map((q) => {
-        const { records, series, colorIndex } = q.data!;
-        const points = parseSenMLToTimeSeries(records);
+    // What every series has is not what tells them apart
+    const shared = sharedLabels(selectedSeries.map((s) => s.labels));
+    const series = selectedSeries
+      .filter((s) => shown[s.uuid])
+      .map((s) => {
         return {
-          name: buildSeriesLabel(series.name, series.labels),
-          type: 'line' as const,
-          data: points,
-          smooth: false,
-          showSymbol: points.length < 100,
-          symbol: 'circle',
-          symbolSize: 3,
-          lineStyle: { width: 1.5 },
-          color: COLORS[colorIndex % COLORS.length],
+          id: s.uuid,
+          name: buildSeriesLabel(s.name, withoutShared(s.labels, shared)),
+          points: parseSenMLToTimeSeries(shown[s.uuid].records),
+          boolean: isBooleanType(s.type),
+          color: seriesColor(s.slot, dark),
         };
       });
+    return buildChartOption(series, chartStyle, logScale, timeRange);
+  }, [shown, selectedSeries, dark, timeRange, chartStyle, logScale]);
 
-    return {
-      tooltip: {
-        trigger: 'axis' as const,
-        axisPointer: {
-          type: 'cross' as const,
-        },
-      },
-      legend: {
-        data: seriesData.map((s) => s.name),
-        type: 'scroll' as const,
-        bottom: 0,
-      },
-      grid: {
-        top: 40,
-        right: 40,
-        bottom: 60,
-        left: 60,
-      },
-      xAxis: {
-        type: 'time' as const,
-        min: new Date(timeRange.start).getTime(),
-        max: new Date(timeRange.end).getTime(),
-      },
-      yAxis: {
-        type: 'value' as const,
-        scale: true,
-      },
-      dataZoom: [
-        {
-          type: 'inside' as const,
-          start: 0,
-          end: 100,
-        },
-        {
-          type: 'slider' as const,
-          start: 0,
-          end: 100,
-          bottom: 30,
-          height: 20,
-        },
-      ],
-      toolbox: {
-        feature: {
-          saveAsImage: {},
-          dataZoom: {},
-          restore: {},
-        },
-      },
-      series: seriesData,
-    };
-  }, [queries, timeRange]);
+  // A drag on the chart is the window to show
+  function handleBrush(fromMs: number, toMs: number) {
+    const range = brushedRange(fromMs, toMs);
+    if (range) setTimeRange(range.start, range.end);
+  }
 
   if (selectedSeries.length === 0) {
     return null;
@@ -153,25 +125,24 @@ export function TimeSeriesChart() {
 
   return (
     <div className="flex flex-col h-full">
-      {isLoading && (
-        <div className="flex items-center justify-center gap-2 py-2 shrink-0">
-          <span className="loading loading-spinner loading-sm text-primary" />
-          <span className="text-sm text-base-content/50">Loading chart data...</span>
-        </div>
-      )}
-
       {errors.length > 0 && (
         <div className="alert alert-warning shrink-0">
           <span>Some series failed to load: {errors.map(q => q.error instanceof Error ? q.error.message : 'Unknown error').join(', ')}</span>
         </div>
       )}
 
-      <ReactECharts
-        option={option}
-        style={{ height: '100%', width: '100%' }}
-        notMerge={true}
-        lazyUpdate={true}
-      />
+      <div className="flex-1 min-h-0 relative">
+        {/* Over the chart, so that the chart does not move when it loads */}
+        {isFetching && (
+          <progress
+            className="progress progress-primary absolute top-0 left-0 w-full h-0.5 z-10"
+            aria-label="Loading chart data"
+          />
+        )}
+        <Suspense fallback={null}>
+          <EChart option={option} onBrush={handleBrush} highlight={hoveredSeries} />
+        </Suspense>
+      </div>
     </div>
   );
 }

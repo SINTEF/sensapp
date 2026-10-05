@@ -1,14 +1,22 @@
 import '@testing-library/jest-dom/vitest';
 
-// Mock echarts-for-react globally since it requires canvas in jsdom
-vi.mock('echarts-for-react', () => ({
-  default: (props: { option: unknown }) => {
-    const seriesCount = Array.isArray((props.option as Record<string, unknown>)?.series)
-      ? ((props.option as Record<string, unknown>).series as unknown[]).length
-      : 0;
+// echarts needs a canvas, which jsdom does not have.
+vi.mock('../components/EChart', () => ({
+  default: (props: { option: unknown; onBrush?: (fromMs: number, toMs: number) => void; highlight?: string | null }) => {
+    const series = (props.option as { series?: unknown[] })?.series;
     return (
-      <div data-testid="echarts" data-series-count={seriesCount}>
+      <div
+        data-testid="echarts"
+        data-series-count={Array.isArray(series) ? series.length : 0}
+        data-option={JSON.stringify(props.option)}
+        data-highlight={props.highlight ?? undefined}
+      >
         Chart
+        {/* A drag on the chart, from 00:10 to 00:20 on 2026-10-04 */}
+        <button
+          data-testid="echarts-brush"
+          onClick={() => props.onBrush?.(Date.parse('2026-10-04T00:10:00.400Z'), Date.parse('2026-10-04T00:20:00.600Z'))}
+        />
       </div>
     );
   },

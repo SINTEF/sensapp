@@ -1,44 +1,235 @@
 @import "tailwindcss";
-@import "@fontsource/roboto";
-@import "@fontsource/roboto/500.css";
-@import "@fontsource/roboto/700.css";
+
+/* One variable file for every weight, latin only (the UI is in English). */
+@font-face {
+  font-family: "Roboto Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/roboto/files/roboto-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+/* The display face, for the few words of the header that are not the logo. */
+@font-face {
+  font-family: "Sora Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("@fontsource-variable/sora/files/sora-latin-wght-normal.woff2") format("woff2-variations");
+}
 
 @plugin "daisyui" {
-  themes: light --default, dark;
+  themes: false;
   logs: false;
 }
 
+/*
+ * The colors come from the logo: its navy blue is the primary color, the grey of its dish the
+ * neutral one. The surfaces have a hint of that blue. The colors of the series are another matter
+ * (src/lib/palette.ts): they have to be told apart, not to match the logo.
+ */
 @plugin "daisyui/theme" {
   name: "light";
   default: true;
   color-scheme: light;
-  --color-primary: #2563eb;
-  --color-primary-content: #ffffff;
-  --color-secondary: #7c3aed;
-  --color-secondary-content: #ffffff;
-  --color-accent: #059669;
-  --color-accent-content: #ffffff;
-  --color-neutral: #1f2937;
   --color-base-100: #ffffff;
-  --color-base-200: #f8fafc;
-  --color-base-300: #e2e8f0;
+  --color-base-200: #f3f6fa;
+  --color-base-300: #dce4ed;
+  --color-base-content: #17222e;
+  --color-primary: #1d4f7f;
+  --color-primary-content: #ffffff;
+  --color-secondary: #5d6f83;
+  --color-secondary-content: #ffffff;
+  --color-accent: #0f7f86;
+  --color-accent-content: #ffffff;
+  --color-neutral: #1c2b3a;
+  --color-neutral-content: #f3f6fa;
+  --color-info: #2f78b8;
+  --color-info-content: #ffffff;
+  --color-success: #1f8a4c;
+  --color-success-content: #ffffff;
+  --color-warning: #d99a00;
+  --color-warning-content: #1f1600;
+  --color-error: #c93c3c;
+  --color-error-content: #ffffff;
+}
+
+@plugin "daisyui/theme" {
+  name: "dark";
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: #1d232a;
+  --color-base-200: #151a20;
+  --color-base-300: #2d3641;
+  --color-base-content: #e4eaf1;
+  --color-primary: #6aa8de;
+  --color-primary-content: #0b1a2a;
+  --color-secondary: #8fa0b3;
+  --color-secondary-content: #10161d;
+  --color-accent: #3cb4b8;
+  --color-accent-content: #08191a;
+  --color-neutral: #2d3641;
+  --color-neutral-content: #e4eaf1;
+  --color-info: #5aa0e0;
+  --color-info-content: #08182a;
+  --color-success: #3dbb78;
+  --color-success-content: #06180e;
+  --color-warning: #e0a919;
+  --color-warning-content: #1f1600;
+  --color-error: #e36767;
+  --color-error-content: #240808;
 }
 
 @theme {
-  --font-sans: Roboto, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-display: "Sora Variable", "Roboto Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-code: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: "Roboto Variable", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
+/* The page scrolls on small screens. From lg on it is one screen, and the panels scroll. */
 html, body, #root {
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
 }
 
-/* Smooth transitions for interactive elements */
-.transition-card {
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+@media (min-width: 1024px) {
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
 }
 
-/* Better table row hover */
-tr.cursor-pointer:hover td {
-  background-color: oklch(var(--color-primary) / 0.04);
+/*
+ * One look for the controls, in both themes. The borders are a hint of the text color, so they follow the
+ * theme (daisyUI's outline buttons and badges are drawn in the full text color: white frames on the dark one).
+ * Written outside the layers: they must win over daisyUI's.
+ */
+:root {
+  --control-border: color-mix(in oklab, var(--color-base-content) 18%, transparent);
+  --control-border-hover: color-mix(in oklab, var(--color-base-content) 32%, transparent);
+  --wash: color-mix(in oklab, var(--color-base-content) 7%, transparent);
 }
+
+/* A button of the bars: quiet, and tinted with the primary color when it is on */
+.btn.btn-quiet {
+  background: transparent;
+  box-shadow: none;
+  background-image: none;
+  border-color: var(--control-border);
+  color: color-mix(in oklab, var(--color-base-content) 80%, transparent);
+}
+/*
+ * A joined button overlaps its neighbor by one border, so the shared edge is one line. daisyUI skips that
+ * overlap on a disabled button, which then shows a double edge on its left: the line jumps as the state changes.
+ */
+.join > .btn.btn-quiet:not(:first-child) {
+  margin-inline-start: calc(var(--border, 1px) * -1);
+}
+.btn.btn-quiet:hover:not(:disabled) {
+  background: var(--wash);
+  border-color: var(--control-border-hover);
+}
+.btn.btn-quiet:disabled {
+  background: transparent;
+  /* daisyUI drops the end border of a disabled joined button (the last one loses its right edge) */
+  border-inline-end-width: var(--border, 1px);
+  border-color: var(--control-border);
+  color: color-mix(in oklab, var(--color-base-content) 30%, transparent);
+}
+.btn.btn-quiet.btn-active,
+.btn.btn-quiet[aria-pressed="true"] {
+  background: color-mix(in oklab, var(--color-primary) 16%, transparent);
+  border-color: color-mix(in oklab, var(--color-primary) 55%, transparent);
+  color: var(--color-primary);
+}
+
+/* The ghost buttons (API Docs, Clear) get the wash of the quiet ones, nothing else */
+.btn.btn-ghost:hover:not(:disabled) {
+  background: var(--wash);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* A label or a dimension: a wash, no frame */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  border-radius: 0.25rem;
+  padding: 0.0625rem 0.375rem;
+  font-size: 0.6875rem;
+  line-height: 1.25rem;
+  background: var(--wash);
+  color: color-mix(in oklab, var(--color-base-content) 75%, transparent);
+  white-space: nowrap;
+}
+
+/* The fields share the border of the buttons */
+.input,
+.select {
+  border-color: var(--control-border);
+  box-shadow: none;
+}
+.input:hover,
+.select:hover {
+  border-color: var(--control-border-hover);
+}
+.input:focus,
+.input:focus-within,
+.select:focus {
+  border-color: var(--color-primary);
+}
+
+/* Thin scrollbars that are not brighter than the page */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--color-base-content) 28%, transparent) transparent;
+}
+
+/* The face of code, loaded only when a snippet is shown. */
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+/*
+ * Code is always on a dark ground, in both themes: the colors do not change with the theme, so they
+ * are written once (the palette is One Dark's, on a navy that sits with the logo's).
+ */
+.code-block {
+  --code-bg: #0f1722;
+  --code-fg: #d6deeb;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-code);
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  font-variant-ligatures: none;
+  tab-size: 4;
+  /* Long lines wrap (no sideways scroll); a token with no space, such as a uuid or an address, breaks where it must */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.code-block .hljs-comment { color: #8a98aa; font-style: italic; }
+.code-block .hljs-keyword,
+.code-block .hljs-doctag { color: #c792ea; }
+.code-block .hljs-string,
+.code-block .hljs-regexp { color: #a5d38a; }
+.code-block .hljs-number,
+.code-block .hljs-literal { color: #f0a972; }
+.code-block .hljs-built_in,
+.code-block .hljs-type { color: #e8c874; }
+.code-block .hljs-title,
+.code-block .hljs-title.function_ { color: #7ab8f5; }
+.code-block .hljs-title.class_ { color: #e8c874; }
+.code-block .hljs-variable,
+.code-block .hljs-template-variable,
+.code-block .hljs-params { color: #ef8b94; }
+.code-block .hljs-attr,
+.code-block .hljs-attribute,
+.code-block .hljs-meta,
+.code-block .hljs-symbol { color: #5fc8cf; }
+.code-block .hljs-operator,
+.code-block .hljs-punctuation { color: #9fb0c4; }

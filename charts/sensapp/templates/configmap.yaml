@@ -6,6 +6,9 @@ metadata:
     {{- include "sensapp.labels" . | nindent 4 }}
 data:
   SENSAPP_PORT: {{ .Values.service.port | quote }}
+  {{- if .Values.auth.disabled }}
+  SENSAPP_AUTH_DISABLED: "true"
+  {{- end }}
   {{- range $key, $value := .Values.env }}
   {{- if ne $key "SENSAPP_PORT" }}
   {{ $key }}: {{ $value | quote }}

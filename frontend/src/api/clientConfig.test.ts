@@ -1,5 +1,77 @@
-import { describe, it, expect } from 'vitest';
-import { extractErrorMessage } from './clientConfig';
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { client } from '../client/client.gen';
+import { listMetrics } from '../client';
+import { ApiError, configureApiClient, extractErrorMessage, unwrap } from './clientConfig';
+import { useAuthStore } from '../stores/useAuthStore';
+
+describe('ApiError and unwrap', () => {
+  it('returns the data of a successful call', () => {
+    expect(unwrap({ data: { ok: true } })).toEqual({ ok: true });
+  });
+
+  it('throws an ApiError with the status and the message of the server', () => {
+    try {
+      unwrap({ error: 'Invalid token: ExpiredSignature', response: { status: 401 } });
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).message).toBe('Invalid token: ExpiredSignature');
+      expect((error as ApiError).status).toBe(401);
+      expect((error as ApiError).isAuthError).toBe(true);
+    }
+  });
+
+  it('knows which errors are about authentication', () => {
+    expect(new ApiError('no', 401).isAuthError).toBe(true);
+    expect(new ApiError('no', 403).isAuthError).toBe(true);
+    expect(new ApiError('no', 400).isAuthError).toBe(false);
+    expect(new ApiError('no', 500).isAuthError).toBe(false);
+    expect(new ApiError('no').isAuthError).toBe(false);
+  });
+});
+
+describe('the configured API client', () => {
+  let authorization: string | null | undefined;
+  let status = 200;
+
+  beforeAll(() => {
+    configureApiClient();
+    client.setConfig({
+      baseUrl: 'http://example.test',
+      fetch: async (input) => {
+        authorization = (input as Request).headers.get('Authorization');
+        return status === 200
+          ? new Response('{}', { headers: { 'Content-Type': 'application/json' } })
+          : new Response('Invalid token: ExpiredSignature', { status });
+      },
+    });
+  });
+
+  beforeEach(() => {
+    authorization = undefined;
+    status = 200;
+    useAuthStore.setState({ token: null });
+  });
+
+  it('sends no Authorization header without a token', async () => {
+    await listMetrics();
+    expect(authorization).toBeNull();
+  });
+
+  it('sends the token as a Bearer token', async () => {
+    useAuthStore.getState().signIn('the.jwt.token');
+    await listMetrics();
+    expect(authorization).toBe('Bearer the.jwt.token');
+  });
+
+  it('turns a refused request into an authentication error', async () => {
+    status = 401;
+    const result = await listMetrics();
+    expect(() => unwrap(result)).toThrow(
+      expect.objectContaining({ status: 401, message: 'Invalid token: ExpiredSignature' }),
+    );
+  });
+});
 
 describe('extractErrorMessage', () => {
   it('extracts message from Error objects', () => {

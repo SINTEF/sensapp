@@ -14,13 +14,22 @@
   echo http://127.0.0.1:3000
 {{- end }}
 
-{{- if .Values.auth.jwtSecret }}
-2. JWT authentication is ENABLED.
-   Generate a token with:
-     sensapp generate-token <subject> --scope readwrite --duration 3600
+{{- if and .Values.auth.disabled (not .Values.auth.jwtSecret) (not .Values.auth.existingSecret) }}
+2. Authentication is DISABLED (auth.disabled): every endpoint is open to whoever can reach it.
+   To require tokens, remove auth.disabled.
+{{- else }}
+2. Authentication is ENABLED: the endpoints need a token.
+{{- if .Values.auth.existingSecret }}
+   The secret is the key {{ .Values.auth.existingSecretKey }} of the Secret {{ .Values.auth.existingSecret }}.
+{{- else if .Values.auth.jwtSecret }}
+   The secret is auth.jwtSecret.
+{{- else }}
+   The chart made the secret, and keeps it across upgrades.
+{{- end }}
+   Make an admin token (it makes the other tokens, in the UI under Credentials or with POST /api/v1/admin/tokens):
+     kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "sensapp.fullname" . }} -- sensapp generate-token me --scope read,admin
+   Or a token for a client:
+     kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "sensapp.fullname" . }} -- sensapp generate-token <subject> --scope readwrite --duration 86400
    Use it in requests:
      curl -H "Authorization: Bearer <token>" http://<sensapp-url>/metrics
-{{- else }}
-2. JWT authentication is DISABLED. All endpoints are open.
-   To enable, set auth.jwtSecret to a random string (≥ 32 chars).
 {{- end }}

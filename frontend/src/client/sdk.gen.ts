@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { FrontpageData, FrontpageResponses, GetSeriesDataData, GetSeriesDataErrors, GetSeriesDataResponses, ListMetricsData, ListMetricsResponses, ListSeriesData, ListSeriesResponses, LivenessData, LivenessResponses, PrometheusMetricsData, PrometheusMetricsResponses, PrometheusRemoteReadData, PrometheusRemoteReadErrors, PrometheusRemoteReadResponses, PublishInfluxdbData, PublishInfluxdbErrors, PublishInfluxdbResponses, PublishPrometheusData, PublishPrometheusErrors, PublishPrometheusResponses, PublishSensorsDataData, PublishSensorsDataErrors, PublishSensorsDataResponses, ReadinessData, ReadinessErrors, ReadinessResponses, SimplePromqlQueryData, SimplePromqlQueryErrors, SimplePromqlQueryResponses, VacuumDatabaseData, VacuumDatabaseErrors, VacuumDatabaseResponses } from './types.gen';
+import type { CreateTokenData, CreateTokenErrors, CreateTokenResponses, DeleteSeriesData, DeleteSeriesErrors, DeleteSeriesResponses, DeleteSeriesSamplesData, DeleteSeriesSamplesErrors, DeleteSeriesSamplesResponses, FrontpageData, FrontpageResponses, GetSeriesAvailabilityData, GetSeriesAvailabilityErrors, GetSeriesAvailabilityResponses, GetSeriesDataData, GetSeriesDataErrors, GetSeriesDataResponses, GetSeriesLastSampleData, GetSeriesLastSampleErrors, GetSeriesLastSampleResponses, ListMetricsData, ListMetricsErrors, ListMetricsResponses, ListSeriesData, ListSeriesErrors, ListSeriesResponses, LivenessData, LivenessResponses, PrometheusMetricsData, PrometheusMetricsResponses, PrometheusRemoteReadData, PrometheusRemoteReadErrors, PrometheusRemoteReadResponses, PublishInfluxdbData, PublishInfluxdbErrors, PublishInfluxdbResponses, PublishPrometheusData, PublishPrometheusErrors, PublishPrometheusResponses, PublishSensorsDataData, PublishSensorsDataErrors, PublishSensorsDataResponses, ReadinessData, ReadinessErrors, ReadinessResponses, SimplePromqlQueryData, SimplePromqlQueryErrors, SimplePromqlQueryResponses, VacuumDatabaseData, VacuumDatabaseErrors, VacuumDatabaseResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -21,12 +21,37 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 export const frontpage = <ThrowOnError extends boolean = false>(options?: Options<FrontpageData, ThrowOnError>): RequestResult<FrontpageResponses, unknown, ThrowOnError> => (options?.client ?? client).get<FrontpageResponses, unknown, ThrowOnError>({ url: '/', ...options });
 
 /**
+ * Create a token
+ *
+ * Makes a signed token for a client. SensApp does not keep tokens: the answer is the only time
+ * the token is shown, it cannot be listed or revoked, and it is valid until it expires or until
+ * the secret that signed it is rotated out (see `SENSAPP_JWT_PREVIOUS_SECRETS`). Requires the
+ * `admin` scope. An `admin` token cannot make another `admin` token: those come from
+ * `sensapp generate-token`, which needs the secret. Not available when authentication is disabled.
+ */
+export const createToken = <ThrowOnError extends boolean = false>(options: Options<CreateTokenData, ThrowOnError>): RequestResult<CreateTokenResponses, CreateTokenErrors, ThrowOnError> => (options.client ?? client).post<CreateTokenResponses, CreateTokenErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/admin/tokens',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * Database Vacuuming
  *
- * Cleans up and optimizes the database by removing unused data and reclaiming space.
- * (only if supported by the underlying storage engine).
+ * Removes the duplicate samples (a retried write, a client that sends twice, a crash in the middle
+ * of a request leave some), then cleans up and optimizes the database and reclaims space, as far as
+ * the storage backend supports it. Only exact duplicates go: two different values at the same
+ * timestamp are both kept. Requires the `delete` scope, and a token without a sensor allow list.
  */
-export const vacuumDatabase = <ThrowOnError extends boolean = false>(options?: Options<VacuumDatabaseData, ThrowOnError>): RequestResult<VacuumDatabaseResponses, VacuumDatabaseErrors, ThrowOnError> => (options?.client ?? client).post<VacuumDatabaseResponses, VacuumDatabaseErrors, ThrowOnError>({ url: '/api/v1/admin/vacuum', ...options });
+export const vacuumDatabase = <ThrowOnError extends boolean = false>(options?: Options<VacuumDatabaseData, ThrowOnError>): RequestResult<VacuumDatabaseResponses, VacuumDatabaseErrors, ThrowOnError> => (options?.client ?? client).post<VacuumDatabaseResponses, VacuumDatabaseErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/admin/vacuum',
+    ...options
+});
 
 /**
  * Prometheus Remote Read API.
@@ -35,7 +60,11 @@ export const vacuumDatabase = <ThrowOnError extends boolean = false>(options?: O
  *
  * It follows the [Prometheus Remote Read specification](https://prometheus.io/docs/prometheus/latest/querying/remote_read_api/).
  */
-export const prometheusRemoteRead = <ThrowOnError extends boolean = false>(options: Options<PrometheusRemoteReadData, ThrowOnError>): RequestResult<PrometheusRemoteReadResponses, PrometheusRemoteReadErrors, ThrowOnError> => (options.client ?? client).post<PrometheusRemoteReadResponses, PrometheusRemoteReadErrors, ThrowOnError>({ url: '/api/v1/prometheus_remote_read', ...options });
+export const prometheusRemoteRead = <ThrowOnError extends boolean = false>(options: Options<PrometheusRemoteReadData, ThrowOnError>): RequestResult<PrometheusRemoteReadResponses, PrometheusRemoteReadErrors, ThrowOnError> => (options.client ?? client).post<PrometheusRemoteReadResponses, PrometheusRemoteReadErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/prometheus_remote_read',
+    ...options
+});
 
 /**
  * Prometheus Remote Write API.
@@ -44,7 +73,11 @@ export const prometheusRemoteRead = <ThrowOnError extends boolean = false>(optio
  *
  * It follows the [Prometheus Remote Write specification](https://prometheus.io/docs/concepts/remote_write_spec/).
  */
-export const publishPrometheus = <ThrowOnError extends boolean = false>(options: Options<PublishPrometheusData, ThrowOnError>): RequestResult<PublishPrometheusResponses, PublishPrometheusErrors, ThrowOnError> => (options.client ?? client).post<PublishPrometheusResponses, PublishPrometheusErrors, ThrowOnError>({ url: '/api/v1/prometheus_remote_write', ...options });
+export const publishPrometheus = <ThrowOnError extends boolean = false>(options: Options<PublishPrometheusData, ThrowOnError>): RequestResult<PublishPrometheusResponses, PublishPrometheusErrors, ThrowOnError> => (options.client ?? client).post<PublishPrometheusResponses, PublishPrometheusErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/prometheus_remote_write',
+    ...options
+});
 
 /**
  * Simple PromQL query endpoint.
@@ -59,7 +92,11 @@ export const publishPrometheus = <ThrowOnError extends boolean = false>(options:
  * - Range query: `GET /api/v1/query?query=my_metric[5m]`
  * - With format: `GET /api/v1/query?query=my_metric&format=csv`
  */
-export const simplePromqlQuery = <ThrowOnError extends boolean = false>(options: Options<SimplePromqlQueryData, ThrowOnError>): RequestResult<SimplePromqlQueryResponses, SimplePromqlQueryErrors, ThrowOnError> => (options.client ?? client).get<SimplePromqlQueryResponses, SimplePromqlQueryErrors, ThrowOnError>({ url: '/api/v1/query', ...options });
+export const simplePromqlQuery = <ThrowOnError extends boolean = false>(options: Options<SimplePromqlQueryData, ThrowOnError>): RequestResult<SimplePromqlQueryResponses, SimplePromqlQueryErrors, ThrowOnError> => (options.client ?? client).get<SimplePromqlQueryResponses, SimplePromqlQueryErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/query',
+    ...options
+});
 
 /**
  * InfluxDB Compatible Write API.
@@ -69,6 +106,7 @@ export const simplePromqlQuery = <ThrowOnError extends boolean = false>(options:
  */
 export const publishInfluxdb = <ThrowOnError extends boolean = false>(options: Options<PublishInfluxdbData, ThrowOnError>): RequestResult<PublishInfluxdbResponses, PublishInfluxdbErrors, ThrowOnError> => (options.client ?? client).post<PublishInfluxdbResponses, PublishInfluxdbErrors, ThrowOnError>({
     bodySerializer: null,
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v2/write',
     ...options,
     headers: {
@@ -96,9 +134,17 @@ export const readiness = <ThrowOnError extends boolean = false>(options?: Option
 /**
  * List unique metrics (measurement types) with aggregated information in DCAT catalog format.
  */
-export const listMetrics = <ThrowOnError extends boolean = false>(options?: Options<ListMetricsData, ThrowOnError>): RequestResult<ListMetricsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListMetricsResponses, unknown, ThrowOnError>({ url: '/metrics', ...options });
+export const listMetrics = <ThrowOnError extends boolean = false>(options?: Options<ListMetricsData, ThrowOnError>): RequestResult<ListMetricsResponses, ListMetricsErrors, ThrowOnError> => (options?.client ?? client).get<ListMetricsResponses, ListMetricsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/metrics',
+    ...options
+});
 
-export const prometheusMetrics = <ThrowOnError extends boolean = false>(options?: Options<PrometheusMetricsData, ThrowOnError>): RequestResult<PrometheusMetricsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<PrometheusMetricsResponses, unknown, ThrowOnError>({ url: '/prometheus/metrics', ...options });
+export const prometheusMetrics = <ThrowOnError extends boolean = false>(options?: Options<PrometheusMetricsData, ThrowOnError>): RequestResult<PrometheusMetricsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<PrometheusMetricsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/prometheus/metrics',
+    ...options
+});
 
 /**
  * SensApp native data ingestion API supporting multiple formats.
@@ -106,12 +152,13 @@ export const prometheusMetrics = <ThrowOnError extends boolean = false>(options?
  * Accepts sensor data in one of the following formats:
  * - **SenML JSON** (RFC 8428): `Content-Type: application/json`
  * - **CSV**: `Content-Type: text/csv` or `application/csv`
- * - **Apache Arrow IPC**: `Content-Type: application/vnd.apache.arrow.file`
+ * - **Apache Arrow IPC**: `Content-Type: application/vnd.apache.arrow.stream`
  *
  * If no Content-Type header is provided, defaults to CSV format.
  */
 export const publishSensorsData = <ThrowOnError extends boolean = false>(options: Options<PublishSensorsDataData, ThrowOnError>): RequestResult<PublishSensorsDataResponses, PublishSensorsDataErrors, ThrowOnError> => (options.client ?? client).post<PublishSensorsDataResponses, PublishSensorsDataErrors, ThrowOnError>({
     bodySerializer: null,
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/publish',
     ...options,
     headers: {
@@ -123,9 +170,61 @@ export const publishSensorsData = <ThrowOnError extends boolean = false>(options
 /**
  * List all series (time series) in DCAT catalog format.
  */
-export const listSeries = <ThrowOnError extends boolean = false>(options?: Options<ListSeriesData, ThrowOnError>): RequestResult<ListSeriesResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListSeriesResponses, unknown, ThrowOnError>({ url: '/series', ...options });
+export const listSeries = <ThrowOnError extends boolean = false>(options?: Options<ListSeriesData, ThrowOnError>): RequestResult<ListSeriesResponses, ListSeriesErrors, ThrowOnError> => (options?.client ?? client).get<ListSeriesResponses, ListSeriesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/series',
+    ...options
+});
+
+/**
+ * Delete a series: all its samples, its labels and the sensor itself.
+ *
+ * Publishing the same sensor again recreates it with the same UUID.
+ * Requires the `delete` scope when authentication is enabled.
+ */
+export const deleteSeries = <ThrowOnError extends boolean = false>(options: Options<DeleteSeriesData, ThrowOnError>): RequestResult<DeleteSeriesResponses, DeleteSeriesErrors, ThrowOnError> => (options.client ?? client).delete<DeleteSeriesResponses, DeleteSeriesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/series/{series_uuid}',
+    ...options
+});
 
 /**
  * Get series data in various formats based on query parameter.
  */
-export const getSeriesData = <ThrowOnError extends boolean = false>(options: Options<GetSeriesDataData, ThrowOnError>): RequestResult<GetSeriesDataResponses, GetSeriesDataErrors, ThrowOnError> => (options.client ?? client).get<GetSeriesDataResponses, GetSeriesDataErrors, ThrowOnError>({ url: '/series/{series_uuid}', ...options });
+export const getSeriesData = <ThrowOnError extends boolean = false>(options: Options<GetSeriesDataData, ThrowOnError>): RequestResult<GetSeriesDataResponses, GetSeriesDataErrors, ThrowOnError> => (options.client ?? client).get<GetSeriesDataResponses, GetSeriesDataErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/series/{series_uuid}',
+    ...options
+});
+
+/**
+ * Get presence and optional bucket coverage for a series over a time window.
+ */
+export const getSeriesAvailability = <ThrowOnError extends boolean = false>(options: Options<GetSeriesAvailabilityData, ThrowOnError>): RequestResult<GetSeriesAvailabilityResponses, GetSeriesAvailabilityErrors, ThrowOnError> => (options.client ?? client).get<GetSeriesAvailabilityResponses, GetSeriesAvailabilityErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/series/{series_uuid}/availability',
+    ...options
+});
+
+/**
+ * Get the most recent sample for a series, optionally within a bounded time window.
+ */
+export const getSeriesLastSample = <ThrowOnError extends boolean = false>(options: Options<GetSeriesLastSampleData, ThrowOnError>): RequestResult<GetSeriesLastSampleResponses, GetSeriesLastSampleErrors, ThrowOnError> => (options.client ?? client).get<GetSeriesLastSampleResponses, GetSeriesLastSampleErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/series/{series_uuid}/last',
+    ...options
+});
+
+/**
+ * Delete the samples of a series between `start` and `end`, both inclusive.
+ *
+ * Both bounds are required, so that a request cannot wipe a whole series by
+ * accident (use `DELETE /series/{series_uuid}` for that). `start` equal to `end`
+ * deletes the samples at one exact timestamp. The sensor and its labels are kept.
+ * Requires the `delete` scope when authentication is enabled.
+ */
+export const deleteSeriesSamples = <ThrowOnError extends boolean = false>(options: Options<DeleteSeriesSamplesData, ThrowOnError>): RequestResult<DeleteSeriesSamplesResponses, DeleteSeriesSamplesErrors, ThrowOnError> => (options.client ?? client).delete<DeleteSeriesSamplesResponses, DeleteSeriesSamplesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/series/{series_uuid}/samples',
+    ...options
+});

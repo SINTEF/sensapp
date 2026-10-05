@@ -209,3 +209,18 @@ In the current version, the geolocalised data doesn't really mind the coordinate
 ## TimeStamps are in microseconds
 
 We use microsecond timestamps, as it provides a good compromise between precision and storage size. Some time-series database go down to nanoseconds but then the minimum and maximum timestamps are too close in times using 64 bits integers. It should be possible to have historical data and prediction data in SensApp. We haven't identified use cases that would require nanosecond precision in our research. People with such use cases should consider patching SensApp or using another solution.
+
+## Prometheus remote read and its hints
+
+A remote read query carries the hints of the PromQL query that asks for it: the function (`avg_over_time`), the `step` between two evaluations and the `range` of the `[1h]`. Prometheus does not trust the answer to have applied them: it evaluates the query again on the samples it receives. SensApp therefore only aggregates in the database (one bucket per `step`) when this second evaluation gives the result of the raw samples, and sends the raw samples otherwise, within the selector limits of [HTTP_LIMITS.md](HTTP_LIMITS.md).
+
+| Hint | Answered with |
+| --- | --- |
+| `avg_over_time`, `min_over_time`, `max_over_time`, `sum_over_time`, `first_over_time`, `last_over_time`, with a `range` that is a whole number of steps | buckets of one `step`, which start where the window of the first evaluation starts |
+| `count_over_time` | raw samples (Prometheus would count the buckets) |
+| a `range` shorter than the `step`, or not a whole number of steps | raw samples (the bucket would be wider than the window) |
+| `sum`, `avg`, `min`, `max`, `count` across series, `rate`, plain selectors | raw samples (the value at the evaluation time is needed, not an aggregate of the following step) |
+
+When the range is several steps, `min`, `max`, `sum`, `first` and `last` are exact. `avg_over_time` averages the averages of the buckets of its window: exact when they hold as many samples each, an approximation otherwise (a series with gaps, the edges of the data). This is a compromise, the price of sending a year of data at a one hour step as 8,760 values instead of all the samples.
+
+This was measured with real Prometheus 3.8, 3.13 (LTS) and 3.15 (`tests/prometheus_live`). Prometheus 3 evaluates the window `(t - range, t]` and asks from `t - range + 1 ms`; Prometheus 2 is not supported.

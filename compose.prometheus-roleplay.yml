@@ -8,6 +8,8 @@ services:
     container_name: sensapp-roleplay
     environment:
       SENSAPP_ENDPOINT: 0.0.0.0
+      # A demo on a laptop, with clients that send no token
+      SENSAPP_AUTH_DISABLED: "true"
       SENSAPP_PORT: 3017
       SENSAPP_STORAGE_CONNECTION_STRING: duckdb:///workspaces/sensapp/python/roleplay-datascience/roleplay-session.duckdb
       RUST_LOG: info

@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMetrics } from '../hooks/useMetrics';
 import type { DcatDataset } from '../hooks/useMetrics';
 import { useSelectionStore } from '../stores/useSelectionStore';
+import { ErrorAlert, Loading } from './Feedback';
+import { Panel } from './Panel';
 
 const SENSOR_TYPES = [
   '',
@@ -27,7 +29,22 @@ export function MetricsTable() {
 
   const metrics = data?.['dcat:dataset'] ?? [];
 
+  // The page opened on a metric (the address says which): the list starts there, once. A click is on
+  // a row that is on screen, the list does not move for it.
+  const list = useRef<HTMLDivElement>(null);
+  const placed = useRef(false);
+  useEffect(() => {
+    if (placed.current || !selectedMetric || !list.current) return;
+    const row = list.current.querySelector<HTMLElement>('[data-selected="true"]');
+    if (!row) return;
+    placed.current = true;
+    const box = list.current.getBoundingClientRect();
+    const rect = row.getBoundingClientRect();
+    list.current.scrollTop += rect.top - box.top - (box.height - rect.height) / 2;
+  }, [data, selectedMetric]);
+
   function handleSelectMetric(metric: DcatDataset) {
+    placed.current = true;
     const metricName = metric['dct:title'];
     if (selectedMetric === metricName) {
       setSelectedMetric(null);
@@ -36,8 +53,9 @@ export function MetricsTable() {
     }
   }
 
+  // The server says `Float`, the filter above `float`
   function sensorTypeBadgeClass(type: string): string {
-    switch (type) {
+    switch (type.toLowerCase()) {
       case 'float':
       case 'numeric':
         return 'badge-primary';
@@ -54,50 +72,42 @@ export function MetricsTable() {
     }
   }
 
+  const controls = (
+    <>
+      <input
+        type="text"
+        placeholder="Filter by name..."
+        aria-label="Filter by name"
+        className="input input-xs text-xs w-40 h-7"
+        value={nameFilter}
+        onChange={(e) => setNameFilter(e.target.value)}
+      />
+      <select
+        className="select select-xs text-xs h-7 w-auto"
+        aria-label="Filter by type"
+        value={typeFilter}
+        onChange={(e) => setTypeFilter(e.target.value)}
+      >
+        {SENSOR_TYPES.map((t) => (
+          <option key={t} value={t}>
+            {t || 'All types'}
+          </option>
+        ))}
+      </select>
+      {!isLoading && !error && (
+        <span className="text-xs text-base-content/40">
+          {metrics.length} metric{metrics.length !== 1 ? 's' : ''}
+        </span>
+      )}
+    </>
+  );
+
   return (
-    <div className="flex flex-col h-full gap-2">
-      <div className="flex flex-wrap gap-2 items-center shrink-0">
-        <input
-          type="text"
-          placeholder="Filter by name..."
-          className="input input-bordered input-xs text-xs flex-1 min-w-36 max-w-xs h-7"
-          value={nameFilter}
-          onChange={(e) => setNameFilter(e.target.value)}
-        />
-        <select
-          className="select select-bordered select-xs text-xs h-7"
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-        >
-          {SENSOR_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t || 'All types'}
-            </option>
-          ))}
-        </select>
-        {!isLoading && !error && (
-          <span className="text-xs text-base-content/40">
-            {metrics.length} metric{metrics.length !== 1 ? 's' : ''}
-          </span>
-        )}
-      </div>
+    <Panel title="Metrics" controls={controls}>
+      <div ref={list} className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
+      {isLoading && <Loading />}
 
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
-      {isLoading && (
-        <div className="flex items-center justify-center gap-2 py-6">
-          <span className="loading loading-spinner loading-xs text-primary" />
-          <span className="text-xs text-base-content/50">Loading...</span>
-        </div>
-      )}
-
-      {error && (
-        <div className="alert alert-error">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-          </svg>
-          <span>Failed to load metrics: {error instanceof Error ? error.message : 'Unknown error'}</span>
-        </div>
-      )}
+      {error && <ErrorAlert what="metrics" error={error} />}
 
       {!isLoading && !error && metrics.length === 0 && (
         <div className="text-center py-6">
@@ -118,6 +128,9 @@ export function MetricsTable() {
           <table className="table table-xs w-full">
             <thead>
               <tr className="text-xs text-base-content/50">
+                <th className="w-8">
+                  <span className="sr-only">Select</span>
+                </th>
                 <th className="font-medium">Metric Name</th>
                 <th className="font-medium">Type</th>
                 <th className="font-medium">Series</th>
@@ -132,32 +145,50 @@ export function MetricsTable() {
                 const dimensions = metric['sensor:labelDimensions'] ?? [];
                 return (
                   <tr
-                    key={metric['@id']}
+                    key={`${name}/${metric['sensor:type']}`}
                     className={`cursor-pointer transition-colors ${
                       isSelected
                         ? 'bg-primary/8 border-l-2 border-primary'
-                        : 'hover:bg-base-200/60'
+                        : 'hover:bg-base-content/5'
                     }`}
+                    data-selected={isSelected}
                     onClick={() => handleSelectMetric(metric)}
                   >
                     <td>
-                      <span className="font-mono text-xs font-medium">{name}</span>
-                      {metric['sensor:unit'] && (
-                        <span className="text-xs text-base-content/40 ml-1">({metric['sensor:unit']})</span>
-                      )}
+                      {/* The metric that is open, as the checkbox of a series is a series that is drawn */}
+                      <input
+                        type="radio"
+                        className="radio radio-primary radio-sm"
+                        aria-label={`Select metric ${name}`}
+                        checked={isSelected}
+                        onChange={() => {}}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectMetric(metric);
+                        }}
+                      />
+                    </td>
+                    {/* Takes what the other columns leave, and cuts the name there (`max-w-0` is what lets it) */}
+                    <td className="w-2/5 max-w-0">
+                      <div className="truncate" title={name}>
+                        <span className="font-mono text-xs font-medium">{name}</span>
+                        {metric['sensor:unit'] && (
+                          <span className="text-xs text-base-content/40 ml-1">({metric['sensor:unit']})</span>
+                        )}
+                      </div>
                     </td>
                     <td>
-                      <span className={`badge badge-sm ${sensorTypeBadgeClass(metric['sensor:type'])}`}>
-                        {metric['sensor:type']}
+                      <span className={`badge badge-sm badge-soft ${sensorTypeBadgeClass(metric['sensor:type'])}`}>
+                        {metric['sensor:type'].toLowerCase()}
                       </span>
                     </td>
                     <td className="tabular-nums text-xs">
                       {seriesCount ?? '—'}
                     </td>
                     <td className="hidden sm:table-cell">
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1 max-w-72">
                         {dimensions.slice(0, 5).map((dim) => (
-                          <span key={dim} className="badge badge-xs badge-outline font-mono">
+                          <span key={dim} className="chip font-mono">
                             {dim}
                           </span>
                         ))}
@@ -174,6 +205,6 @@ export function MetricsTable() {
         </div>
       )}
       </div>
-    </div>
+    </Panel>
   );
 }

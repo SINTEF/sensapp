@@ -88,6 +88,7 @@ fn verify_headers(headers: &HeaderMap) -> Result<(), AppError> {
 #[utoipa::path(
     post,
     path = "/api/v1/prometheus_remote_write",
+    security(("bearer" = ["write"])),
     tag = "Prometheus",
     request_body(
         content_type = "application/x-protobuf",

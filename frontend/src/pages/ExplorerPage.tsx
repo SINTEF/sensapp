@@ -1,29 +1,27 @@
+import { ChartOptions } from '../components/ChartOptions';
 import { MetricsTable } from '../components/MetricsTable';
 import { SeriesTable } from '../components/SeriesTable';
 import { TimeSeriesChart } from '../components/TimeSeriesChart';
 import { TimeRangeSelector } from '../components/TimeRangeSelector';
+import { useLiveRange } from '../hooks/useLiveRange';
+import { useUrlState } from '../hooks/useUrlState';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
 export function ExplorerPage() {
-  const { selectedMetric, selectedSeries, clearSelectedSeries } =
-    useSelectionStore();
+  const { selectedMetric, selectedSeries } = useSelectionStore();
+  useUrlState();
+  useLiveRange();
 
   return (
-    <div className="flex flex-col gap-3 h-full">
-      {/* Chart + Time Range — always on top, à la InfluxDB */}
+    <div className="flex flex-col gap-3 lg:h-full">
+      {/* Chart: the window and the drawing are chosen in its header, which keeps the room for the chart */}
       <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm shrink-0">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 border-b border-base-300">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 border-b border-base-300">
           <h2 className="text-sm font-semibold">Chart</h2>
-          {selectedSeries.length > 0 && (
-            <span className="text-xs text-base-content/40">
-              {selectedSeries.length} series
-            </span>
-          )}
-          <div className="ml-auto">
-            <TimeRangeSelector />
-          </div>
+          <ChartOptions />
+          <TimeRangeSelector />
         </div>
-        <div className="px-2 py-1" style={{ height: '260px' }}>
+        <div className="px-2 py-1" style={{ height: 'clamp(260px, 40vh, 640px)' }}>
           {selectedSeries.length > 0 ? (
             <TimeSeriesChart />
           ) : (
@@ -42,48 +40,10 @@ export function ExplorerPage() {
       </section>
 
       {/* Metrics + Series side-by-side below the chart */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0">
-        {/* Metrics panel */}
-        <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm flex flex-col min-h-0">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-base-300 shrink-0">
-            <h2 className="text-sm font-semibold">Metrics</h2>
-            <div className="btn btn-ghost btn-xs invisible" aria-hidden="true" />
-          </div>
-          <div className="p-3 pt-2 flex-1 min-h-0 flex flex-col">
-            <MetricsTable />
-          </div>
-        </section>
-
-        {/* Series panel */}
-        <section className="bg-base-100 rounded-lg border border-base-300 shadow-sm flex flex-col min-h-0">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-base-300 shrink-0">
-            <h2 className="text-sm font-semibold">
-              {selectedMetric ? (
-                <>
-                  Series{' '}
-                  <code className="text-primary bg-primary/5 px-1 py-0.5 rounded text-xs font-mono">{selectedMetric}</code>
-                </>
-              ) : (
-                'Series'
-              )}
-            </h2>
-            <button
-              className={`btn btn-ghost btn-xs text-base-content/60 ${selectedSeries.length === 0 ? 'invisible' : ''}`}
-              onClick={clearSelectedSeries}
-            >
-              Clear ({selectedSeries.length})
-            </button>
-          </div>
-          <div className="p-3 pt-2 flex-1 min-h-0 flex flex-col">
-            {selectedMetric ? (
-              <SeriesTable />
-            ) : (
-              <div className="text-center py-8 text-base-content/30">
-                <p className="text-sm">Select a metric to browse series</p>
-              </div>
-            )}
-          </div>
-        </section>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 lg:flex-1 lg:min-h-0">
+        <MetricsTable />
+        {/* A new metric is a new list: nothing of the sort or the selector stays */}
+        <SeriesTable key={selectedMetric ?? ''} />
       </div>
     </div>
   );

@@ -52,3 +52,20 @@ Supported URL forms in the default container image include:
 | ClickHouse HTTPS | `clickhouses://user:password@clickhouse.example.com:8443/sensapp` |
 
 For a quick setup, you can set `storage.connectionString` directly instead of referencing a Secret. Helm stores that value in the release configuration, so use an existing Secret for credentials. External databases own their storage and lifecycle; leave `persistence.enabled=false` for these backends.
+
+## Authentication
+
+SensApp does not run open: the container image listens on every address, so it refuses to start without a secret. By default the chart **makes a random secret on the first install** and keeps it across upgrades (it reads it back from the Secret of the release). Make an admin token, which makes the other tokens in the UI (Credentials tab):
+
+```bash
+kubectl exec deploy/sensapp -- sensapp generate-token me --scope read,admin
+```
+
+| Value | Effect |
+| --- | --- |
+| `auth.jwtSecret` | A secret of your choice (at least 32 characters). Stored in the Secret of the release and in the release values: prefer `existingSecret`. |
+| `auth.existingSecret`, `auth.existingSecretKey` | A Secret of yours holding `SENSAPP_JWT_SECRET`. Takes precedence over `jwtSecret`. |
+| `auth.previousSecrets` | Comma-separated secrets that still verify tokens but never sign: the way to rotate the secret, see [JWT_AUTH.md](../../docs/JWT_AUTH.md#rotating-the-secret-and-revoking-tokens). |
+| `auth.disabled` | Every endpoint is open (`SENSAPP_AUTH_DISABLED`), for a network that authenticates in front of SensApp. Ignored when a secret is given. |
+
+The made secret needs the chart to read the cluster (`lookup`). Tools that only render the chart (`helm template`, Argo CD) cannot, and would make a new secret at each render: for those, set `auth.jwtSecret` or `auth.existingSecret`.

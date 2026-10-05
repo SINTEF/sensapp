@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -40,6 +41,20 @@ def wait_for_readiness(base_url: str, expected_status: int, timeout: int) -> Non
     raise AssertionError(f"Readiness did not reach HTTP {expected_status}: {last_result}")
 
 
+def check_ui(base_url: str) -> None:
+    """The image ships the web UI: `/` leads to it, and the script it loads is there."""
+    status, body = request(base_url, "/")  # urllib follows the redirect to /ui/
+    if status != 200 or '<div id="root">' not in body:
+        raise AssertionError(f"The web UI is not served at /: HTTP {status}: {body[:200]}")
+    script = re.search(r'src="(/ui/assets/[^"]+\.js)"', body)
+    if not script:
+        raise AssertionError(f"The web UI page loads no script: {body[:200]}")
+    status, _ = request(base_url, script.group(1))
+    if status != 200:
+        raise AssertionError(f"The web UI script {script.group(1)} answers HTTP {status}")
+    print(f"Web UI served, with {script.group(1)}")
+
+
 def lifecycle(base_url: str) -> None:
     wait_for_readiness(base_url, 200, 120)
     metric = f"sensapp_ci_{uuid.uuid4().hex}"
@@ -65,6 +80,7 @@ def lifecycle(base_url: str) -> None:
     if status != 200 or not body.strip():
         raise AssertionError(f"Service metrics unavailable: HTTP {status}: {body}")
     print(f"Published and queried {metric}; service metrics available")
+    check_ui(base_url)
 
 
 def main() -> int:

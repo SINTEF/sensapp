@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { listSeries } from '../client';
-import { extractErrorMessage } from '../api/clientConfig';
+import { unwrap } from '../api/clientConfig';
 
 export interface SeriesLabel {
   [key: string]: string;
@@ -36,9 +36,17 @@ export interface SeriesCatalog {
   };
 }
 
+/** The cursor of the next page, in the `hydra:next` link of a page. */
+export function nextBookmark(catalog?: SeriesCatalog): string | undefined {
+  const next = catalog?.['hydra:view']?.['hydra:next'];
+  if (!next) return undefined;
+  return new URL(next, 'http://sensapp').searchParams.get('bookmark') ?? undefined;
+}
+
 export function useSeries(filters?: {
   metric?: string;
   selector?: string;
+  bookmark?: string;
 }) {
   return useQuery({
     queryKey: ['series', filters],
@@ -47,12 +55,10 @@ export function useSeries(filters?: {
         query: {
           metric: filters?.metric,
           selector: filters?.selector,
+          bookmark: filters?.bookmark,
         },
       });
-      if (result.error) {
-        throw new Error(extractErrorMessage(result.error));
-      }
-      return result.data as unknown as SeriesCatalog;
+      return unwrap(result) as unknown as SeriesCatalog;
     },
     enabled: !!filters?.metric || !!filters?.selector,
   });

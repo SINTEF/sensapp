@@ -80,7 +80,7 @@ No action is needed.
 
 ## Authorization
 
-With [JWT authentication](JWT_AUTH.md) enabled, deleting requires the `delete` scope.
+With [authentication](JWT_AUTH.md) on, deleting requires the `delete` scope.
 The default `read write` scope does **not** include it, so a leaked edge-device token cannot erase history.
 
 ```bash
@@ -92,7 +92,7 @@ A `delete` token is still limited by its `sensors` allow list. Series it cannot 
 as `404`, like on the read endpoints. The `delete` scope does not allow reading: combine it with `read`
 to be able to list series and check what was removed.
 
-Without JWT authentication, like every other endpoint, deletes are open.
+With authentication disabled (`SENSAPP_AUTH_DISABLED`), like every other endpoint, deletes are open.
 
 Each deletion is logged at `INFO` level with the series UUID, the token subject, and the number of samples.
 

@@ -297,6 +297,8 @@ impl HttpMetrics {
 #[utoipa::path(
     get,
     path = "/prometheus/metrics",
+    // Public, except with `include_latest_samples=true`, which needs a read token
+    security((), ("bearer" = ["read"])),
     tag = "Observability",
     params(
         ("include_latest_samples" = Option<bool>, Query, description = "Append the most recent sample for Prometheus-compatible series"),

@@ -6,7 +6,8 @@ tags, published releases, and manual dispatch.
 ## What is checked
 
 - Rust formatting, a blocking `cargo audit` (with the documented RSA advisory
-  exception in `Makefile.toml`), frontend lint/typecheck/tests/build and a
+  exception in `Makefile.toml`), frontend lint/typecheck/tests/build (a Rust test
+  also checks that `frontend/openapi.json` is the OpenAPI document of the server) and a
   high-severity npm audit, and Python 3.14 SDK unit tests, lint, package build and
   wheel install smoke test.
 
@@ -23,7 +24,8 @@ see `ideas/remove-frontend-js-yaml-override.md` for the override follow-up.
   ([BIGQUERY.md](BIGQUERY.md)). It does not block the ClickHouse release path.
 - Helm lint/template/package and Docker builds. The normal runtime image is
   actually started with ClickHouse, then `tests/clickhouse_container_smoke.py`
-  checks readiness, publish, query, and service metrics. Live Python SDK tests
+  checks readiness, publish, query, service metrics, and that the web UI is served
+  (the image builds it in its own Node stage). Live Python SDK tests
   also run against this image. CI stops ClickHouse and verifies that readiness
   becomes unhealthy, restarts it, and verifies recovery. The image smoke job is
   skipped on published releases: the tagged commit already passed it on `main`,

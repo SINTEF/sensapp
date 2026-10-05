@@ -86,14 +86,27 @@ storage:
   existingSecret: ""
   existingSecretKey: SENSAPP_STORAGE_CONNECTION_STRING
 
-# Optional JWT authentication.
-# When jwtSecret is set, read/write endpoints require a valid Bearer token.
-# Health checks, docs, and prometheus scrape remain open.
-# Use `sensapp generate-token <subject>` to create tokens.
+# Authentication. SensApp does not run open unless told to: the protected endpoints need a JWT
+# signed with a secret. Health checks, docs, the UI files and the Prometheus scrape stay open.
+#
+# By default the chart makes a random secret on the first install and keeps it across upgrades
+# (it is read back from the Secret of the release). Make an admin token with:
+#   kubectl exec deploy/<release name> -- sensapp generate-token me --scope read,admin
+# Tools that only render the chart (Argo CD, `helm template`) cannot read it back and would make a
+# new secret each time: for those, give jwtSecret or existingSecret.
 auth:
-  # Set to a random string of at least 32 characters to enable JWT auth.
-  # Leave empty (or omit) to run without authentication (default).
+  # A secret of at least 32 characters (`sensapp generate-secret` makes one). Stored in the Secret
+  # of the release, and in the release values: prefer existingSecret.
   jwtSecret: ""
+  # A Secret of yours holding the key below. Takes precedence over jwtSecret.
+  existingSecret: ""
+  existingSecretKey: SENSAPP_JWT_SECRET
+  # Secrets that still verify tokens but never sign them, separated by commas: the way to rotate
+  # the secret. Dropping one revokes the tokens it signed.
+  previousSecrets: ""
+  # Run with every endpoint open (SENSAPP_AUTH_DISABLED). For a network that authenticates
+  # in front of SensApp. Ignored when a secret is given.
+  disabled: false
 
 secretEnv: {}
 extraEnv: []

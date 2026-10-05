@@ -242,6 +242,7 @@ fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
 #[utoipa::path(
     get,
     path = "/api/v1/query",
+    security(("bearer" = ["read"])),
     tag = "SensApp",
     params(
         ("query" = String, Query, description = "PromQL query string (e.g., 'my_metric{label=\"value\"}' or 'my_metric[5m]')"),

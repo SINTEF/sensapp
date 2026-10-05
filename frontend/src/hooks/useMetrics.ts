@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { listMetrics } from '../client';
-import { extractErrorMessage } from '../api/clientConfig';
+import { unwrap } from '../api/clientConfig';
 
 export interface DcatDataset {
   '@type': string;
@@ -34,13 +34,18 @@ export interface DcatCatalog {
   'dcat:dataset': DcatDataset[];
 }
 
-export function useMetrics(filters?: {
-  name?: string;
-  nameRegex?: string;
-  type?: string;
-}) {
+export function useMetrics(
+  filters?: {
+    name?: string;
+    nameRegex?: string;
+    type?: string;
+  },
+  // `false` when the catalog is not needed, nor worth a refusal that asks for a token
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: ['metrics', filters],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       const result = await listMetrics({
         query: {
@@ -49,10 +54,7 @@ export function useMetrics(filters?: {
           type: filters?.type,
         },
       });
-      if (result.error) {
-        throw new Error(extractErrorMessage(result.error));
-      }
-      return result.data as unknown as DcatCatalog;
+      return unwrap(result) as unknown as DcatCatalog;
     },
   });
 }

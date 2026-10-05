@@ -1,22 +1,23 @@
+import { AGGREGATIONS, FIXED_STEPS } from '../lib/chartStep';
+import type { Aggregation } from '../lib/chartStep';
+import { PRESETS } from '../lib/timeRange';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
-const PRESETS = [
-  { label: '15m', minutes: 15 },
-  { label: '1h', minutes: 60 },
-  { label: '6h', minutes: 360 },
-  { label: '24h', minutes: 1440 },
-  { label: '7d', minutes: 10080 },
-  { label: '30d', minutes: 43200 },
-];
-
 export function TimeRangeSelector() {
-  const { timeRange, setTimeRange } = useSelectionStore();
-
-  function handlePreset(minutes: number) {
-    const end = new Date();
-    const start = new Date(end.getTime() - minutes * 60 * 1000);
-    setTimeRange(start.toISOString(), end.toISOString());
-  }
+  const {
+    timeRange,
+    relativeRange,
+    rangeHistory,
+    setTimeRange,
+    setRelativeRange,
+    panRange,
+    zoomOutRange,
+    undoRange,
+    step,
+    setStep,
+    aggregation,
+    setAggregation,
+  } = useSelectionStore();
 
   function handleStartChange(value: string) {
     if (value) {
@@ -38,34 +39,106 @@ export function TimeRangeSelector() {
   }
 
   return (
-    <div className="flex flex-wrap gap-2 items-center">
+    <div className="contents">
+      {/* Where the window is: back to the one before, earlier, wider, later */}
+      <div className="join [&>.btn]:w-7 [&>.btn]:px-0">
+        <button
+          className="join-item btn btn-xs btn-quiet"
+          aria-label="Back to the previous window"
+          title="Back to the previous window"
+          disabled={rangeHistory.length === 0}
+          onClick={undoRange}
+        >
+          ↶
+        </button>
+        <button
+          className="join-item btn btn-xs btn-quiet"
+          aria-label="Earlier"
+          title="Half a window earlier"
+          onClick={() => panRange(-1)}
+        >
+          ‹
+        </button>
+        <button
+          className="join-item btn btn-xs btn-quiet"
+          aria-label="Zoom out"
+          title="Twice the window"
+          onClick={zoomOutRange}
+        >
+          −
+        </button>
+        <button
+          className="join-item btn btn-xs btn-quiet"
+          aria-label="Later"
+          title="Half a window later"
+          // A live window is at now already
+          disabled={relativeRange !== null}
+          onClick={() => panRange(1)}
+        >
+          ›
+        </button>
+      </div>
+
       <div className="join">
         {PRESETS.map((preset) => (
           <button
             key={preset.label}
-            className="join-item btn btn-xs btn-outline"
-            onClick={() => handlePreset(preset.minutes)}
+            className={`join-item btn btn-xs btn-quiet ${relativeRange === preset.label ? 'btn-active' : ''}`}
+            onClick={() => setRelativeRange(preset.label)}
+            aria-pressed={relativeRange === preset.label}
           >
             {preset.label}
           </button>
         ))}
       </div>
 
-      <div className="flex items-center gap-1 text-xs text-base-content/50">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5 text-xs text-base-content/50">
         <span>from</span>
         <input
           type="datetime-local"
-          className="input input-bordered input-xs text-xs h-7"
+          className="input input-xs text-xs h-7 w-44"
           value={toLocalDatetime(timeRange.start)}
           onChange={(e) => handleStartChange(e.target.value)}
         />
         <span>to</span>
         <input
           type="datetime-local"
-          className="input input-bordered input-xs text-xs h-7"
+          className="input input-xs text-xs h-7 w-44"
           value={toLocalDatetime(timeRange.end)}
           onChange={(e) => handleEndChange(e.target.value)}
         />
+      </div>
+
+      <div className="flex items-center gap-1 sm:ml-auto">
+        <select
+          className="select select-xs text-xs h-7 w-auto"
+          aria-label="Step"
+          title="Step"
+          value={step}
+          onChange={(e) => setStep(e.target.value)}
+        >
+          <option value="auto">Auto</option>
+          <option value="raw">Raw</option>
+          {FIXED_STEPS.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <select
+          className="select select-xs text-xs h-7 w-auto"
+          aria-label="Aggregation"
+          title="Aggregation"
+          value={aggregation}
+          disabled={step === 'raw'}
+          onChange={(e) => setAggregation(e.target.value as Aggregation)}
+        >
+          {AGGREGATIONS.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
       </div>
     </div>
   );

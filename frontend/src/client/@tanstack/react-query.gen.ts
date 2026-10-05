@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, queryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
 import { client } from '../client.gen';
-import { frontpage, getSeriesData, listMetrics, listSeries, liveness, type Options, prometheusMetrics, prometheusRemoteRead, publishInfluxdb, publishPrometheus, publishSensorsData, readiness, simplePromqlQuery, vacuumDatabase } from '../sdk.gen';
-import type { FrontpageData, FrontpageResponse, GetSeriesDataData, ListMetricsData, ListSeriesData, LivenessData, LivenessResponse, PrometheusMetricsData, PrometheusMetricsResponse, PrometheusRemoteReadData, PrometheusRemoteReadError, PublishInfluxdbData, PublishInfluxdbError, PublishInfluxdbResponse, PublishPrometheusData, PublishPrometheusError, PublishPrometheusResponse, PublishSensorsDataData, PublishSensorsDataError, PublishSensorsDataResponse, ReadinessData, ReadinessError, ReadinessResponse2, SimplePromqlQueryData, VacuumDatabaseData, VacuumDatabaseError, VacuumDatabaseResponse } from '../types.gen';
+import { createToken, deleteSeries, deleteSeriesSamples, frontpage, getSeriesAvailability, getSeriesData, getSeriesLastSample, listMetrics, listSeries, liveness, type Options, prometheusMetrics, prometheusRemoteRead, publishInfluxdb, publishPrometheus, publishSensorsData, readiness, simplePromqlQuery, vacuumDatabase } from '../sdk.gen';
+import type { CreateTokenData, CreateTokenResponse, DeleteSeriesData, DeleteSeriesResponse, DeleteSeriesSamplesData, FrontpageData, FrontpageResponse, GetSeriesAvailabilityData, GetSeriesDataData, GetSeriesLastSampleData, ListMetricsData, ListSeriesData, LivenessData, LivenessResponse, PrometheusMetricsData, PrometheusMetricsResponse, PrometheusRemoteReadData, PrometheusRemoteReadError, PublishInfluxdbData, PublishInfluxdbError, PublishInfluxdbResponse, PublishPrometheusData, PublishPrometheusError, PublishPrometheusResponse, PublishSensorsDataData, PublishSensorsDataError, PublishSensorsDataResponse, ReadinessData, ReadinessError, ReadinessResponse2, SimplePromqlQueryData, VacuumDatabaseData, VacuumDatabaseError, VacuumDatabaseResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -55,10 +55,35 @@ export const frontpageOptions = (options?: Options<FrontpageData>) => queryOptio
 });
 
 /**
+ * Create a token
+ *
+ * Makes a signed token for a client. SensApp does not keep tokens: the answer is the only time
+ * the token is shown, it cannot be listed or revoked, and it is valid until it expires or until
+ * the secret that signed it is rotated out (see `SENSAPP_JWT_PREVIOUS_SECRETS`). Requires the
+ * `admin` scope. An `admin` token cannot make another `admin` token: those come from
+ * `sensapp generate-token`, which needs the secret. Not available when authentication is disabled.
+ */
+export const createTokenMutation = (options?: Partial<Options<CreateTokenData>>): UseMutationOptions<CreateTokenResponse, DefaultError, Options<CreateTokenData>> => {
+    const mutationOptions: UseMutationOptions<CreateTokenResponse, DefaultError, Options<CreateTokenData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await createToken({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
  * Database Vacuuming
  *
- * Cleans up and optimizes the database by removing unused data and reclaiming space.
- * (only if supported by the underlying storage engine).
+ * Removes the duplicate samples (a retried write, a client that sends twice, a crash in the middle
+ * of a request leave some), then cleans up and optimizes the database and reclaims space, as far as
+ * the storage backend supports it. Only exact duplicates go: two different values at the same
+ * timestamp are both kept. Requires the `delete` scope, and a token without a sensor allow list.
  */
 export const vacuumDatabaseMutation = (options?: Partial<Options<VacuumDatabaseData>>): UseMutationOptions<VacuumDatabaseResponse, VacuumDatabaseError, Options<VacuumDatabaseData>> => {
     const mutationOptions: UseMutationOptions<VacuumDatabaseResponse, VacuumDatabaseError, Options<VacuumDatabaseData>> = {
@@ -245,7 +270,7 @@ export const prometheusMetricsOptions = (options?: Options<PrometheusMetricsData
  * Accepts sensor data in one of the following formats:
  * - **SenML JSON** (RFC 8428): `Content-Type: application/json`
  * - **CSV**: `Content-Type: text/csv` or `application/csv`
- * - **Apache Arrow IPC**: `Content-Type: application/vnd.apache.arrow.file`
+ * - **Apache Arrow IPC**: `Content-Type: application/vnd.apache.arrow.stream`
  *
  * If no Content-Type header is provided, defaults to CSV format.
  */
@@ -280,6 +305,26 @@ export const listSeriesOptions = (options?: Options<ListSeriesData>) => queryOpt
     },
     queryKey: listSeriesQueryKey(options)
 });
+
+/**
+ * Delete a series: all its samples, its labels and the sensor itself.
+ *
+ * Publishing the same sensor again recreates it with the same UUID.
+ * Requires the `delete` scope when authentication is enabled.
+ */
+export const deleteSeriesMutation = (options?: Partial<Options<DeleteSeriesData>>): UseMutationOptions<DeleteSeriesResponse, DefaultError, Options<DeleteSeriesData>> => {
+    const mutationOptions: UseMutationOptions<DeleteSeriesResponse, DefaultError, Options<DeleteSeriesData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await deleteSeries({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
 
 export const getSeriesDataQueryKey = (options: Options<GetSeriesDataData>) => createQueryKey('getSeriesData', options);
 
@@ -356,4 +401,122 @@ export const getSeriesDataInfiniteOptions = (options: Options<GetSeriesDataData>
         queryKey: getSeriesDataInfiniteQueryKey(options)
     });
     return opts as Omit<typeof opts, 'initialData'>;
+};
+
+export const getSeriesAvailabilityQueryKey = (options: Options<GetSeriesAvailabilityData>) => createQueryKey('getSeriesAvailability', options);
+
+/**
+ * Get presence and optional bucket coverage for a series over a time window.
+ */
+export const getSeriesAvailabilityOptions = (options: Options<GetSeriesAvailabilityData>) => queryOptions<unknown, DefaultError, unknown, ReturnType<typeof getSeriesAvailabilityQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await getSeriesAvailability({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: getSeriesAvailabilityQueryKey(options)
+});
+
+export const getSeriesAvailabilityInfiniteQueryKey = (options: Options<GetSeriesAvailabilityData>): QueryKey<Options<GetSeriesAvailabilityData>> => createQueryKey('getSeriesAvailability', options, true);
+
+/**
+ * Get presence and optional bucket coverage for a series over a time window.
+ */
+export const getSeriesAvailabilityInfiniteOptions = (options: Options<GetSeriesAvailabilityData>) => {
+    const opts = infiniteQueryOptions<unknown, DefaultError, InfiniteData<unknown>, QueryKey<Options<GetSeriesAvailabilityData>>, string | Pick<QueryKey<Options<GetSeriesAvailabilityData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<GetSeriesAvailabilityData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    start: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await getSeriesAvailability({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: getSeriesAvailabilityInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
+
+export const getSeriesLastSampleQueryKey = (options: Options<GetSeriesLastSampleData>) => createQueryKey('getSeriesLastSample', options);
+
+/**
+ * Get the most recent sample for a series, optionally within a bounded time window.
+ */
+export const getSeriesLastSampleOptions = (options: Options<GetSeriesLastSampleData>) => queryOptions<unknown, DefaultError, unknown, ReturnType<typeof getSeriesLastSampleQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await getSeriesLastSample({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: getSeriesLastSampleQueryKey(options)
+});
+
+export const getSeriesLastSampleInfiniteQueryKey = (options: Options<GetSeriesLastSampleData>): QueryKey<Options<GetSeriesLastSampleData>> => createQueryKey('getSeriesLastSample', options, true);
+
+/**
+ * Get the most recent sample for a series, optionally within a bounded time window.
+ */
+export const getSeriesLastSampleInfiniteOptions = (options: Options<GetSeriesLastSampleData>) => {
+    const opts = infiniteQueryOptions<unknown, DefaultError, InfiniteData<unknown>, QueryKey<Options<GetSeriesLastSampleData>>, string | Pick<QueryKey<Options<GetSeriesLastSampleData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<GetSeriesLastSampleData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    start: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await getSeriesLastSample({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: getSeriesLastSampleInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
+
+/**
+ * Delete the samples of a series between `start` and `end`, both inclusive.
+ *
+ * Both bounds are required, so that a request cannot wipe a whole series by
+ * accident (use `DELETE /series/{series_uuid}` for that). `start` equal to `end`
+ * deletes the samples at one exact timestamp. The sensor and its labels are kept.
+ * Requires the `delete` scope when authentication is enabled.
+ */
+export const deleteSeriesSamplesMutation = (options?: Partial<Options<DeleteSeriesSamplesData>>): UseMutationOptions<unknown, DefaultError, Options<DeleteSeriesSamplesData>> => {
+    const mutationOptions: UseMutationOptions<unknown, DefaultError, Options<DeleteSeriesSamplesData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await deleteSeriesSamples({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
 };

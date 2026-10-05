@@ -41,6 +41,16 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_MAX_CONCURRENT_WRITES", default = 16)]
     pub http_max_concurrent_writes: usize,
 
+    /// Serve the web UI under `/ui/`, and redirect `/` to it. The UI is only the static files of
+    /// `frontend/`: the data stays behind the same authentication as the API.
+    #[config(env = "SENSAPP_UI_ENABLED", default = true)]
+    pub ui_enabled: bool,
+
+    /// Directory with the built UI (`frontend/dist`). The container image sets it to where it
+    /// ships the files. When it has no `index.html` the UI is not served and a warning is logged.
+    #[config(env = "SENSAPP_UI_DIR", default = "frontend/dist")]
+    pub ui_dir: String,
+
     #[config(env = "SENSAPP_MAX_INFERENCES_ROWS", default = 128)]
     pub max_inference_rows: usize,
 
@@ -69,12 +79,32 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_INFLUXDB_WITH_NUMERIC", default = false)]
     pub influxdb_with_numeric: bool,
 
-    /// JWT secret for optional authentication.
-    /// When set, all protected endpoints require a valid JWT bearer token.
-    /// Must be at least 32 characters long.
-    /// When unset, all endpoints are open (no security).
+    /// Secret that signs and verifies the JWTs. Must be at least 32 characters long
+    /// (`sensapp generate-secret` makes one). When set, the protected endpoints require a valid
+    /// JWT bearer token.
+    ///
+    /// When unset, SensApp does not run open by default: on a loopback address it makes a random
+    /// secret for this run and prints an admin token, on any other address it refuses to start,
+    /// unless `SENSAPP_AUTH_DISABLED` is true.
     #[config(env = "SENSAPP_JWT_SECRET")]
     pub jwt_secret: Option<String>,
+
+    /// Previous secrets, separated by commas, that still verify tokens but never sign them: the
+    /// way to rotate `SENSAPP_JWT_SECRET`. Put the new secret in `SENSAPP_JWT_SECRET` and the
+    /// old one here until its tokens have expired, then remove it. Dropping a secret refuses
+    /// every token it signed, which is also how tokens are revoked.
+    #[config(env = "SENSAPP_JWT_PREVIOUS_SECRETS")]
+    pub jwt_previous_secrets: Option<String>,
+
+    /// Longest validity, in seconds, of a token made with `POST /api/v1/admin/tokens` (one year
+    /// by default). `sensapp generate-token` has the secret and is not capped by it.
+    #[config(env = "SENSAPP_TOKEN_MAX_DURATION_SECONDS", default = 31536000)]
+    pub token_max_duration_seconds: u64,
+
+    /// Run without authentication: every endpoint is open. The explicit opt-out for demos and
+    /// networks that authenticate in front of SensApp. Ignored when `SENSAPP_JWT_SECRET` is set.
+    #[config(env = "SENSAPP_AUTH_DISABLED", default = false)]
+    pub auth_disabled: bool,
 }
 
 impl SensAppConfig {
@@ -86,6 +116,18 @@ impl SensAppConfig {
         let c = SensAppConfig::builder().env().file(settings_file).load()?;
 
         Ok(c)
+    }
+
+    /// The secrets of `SENSAPP_JWT_PREVIOUS_SECRETS`, one per comma-separated item.
+    pub fn previous_jwt_secrets(&self) -> Vec<String> {
+        self.jwt_previous_secrets
+            .as_deref()
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|secret| !secret.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 
     pub fn parse_http_body_limit(&self) -> Result<usize, Error> {
@@ -152,10 +194,28 @@ mod tests {
 
         assert_eq!(config.port, 3000);
         assert_eq!(config.endpoint, IpAddr::from([127, 0, 0, 1]));
+        assert!(config.ui_enabled);
+        assert_eq!(config.ui_dir, "frontend/dist");
 
         temp_env::with_var("SENSAPP_PORT", Some("8080"), || {
             let config = SensAppConfig::load().unwrap();
             assert_eq!(config.port, 8080);
+        });
+    }
+
+    #[test]
+    fn test_previous_jwt_secrets() {
+        temp_env::with_var("SENSAPP_JWT_PREVIOUS_SECRETS", None::<&str>, || {
+            assert!(
+                SensAppConfig::load()
+                    .unwrap()
+                    .previous_jwt_secrets()
+                    .is_empty()
+            );
+        });
+        temp_env::with_var("SENSAPP_JWT_PREVIOUS_SECRETS", Some(" one ,two,, "), || {
+            let secrets = SensAppConfig::load().unwrap().previous_jwt_secrets();
+            assert_eq!(secrets, vec!["one".to_string(), "two".to_string()]);
         });
     }
 
