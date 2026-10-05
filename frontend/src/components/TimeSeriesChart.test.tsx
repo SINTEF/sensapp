@@ -180,4 +180,19 @@ describe('TimeSeriesChart', () => {
     expect(option.series[0]).toMatchObject({ stack: 'total' });
     expect(option.yAxis[0]).toMatchObject({ type: 'log' });
   });
+
+  it('keeps the series drawn while the data of a moved range is on its way', async () => {
+    useSelectionStore.setState({
+      selectedSeries: [temperature],
+      timeRange: { start: START, end: hours(1) },
+    });
+    renderChart();
+    await waitFor(() => expect(screen.getByTestId('echarts')).toHaveAttribute('data-series-count', '1'));
+
+    mockGetSeriesData.mockReturnValue(new Promise(() => {}));
+    act(() => useSelectionStore.getState().setTimeRange(hours(0.1), hours(1.1)));
+    await waitFor(() => expect(mockGetSeriesData).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByTestId('echarts')).toHaveAttribute('data-series-count', '1');
+  });
 });

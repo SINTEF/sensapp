@@ -1,5 +1,5 @@
 import { lazy, Suspense, useMemo } from 'react';
-import { useQueries } from '@tanstack/react-query';
+import { keepPreviousData, useQueries } from '@tanstack/react-query';
 import { getSeriesData } from '../client';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { unwrap } from '../api/clientConfig';
@@ -80,6 +80,8 @@ export function TimeSeriesChart() {
         };
       },
       enabled: !!s.uuid,
+      // The range moves every minute: the chart keeps what it shows until the new data is there
+      placeholderData: keepPreviousData,
     })),
   });
 
@@ -88,7 +90,8 @@ export function TimeSeriesChart() {
 
   const option = useMemo(() => {
     const series = queries
-      .filter((q) => q.data)
+      // What is kept while loading belongs to the series that had this place: not to another
+      .filter((q, i) => q.data && q.data.series.uuid === selectedSeries[i]?.uuid)
       .map((q) => {
         const { records, series, colorIndex } = q.data!;
         return {
@@ -99,7 +102,7 @@ export function TimeSeriesChart() {
         };
       });
     return buildChartOption(series, chartStyle, logScale, timeRange);
-  }, [queries, timeRange, chartStyle, logScale]);
+  }, [queries, selectedSeries, timeRange, chartStyle, logScale]);
 
   if (selectedSeries.length === 0) {
     return null;

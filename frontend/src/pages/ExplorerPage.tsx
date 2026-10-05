@@ -3,6 +3,7 @@ import { MetricsTable } from '../components/MetricsTable';
 import { SeriesTable } from '../components/SeriesTable';
 import { TimeSeriesChart } from '../components/TimeSeriesChart';
 import { TimeRangeSelector } from '../components/TimeRangeSelector';
+import { useLiveRange } from '../hooks/useLiveRange';
 import { useUrlState } from '../hooks/useUrlState';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
@@ -10,6 +11,7 @@ export function ExplorerPage() {
   const { selectedMetric, selectedSeries, clearSelectedSeries } =
     useSelectionStore();
   useUrlState();
+  useLiveRange();
 
   return (
     <div className="flex flex-col gap-3 lg:h-full">
