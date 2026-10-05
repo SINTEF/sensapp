@@ -141,6 +141,26 @@ describe('CredentialsPage', () => {
     );
   });
 
+  it('closes the token when a choice of the form changes, so it is not taken for the new one', async () => {
+    const user = userEvent.setup();
+    useAuthStore.setState({ token: ADMIN });
+    mockCreateToken.mockResolvedValue({ data: created });
+    renderPage();
+
+    await user.type(await screen.findByRole('textbox', { name: 'Name' }), 'edge-7');
+    for (const change of [
+      () => user.type(screen.getByRole('textbox', { name: 'Name' }), '8'),
+      () => user.click(screen.getByRole('radio', { name: '1 hour' })),
+      () => user.click(screen.getByRole('checkbox', { name: /^delete/ })),
+      () => user.type(screen.getByRole('textbox', { name: 'Sensor name' }), 'cpu{Enter}'),
+    ]) {
+      await user.click(screen.getByRole('button', { name: 'Make the token' }));
+      expect(await screen.findByLabelText('Token')).toBeInTheDocument();
+      await change();
+      await waitFor(() => expect(screen.queryByLabelText('Token')).toBeNull());
+    }
+  });
+
   it('fills the name with a random one, to click again for another', async () => {
     const user = userEvent.setup();
     useAuthStore.setState({ token: ADMIN });
@@ -166,7 +186,7 @@ describe('CredentialsPage', () => {
     expect(mockCreateToken).not.toHaveBeenCalled();
   });
 
-  it('makes a token with what the form says, shows it once, then lets it go', async () => {
+  it('makes a token with what the form says, shows it once, then lets it go with its cross', async () => {
     const user = userEvent.setup();
     useAuthStore.setState({ token: ADMIN });
     mockCreateToken.mockResolvedValue({ data: created });
@@ -200,7 +220,7 @@ describe('CredentialsPage', () => {
     expect(await screen.findByText('Copied to the clipboard')).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toBe('made.by.sensapp');
 
-    await user.click(screen.getByRole('button', { name: 'Done' }));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByLabelText('Token')).toBeNull());
     // The form is still there, with what was typed
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('  edge-7 ');

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { createToken } from '../client';
@@ -123,8 +123,13 @@ function SensorsField({
 /** The token that was just made, under the button that made it. */
 function CreatedTokenResult({ created, onDone }: { created: CreatedToken; onDone: () => void }) {
   return (
-    <div className="flex flex-col gap-3 rounded-box border border-base-300 p-3">
-      <CodeBlock code={created.token} language="bash" label="Token" />
+    <div className="relative flex flex-col gap-3 rounded-box border border-base-300 p-3">
+      <button type="button" className="btn btn-ghost btn-xs btn-square absolute top-1 right-1" aria-label="Close" title="Close" onClick={onDone}>
+        ✕
+      </button>
+      <div className="pt-5">
+        <CodeBlock code={created.token} language="bash" label="Token" />
+      </div>
       <CodeBlock code={`export SENSAPP_TOKEN=${created.token}\n`} language="bash" label="Export of the token" />
       <p className="text-xs text-base-content/60">SensApp does not keep tokens, copy it now.</p>
 
@@ -140,12 +145,6 @@ function CreatedTokenResult({ created, onDone }: { created: CreatedToken; onDone
         <dt className="text-base-content/60">Id</dt>
         <dd className="font-mono text-xs self-center break-all">{created.jti}</dd>
       </dl>
-
-      <div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onDone}>
-          Done
-        </button>
-      </div>
     </div>
   );
 }
@@ -177,6 +176,10 @@ function TokenMaker({ token, canRead, isAdmin }: { token: string | null; canRead
     // The token is not kept in the cache of the mutations once the page is left
     gcTime: 0,
   });
+
+  // A token made with other choices than the form now has would be confusing: it goes
+  const { reset } = mutation;
+  useEffect(() => reset(), [subject, durationSeconds, scope, sensors, reset]);
 
   const wish = { subject, scope, sensors, durationSeconds };
   const names = (metrics.data?.['dcat:dataset'] ?? []).map((dataset) => dataset['dct:title']);
