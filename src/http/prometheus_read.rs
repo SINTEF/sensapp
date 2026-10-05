@@ -24,24 +24,34 @@ use std::time::Instant;
 use tokio_util::bytes::Bytes;
 use tracing::{debug, info, warn};
 
+/// Prometheus does not trust a remote read to have answered the function of the hint: it
+/// evaluates the query again on the samples it gets back. A hint is therefore only answered with
+/// buckets when the second evaluation gives the result of the raw samples, which is the case of
+/// the `*_over_time` functions that can be merged (min, max, sum, first, last, and the average
+/// of buckets, exact when the buckets hold the same number of samples). `count_over_time` would
+/// count the buckets, and the aggregation operators (`sum`, `avg`, ...) ask for the value of each
+/// series at the evaluation time, not for an aggregate of the hour that follows it.
 fn aggregation_from_read_hints(hints: &ReadHints) -> Option<Aggregation> {
-    match hints.func.trim().to_ascii_lowercase().as_str() {
-        "avg_over_time" | "avg" => Some(Aggregation::Avg),
-        "min_over_time" | "min" => Some(Aggregation::Min),
-        "max_over_time" | "max" => Some(Aggregation::Max),
-        "sum_over_time" | "sum" => Some(Aggregation::Sum),
-        "count_over_time" | "count" => Some(Aggregation::Count),
-        "first_over_time" | "first" => Some(Aggregation::First),
-        "last_over_time" | "last" => Some(Aggregation::Last),
+    match hints.func.trim() {
+        "avg_over_time" => Some(Aggregation::Avg),
+        "min_over_time" => Some(Aggregation::Min),
+        "max_over_time" => Some(Aggregation::Max),
+        "sum_over_time" => Some(Aggregation::Sum),
+        "first_over_time" => Some(Aggregation::First),
+        "last_over_time" => Some(Aggregation::Last),
         _ => None,
     }
 }
 
+/// `range_ms` is the width of the `[1h]` of the query, `step_ms` the distance between two
+/// evaluations. Prometheus starts the window at the end of the first range, so buckets of one
+/// step that start there fit the windows of the evaluations when the range is a whole number of
+/// steps. A shorter range would be answered with a bucket wider than the window it asks for.
 fn query_options_from_read_hints(query: &Query) -> Option<SensorDataQueryOptions> {
     let hints = query.hints.as_ref()?;
     let aggregation = aggregation_from_read_hints(hints)?;
 
-    if hints.step_ms <= 0 {
+    if hints.step_ms <= 0 || hints.range_ms <= 0 || hints.range_ms % hints.step_ms != 0 {
         return None;
     }
 
@@ -601,60 +611,102 @@ mod tests {
         assert!(verify_read_headers(&headers).is_err());
     }
 
-    #[test]
-    fn test_aggregation_from_read_hints() {
-        let hints = ReadHints {
-            step_ms: 60_000,
-            func: "avg_over_time".to_string(),
+    fn hints(func: &str, step_ms: i64, range_ms: i64) -> ReadHints {
+        ReadHints {
+            step_ms,
+            func: func.to_string(),
             start_ms: 0,
             end_ms: 0,
             grouping: vec![],
             by: false,
-            range_ms: 60_000,
-        };
-
-        assert_eq!(aggregation_from_read_hints(&hints), Some(Aggregation::Avg));
-
-        let unknown = ReadHints {
-            func: "rate".to_string(),
-            ..hints
-        };
-        assert_eq!(aggregation_from_read_hints(&unknown), None);
+            range_ms,
+        }
     }
 
-    #[test]
-    fn test_query_options_from_read_hints_requires_supported_func() {
-        let query = Query {
+    fn query_with(hints: ReadHints) -> Query {
+        Query {
             start_timestamp_ms: 1_000,
             end_timestamp_ms: 5_000,
             matchers: vec![],
-            hints: Some(ReadHints {
-                step_ms: 2_000,
-                func: "max_over_time".to_string(),
-                start_ms: 1_000,
-                end_ms: 5_000,
-                grouping: vec![],
-                by: false,
-                range_ms: 2_000,
-            }),
-        };
+            hints: Some(hints),
+        }
+    }
 
-        let options = query_options_from_read_hints(&query).unwrap();
+    #[test]
+    fn test_aggregation_from_read_hints() {
+        for (func, expected) in [
+            ("avg_over_time", Aggregation::Avg),
+            ("min_over_time", Aggregation::Min),
+            ("max_over_time", Aggregation::Max),
+            ("sum_over_time", Aggregation::Sum),
+            ("first_over_time", Aggregation::First),
+            ("last_over_time", Aggregation::Last),
+        ] {
+            assert_eq!(
+                aggregation_from_read_hints(&hints(func, 60_000, 60_000)),
+                Some(expected),
+                "{func}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_hints_that_buckets_would_answer_wrongly_are_not_aggregated() {
+        // Prometheus counts the buckets, evaluates the aggregation operators at the evaluation
+        // time and cannot use buckets for a rate.
+        for func in [
+            "count_over_time",
+            "count",
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "rate",
+            "",
+        ] {
+            assert_eq!(
+                aggregation_from_read_hints(&hints(func, 60_000, 60_000)),
+                None,
+                "{func:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_query_options_from_read_hints_follow_the_range_and_the_step() {
+        let options =
+            query_options_from_read_hints(&query_with(hints("max_over_time", 2_000, 2_000)))
+                .unwrap();
         assert_eq!(options.step_ms, Some(2_000));
         assert_eq!(options.aggregation, Some(Aggregation::Max));
 
-        let unsupported = Query {
-            hints: Some(ReadHints {
-                step_ms: 2_000,
-                func: "rate".to_string(),
-                start_ms: 1_000,
-                end_ms: 5_000,
-                grouping: vec![],
-                by: false,
-                range_ms: 2_000,
-            }),
-            ..query
-        };
-        assert!(query_options_from_read_hints(&unsupported).is_none());
+        // Several steps in a range keep the buckets inside the windows.
+        assert!(
+            query_options_from_read_hints(&query_with(hints("max_over_time", 2_000, 6_000)))
+                .is_some()
+        );
+
+        // A range shorter than the step, a range that is not a whole number of steps, an instant
+        // selector (no range) or no step cannot be answered with buckets.
+        for (step_ms, range_ms) in [(2_000, 1_000), (2_000, 3_000), (2_000, 0), (0, 2_000)] {
+            assert!(
+                query_options_from_read_hints(&query_with(hints(
+                    "max_over_time",
+                    step_ms,
+                    range_ms
+                )))
+                .is_none(),
+                "step {step_ms} range {range_ms}"
+            );
+        }
+
+        assert!(query_options_from_read_hints(&query_with(hints("rate", 2_000, 2_000))).is_none());
+        assert!(
+            query_options_from_read_hints(&Query {
+                hints: None,
+                ..query_with(hints("max_over_time", 2_000, 2_000))
+            })
+            .is_none()
+        );
     }
 }

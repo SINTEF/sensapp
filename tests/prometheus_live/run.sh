@@ -39,7 +39,7 @@ docker run --detach \
   --add-host host.docker.internal:host-gateway \
   --publish 127.0.0.1:9099:9090 \
   --volume "$repo_root/tests/prometheus_live/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
-  prom/prometheus:v2.55.1 \
+  "${PROMETHEUS_IMAGE:-prom/prometheus:v3.8.0}" \
   --config.file=/etc/prometheus/prometheus.yml \
   --storage.tsdb.path=/prometheus
 
