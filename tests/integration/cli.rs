@@ -88,3 +88,12 @@ fn sensapp_help_lists_the_subcommands() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("generate-token") && stdout.contains("generate-secret"));
 }
+
+#[test]
+fn serve_is_a_subcommand_with_its_own_help() {
+    let output = sensapp(&["serve", "--help"], None);
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Run the server"));
+    let output = sensapp(&["--help"], None);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("serve"));
+}

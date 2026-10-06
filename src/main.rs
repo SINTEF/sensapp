@@ -22,7 +22,8 @@ fn main() -> Result<()> {
             println!("{}", generate_secret()?);
             return Ok(());
         }
-        None => {}
+        // `sensapp` alone runs the server too
+        Some(Command::Serve) | None => {}
     }
 
     rustls::crypto::aws_lc_rs::default_provider()
@@ -207,6 +208,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Run the server (what `sensapp` does alone), configured with the SENSAPP_* environment
+    /// variables or a settings.toml, see docs/CONFIGURATION.md
+    Serve,
     /// Generate a signed JWT token. Needs SENSAPP_JWT_SECRET, the shared secret for signing
     GenerateToken(GenerateTokenArgs),
     /// Print a new random secret, to use as SENSAPP_JWT_SECRET
