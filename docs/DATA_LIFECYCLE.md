@@ -37,6 +37,8 @@ curl -X DELETE "http://localhost:3000/series/$SERIES_UUID" -H "Authorization: Be
 
 Removes the samples, the labels and the series itself. `204` on success, `404` when it does not exist.
 
+On SQLite a delete holds the write lock of the whole database until it ends, so deletes and writes queue behind each other (they wait up to the 5 second busy timeout, then the request answers `503`). Deleting many series in parallel works, it just does not go faster than one at a time.
+
 Both operations are permanent. Take a backup, or export the range first (`GET /series/{uuid}?format=csv&start=…&end=…`), if you may need it back.
 
 ## Correcting data
