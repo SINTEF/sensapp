@@ -24,7 +24,9 @@ From `ideas/download-button-and-signed-download-links.md` (part 1 and step 2). W
    `filename` (ASCII fallback) and `filename*` (UTF-8). Unit tests for the name and hostile names,
    backend-generic integration tests. OpenAPI document and generated client.
 2. [x] Frontend: `DownloadButton`, `DownloadDialog`, `lib/download.ts`, tests.
-3. [ ] Docs (`docs/FRONTEND.md`, the API doc of `GET /series/{uuid}`), live check, move this file to `done/`.
+3. [x] Docs (`docs/FRONTEND.md`; no doc page lists the parameters of `GET /series/{uuid}`, the OpenAPI at `/docs`
+   has `download`, and `docs/DATA_LIFECYCLE.md` points to it where it says to export before deleting), live check,
+   move this file to `done/`.
 
 ## Progress
 
@@ -44,3 +46,9 @@ From `ideas/download-button-and-signed-download-links.md` (part 1 and step 2). W
   100000 samples; narrow the time range or use aggregation", the two others are saved. Aggregated (1h max),
   Arrow: the string series is asked raw, the others with `step=1h&aggregation=max`, all saved. `curl -OJ` saves
   under the ASCII `filename`. The header and the dialog fit at 375 px.
+- Regression gate (6 Oct 2026): `cargo clippy --tests` clean; full suites with `--no-default-features --features
+  <backend>`: SQLite 282 + 309, PostgreSQL 288 + 310, TimescaleDB 288 + 314, ClickHouse 296 + 321 passed, 1
+  failed. The failure is `data_lifecycle::clickhouse::concurrent_publish_and_delete`, the test of the SQLite
+  delete fix (`a0b62c6`), run on ClickHouse for the first time: about 1 run in 3, a series whose
+  `delete_series` returned is still listed. Not touched by this task (no storage change); left as a separate task.
+  Frontend: lint, 287 tests, build.

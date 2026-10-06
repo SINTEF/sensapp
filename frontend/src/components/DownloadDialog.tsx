@@ -255,7 +255,7 @@ export default function DownloadDialog({ onClose }: { onClose: () => void }) {
           {/* Not `disabled`: the button would lose the focus, and the dialog Escape with it */}
           <button
             type="button"
-            className="btn btn-primary btn-sm aria-disabled:btn-disabled"
+            className="btn btn-primary btn-sm"
             autoFocus
             aria-disabled={running}
             onClick={() => !running && void download()}

@@ -11,7 +11,7 @@ SensApp ships a small explorer: pick a metric, pick series, draw them over a tim
 
 ## The header
 
-From 768 px (`md`) the header is one row: the logo, the three tabs, then the Code, API Docs and sign-in buttons. Below, the logo and the buttons keep the first row and the tabs get a row of their own, side by side across the width, so nothing scrolls sideways and the logo never shrinks (the small logo, without the name, is used under 640 px).
+From 768 px (`md`) the header is one row: the logo, the three tabs, then the Code, Download, API Docs and sign-in buttons. Below, the logo and the buttons keep the first row and the tabs get a row of their own, side by side across the width, so nothing scrolls sideways and the logo never shrinks (the small logo, without the name, is used under 640 px).
 
 Under 1024 px (`lg`) the page scrolls, and the lists of metrics and series are each capped at 70% of the screen height and scroll inside their card; without it, hundreds of metrics would push the series list thousands of pixels down. From `lg` the explorer fills the window and the cards share it.
 
@@ -49,6 +49,18 @@ The **Code** button of the header opens the code that loads what the explorer sh
 - Whatever a label or a name says is quoted (Python and shell) or put on one line (comments): a hostile label cannot add a line of code to what is copied.
 - The code is always on a dark ground, in both themes, in JetBrains Mono, coloured by highlight.js (Python and Bash only). Long lines wrap instead of scrolling sideways (a uuid or an address with no space breaks where it must); the copied text is unchanged. The dialog, the highlighter and the font are loaded when it is first opened: 13 kB gzipped and 40 kB of font, nothing for a page that never opens it. The copy works on a page served by plain http too, where the clipboard API does not exist.
 - The Python SDK is not on PyPI yet. The script starts with a [PEP 723](https://peps.python.org/pep-0723/) block (`# /// script`) that says it needs `sensapp` and that it comes from GitHub (`[tool.uv.sources.sensapp]`), so `uv run script.py` is enough: uv makes the environment. The `uv pip install` command is there too, for an environment of one's own. Both are in `src/lib/snippets.ts` (`SCRIPT_METADATA`, `INSTALL_COMMENT`): change them when the SDK is published, and the Python the block asks for follows `requires-python` of the SDK.
+
+## Download
+
+The **Download** button of the header saves the selected series as files, **one file per series**. It is off while no series is selected.
+
+- The dialog asks the **format** (CSV, JSON Lines, SenML, Arrow), the **window** (the chart's, or all the data: no `start` and `end`) and the **samples** (raw, or aggregated with a step and an aggregation). It starts from what the chart draws: its step (`auto` resolved for the window) and aggregation, or raw. Text and boolean series are always downloaded raw, as on the chart.
+- The series are fetched **one after the other** from `GET /series/{uuid}?…&download=true`, each with its status in the dialog (waiting, downloading, saved, or the message of the server). Closing the dialog cancels what is left; there is no job queue on the server.
+- **The sample cap** (100,000 by default, `SENSAPP_HTTP_MAX_QUERY_SAMPLES`) applies to each series: a series over it is not saved and shows the server's message ("narrow the time range or use aggregation"), the others are saved. A 401 or 403 opens the sign-in dialog and stops.
+- **Why not a plain link**: the token of the UI is sent in the `Authorization` header, which a link the browser follows cannot carry. The dialog fetches the file with the token, holds it in a `Blob` (a few MB at most under the cap) and saves it with `<a download>`. Bigger downloads, without the copy in memory, would need signed links (`ideas/signed-download-links.md`).
+- **The file name** is the server's, from the `Content-Disposition` that `download=true` adds: the series name, its labels sorted by key, the window in UTC and the step, `temperature_room-kitchen_20261006T090000Z_20261006T100000Z_5m-avg.csv` (`json` for SenML, `jsonl`, `arrow`). The labels are there because a single-series CSV is only `timestamp,value`, and the selected series often share a name. The header has a UTF-8 `filename*` and an ASCII `filename` (what `curl -OJ` uses): characters no file system takes become `_`, a leading dot is dropped, and the name is cut at 150 characters. The code is in `src/http/download.rs`.
+- Browsers may ask, once for the site, to allow several downloads at a time.
+- The dialog is loaded when it is first opened (3 kB gzipped). The code is in `src/components/DownloadDialog.tsx` and `src/lib/download.ts`.
 
 ## Load Data
 
