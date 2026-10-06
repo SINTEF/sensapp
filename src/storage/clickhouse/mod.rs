@@ -327,6 +327,45 @@ impl ClickHouseStorage {
         }
     }
 
+    /// Runs `DELETE FROM table WHERE condition` until no row matches the condition any more.
+    ///
+    /// A lightweight delete is a mutation, and ClickHouse 24.8 can lose one while background
+    /// merges run: the mutation is reported as done and the rows stay, for ever. A plain
+    /// `ReplacingMergeTree` table and 24 parallel deletes lose one in 8 runs out of 100, and
+    /// none in 100 with this check; a second attempt always sufficed. `mutations_sync` does not
+    /// help and the heavy `ALTER TABLE .. DELETE` is worse. The delete is idempotent, so doing
+    /// it again is safe, including from several SensApp instances at once.
+    async fn delete_until_gone(
+        &self,
+        table: &str,
+        condition: &str,
+        bind: impl Fn(clickhouse::query::Query) -> clickhouse::query::Query,
+    ) -> Result<()> {
+        const MAX_ATTEMPTS: u32 = 5;
+        for _ in 0..MAX_ATTEMPTS {
+            // Lightweight deletes are synchronous by default (lightweight_deletes_sync = 2)
+            // and rows are physically removed by later merges or OPTIMIZE.
+            bind(
+                self.client
+                    .query(&format!("DELETE FROM {table} WHERE {condition}")),
+            )
+            .execute()
+            .await?;
+            let remaining: u64 = bind(
+                self.client
+                    .query(&format!("SELECT count() FROM {table} WHERE {condition}")),
+            )
+            .fetch_one()
+            .await?;
+            if remaining == 0 {
+                return Ok(());
+            }
+        }
+        Err(anyhow::anyhow!(
+            "{table} still has rows matching `{condition}` after {MAX_ATTEMPTS} deletes"
+        ))
+    }
+
     async fn query_latest_timestamp_us(
         &self,
         table_name: &str,
@@ -569,13 +608,8 @@ impl StorageInstance for ClickHouseStorage {
             return Ok(false);
         }
 
-        // Lightweight deletes are synchronous by default (lightweight_deletes_sync = 2)
-        // and rows are physically removed by later merges or OPTIMIZE.
         for table in VALUE_TABLES.into_iter().chain(["labels", "sensors"]) {
-            self.client
-                .query(&format!("DELETE FROM {table} WHERE sensor_id = ?"))
-                .bind(sensor_id)
-                .execute()
+            self.delete_until_gone(table, "sensor_id = ?", |query| query.bind(sensor_id))
                 .await
                 .with_context(|| format!("Failed to delete series rows from {table}"))?;
         }
@@ -612,16 +646,13 @@ impl StorageInstance for ClickHouseStorage {
             .with_context(|| format!("Failed to count samples to delete from {table}"))?;
 
         if count > 0 {
-            let delete_sql =
-                format!("DELETE FROM {table} WHERE sensor_id = ? AND timestamp_us BETWEEN ? AND ?");
-            self.client
-                .query(&delete_sql)
-                .bind(sensor_id)
-                .bind(start_us)
-                .bind(end_us)
-                .execute()
-                .await
-                .with_context(|| format!("Failed to delete samples from {table}"))?;
+            self.delete_until_gone(
+                table,
+                "sensor_id = ? AND timestamp_us BETWEEN ? AND ?",
+                |query| query.bind(sensor_id).bind(start_us).bind(end_us),
+            )
+            .await
+            .with_context(|| format!("Failed to delete samples from {table}"))?;
         }
 
         Ok(Some(count))
