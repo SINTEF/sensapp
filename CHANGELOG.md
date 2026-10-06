@@ -3,6 +3,28 @@
 SensApp is pre-production: breaking changes happen between minor versions and are listed first.
 Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASING.md).
 
+## 0.4.1
+
+### Added
+
+- **A Download button** in the explorer (one file per series, downloaded in the background), backed by
+  `?download=true` on `GET /series/{uuid}`, which answers with a `Content-Disposition` header.
+- `sensapp serve`, the explicit name of what plain `sensapp` does.
+- `SENSAPP_HTTP_MAX_QUERY_SAMPLES` (default `100000`): the most samples a read may return, instead of constants.
+- The explorer header wraps on narrow screens, and has a 1 year preset.
+
+### Changed and fixed
+
+- **Prometheus remote read of a plain selector over a long range** answers with one sample per step (the last
+  sample of each step, with its own timestamp) instead of the raw samples, so graphing a metric over weeks at a
+  coarse step no longer fails with `Query exceeds 100000 samples`. Prometheus gets the same answer as with the raw
+  samples. Checked live against Prometheus 3.8, 3.13 and 3.15.
+- The command line is parsed with clap: `sensapp --help` prints the help instead of making a token for the
+  subject `--help`.
+- SQLite: `delete_series` takes the write lock first, so concurrent deletes wait instead of failing, and
+  `SQLITE_BUSY` and `SQLITE_LOCKED` answer `503`.
+- ClickHouse: deletes are checked and repeated, as ClickHouse 24.8 can lose one.
+
 ## 0.4.0
 
 ### Breaking changes
