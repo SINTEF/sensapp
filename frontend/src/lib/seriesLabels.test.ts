@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exampleSelector, sharedLabels, sortByColumns, withoutShared } from './seriesLabels';
+import { exampleSelector, seriesLabel, sharedLabels, sortByColumns, withoutShared } from './seriesLabels';
 
 describe('sharedLabels', () => {
   it('keeps what every series has the same, nothing for one series', () => {
@@ -64,5 +64,12 @@ describe('exampleSelector', () => {
 
   it('skips a label the series does not have, and escapes what has to be', () => {
     expect(exampleSelector({ b: 'say "hi"', c: '.x' }, ['a', 'b', 'c'])).toBe(String.raw`{b="say \"hi\"", c=~"\\..*"}`);
+  });
+});
+
+describe('seriesLabel', () => {
+  it('writes the labels as a selector, the name alone when there is none', () => {
+    expect(seriesLabel('cpu', { host: 'a', core: '1' })).toBe('cpu{host="a", core="1"}');
+    expect(seriesLabel('cpu', {})).toBe('cpu');
   });
 });

@@ -2,6 +2,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { AuthDialog } from './AuthDialog';
 import { AuthStatus } from './AuthStatus';
 import { CodeButton } from './CodeButton';
+import { DownloadButton } from './DownloadButton';
 
 // The files of public/, served next to the page (`BASE_URL` is `/ui/` when SensApp serves them)
 const base = import.meta.env.BASE_URL;
@@ -17,7 +18,7 @@ const TABS = [
 ];
 
 export function Layout() {
-  // The Code button is about what the explorer shows
+  // The Code and Download buttons are about what the explorer shows
   const explorer = useLocation().pathname === '/';
   return (
     <div className="min-h-screen lg:h-screen flex flex-col bg-base-200 lg:overflow-hidden">
@@ -61,6 +62,7 @@ export function Layout() {
             </nav>
             <div className="max-md:order-2 md:order-4 ml-auto flex items-center gap-1 md:gap-3 shrink-0">
               {explorer && <CodeButton />}
+              {explorer && <DownloadButton />}
               <a
                 href="/docs"
                 target="_blank"

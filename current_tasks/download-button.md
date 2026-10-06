@@ -23,7 +23,7 @@ From `ideas/download-button-and-signed-download-links.md` (part 1 and step 2). W
 1. [x] Backend: `?download=true` on `GET /series/{uuid}` adds `Content-Disposition: attachment` with
    `filename` (ASCII fallback) and `filename*` (UTF-8). Unit tests for the name and hostile names,
    backend-generic integration tests. OpenAPI document and generated client.
-2. [ ] Frontend: `DownloadButton`, `DownloadDialog`, `lib/download.ts`, tests.
+2. [x] Frontend: `DownloadButton`, `DownloadDialog`, `lib/download.ts`, tests.
 3. [ ] Docs (`docs/FRONTEND.md`, the API doc of `GET /series/{uuid}`), live check, move this file to `done/`.
 
 ## Progress
@@ -35,3 +35,12 @@ From `ideas/download-button-and-signed-download-links.md` (part 1 and step 2). W
   `Sanit%C3%A6ranlegg`), not the tag values. Existing behaviour, left as it is; the test puts its non-ASCII
   text in a tag. An InfluxDB series also has `influxdb_bucket` and `influxdb_org` labels, which are in its
   file name.
+- Frontend: `DownloadButton` (lazy dialog, off with nothing selected), `DownloadDialog`, `lib/download.ts`.
+  The dialog starts from what the chart draws (its resolved step and aggregation, or Raw). The Download button
+  is not `disabled` while it runs (`aria-disabled`): a disabled button loses the focus, and Escape no longer
+  reached the dialog. A saved series says "✓ saved", the file name is its tooltip (the names are long).
+- Live check (SQLite, authentication on, port 3100): two `temperature value` series told apart by `room`, a
+  string series and a series of 100,001 samples. Raw over all the data: the big series shows "Query exceeds
+  100000 samples; narrow the time range or use aggregation", the two others are saved. Aggregated (1h max),
+  Arrow: the string series is asked raw, the others with `step=1h&aggregation=max`, all saved. `curl -OJ` saves
+  under the ASCII `filename`. The header and the dialog fit at 375 px.
