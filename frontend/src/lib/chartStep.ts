@@ -46,6 +46,9 @@ export function chartStep(start: string, end: string): string | undefined {
   return step;
 }
 
+/** Every step `chartStep` can choose, shortest first. */
+export const ROUND_STEPS = STEPS.map(([, step]) => step);
+
 /** What the step selector offers besides `auto` (the range decides) and `raw` (no aggregation). */
 export const FIXED_STEPS = ['5s', '15s', '30s', '1m', '5m', '15m', '30m', '1h', '6h', '1d'];
 

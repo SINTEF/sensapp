@@ -158,7 +158,7 @@ export function SeriesTable() {
         </span>
       )}
       {paged && (
-        <div className="join">
+        <div className="join [&>.btn]:h-7">
           <button
             className="join-item btn btn-xs btn-quiet"
             aria-label="Previous page"
@@ -178,7 +178,7 @@ export function SeriesTable() {
         </div>
       )}
       {selectedSeries.length > 0 && (
-        <button className="btn btn-ghost btn-xs text-base-content/60 ml-auto" onClick={clearSelectedSeries}>
+        <button className="btn btn-ghost btn-xs h-7 text-base-content/60 ml-auto" onClick={clearSelectedSeries}>
           Clear ({selectedSeries.length})
         </button>
       )}

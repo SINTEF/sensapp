@@ -6,19 +6,12 @@ import { unwrap } from '../api/clientConfig';
 import { isBooleanType, isNumericType, resolveStep } from '../lib/chartStep';
 import { buildChartOption } from '../lib/chartOption';
 import { seriesColor } from '../lib/palette';
-import { sharedLabels, withoutShared } from '../lib/seriesLabels';
+import { seriesLabel, sharedLabels, withoutShared } from '../lib/seriesLabels';
 import { brushedRange } from '../lib/timeRange';
 import { usePrefersDark } from '../lib/usePrefersDark';
 
 // echarts is large: load it when the first chart is drawn.
 const EChart = lazy(() => import('./EChart'));
-
-function buildSeriesLabel(name: string, labels: Record<string, string>): string {
-  const labelStr = Object.entries(labels)
-    .map(([k, v]) => `${k}="${v}"`)
-    .join(', ');
-  return labelStr ? `${name}{${labelStr}}` : name;
-}
 
 /** One SenML record. Only the first of a pack has the base time (`bt`), the others are relative to it. */
 interface SenMLRecord {
@@ -104,7 +97,7 @@ export function TimeSeriesChart() {
       .map((s) => {
         return {
           id: s.uuid,
-          name: buildSeriesLabel(s.name, withoutShared(s.labels, shared)),
+          name: seriesLabel(s.name, withoutShared(s.labels, shared)),
           points: parseSenMLToTimeSeries(shown[s.uuid].records),
           boolean: isBooleanType(s.type),
           color: seriesColor(s.slot, dark),

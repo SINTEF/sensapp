@@ -39,6 +39,8 @@ describe('pythonSnippet', () => {
     expect(code).not.toContain('2026-10-05');
     expect(pythonSnippet({ ...base, relativeRange: '7d' })).toContain('timedelta(days=7)');
     expect(pythonSnippet({ ...base, relativeRange: '15m' })).toContain('timedelta(minutes=15)');
+    // Python has no year
+    expect(pythonSnippet({ ...base, relativeRange: '1y' })).toContain('timedelta(days=365)');
   });
 
   it('asks for the step and the aggregation of the chart', () => {

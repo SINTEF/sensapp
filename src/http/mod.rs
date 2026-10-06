@@ -3,6 +3,7 @@ pub mod auth;
 pub mod authorized_storage;
 pub mod backpressure;
 pub mod crud;
+pub mod download;
 pub mod health;
 pub mod influxdb;
 pub mod limits;

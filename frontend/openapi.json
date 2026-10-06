@@ -1108,7 +1108,7 @@
             }
           },
           {
-            "description": "Output format: senml, csv, or jsonl (default: senml)",
+            "description": "Output format: senml, csv, jsonl or arrow (default: senml)",
             "in": "query",
             "name": "format",
             "required": false,
@@ -1185,6 +1185,15 @@
             "description": "Use Douglas-Peucker only when simplifying",
             "in": "query",
             "name": "simplify_high_quality",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Answer with 'Content-Disposition: attachment' and a file name: the series name, its labels, the window and the step (e.g. 'temperature_room-kitchen_20261006T090000Z_20261006T100000Z_5m-avg.csv'), so that a browser or 'curl -OJ' saves a file",
+            "in": "query",
+            "name": "download",
             "required": false,
             "schema": {
               "type": "boolean"

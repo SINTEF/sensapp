@@ -17,6 +17,14 @@ export function sharedLabels(all: Labels[]): Labels {
   );
 }
 
+/** `cpu{host="a", core="1"}`, or the name alone when there is no label. */
+export function seriesLabel(name: string, labels: Labels): string {
+  const text = Object.entries(labels)
+    .map(([k, v]) => `${k}="${v}"`)
+    .join(', ');
+  return text ? `${name}{${text}}` : name;
+}
+
 /** The labels of a series that tell it from the others of a selection. */
 export function withoutShared(labels: Labels, shared: Labels): Labels {
   return Object.fromEntries(Object.entries(labels).filter(([key]) => !(key in shared)));

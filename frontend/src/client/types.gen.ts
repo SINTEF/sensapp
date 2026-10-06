@@ -632,7 +632,7 @@ export type GetSeriesDataData = {
     };
     query?: {
         /**
-         * Output format: senml, csv, or jsonl (default: senml)
+         * Output format: senml, csv, jsonl or arrow (default: senml)
          */
         format?: string;
         /**
@@ -667,6 +667,10 @@ export type GetSeriesDataData = {
          * Use Douglas-Peucker only when simplifying
          */
         simplify_high_quality?: boolean;
+        /**
+         * Answer with 'Content-Disposition: attachment' and a file name: the series name, its labels, the window and the step (e.g. 'temperature_room-kitchen_20261006T090000Z_20261006T100000Z_5m-avg.csv'), so that a browser or 'curl -OJ' saves a file
+         */
+        download?: boolean;
     };
     url: '/series/{series_uuid}';
 };

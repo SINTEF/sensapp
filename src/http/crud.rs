@@ -120,6 +120,16 @@ impl ExportFormat {
             ExportFormat::Arrow => "application/vnd.apache.arrow.stream",
         }
     }
+
+    /// The extension of a downloaded file
+    pub fn extension(&self) -> &'static str {
+        match self {
+            ExportFormat::Senml => "json",
+            ExportFormat::Csv => "csv",
+            ExportFormat::Jsonl => "jsonl",
+            ExportFormat::Arrow => "arrow",
+        }
+    }
 }
 
 /// Parse ISO8601/RFC3339 datetime string to SensAppDateTime using hifitime
@@ -146,6 +156,7 @@ pub struct SensorDataQuery {
     pub simplify: Option<bool>,
     pub simplify_tolerance: Option<f64>,
     pub simplify_high_quality: Option<bool>,
+    pub download: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -835,7 +846,7 @@ pub async fn list_series(
     tag = "SensApp",
     params(
         ("series_uuid" = String, Path, description = "UUID of the series"),
-        ("format" = Option<String>, Query, description = "Output format: senml, csv, or jsonl (default: senml)"),
+        ("format" = Option<String>, Query, description = "Output format: senml, csv, jsonl or arrow (default: senml)"),
         ("start" = Option<String>, Query, description = "Start datetime in ISO 8601 format (e.g., '2024-01-15T10:30:00Z')"),
         ("end" = Option<String>, Query, description = "End datetime in ISO 8601 format (e.g., '2024-01-15T11:00:00Z')"),
         ("limit" = Option<usize>, Query, description = "Maximum number of samples (at most 100,000). Returns the oldest N samples of the window, in time order, and silently drops the rest. With simplify, it bounds the rows read before simplification"),
@@ -843,7 +854,8 @@ pub async fn list_series(
         ("aggregation" = Option<String>, Query, description = "Aggregation function: avg, min, max, sum, count, first, last"),
         ("simplify" = Option<bool>, Query, description = "Explicitly enable simplify-based point reduction. Applied to the rows read for the window (after bucketing when step is set); more than 100,000 rows to simplify is rejected with HTTP 400 instead of being truncated, so use step/aggregation or a narrower start/end"),
         ("simplify_tolerance" = Option<f64>, Query, description = "Dimensionless simplify tolerance on normalized time/value coordinates"),
-        ("simplify_high_quality" = Option<bool>, Query, description = "Use Douglas-Peucker only when simplifying")
+        ("simplify_high_quality" = Option<bool>, Query, description = "Use Douglas-Peucker only when simplifying"),
+        ("download" = Option<bool>, Query, description = "Answer with 'Content-Disposition: attachment' and a file name: the series name, its labels, the window and the step (e.g. 'temperature_room-kitchen_20261006T090000Z_20261006T100000Z_5m-avg.csv'), so that a browser or 'curl -OJ' saves a file")
     ),
     responses(
         (status = 200, description = "Series data in requested format", body = Value),
@@ -988,7 +1000,18 @@ pub async fn get_series_data(
 
         let sample_count = series_data.samples.len();
 
-        let response = match format {
+        let disposition = query.download.unwrap_or(false).then(|| {
+            let bucket = query.step.as_deref().zip(query_options.aggregation);
+            crate::http::download::content_disposition(&crate::http::download::file_name(
+                &series_data.sensor,
+                start_time,
+                end_time,
+                bucket,
+                format.extension(),
+            ))
+        });
+
+        let mut response = match format {
             ExportFormat::Senml => {
                 let json_value = SenMLConverter::to_senml_json(&series_data)
                     .map_err(AppError::internal_server_error)?;
@@ -1021,6 +1044,12 @@ pub async fn get_series_data(
         .map_err(|e| {
             AppError::internal_server_error(anyhow::anyhow!("Failed to build response: {}", e))
         })?;
+
+        if let Some(disposition) = disposition {
+            response
+                .headers_mut()
+                .insert(axum::http::header::CONTENT_DISPOSITION, disposition);
+        }
 
         Ok::<_, AppError>((response, sample_count))
     }

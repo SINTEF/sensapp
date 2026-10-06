@@ -9,6 +9,12 @@ SensApp ships a small explorer: pick a metric, pick series, draw them over a tim
 - The files are public. Responses carry a `Content-Security-Policy` (the page only talks to its own origin, and cannot be framed), `X-Content-Type-Options: nosniff` and `Cache-Control: no-cache`.
 - The UI calls the SensApp API of its own origin: `/metrics`, `/series`, `/series/{uuid}` and `/health/ready`.
 
+## The header
+
+From 768 px (`md`) the header is one row: the logo, the three tabs, then the Code, Download, API Docs and sign-in buttons. Below, the logo and the buttons keep the first row and the tabs get a row of their own, side by side across the width, so nothing scrolls sideways and the logo never shrinks (the small logo, without the name, is used under 640 px).
+
+Under 1024 px (`lg`) the page scrolls, and the lists of metrics and series are each capped at 70% of the screen height and scroll inside their card; without it, hundreds of metrics would push the series list thousands of pixels down. From `lg` the explorer fills the window and the cards share it.
+
 ## Charts
 
 Two selectors next to the time range control what the server computes, as in the Influx and Prometheus UIs:
@@ -24,6 +30,7 @@ There is one time window, the one of the explorer, and the chart draws exactly t
 
 - **Drag on the chart** to choose a window: it is asked of the server again, at the step that fits it (raw samples when zoomed in far enough). The old points stay, on the new axis, until the new ones arrive; a thin bar over the chart says it is loading.
 - **In the header of the chart**, with the style and the scale: `↶` goes back to the window before (the last 20 windows the user left; what the clock does to a preset is not one), `‹` and `›` move by half a window (`›` never goes past now, and is off on a live preset), `−` shows twice the window (a live preset goes to the next one), then the presets, the dates, the step and the aggregation.
+- **The tooltip** over the chart gives the value of each series at the time under the pointer. With many series it would cover the chart, so it shows 10 rows at most (the 10 largest values, and "and N more"), the metric name is said once in the header when the series are all of one metric (the rows keep only their labels), a long name is cut with an ellipsis, never the value after it, and the tooltip stays under 480 px wide. The full names are in the list of series.
 - A preset window is **live**: its end is now, and moves every minute while the tab is on screen. A window that was dragged, moved or typed is not.
 
 ### Colors
@@ -42,6 +49,18 @@ The **Code** button of the header opens the code that loads what the explorer sh
 - Whatever a label or a name says is quoted (Python and shell) or put on one line (comments): a hostile label cannot add a line of code to what is copied.
 - The code is always on a dark ground, in both themes, in JetBrains Mono, coloured by highlight.js (Python and Bash only). Long lines wrap instead of scrolling sideways (a uuid or an address with no space breaks where it must); the copied text is unchanged. The dialog, the highlighter and the font are loaded when it is first opened: 13 kB gzipped and 40 kB of font, nothing for a page that never opens it. The copy works on a page served by plain http too, where the clipboard API does not exist.
 - The Python SDK is not on PyPI yet. The script starts with a [PEP 723](https://peps.python.org/pep-0723/) block (`# /// script`) that says it needs `sensapp` and that it comes from GitHub (`[tool.uv.sources.sensapp]`), so `uv run script.py` is enough: uv makes the environment. The `uv pip install` command is there too, for an environment of one's own. Both are in `src/lib/snippets.ts` (`SCRIPT_METADATA`, `INSTALL_COMMENT`): change them when the SDK is published, and the Python the block asks for follows `requires-python` of the SDK.
+
+## Download
+
+The **Download** button of the header saves the selected series as files, **one file per series**. It is off while no series is selected.
+
+- The dialog asks the **format** (CSV, JSON Lines, SenML, Arrow), the **window** (the chart's, or all the data: no `start` and `end`) and the **samples** (raw, or aggregated with a step and an aggregation). It starts from what the chart draws: its step (`auto` resolved for the window) and aggregation, or raw. Text and boolean series are always downloaded raw, as on the chart.
+- The series are fetched **one after the other** from `GET /series/{uuid}?…&download=true`, each with its status in the dialog (waiting, downloading, saved, or the message of the server). Closing the dialog cancels what is left; there is no job queue on the server.
+- **The sample cap** (100,000 by default, `SENSAPP_HTTP_MAX_QUERY_SAMPLES`) applies to each series: a series over it is not saved and shows the server's message ("narrow the time range or use aggregation"), the others are saved. A 401 or 403 opens the sign-in dialog and stops.
+- **Why not a plain link**: the token of the UI is sent in the `Authorization` header, which a link the browser follows cannot carry. The dialog fetches the file with the token, holds it in a `Blob` (a few MB at most under the cap) and saves it with `<a download>`. Bigger downloads, without the copy in memory, would need signed links (`ideas/signed-download-links.md`).
+- **The file name** is the server's, from the `Content-Disposition` that `download=true` adds: the series name, its labels sorted by key, the window in UTC and the step, `temperature_room-kitchen_20261006T090000Z_20261006T100000Z_5m-avg.csv` (`json` for SenML, `jsonl`, `arrow`). The labels are there because a single-series CSV is only `timestamp,value`, and the selected series often share a name. The header has a UTF-8 `filename*` and an ASCII `filename` (what `curl -OJ` uses): characters no file system takes become `_`, a leading dot is dropped, and the name is cut at 150 characters. The code is in `src/http/download.rs`.
+- Browsers may ask, once for the site, to allow several downloads at a time.
+- The dialog is loaded when it is first opened (3 kB gzipped). The code is in `src/components/DownloadDialog.tsx` and `src/lib/download.ts`.
 
 ## Load Data
 
@@ -81,7 +100,7 @@ The explorer is in the address, so a link shares a view and a reload keeps it: `
 | --- | --- | --- |
 | `metric` | the selected metric | none |
 | `series` | a selected series, repeated | none |
-| `range` | a preset (`15m`, `1h`, `6h`, `24h`, `7d`, `30d`), ending now | `1h` |
+| `range` | a preset (`15m`, `1h`, `6h`, `24h`, `7d`, `30d`, `1y`), ending now | `1h` |
 | `from`, `to` | an absolute range (ISO 8601), once dates were typed | a preset is used |
 | `step`, `agg` | the step (`raw` or a duration) and the aggregation | `auto`, `avg` |
 | `style`, `log` | the chart style, `log=1` for the log scale | `line`, linear |

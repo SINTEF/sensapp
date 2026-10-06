@@ -19,7 +19,7 @@ describe('TimeRangeSelector', () => {
 
   it('renders all preset buttons', () => {
     render(<TimeRangeSelector />);
-    for (const label of ['15m', '1h', '6h', '24h', '7d', '30d']) {
+    for (const label of ['15m', '1h', '6h', '24h', '7d', '30d', '1y']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
   });

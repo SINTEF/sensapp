@@ -2,6 +2,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { AuthDialog } from './AuthDialog';
 import { AuthStatus } from './AuthStatus';
 import { CodeButton } from './CodeButton';
+import { DownloadButton } from './DownloadButton';
 
 // The files of public/, served next to the page (`BASE_URL` is `/ui/` when SensApp serves them)
 const base = import.meta.env.BASE_URL;
@@ -17,47 +18,51 @@ const TABS = [
 ];
 
 export function Layout() {
-  // The Code button is about what the explorer shows
+  // The Code and Download buttons are about what the explorer shows
   const explorer = useLocation().pathname === '/';
   return (
     <div className="min-h-screen lg:h-screen flex flex-col bg-base-200 lg:overflow-hidden">
       <header className="bg-base-100 border-b border-base-300 sticky top-0 z-50">
         <div className="px-3">
-          {/* The row covers the border of the header, so the line under the current tab sits on it */}
-          <div className="flex items-center justify-between gap-3 h-14 -mb-px">
-            <div className="flex items-center gap-2 sm:gap-3 self-stretch min-w-0">
-              <Link to="/" className="flex items-center hover:opacity-80 transition-opacity">
-                {/* The white logo on a dark page, the small one (no name) on a narrow screen */}
-                <picture>
-                  <source media="(min-width: 640px) and (prefers-color-scheme: dark)" srcSet={logoWhite} />
-                  <source media="(min-width: 640px)" srcSet={logo} />
-                  <source media="(prefers-color-scheme: dark)" srcSet={logoSmallWhite} />
-                  <img src={logoSmall} alt="SensApp" className="h-10 w-auto" />
-                </picture>
-              </Link>
-              <span aria-hidden="true" className="self-center h-6 w-px bg-base-300 shrink-0" />
-              {/* On a narrow screen the tabs scroll rather than push the page wider */}
-              <nav aria-label="Pages" className="flex items-stretch self-stretch sm:gap-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
-                {TABS.map((tab) => (
-                  <NavLink
-                    key={tab.to}
-                    to={tab.to}
-                    end={tab.end}
-                    className={({ isActive }) =>
-                      `flex items-center whitespace-nowrap px-1.5 sm:px-3 pt-1 border-b-2 font-display text-[0.65rem] sm:text-[0.7rem] font-semibold uppercase tracking-[0.06em] sm:tracking-[0.2em] transition-colors ${
-                        isActive
-                          ? 'border-primary text-base-content'
-                          : 'border-transparent text-base-content/45 hover:text-base-content/80'
-                      }`
-                    }
-                  >
-                    {tab.label}
-                  </NavLink>
-                ))}
-              </nav>
-            </div>
-            <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+          {/*
+            The row covers the border of the header, so the line under the current tab sits on it.
+            On a narrow screen it wraps: the logo and the buttons, then the tabs on a row of their own.
+          */}
+          <div className="flex flex-wrap md:flex-nowrap items-center gap-x-2 md:gap-x-3 -mb-px">
+            <Link to="/" className="order-1 flex items-center shrink-0 h-12 md:h-14 hover:opacity-80 transition-opacity">
+              {/* The white logo on a dark page, the small one (no name) on a narrow screen */}
+              <picture>
+                <source media="(min-width: 640px) and (prefers-color-scheme: dark)" srcSet={logoWhite} />
+                <source media="(min-width: 640px)" srcSet={logo} />
+                <source media="(prefers-color-scheme: dark)" srcSet={logoSmallWhite} />
+                <img src={logoSmall} alt="SensApp" className="h-10 w-auto max-w-none" />
+              </picture>
+            </Link>
+            <span aria-hidden="true" className="order-2 max-md:hidden h-6 w-px bg-base-300 shrink-0" />
+            <nav
+              aria-label="Pages"
+              className="order-3 max-md:-mx-3 max-md:w-[calc(100%+1.5rem)] max-md:border-t max-md:border-base-300 flex items-stretch h-10 md:h-14 md:gap-1 min-w-0"
+            >
+              {TABS.map((tab) => (
+                <NavLink
+                  key={tab.to}
+                  to={tab.to}
+                  end={tab.end}
+                  className={({ isActive }) =>
+                    `flex items-center justify-center max-md:flex-1 whitespace-nowrap md:px-3 pt-1 border-b-2 font-display text-[0.65rem] md:text-[0.7rem] font-semibold uppercase tracking-[0.06em] md:tracking-[0.12em] lg:tracking-[0.2em] transition-colors ${
+                      isActive
+                        ? 'border-primary text-base-content'
+                        : 'border-transparent text-base-content/45 hover:text-base-content/80'
+                    }`
+                  }
+                >
+                  {tab.label}
+                </NavLink>
+              ))}
+            </nav>
+            <div className="max-md:order-2 md:order-4 ml-auto flex items-center gap-1 md:gap-3 shrink-0">
               {explorer && <CodeButton />}
+              {explorer && <DownloadButton />}
               <a
                 href="/docs"
                 target="_blank"

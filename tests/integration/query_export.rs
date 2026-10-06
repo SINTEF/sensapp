@@ -940,3 +940,134 @@ mod advanced_series_query_tests {
         Ok(())
     }
 }
+
+/// `?download=true` on `GET /series/{uuid}`: the same body, with a `Content-Disposition`
+mod download_tests {
+    use super::*;
+
+    /// A series with labels, one of them not ASCII, two samples on 2024-01-01 from 00:00:00 UTC.
+    /// (The InfluxDB write percent-encodes a measurement name, not a tag value.)
+    async fn publish_labelled_series(app: &TestApp) -> Result<String> {
+        let measurement = format!(
+            "download_{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..8]
+        );
+        app.post_influxdb(
+            "/api/v2/write?bucket=test&org=sensapp&precision=s",
+            &format!(
+                "{measurement},room=kjøkken,floor=1 value=1.5 1704067200\n\
+                 {measurement},room=kjøkken,floor=1 value=2.5 1704067260"
+            ),
+        )
+        .await?
+        .assert_status(StatusCode::NO_CONTENT);
+        Ok(format!("{measurement} value"))
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_download_names_the_file() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let sensor_name = publish_labelled_series(&app).await?;
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("sensor should exist");
+        let measurement = sensor_name.trim_end_matches(" value");
+
+        let query = format!(
+            "/series/{}?format=csv&start=2024-01-01T00:00:00Z&end=2024-01-01T01:00:00Z&step=1m&aggregation=avg",
+            sensor.uuid
+        );
+        let plain = app.get(&query).await?;
+        plain.assert_status(StatusCode::OK);
+        assert!(plain.headers().get("content-disposition").is_none());
+
+        let download = app.get(&format!("{query}&download=true")).await?;
+        download.assert_status(StatusCode::OK);
+        download.assert_header("content-type", "text/csv");
+        download.assert_header(
+            "content-disposition",
+            &format!(
+                "attachment; \
+                 filename=\"{measurement}_value_floor-1_influxdb_bucket-test_influxdb_org-sensapp_room-kj_kken_20240101T000000Z_20240101T010000Z_1m-avg.csv\"; \
+                 filename*=UTF-8''{measurement}%20value_floor-1_influxdb_bucket-test_influxdb_org-sensapp_room-kj%C3%B8kken_20240101T000000Z_20240101T010000Z_1m-avg.csv"
+            ),
+        );
+        assert_eq!(download.body(), plain.body());
+        assert!(download.body().contains("1.5"));
+
+        // `download=false` is the plain answer
+        let response = app.get(&format!("{query}&download=false")).await?;
+        response.assert_status(StatusCode::OK);
+        assert!(response.headers().get("content-disposition").is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_download_extension_follows_the_format() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let sensor_name = publish_labelled_series(&app).await?;
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("sensor should exist");
+
+        for (format, extension) in [
+            ("&format=csv", "csv"),
+            ("&format=jsonl", "jsonl"),
+            ("&format=senml", "json"),
+            ("&format=json", "json"),
+            ("&format=arrow", "arrow"),
+            ("", "json"),
+        ] {
+            let response = app
+                .get(&format!("/series/{}?download=true{format}", sensor.uuid))
+                .await?;
+            response.assert_status(StatusCode::OK);
+            let disposition = response
+                .headers()
+                .get("content-disposition")
+                .expect("a download has a Content-Disposition")
+                .to_str()?;
+            // No window and no step: the name and the labels only
+            assert!(
+                disposition.ends_with(&format!("_room-kj%C3%B8kken.{extension}")),
+                "{format}: {disposition}"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_download_over_the_sample_cap_is_refused() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::with_max_query_samples(storage.clone(), 1).await;
+
+        let sensor_name = publish_labelled_series(&app).await?;
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("sensor should exist");
+
+        let response = app
+            .get(&format!("/series/{}?format=csv&download=true", sensor.uuid))
+            .await?;
+        response.assert_status(StatusCode::BAD_REQUEST);
+        response.assert_body_contains("Query exceeds 1 samples");
+        assert!(response.headers().get("content-disposition").is_none());
+
+        Ok(())
+    }
+}

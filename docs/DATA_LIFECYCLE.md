@@ -37,7 +37,9 @@ curl -X DELETE "http://localhost:3000/series/$SERIES_UUID" -H "Authorization: Be
 
 Removes the samples, the labels and the series itself. `204` on success, `404` when it does not exist.
 
-Both operations are permanent. Take a backup, or export the range first (`GET /series/{uuid}?format=csv&start=…&end=…`), if you may need it back.
+On SQLite a delete holds the write lock of the whole database until it ends, so deletes and writes queue behind each other (they wait up to the 5 second busy timeout, then the request answers `503`). Deleting many series in parallel works, it just does not go faster than one at a time.
+
+Both operations are permanent. Take a backup, or export the range first (`GET /series/{uuid}?format=csv&start=…&end=…&download=true`, which `curl -OJ` saves under a file name of its own, or the Download button of the UI), if you may need it back.
 
 ## Correcting data
 
@@ -137,7 +139,7 @@ Two requests that write the same new sample at the same moment, on different ins
 | SQLite | yes | yes | yes | `VACUUM` shrinks the file |
 | TimescaleDB | yes | yes | yes | Works on compressed chunks. `DELETE` on a compressed chunk decompresses what it touches first, which is slower. The vacuum decompresses only the chunks that hold duplicates, removes them and compresses those chunks again |
 | DuckDB | yes | yes | yes | Exact duplicates are found with `rowid` |
-| ClickHouse | yes | yes | yes | Lightweight `DELETE`: rows disappear from queries at once and are physically removed by later merges. The sample count is taken just before the delete |
+| ClickHouse | yes | yes | yes | Lightweight `DELETE`: rows disappear from queries at once and are physically removed by later merges. The sample count is taken just before the delete. ClickHouse 24.8 can lose a delete while background merges run, so SensApp checks that the rows are gone and deletes again if not |
 | BigQuery | yes | yes | no | `DELETE` statements, which bill the bytes they scan. BigQuery runs 2 mutating statements at a time per table and queues 20: deleting many series at once fails. Duplicates cannot be removed: `501 Not Implemented` |
 | RRDCached | no | no | no | Returns `501 Not Implemented` |
 

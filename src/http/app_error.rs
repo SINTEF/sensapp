@@ -15,8 +15,22 @@ fn sqlstate_is_unavailable(code: &str) -> bool {
     code.starts_with("08") || matches!(code, "53300" | "57P01" | "57P02" | "57P03")
 }
 
-/// Whether a sqlx error means that the database cannot be reached or is out of connections.
-/// Everything else (a slow or cancelled statement, a constraint, a missing file, a bad
+/// Whether a SQLite error is `SQLITE_BUSY` or `SQLITE_LOCKED`: another connection holds the write
+/// lock for longer than the busy timeout. The database is fine, the same request can work later.
+/// sqlx reports the extended result code, whose low byte is the primary code (`SQLITE_BUSY_SNAPSHOT`
+/// is 517, so 5).
+#[cfg(feature = "sqlite")]
+fn sqlite_error_is_busy(error: &dyn sqlx::error::DatabaseError) -> bool {
+    use sqlx::error::DatabaseError;
+
+    error
+        .try_downcast_ref::<sqlx::sqlite::SqliteError>()
+        .and_then(|error| error.code()?.parse::<i32>().ok())
+        .is_some_and(|code| matches!(code & 0xff, 5 | 6))
+}
+
+/// Whether a sqlx error means that the database cannot be reached, is out of connections, or is
+/// busy with another writer (SQLite). Everything else (a slow or cancelled statement, a constraint, a missing file, a bad
 /// configuration) is a failure of the operation, reported as a 500 that clients do not retry.
 fn sqlx_error_is_unavailable(error: &sqlx::Error) -> bool {
     match error {
@@ -24,9 +38,15 @@ fn sqlx_error_is_unavailable(error: &sqlx::Error) -> bool {
         | sqlx::Error::PoolClosed
         | sqlx::Error::WorkerCrashed
         | sqlx::Error::Io(_) => true,
-        sqlx::Error::Database(error) => error
-            .code()
-            .is_some_and(|code| sqlstate_is_unavailable(&code)),
+        sqlx::Error::Database(error) => {
+            #[cfg(feature = "sqlite")]
+            if sqlite_error_is_busy(error.as_ref()) {
+                return true;
+            }
+            error
+                .code()
+                .is_some_and(|code| sqlstate_is_unavailable(&code))
+        }
         _ => false,
     }
 }
@@ -268,6 +288,56 @@ mod tests {
         let response = AppError::from(StorageError::Unavailable("timeout expired".to_string()))
             .into_response();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Two connections to one file, the first holding the write lock, the second not waiting.
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn test_sqlite_busy_is_a_503_and_other_errors_are_not() {
+        use sqlx::Connection;
+        use sqlx::sqlite::SqliteConnectOptions;
+        use std::str::FromStr;
+        use std::time::Duration;
+
+        let path = std::env::temp_dir().join(format!("sensapp-busy-{}.db", uuid::Uuid::new_v4()));
+        let options = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))
+            .unwrap()
+            .create_if_missing(true)
+            .busy_timeout(Duration::ZERO);
+        let mut holder = sqlx::SqliteConnection::connect_with(&options)
+            .await
+            .unwrap();
+        let mut waiter = sqlx::SqliteConnection::connect_with(&options)
+            .await
+            .unwrap();
+
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut holder)
+            .await
+            .unwrap();
+        let busy = sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut waiter)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            status_of(busy.into()).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+
+        let syntax = sqlx::query("NOT SQL")
+            .execute(&mut waiter)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            status_of(syntax.into()).await,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        drop(holder);
+        drop(waiter);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
     }
 
     #[cfg(feature = "clickhouse")]
