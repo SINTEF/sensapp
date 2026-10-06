@@ -2,8 +2,8 @@ apiVersion: v2
 name: sensapp
 description: Helm chart for deploying SensApp
 type: application
-version: 0.2.0
-appVersion: "0.4.0"
+version: 0.2.1
+appVersion: "0.4.1"
 keywords:
   - sensapp
   - time-series

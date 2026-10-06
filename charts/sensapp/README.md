@@ -7,7 +7,7 @@ The chart deploys SensApp only. It does not install or manage a database. Each S
 Published releases push the chart to GHCR as an OCI package. Install a specific chart version with:
 
 ```bash
-helm install sensapp oci://ghcr.io/sintef/charts/sensapp --version 0.2.0
+helm install sensapp oci://ghcr.io/sintef/charts/sensapp --version 0.2.1
 ```
 
 The chart version is the `version` in `Chart.yaml`, which is separate from the SensApp `appVersion`. Bump the chart version for each release so an existing OCI tag is not reused. GHCR creates new packages as private by default; an organization admin must make the chart package public for anonymous installs after its first publication.
