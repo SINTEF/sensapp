@@ -18,6 +18,7 @@ describe('chartStep', () => {
     expect(chartStep(START, at(24 * 3600))).toBe('1m');
     expect(chartStep(START, at(7 * 86400))).toBe('10m');
     expect(chartStep(START, at(30 * 86400))).toBe('30m');
+    expect(chartStep(START, at(365 * 86400))).toBe('6h');
   });
 
   it('never makes more than 2000 points, up to a year', () => {

@@ -192,10 +192,10 @@ describe('useSelectionStore', () => {
       expect(state().relativeRange).toBe('6h');
       const hours = (Date.parse(state().timeRange.end) - Date.parse(state().timeRange.start)) / 3_600_000;
       expect(hours).toBe(6);
-      act(() => state().setRelativeRange('30d'));
+      act(() => state().setRelativeRange('1y'));
       const before = state().rangeHistory.length;
       act(() => state().zoomOutRange());
-      expect(state().relativeRange).toBe('30d');
+      expect(state().relativeRange).toBe('1y');
       expect(state().rangeHistory).toHaveLength(before);
     });
   });

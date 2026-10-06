@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChartOption } from './chartOption';
+import { buildChartOption, MAX_TOOLTIP_ROWS, tooltipHtml } from './chartOption';
 import type { ChartSeries } from './chartOption';
 
 const RANGE = { start: '2026-10-04T00:00:00.000Z', end: '2026-10-04T01:00:00.000Z' };
@@ -16,6 +16,12 @@ describe('buildChartOption', () => {
     expect(option.series[0]).toMatchObject({ type: 'line', name: 'temperature', stack: undefined, areaStyle: undefined, step: undefined });
     expect(buildChartOption([temperature], 'line', false, RANGE)).toMatchObject({
       xAxis: { min: Date.parse(RANGE.start), max: Date.parse(RANGE.end) },
+    });
+  });
+
+  it('hides the labels of the time axis that would overlap (a short window on a narrow screen)', () => {
+    expect(buildChartOption([temperature], 'line', false, RANGE)).toMatchObject({
+      xAxis: { axisLabel: { hideOverlap: true } },
     });
   });
 
@@ -67,5 +73,65 @@ describe('buildChartOption', () => {
   it('labels the boolean axis', () => {
     const formatter = (build([door]).yAxis[1].axisLabel as { formatter: (v: number) => string }).formatter;
     expect([formatter(0), formatter(1)]).toEqual(['false', 'true']);
+  });
+});
+
+describe('tooltipHtml', () => {
+  const row = (name: string, value: unknown, axisValueLabel = '2026-10-04') => ({ marker: '<i></i>', seriesName: name, value, axisValueLabel });
+
+  it('says the date, then each series with its value rounded for the eye', () => {
+    const html = tooltipHtml([row('temperature', [1, 23.99055599]), row('door', [1, 1])]);
+    expect(html).toContain('2026-10-04');
+    expect(html).toMatch(/temperature<\/span><b[^>]*>23\.9906<\/b>/);
+    expect(html).toMatch(/door<\/span><b[^>]*>1<\/b>/);
+    expect(html).not.toContain('more');
+  });
+
+  it('says the metric once in the header when all the series are of it, and keeps the labels in the rows', () => {
+    const html = tooltipHtml([row('cpu{host="a"}', [1, 1]), row('cpu{host="b"}', [1, 2])]);
+    expect(html).toContain('2026-10-04 · cpu</div>');
+    expect(html).toContain('{host=&quot;a&quot;}');
+    expect(html).not.toContain('>cpu{');
+  });
+
+  it('keeps the whole names when the metrics differ or have no labels', () => {
+    const mixed = tooltipHtml([row('cpu{host="a"}', [1, 1]), row('mem{host="a"}', [1, 2])]);
+    expect(mixed).toContain('cpu{host=');
+    expect(mixed).toContain('mem{host=');
+    const bare = tooltipHtml([row('temperature', [1, 1]), row('door', [1, 2])]);
+    expect(bare).toContain('temperature');
+    expect(bare).not.toContain(' · ');
+  });
+
+  it('escapes the names: they are the labels of the series', () => {
+    const html = tooltipHtml([row('<i>cpu{host="<b>a</b>"}', [1, 1])]);
+    expect(html).toContain('&lt;i&gt;cpu</div>');
+    expect(html).toContain('{host=&quot;&lt;b&gt;a&lt;/b&gt;&quot;}');
+    expect(html).not.toContain('<b>a</b>');
+    expect(html).not.toContain('<i>cpu');
+  });
+
+  it('cuts a long name by the width of the tooltip, not the value', () => {
+    const html = tooltipHtml([row('x'.repeat(500), [1, 1])]);
+    expect(html).toContain('text-overflow:ellipsis');
+    expect(html).toContain('max-width:min(480px,80vw)');
+  });
+
+  it('keeps the largest values past the row limit, and says how many are left out', () => {
+    const many = Array.from({ length: MAX_TOOLTIP_ROWS + 5 }, (_, i) => row(`series-${i}`, [1, i]));
+    const html = tooltipHtml(many);
+    expect(html.match(/<b style/g)).toHaveLength(MAX_TOOLTIP_ROWS);
+    expect(html).toContain('series-14');
+    expect(html).not.toContain('series-4<');
+    expect(html).toContain('and 5 more');
+  });
+
+  it('keeps the order of the series when they all fit', () => {
+    const html = tooltipHtml([row('b', [1, 1]), row('a', [1, 9])]);
+    expect(html.indexOf('>b<')).toBeLessThan(html.indexOf('>a<'));
+  });
+
+  it('shows a dash for a series without a value', () => {
+    expect(tooltipHtml([row('gap', [1, undefined])])).toMatch(/<b[^>]*>-<\/b>/);
   });
 });

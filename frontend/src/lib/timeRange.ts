@@ -6,6 +6,7 @@ export const PRESETS = [
   { label: '24h', minutes: 1440 },
   { label: '7d', minutes: 10080 },
   { label: '30d', minutes: 43200 },
+  { label: '1y', minutes: 525600 },
 ];
 
 export const DEFAULT_RANGE = '1h';

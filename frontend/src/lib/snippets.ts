@@ -92,10 +92,11 @@ function clean(iso: string): string {
   return iso.replace(/\.000Z$/, 'Z');
 }
 
-/** `24h` as `hours=24`, the argument of a Python `timedelta`. */
+/** `24h` as `hours=24`, the argument of a Python `timedelta`. It has no year: `1y` is 365 days, as the preset is. */
 function timedelta(label: string): string | undefined {
-  const match = /^(\d+)([mhd])$/.exec(label);
+  const match = /^(\d+)([mhdy])$/.exec(label);
   if (!match) return undefined;
+  if (match[2] === 'y') return `days=${Number(match[1]) * 365}`;
   const unit = { m: 'minutes', h: 'hours', d: 'days' }[match[2] as 'm' | 'h' | 'd'];
   return `${unit}=${match[1]}`;
 }

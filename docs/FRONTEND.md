@@ -9,6 +9,12 @@ SensApp ships a small explorer: pick a metric, pick series, draw them over a tim
 - The files are public. Responses carry a `Content-Security-Policy` (the page only talks to its own origin, and cannot be framed), `X-Content-Type-Options: nosniff` and `Cache-Control: no-cache`.
 - The UI calls the SensApp API of its own origin: `/metrics`, `/series`, `/series/{uuid}` and `/health/ready`.
 
+## The header
+
+From 768 px (`md`) the header is one row: the logo, the three tabs, then the Code, API Docs and sign-in buttons. Below, the logo and the buttons keep the first row and the tabs get a row of their own, side by side across the width, so nothing scrolls sideways and the logo never shrinks (the small logo, without the name, is used under 640 px).
+
+Under 1024 px (`lg`) the page scrolls, and the lists of metrics and series are each capped at 70% of the screen height and scroll inside their card; without it, hundreds of metrics would push the series list thousands of pixels down. From `lg` the explorer fills the window and the cards share it.
+
 ## Charts
 
 Two selectors next to the time range control what the server computes, as in the Influx and Prometheus UIs:
@@ -24,6 +30,7 @@ There is one time window, the one of the explorer, and the chart draws exactly t
 
 - **Drag on the chart** to choose a window: it is asked of the server again, at the step that fits it (raw samples when zoomed in far enough). The old points stay, on the new axis, until the new ones arrive; a thin bar over the chart says it is loading.
 - **In the header of the chart**, with the style and the scale: `↶` goes back to the window before (the last 20 windows the user left; what the clock does to a preset is not one), `‹` and `›` move by half a window (`›` never goes past now, and is off on a live preset), `−` shows twice the window (a live preset goes to the next one), then the presets, the dates, the step and the aggregation.
+- **The tooltip** over the chart gives the value of each series at the time under the pointer. With many series it would cover the chart, so it shows 10 rows at most (the 10 largest values, and "and N more"), the metric name is said once in the header when the series are all of one metric (the rows keep only their labels), a long name is cut with an ellipsis, never the value after it, and the tooltip stays under 480 px wide. The full names are in the list of series.
 - A preset window is **live**: its end is now, and moves every minute while the tab is on screen. A window that was dragged, moved or typed is not.
 
 ### Colors
@@ -81,7 +88,7 @@ The explorer is in the address, so a link shares a view and a reload keeps it: `
 | --- | --- | --- |
 | `metric` | the selected metric | none |
 | `series` | a selected series, repeated | none |
-| `range` | a preset (`15m`, `1h`, `6h`, `24h`, `7d`, `30d`), ending now | `1h` |
+| `range` | a preset (`15m`, `1h`, `6h`, `24h`, `7d`, `30d`, `1y`), ending now | `1h` |
 | `from`, `to` | an absolute range (ISO 8601), once dates were typed | a preset is used |
 | `step`, `agg` | the step (`raw` or a duration) and the aggregation | `auto`, `avg` |
 | `style`, `log` | the chart style, `log=1` for the log scale | `line`, linear |

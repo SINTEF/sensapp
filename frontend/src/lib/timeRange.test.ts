@@ -51,6 +51,7 @@ describe('zoomedOut', () => {
 describe('nextPreset', () => {
   it('is the next one, and the widest stays', () => {
     expect(nextPreset('1h')).toBe('6h');
-    expect(nextPreset('30d')).toBe('30d');
+    expect(nextPreset('30d')).toBe('1y');
+    expect(nextPreset('1y')).toBe('1y');
   });
 });
