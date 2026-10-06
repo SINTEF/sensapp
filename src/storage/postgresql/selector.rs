@@ -112,7 +112,7 @@ impl PostgresStorage {
         limit: usize,
     ) -> Result<HashMap<i64, TypedSamples>> {
         use super::queries::{
-            bucketed_cte, float_aggregate_expression, group_by_clause,
+            bucket_timestamp_expression, bucketed_cte, float_aggregate_expression, group_by_clause,
             integer_aggregate_expression, numeric_aggregate_expression,
         };
         use crate::storage::Aggregation;
@@ -137,8 +137,9 @@ impl PostgresStorage {
         // The fragments are static, the table comes from the match above; the ids, the window,
         // the step and the limit are bound.
         let sql = format!(
-            "{} SELECT sensor_id, bucket_us AS timestamp_us, {expression} AS value {}",
+            "{} SELECT sensor_id, {} AS timestamp_us, {expression} AS value {}",
             bucketed_cte(table, true),
+            bucket_timestamp_expression(read.aggregation),
             group_by_clause(true)
         );
         let origin_us = read.start_us.unwrap_or(0);

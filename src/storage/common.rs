@@ -410,6 +410,10 @@ fn aggregate_float_samples(
                 datetime,
                 value: last,
             }),
+            Aggregation::Latest => output_float.push(Sample {
+                datetime: samples[end - 1].datetime,
+                value: last,
+            }),
             Aggregation::Count => output_int.push(Sample {
                 datetime,
                 value: count,
@@ -496,6 +500,10 @@ fn aggregate_integer_samples(
                 datetime,
                 value: last,
             }),
+            Aggregation::Latest => output_int.push(Sample {
+                datetime: samples[end - 1].datetime,
+                value: last,
+            }),
             Aggregation::Count => output_int.push(Sample {
                 datetime,
                 value: count,
@@ -580,6 +588,10 @@ fn aggregate_numeric_samples(
             }),
             Aggregation::Last => output_numeric.push(Sample {
                 datetime,
+                value: last,
+            }),
+            Aggregation::Latest => output_numeric.push(Sample {
+                datetime: samples[end - 1].datetime,
                 value: last,
             }),
             Aggregation::Count => output_int.push(Sample {
@@ -678,6 +690,58 @@ mod tests {
         assert_eq!(
             input_ms, output_ms,
             "Roundtrip should preserve milliseconds"
+        );
+    }
+
+    #[test]
+    fn latest_keeps_the_timestamp_of_the_last_sample_of_each_bucket() {
+        use crate::datamodel::{Sensor, SensorType};
+
+        // One sample every 15 s for 3 minutes, from the epoch
+        let data = || {
+            let samples: smallvec::SmallVec<[Sample<f64>; 4]> = (0..12)
+                .map(|index| Sample {
+                    datetime: SensAppDateTime::from_unix_seconds(index as f64 * 15.0),
+                    value: index as f64,
+                })
+                .collect();
+            let sensor = Sensor {
+                uuid: uuid::Uuid::nil(),
+                name: "latest".into(),
+                sensor_type: SensorType::Float,
+                unit: None,
+                labels: Default::default(),
+            };
+            SensorData::new(sensor, TypedSamples::Float(samples))
+        };
+        let options = |aggregation| SensorDataQueryOptions {
+            start_time: Some(SensAppDateTime::from_unix_seconds(0.0)),
+            end_time: None,
+            limit: None,
+            step_ms: Some(60_000),
+            aggregation: Some(aggregation),
+            simplify: None,
+        };
+        let seconds_and_values =
+            |aggregation| match apply_query_options(data(), &options(aggregation))
+                .unwrap()
+                .samples
+            {
+                TypedSamples::Float(samples) => samples
+                    .iter()
+                    .map(|sample| (sample.datetime.to_unix_seconds() as i64, sample.value))
+                    .collect::<Vec<_>>(),
+                other => panic!("unexpected samples {other:?}"),
+            };
+
+        // `Last` is stamped at the start of its bucket, `Latest` at its sample
+        assert_eq!(
+            seconds_and_values(Aggregation::Last),
+            vec![(0, 3.0), (60, 7.0), (120, 11.0)]
+        );
+        assert_eq!(
+            seconds_and_values(Aggregation::Latest),
+            vec![(45, 3.0), (105, 7.0), (165, 11.0)]
         );
     }
 }

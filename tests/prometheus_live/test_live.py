@@ -13,11 +13,13 @@ SENSAPP = "http://127.0.0.1:3017"
 PROMETHEUS = "http://127.0.0.1:9099"
 
 
-def request(base: str, path: str, payload: bytes | None = None) -> tuple[int, str]:
+def request(
+    base: str, path: str, payload: bytes | None = None, timeout: int = 5
+) -> tuple[int, str]:
     headers = {"Content-Type": "application/json"} if payload is not None else {}
     req = urllib.request.Request(base + path, data=payload, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
             return response.status, response.read().decode("utf-8")
     except urllib.error.HTTPError as error:
         return error.code, error.read().decode("utf-8")
@@ -180,17 +182,27 @@ def test_remote_read_hints() -> None:
         (f"min_over_time({one}[2h])", HOUR, over(min, 2 * HOUR), True),
         (f"sum_over_time({one}[2h])", HOUR, over(sum, 2 * HOUR), True),
         (f"avg_over_time({one}[2h])", HOUR, over(mean, 2 * HOUR), True),
+        # A plain selector and the aggregation operators are evaluated on the latest sample of
+        # each series at each step: SensApp answers with the last sample of each step.
+        (f"sum({selector})", HOUR, across(sum), True),
+        (f"avg({selector})", HOUR, across(mean), True),
+        (f"min({selector})", HOUR, across(min), True),
+        (f"max({selector})", HOUR, across(max), True),
+        (f"count({selector})", HOUR, across(len), True),
+        (one, HOUR, lambda t: window("a", t, 300)[-1], True),
+        (one, 900, lambda t: window("a", t, 300)[-1], True),
         # Not answered with buckets, or the answer would be wrong:
-        # a window shorter than the step, a count of samples, aggregations across series.
+        # a window shorter than the step, a count of samples.
         (f"avg_over_time({one}[30m])", HOUR, over(mean, 1800), False),
         (f"max_over_time({one}[10m])", 900, over(max, 600), False),
         (f"count_over_time({one}[1h])", HOUR, over(len, HOUR), False),
-        (f"sum({selector})", HOUR, across(sum), False),
-        (f"avg({selector})", HOUR, across(mean), False),
-        (f"min({selector})", HOUR, across(min), False),
-        (f"max({selector})", HOUR, across(max), False),
-        (f"count({selector})", HOUR, across(len), False),
-        (one, HOUR, lambda t: window("a", t, 300)[-1], False),
+        # A subquery is evaluated on its own grid: the raw samples
+        (
+            f"max_over_time({one}[2h:30m])",
+            HOUR,
+            lambda t: max(window("a", t - 1800 * i, 300)[-1] for i in range(4)),
+            False,
+        ),
     ]
 
     failures = []
@@ -211,12 +223,104 @@ def test_remote_read_hints() -> None:
     print(f"PASS remote read hints give the answer of the raw samples ({len(cases)} queries)", flush=True)
 
 
+def query_range_values(
+    expression: str, start: int, end: int, step: int
+) -> dict[int, float]:
+    """Like `query_range`, for an expression that may have no point at all."""
+    params = urllib.parse.urlencode(
+        {"query": expression, "start": start, "end": end, "step": step}
+    )
+    status, body = request(PROMETHEUS, "/api/v1/query_range?" + params, timeout=60)
+    if status != 200:
+        raise AssertionError(f"{expression}: Prometheus HTTP {status}: {body[:300]}")
+    result = json.loads(body)["data"]["result"]
+    if len(result) > 1:
+        raise AssertionError(f"{expression}: expected one series, got {result}")
+    return {int(float(t)): float(v) for t, v in result[0]["values"]} if result else {}
+
+
+def test_remote_read_plain_selector_over_a_long_range() -> None:
+    """A series of more samples than a read may return, graphed at a coarse step: the raw samples
+    are rejected over 100,000 of them, and a plain selector only needs the last sample of each
+    step. A series with a gap longer than the lookback of Prometheus must keep its gaps."""
+    tag = uuid.uuid4().hex[:8]
+    minutes = 120_000  # 83 days, one sample a minute
+    t0 = int(time.time()) // HOUR * HOUR - 90 * 24 * HOUR
+    steady, sparse = f"long_{tag}_steady", f"long_{tag}_sparse"
+
+    def steady_value(minute: int) -> float:
+        return float((minute * 7919) % 1000)
+
+    def sparse_value(minute: int) -> float:
+        return float(minute % 1000)
+
+    # The sparse series has samples between minutes 10 and 19 of each hour only
+    payload = [{"n": steady, "v": steady_value(m), "t": t0 + 60 * m} for m in range(minutes)]
+    payload += [
+        {"n": sparse, "v": sparse_value(m), "t": t0 + 60 * m}
+        for m in range(minutes)
+        if 10 <= m % 60 < 20
+    ]
+    for chunk in range(0, len(payload), 50_000):
+        status, body = request(
+            SENSAPP,
+            "/publish",
+            json.dumps(payload[chunk : chunk + 50_000]).encode(),
+            timeout=120,
+        )
+        if status != 200:
+            raise AssertionError(f"Could not seed SensApp: HTTP {status}: {body[:300]}")
+
+    failures = []
+    # Evaluations on the hour, and half an hour after: the steps are not tied to the hour
+    for offset in (0, 1800):
+        start = t0 + HOUR + offset
+        end = start + (minutes // 60 - 3) * HOUR
+        for expression, step, expected in [
+            (steady, HOUR, lambda t: steady_value((t - t0) // 60)),
+            (f"max({steady})", HOUR, lambda t: steady_value((t - t0) // 60)),
+        ]:
+            got = query_range_values(expression, start, end, step)
+            wrong = [
+                t
+                for t in range(start, end + 1, step)
+                if t not in got or got[t] != expected(t)
+            ]
+            if wrong:
+                failures.append(
+                    f"{expression} offset={offset}s: {len(wrong)} of "
+                    f"{(end - start) // step + 1} points differ from the raw samples, "
+                    f"the first at T0+{(wrong[0] - t0) / HOUR:.1f}h: got {got.get(wrong[0])}, "
+                    f"want {expected(wrong[0])}"
+                )
+
+    # Every 15 minutes: only the evaluation at :15 has a sample of the last 5 minutes (the one of
+    # minute 19 is 11 minutes old at :30), the others have no point
+    start, end = t0 + HOUR, t0 + 40 * 24 * HOUR
+    got = query_range_values(sparse, start, end, 900)
+    for t in range(start, end + 1, 900):
+        minute = (t - t0) // 60
+        want = sparse_value(minute) if 10 <= minute % 60 < 20 else None
+        if got.get(t) != want:
+            failures.append(
+                f"{sparse} step=900s at T0+{(t - t0) / HOUR:.2f}h: got {got.get(t)}, want {want}"
+            )
+            break
+
+    if failures:
+        raise AssertionError(
+            "remote read of a plain selector over a long range:\n  " + "\n  ".join(failures)
+        )
+    print("PASS a plain selector over more samples than the limit gets the answer of the raw samples", flush=True)
+
+
 def main() -> None:
     wait_for("SensApp readiness", lambda: ready(SENSAPP))
     wait_for("Prometheus readiness", lambda: ready(PROMETHEUS))
     test_remote_write()
     test_remote_read()
     test_remote_read_hints()
+    test_remote_read_plain_selector_over_a_long_range()
 
 
 if __name__ == "__main__":

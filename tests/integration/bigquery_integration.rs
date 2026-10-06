@@ -626,6 +626,7 @@ mod bigquery_tests {
                 Aggregation::Count,
                 Aggregation::First,
                 Aggregation::Last,
+                Aggregation::Latest,
             ] {
                 let options = SensorDataQueryOptions {
                     start_time: window_start,

@@ -11,6 +11,11 @@ pub enum Aggregation {
     Count,
     First,
     Last,
+    /// The value of the last sample of the bucket, stamped with the timestamp of that sample
+    /// instead of the start of the bucket (`Last`). For the readers that look for the latest
+    /// sample before a time, such as a Prometheus instant selector. Internal: not parsed from
+    /// a request.
+    Latest,
 }
 
 impl Aggregation {
@@ -23,6 +28,7 @@ impl Aggregation {
             Self::Count => "count",
             Self::First => "first",
             Self::Last => "last",
+            Self::Latest => "latest",
         }
     }
 

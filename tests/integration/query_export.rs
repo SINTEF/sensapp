@@ -851,7 +851,7 @@ mod advanced_series_query_tests {
         let storage = test_db.storage();
         let app = TestApp::new(storage.clone()).await;
 
-        let cap = sensapp::http::limits::MAX_DIRECT_SAMPLES as u32;
+        let cap = sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES as u32;
         let sensor_name = publish_secondly_series(&app, cap + 1).await?;
         let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
             .await?
@@ -888,6 +888,50 @@ mod advanced_series_query_tests {
         let response = app
             .get(&format!(
                 "/series/{}?format=csv&limit=1000&simplify=true&simplify_tolerance=0.001",
+                sensor.uuid
+            ))
+            .await?;
+        response.assert_status(StatusCode::OK);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_series_query_sample_limit_is_configurable() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let limit = 50usize;
+        let app = TestApp::with_max_query_samples(storage.clone(), limit).await;
+
+        let sensor_name = publish_secondly_series(&app, limit as u32 + 1).await?;
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("sensor should exist");
+
+        // One sample more than the limit is rejected, not truncated.
+        let response = app
+            .get(&format!("/series/{}?format=csv", sensor.uuid))
+            .await?;
+        response.assert_status(StatusCode::BAD_REQUEST);
+        response.assert_body_contains("Query exceeds 50 samples");
+
+        // An explicit limit may be the limit, not more.
+        let response = app
+            .get(&format!("/series/{}?format=csv&limit=50", sensor.uuid))
+            .await?;
+        response.assert_status(StatusCode::OK);
+        let response = app
+            .get(&format!("/series/{}?format=csv&limit=51", sensor.uuid))
+            .await?;
+        response.assert_status(StatusCode::BAD_REQUEST);
+        response.assert_body_contains("limit cannot exceed 50");
+
+        // Buckets bring the read under the limit.
+        let response = app
+            .get(&format!(
+                "/series/{}?format=csv&step=10s&aggregation=avg",
                 sensor.uuid
             ))
             .await?;

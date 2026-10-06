@@ -47,7 +47,10 @@ pub struct CrossSeriesQuery {
 
 impl CrossSeriesQuery {
     pub fn validate(&self) -> Result<()> {
-        if matches!(self.aggregation, Aggregation::First | Aggregation::Last) {
+        if matches!(
+            self.aggregation,
+            Aggregation::First | Aggregation::Last | Aggregation::Latest
+        ) {
             return Err(anyhow!(
                 "'first' and 'last' are not defined across series; use sum, avg, min, max or count"
             ));
@@ -101,7 +104,7 @@ impl Accumulator {
             Aggregation::Count => accumulator.count = value as i64,
             Aggregation::Min => accumulator.min = value,
             Aggregation::Max => accumulator.max = value,
-            Aggregation::Avg | Aggregation::First | Aggregation::Last => {
+            Aggregation::Avg | Aggregation::First | Aggregation::Last | Aggregation::Latest => {
                 unreachable!("not mergeable, rejected before")
             }
         }
@@ -307,7 +310,9 @@ pub async fn read_cross_series<S: StorageInstance + ?Sized>(
         Aggregation::Count => &[Aggregation::Count],
         Aggregation::Min => &[Aggregation::Min],
         Aggregation::Max => &[Aggregation::Max],
-        Aggregation::First | Aggregation::Last => unreachable!("rejected by validate"),
+        Aggregation::First | Aggregation::Last | Aggregation::Latest => {
+            unreachable!("rejected by validate")
+        }
     };
 
     // The reads do not depend on each other: `avg` waits for the slower of its two, not for both
@@ -426,7 +431,10 @@ fn build_output(
                         Aggregation::Avg => acc.sum / acc.count as f64,
                         Aggregation::Min => acc.min,
                         Aggregation::Max => acc.max,
-                        Aggregation::Count | Aggregation::First | Aggregation::Last => {
+                        Aggregation::Count
+                        | Aggregation::First
+                        | Aggregation::Last
+                        | Aggregation::Latest => {
                             unreachable!("handled or rejected before")
                         }
                     },

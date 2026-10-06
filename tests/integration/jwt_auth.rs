@@ -185,6 +185,7 @@ fn build_test_router(storage: Arc<dyn StorageInstance>, auth: Option<AuthConfig>
         storage,
         metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
+        max_query_samples: sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
         auth: auth.clone(),
     };
 

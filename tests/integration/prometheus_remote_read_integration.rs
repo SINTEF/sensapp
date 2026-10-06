@@ -105,11 +105,20 @@ async fn publish_test_sensors(
 
 /// Create a test app with the Prometheus remote read endpoint
 fn create_test_app(storage: Arc<dyn sensapp::storage::StorageInstance>) -> Router {
+    create_test_app_with_limit(storage, sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES)
+}
+
+/// The same, with `SENSAPP_HTTP_MAX_QUERY_SAMPLES` set to `max_query_samples`
+fn create_test_app_with_limit(
+    storage: Arc<dyn sensapp::storage::StorageInstance>,
+    max_query_samples: usize,
+) -> Router {
     let state = HttpServerState {
         name: Arc::new("SensApp Test".to_string()),
         storage,
         metrics: Arc::new(HttpMetrics::new()),
         influxdb_with_numeric: false,
+        max_query_samples,
         auth: None,
     };
 
@@ -1012,6 +1021,205 @@ async fn test_remote_read_default_response_type() -> Result<()> {
     let response = parse_remote_read_response(&response_body)?;
     assert_eq!(response.results.len(), 1);
     assert_eq!(response.results[0].timeseries.len(), 1);
+
+    Ok(())
+}
+
+/// The sample limit of a remote read is `SENSAPP_HTTP_MAX_QUERY_SAMPLES`: a read of exactly the
+/// limit works, one sample more is a 400 for the raw samples (and for a response of either type),
+/// and the same series read with hints that give one bucket per step fits under the same limit.
+#[tokio::test]
+#[serial]
+async fn test_remote_read_sample_limit_is_configurable() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let limit = 50usize;
+    let sensor = create_sensor_with_labels("limited_metric", SensorType::Float, vec![]);
+    let sample_count = limit + 1;
+    let times_ms: Vec<i64> = (0..sample_count)
+        .map(|index| BASE_TS_MS + index as i64 * 1000)
+        .collect();
+    let values: Vec<f64> = (0..sample_count).map(|index| index as f64).collect();
+    publish_test_sensors(
+        &storage,
+        vec![(sensor, create_float_samples_at_times(&times_ms, &values))],
+    )
+    .await?;
+
+    let query = |end_offset_ms: i64, hints: Option<ReadHints>| Query {
+        start_timestamp_ms: BASE_TS_MS,
+        end_timestamp_ms: BASE_TS_MS + end_offset_ms,
+        matchers: vec![PromLabelMatcher {
+            r#type: label_matcher::Type::Eq as i32,
+            name: "__name__".to_string(),
+            value: "limited_metric".to_string(),
+        }],
+        hints,
+    };
+    let app = create_test_app_with_limit(storage, limit);
+
+    // Exactly the limit: the samples at +0 s .. +49 s
+    for response_type in [
+        read_request::ResponseType::Samples,
+        read_request::ResponseType::StreamedXorChunks,
+    ] {
+        let body =
+            build_remote_read_request(vec![query(49_000, None)], vec![response_type as i32])?;
+        let (status, _) = send_remote_read_request(&app, body).await?;
+        assert_eq!(status, StatusCode::OK, "{response_type:?} at the limit");
+
+        // One sample more
+        let body =
+            build_remote_read_request(vec![query(50_000, None)], vec![response_type as i32])?;
+        let (status, body) = send_remote_read_request(&app, body).await?;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{response_type:?} over the limit"
+        );
+        let body = String::from_utf8_lossy(&body);
+        assert!(
+            body.contains("Query exceeds 50 samples in total"),
+            "unexpected body: {body}"
+        );
+    }
+
+    // Buckets of 10 s: 6 buckets for the 51 samples, which fit under the same limit
+    let hints = ReadHints {
+        step_ms: 10_000,
+        func: "max_over_time".to_string(),
+        start_ms: BASE_TS_MS,
+        end_ms: BASE_TS_MS + 50_000,
+        grouping: vec![],
+        by: false,
+        range_ms: 10_000,
+    };
+    let body = build_remote_read_request(vec![query(50_000, Some(hints))], vec![])?;
+    let (status, response_body) = send_remote_read_request(&app, body).await?;
+    assert_eq!(status, StatusCode::OK);
+    let response = parse_remote_read_response(&response_body)?;
+    assert_eq!(response.results[0].timeseries[0].samples.len(), 6);
+
+    Ok(())
+}
+
+/// A plain selector graphed over a long range at a coarse step gets the latest sample of each step,
+/// with its own timestamp, whatever the number of samples: the raw read would be over the limit.
+/// Prometheus keeps or drops each of them with its lookback, as it does with the raw samples.
+#[tokio::test]
+#[serial]
+async fn test_remote_read_plain_selector_hints_return_the_latest_sample_of_each_step() -> Result<()>
+{
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    const MINUTE_MS: i64 = 60_000;
+    const HOUR_MS: i64 = 60 * MINUTE_MS;
+    // One sample a minute for 5 hours, and one with samples only between minutes 10 and 19 of each hour
+    let steady_times: Vec<i64> = (0..=300)
+        .map(|minute| BASE_TS_MS + minute * MINUTE_MS)
+        .collect();
+    let steady_values: Vec<f64> = (0..=300).map(|minute| minute as f64).collect();
+    let sparse_times: Vec<i64> = (0..5)
+        .flat_map(|hour| {
+            (10..20).map(move |minute| BASE_TS_MS + hour * HOUR_MS + minute * MINUTE_MS)
+        })
+        .collect();
+    let sparse_values: Vec<f64> = (0..5)
+        .flat_map(|hour| (10..20).map(move |minute| (hour * 100 + minute) as f64))
+        .collect();
+    publish_test_sensors(
+        &storage,
+        vec![
+            (
+                create_sensor_with_labels("steady_metric", SensorType::Float, vec![]),
+                create_float_samples_at_times(&steady_times, &steady_values),
+            ),
+            (
+                create_sensor_with_labels("sparse_metric", SensorType::Float, vec![]),
+                create_float_samples_at_times(&sparse_times, &sparse_values),
+            ),
+        ],
+    )
+    .await?;
+
+    // 301 samples would be over the limit: the evaluations are every hour, from 1 h to 4 h
+    let app = create_test_app_with_limit(storage, 50);
+    let read = |name: &str, func: &str, range_ms: i64, end_ms: i64| {
+        let first_ms = BASE_TS_MS + HOUR_MS;
+        let query = Query {
+            start_timestamp_ms: first_ms - 5 * MINUTE_MS + 1,
+            end_timestamp_ms: end_ms,
+            matchers: vec![PromLabelMatcher {
+                r#type: label_matcher::Type::Eq as i32,
+                name: "__name__".to_string(),
+                value: name.to_string(),
+            }],
+            hints: Some(ReadHints {
+                step_ms: HOUR_MS,
+                func: func.to_string(),
+                start_ms: first_ms - 5 * MINUTE_MS + 1,
+                end_ms,
+                grouping: vec![],
+                by: false,
+                range_ms,
+            }),
+        };
+        build_remote_read_request(vec![query], vec![])
+    };
+
+    for func in ["", "sum"] {
+        let body = read("steady_metric", func, 0, BASE_TS_MS + 4 * HOUR_MS)?;
+        let (status, response_body) = send_remote_read_request(&app, body).await?;
+        assert_eq!(status, StatusCode::OK, "func {func:?}");
+        let response = parse_remote_read_response(&response_body)?;
+        let samples = &response.results[0].timeseries[0].samples;
+        let got: Vec<(i64, f64)> = samples.iter().map(|s| (s.timestamp, s.value)).collect();
+        let expected: Vec<(i64, f64)> = (1..=4)
+            .map(|hour| (BASE_TS_MS + hour * HOUR_MS, (hour * 60) as f64))
+            .collect();
+        assert_eq!(got, expected, "func {func:?}");
+    }
+
+    // The sparse series keeps the real timestamp of its latest sample before each evaluation, 41
+    // minutes before it: Prometheus drops that sample, as its lookback is 5 minutes
+    let body = read("sparse_metric", "", 0, BASE_TS_MS + 4 * HOUR_MS)?;
+    let (status, response_body) = send_remote_read_request(&app, body).await?;
+    assert_eq!(status, StatusCode::OK);
+    let response = parse_remote_read_response(&response_body)?;
+    let got: Vec<(i64, f64)> = response.results[0].timeseries[0]
+        .samples
+        .iter()
+        .map(|s| (s.timestamp, s.value))
+        .collect();
+    let expected: Vec<(i64, f64)> = (0..4)
+        .map(|hour| {
+            (
+                BASE_TS_MS + hour * HOUR_MS + 19 * MINUTE_MS,
+                (hour * 100 + 19) as f64,
+            )
+        })
+        .collect();
+    assert_eq!(got, expected);
+
+    // A step that does not end on the last evaluation is answered with the raw samples, which are
+    // over the limit here, with the reason in the message
+    let body = read(
+        "steady_metric",
+        "",
+        0,
+        BASE_TS_MS + 4 * HOUR_MS + 30 * MINUTE_MS,
+    )?;
+    let (status, response_body) = send_remote_read_request(&app, body).await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let message = String::from_utf8_lossy(&response_body);
+    assert!(
+        message.contains("could not be answered with one value per step"),
+        "unexpected body: {message}"
+    );
 
     Ok(())
 }

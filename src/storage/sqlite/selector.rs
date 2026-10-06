@@ -155,11 +155,17 @@ impl SqliteStorage {
         // The table and the fragments are static; the ids, the window, the step and the limit are
         // bound.
         let sql = match read.aggregation {
-            Aggregation::First | Aggregation::Last => {
+            Aggregation::First | Aggregation::Last | Aggregation::Latest => {
                 let direction = if read.aggregation == Aggregation::First {
                     "ASC"
                 } else {
                     "DESC"
+                };
+                // `Latest` is stamped with the timestamp of the sample, not the start of the bucket
+                let stamp = if read.aggregation == Aggregation::Latest {
+                    "sample_us"
+                } else {
+                    "bucket_us"
                 };
                 format!(
                     "WITH bucketed AS (
@@ -170,11 +176,11 @@ impl SqliteStorage {
                          AND timestamp_us >= COALESCE(?1, -9223372036854775807)
                          AND timestamp_us <= COALESCE(?2, 9223372036854775807)
                      ), ranked AS (
-                       SELECT sensor_id, bucket_us, value,
+                       SELECT sensor_id, bucket_us, timestamp_us AS sample_us, value,
                               ROW_NUMBER() OVER (PARTITION BY sensor_id, bucket_us ORDER BY timestamp_us {direction}) AS row_num
                        FROM bucketed
                      )
-                     SELECT sensor_id, bucket_us AS timestamp_us, value
+                     SELECT sensor_id, {stamp} AS timestamp_us, value
                      FROM ranked WHERE row_num = 1
                      ORDER BY sensor_id, bucket_us ASC LIMIT ?5"
                 )

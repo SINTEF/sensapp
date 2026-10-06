@@ -1378,7 +1378,7 @@ impl SqliteStorage {
                 }
                 Ok(TypedSamples::Integer(samples))
             }
-            Aggregation::First | Aggregation::Last => {
+            Aggregation::First | Aggregation::Last | Aggregation::Latest => {
                 #[derive(sqlx::FromRow)]
                 struct Row {
                     timestamp_us: i64,
@@ -1486,7 +1486,7 @@ impl SqliteStorage {
                 }
                 Ok(TypedSamples::Integer(samples))
             }
-            Aggregation::First | Aggregation::Last => {
+            Aggregation::First | Aggregation::Last | Aggregation::Latest => {
                 #[derive(sqlx::FromRow)]
                 struct Row {
                     timestamp_us: i64,
@@ -1594,7 +1594,7 @@ impl SqliteStorage {
                 }
                 Ok(TypedSamples::Integer(samples))
             }
-            Aggregation::First | Aggregation::Last => {
+            Aggregation::First | Aggregation::Last | Aggregation::Latest => {
                 #[derive(sqlx::FromRow)]
                 struct Row {
                     timestamp_us: i64,

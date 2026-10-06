@@ -307,6 +307,7 @@ pub async fn simple_promql_query(
                     parsed.start_time,
                     parsed.end_time,
                     &query,
+                    state.max_query_samples,
                 )
                 .await?;
                 (results, stats.series, stats.buckets)
@@ -318,6 +319,7 @@ pub async fn simple_promql_query(
                     parsed.start_time,
                     parsed.end_time,
                     false,
+                    state.max_query_samples,
                 )
                 .await?;
                 let series = results.len();

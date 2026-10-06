@@ -15,6 +15,8 @@ pub struct HttpServerState {
     pub metrics: Arc<HttpMetrics>,
     /// If true, InfluxDB numeric types are stored as Decimal/Numeric instead of Integer/Float
     pub influxdb_with_numeric: bool,
+    /// Most samples a read may return, see `SENSAPP_HTTP_MAX_QUERY_SAMPLES`
+    pub max_query_samples: usize,
     /// Optional JWT authentication configuration.
     /// When `None`, all endpoints are open (no security).
     pub auth: Option<AuthConfig>,

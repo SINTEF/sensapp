@@ -921,6 +921,7 @@ mod rrdcached_tests {
             storage: db.storage(),
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
+            max_query_samples: sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
             auth: None,
         };
         build_router(

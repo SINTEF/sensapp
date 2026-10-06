@@ -212,15 +212,22 @@ We use microsecond timestamps, as it provides a good compromise between precisio
 
 ## Prometheus remote read and its hints
 
-A remote read query carries the hints of the PromQL query that asks for it: the function (`avg_over_time`), the `step` between two evaluations and the `range` of the `[1h]`. Prometheus does not trust the answer to have applied them: it evaluates the query again on the samples it receives. SensApp therefore only aggregates in the database (one bucket per `step`) when this second evaluation gives the result of the raw samples, and sends the raw samples otherwise, within the selector limits of [HTTP_LIMITS.md](HTTP_LIMITS.md).
+A remote read query carries the hints of the PromQL query that asks for it: the function (`avg_over_time`), the `step` between two evaluations and the `range` of the `[1h]`. Prometheus does not trust the answer to have applied them: it evaluates the query again on the samples it receives. SensApp therefore only aggregates in the database (one value per `step`) when this second evaluation gives the result of the raw samples, and sends the raw samples otherwise, within the selector limits of [HTTP_LIMITS.md](HTTP_LIMITS.md).
 
 | Hint | Answered with |
 | --- | --- |
 | `avg_over_time`, `min_over_time`, `max_over_time`, `sum_over_time`, `first_over_time`, `last_over_time`, with a `range` that is a whole number of steps | buckets of one `step`, which start where the window of the first evaluation starts |
+| a plain selector (`my_metric`), or an aggregation operator over one (`sum`, `avg`, `min`, `max`, `count`, `group`, `stddev`, `stdvar`, `quantile`, `topk`, `bottomk`, `count_values`), with no `range`, when the steps end on the evaluation times (see below) | the last sample of each `step`, with its own timestamp |
 | `count_over_time` | raw samples (Prometheus would count the buckets) |
 | a `range` shorter than the `step`, or not a whole number of steps | raw samples (the bucket would be wider than the window) |
-| `sum`, `avg`, `min`, `max`, `count` across series, `rate`, plain selectors | raw samples (the value at the evaluation time is needed, not an aggregate of the following step) |
+| `rate`, `increase`, a subquery, any other function, or a plain selector whose steps do not end on the evaluation times | raw samples |
 
 When the range is several steps, `min`, `max`, `sum`, `first` and `last` are exact. `avg_over_time` averages the averages of the buckets of its window: exact when they hold as many samples each, an approximation otherwise (a series with gaps, the edges of the data). This is a compromise, the price of sending a year of data at a one hour step as 8,760 values instead of all the samples.
+
+### A plain selector: the last sample of each step
+
+At each evaluation time `t`, Prometheus evaluates a plain selector on the last sample in `(t - lookback, t]` (the lookback is 5 minutes by default) and ignores the others. A graph of `my_metric` over 8 weeks at a one hour step needs one sample per hour, not the million samples of the weeks. SensApp answers with the last sample of each step **with its own timestamp** (`Aggregation::Latest`, which is `last` stamped at the sample and not at the start of the bucket), so that Prometheus keeps or drops it with its lookback exactly as it does with the raw samples: a series that stopped 41 minutes before an evaluation has no point there, in the raw samples as in the answer.
+
+The steps must end on the evaluation times, and the hints do not give them. SensApp anchors the steps on the end of the hints, the last evaluation of a range query whose length is a whole number of steps (Grafana makes sure of it). Prometheus 3 asks from `first evaluation - lookback + 1 ms`, so with the default lookback `end - start + 1 ms - 5 minutes` is a whole number of steps when the grid is the one of the end. When it is not (a range query of Prometheus' own API with an `end` that is not on the grid, Prometheus 2, another `--query.lookback-delta`), the raw samples answer, and a query over `SENSAPP_HTTP_MAX_QUERY_SAMPLES` samples is rejected with a message that says that it could not be answered with one value per step. Align `start` and `end` on the `step`, or narrow the time range.
 
 This was measured with real Prometheus 3.8, 3.13 (LTS) and 3.15 (`tests/prometheus_live`). Prometheus 3 evaluates the window `(t - range, t]` and asks from `t - range + 1 ms`; Prometheus 2 is not supported.

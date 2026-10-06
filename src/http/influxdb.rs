@@ -435,6 +435,7 @@ mod tests {
             storage,
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
+            max_query_samples: crate::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
             auth: None,
         });
         let headers = HeaderMap::new();
@@ -756,6 +757,7 @@ mod tests {
             storage: storage.clone(),
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: true,
+            max_query_samples: crate::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
             auth: None,
         });
 

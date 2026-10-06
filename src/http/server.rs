@@ -924,6 +924,7 @@ mod tests {
             storage,
             metrics: Arc::new(HttpMetrics::new()),
             influxdb_with_numeric: false,
+            max_query_samples: crate::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
             auth: None,
         };
         let app = Router::new().route("/", get(frontpage)).with_state(state);
