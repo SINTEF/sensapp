@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 use anyhow::{Context, Result};
+use clap::{Args, Parser, Subcommand};
 use sensapp::config::{self, load_configuration};
 use sensapp::http::auth::{
     AuthConfig, AuthMode, TokenRequest, TokenRules, generate_secret, resolve_auth_mode,
@@ -14,14 +15,14 @@ use tracing::Level;
 use tracing::event;
 
 fn main() -> Result<()> {
-    // Handle `generate-token` subcommand before any server setup
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 && args[1] == "generate-token" {
-        return generate_token_command(&args[2..]);
-    }
-    if args.len() > 1 && args[1] == "generate-secret" {
-        println!("{}", generate_secret()?);
-        return Ok(());
+    // The subcommands are handled before any server setup
+    match Cli::parse().command {
+        Some(Command::GenerateToken(args)) => return generate_token_command(args),
+        Some(Command::GenerateSecret) => {
+            println!("{}", generate_secret()?);
+            return Ok(());
+        }
+        None => {}
     }
 
     rustls::crypto::aws_lc_rs::default_provider()
@@ -195,14 +196,42 @@ fn build_auth(
     }
 }
 
-/// CLI subcommand: generate a signed JWT token.
-///
-/// Usage: sensapp generate-token <subject> [OPTIONS]
-///   --scope <read|write|delete|admin|readwrite,...>  (default: "read write")
-///   --duration <seconds>            (default: 3600)
-///   --sensors <name1,name2,...>      (optional sensor allow list, comma separated)
-///   --sensor <name>                  (one sensor name as it is, commas included; repeat it)
-fn generate_token_command(args: &[String]) -> Result<()> {
+/// SensApp, a sensor data platform. Without a subcommand, it runs the server, configured with the
+/// `SENSAPP_*` environment variables (see docs/CONFIGURATION.md).
+#[derive(Parser)]
+#[command(version, about)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Generate a signed JWT token. Needs SENSAPP_JWT_SECRET, the shared secret for signing
+    GenerateToken(GenerateTokenArgs),
+    /// Print a new random secret, to use as SENSAPP_JWT_SECRET
+    GenerateSecret,
+}
+
+#[derive(Args)]
+struct GenerateTokenArgs {
+    /// Who the token is for
+    subject: String,
+    /// Comma-separated read, write, delete, admin, or readwrite
+    #[arg(long, default_value = "read write")]
+    scope: String,
+    /// Token validity duration, in seconds
+    #[arg(long, default_value_t = 3600)]
+    duration: u64,
+    /// Restrict to specific sensors, comma separated. Can be repeated
+    #[arg(long, value_delimiter = ',', value_name = "NAME,...")]
+    sensors: Vec<String>,
+    /// Restrict to one sensor, named as it is (a comma is part of the name). Can be repeated
+    #[arg(long, value_name = "NAME")]
+    sensor: Vec<String>,
+}
+
+fn generate_token_command(args: GenerateTokenArgs) -> Result<()> {
     load_configuration().context("Failed to load configuration")?;
     let config = config::get().context("Failed to get configuration")?;
 
@@ -214,66 +243,19 @@ fn generate_token_command(args: &[String]) -> Result<()> {
     let auth_config =
         AuthConfig::from_secret(secret).context("Failed to configure JWT authentication")?;
 
-    if args.is_empty() {
-        eprintln!("Usage: sensapp generate-token <subject> [OPTIONS]");
-        eprintln!();
-        eprintln!("Options:");
-        eprintln!(
-            "  --scope <scopes>                Comma-separated read, write, delete, admin, or readwrite (default: \"read write\")"
-        );
-        eprintln!("  --duration <seconds>            Token validity duration (default: 3600)");
-        eprintln!(
-            "  --sensors <name1,name2,...>      Restrict to specific sensors, comma separated"
-        );
-        eprintln!(
-            "  --sensor <name>                 Restrict to one sensor, named as it is (a comma is part of the name). Repeat it"
-        );
-        eprintln!();
-        eprintln!("Environment:");
-        eprintln!("  SENSAPP_JWT_SECRET              Required. The shared secret for signing.");
-        std::process::exit(1);
-    }
-
-    let subject = &args[0];
-    let mut scope = "read write".to_string();
-    let mut duration: u64 = 3600;
-    let mut sensors: Option<Vec<String>> = None;
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--scope" => {
-                i += 1;
-                scope = args.get(i).context("--scope requires a value")?.clone();
-            }
-            "--duration" => {
-                i += 1;
-                let raw = args.get(i).context("--duration requires a value")?;
-                duration = raw
-                    .parse()
-                    .context("--duration must be a number of seconds")?;
-            }
-            "--sensors" => {
-                i += 1;
-                let raw = args.get(i).context("--sensors requires a value")?;
-                sensors.get_or_insert_with(Vec::new).extend(
-                    raw.split(',')
-                        .map(str::trim)
-                        .filter(|name| !name.is_empty())
-                        .map(str::to_string),
-                );
-            }
-            "--sensor" => {
-                i += 1;
-                let name = args.get(i).context("--sensor requires a name")?;
-                sensors.get_or_insert_with(Vec::new).push(name.clone());
-            }
-            other => {
-                anyhow::bail!("Unknown option: {other}");
-            }
-        }
-        i += 1;
-    }
+    // An allow list given but empty (`--sensors ""`) allows nothing, which is not the same as no
+    // allow list at all
+    let restricted = !args.sensors.is_empty() || !args.sensor.is_empty();
+    let sensors = restricted.then(|| {
+        args.sensors
+            .iter()
+            .map(|name| name.trim())
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .chain(args.sensor.iter().cloned())
+            .collect::<Vec<String>>()
+    });
+    let (subject, scope, duration) = (&args.subject, &args.scope, args.duration);
 
     // The secret is what gives the right to make any token, so the command line has no cap but a
     // sane one, and is the only way to make an admin token
@@ -281,7 +263,7 @@ fn generate_token_command(args: &[String]) -> Result<()> {
         max_duration_seconds: 10 * 365 * 24 * 3600,
         allow_admin: true,
     };
-    let request = TokenRequest::new(subject, &scope, sensors, duration, &rules)?;
+    let request = TokenRequest::new(subject, scope, sensors, duration, &rules)?;
     println!("{}", request.issue(&auth_config)?.token);
     Ok(())
 }

@@ -9,6 +9,7 @@ mod aggregated_windows;
 mod arrow_integration;
 mod batched_inserts;
 mod bigquery_integration;
+mod cli;
 mod clickhouse_http_lifecycle;
 mod clickhouse_integration;
 mod cross_series_reads;
