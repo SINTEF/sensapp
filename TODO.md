@@ -6,5 +6,5 @@ This file tracks the main remaining work for SensApp. Detailed task history live
 - [ ] Add research-specific comparison endpoints and reporting helpers
 - [ ] Add storage-space and latency comparison reports across backends
 - [ ] Data retention (`ideas/data-retention.md`)
-- [ ] Download button in the UI, `Content-Disposition` and signed download links in the backend (`ideas/download-button-and-signed-download-links.md`)
+- [ ] Download button in the explorer, `Content-Disposition` on `GET /series/{uuid}` (`current_tasks/download-button.md`); signed download links later (`ideas/signed-download-links.md`)
 - [ ] Cross-series aggregation pushdown, composite sensors, a minimal PromQL `rate()`
