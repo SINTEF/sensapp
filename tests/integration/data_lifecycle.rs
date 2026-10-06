@@ -250,6 +250,115 @@ async fn assert_delete_series_for_backend(db_type: DatabaseType) -> Result<()> {
     Ok(())
 }
 
+/// Many clients deleting series at the same time must all succeed: on SQLite a deferred
+/// read-then-write transaction fails at once with `database is locked` instead of waiting.
+async fn assert_concurrent_delete_series_for_backend(db_type: DatabaseType) -> Result<()> {
+    const SERIES: usize = 24;
+
+    let Some(test_db) = open(&db_type).await? else {
+        return Ok(());
+    };
+    let storage = test_db.storage();
+
+    let bystander = sensor("lifecycle_concurrent_bystander", SensorType::Float, "a");
+    publish(&storage, &bystander, float_samples(&[0, 1, 2])).await?;
+    let mut doomed = Vec::new();
+    for index in 0..SERIES {
+        let series = sensor(
+            &format!("lifecycle_concurrent_{index}"),
+            SensorType::Float,
+            "a",
+        );
+        publish(&storage, &series, float_samples(&[0, 1, 2, 3, 4])).await?;
+        doomed.push(series);
+    }
+
+    let tasks: Vec<_> = doomed
+        .iter()
+        .map(|series| {
+            let storage = storage.clone();
+            let uuid = series.uuid.to_string();
+            tokio::spawn(async move { storage.delete_series(&uuid).await })
+        })
+        .collect();
+    for task in tasks {
+        assert!(
+            task.await??,
+            "every series existed, so every delete is true"
+        );
+    }
+
+    let uuids = series_uuids(&storage).await?;
+    assert_eq!(uuids, vec![bystander.uuid]);
+    assert_eq!(stored_minutes(&storage, &bystander).await?, vec![0, 1, 2]);
+
+    Ok(())
+}
+
+/// Deletes and publishes in flight together: no error, and no write lost on the series that stay.
+async fn assert_concurrent_publish_and_delete_for_backend(db_type: DatabaseType) -> Result<()> {
+    const KEPT: usize = 8;
+    const DOOMED: usize = 16;
+
+    let Some(test_db) = open(&db_type).await? else {
+        return Ok(());
+    };
+    let storage = test_db.storage();
+
+    let mut kept = Vec::new();
+    for index in 0..KEPT {
+        let series = sensor(
+            &format!("lifecycle_mixed_kept_{index}"),
+            SensorType::Float,
+            "a",
+        );
+        publish(&storage, &series, float_samples(&[0])).await?;
+        kept.push(series);
+    }
+    let mut doomed = Vec::new();
+    for index in 0..DOOMED {
+        let series = sensor(
+            &format!("lifecycle_mixed_doomed_{index}"),
+            SensorType::Float,
+            "a",
+        );
+        publish(&storage, &series, float_samples(&[0, 1, 2])).await?;
+        doomed.push(series);
+    }
+
+    let mut tasks = Vec::new();
+    for series in &doomed {
+        let storage = storage.clone();
+        let uuid = series.uuid.to_string();
+        tasks.push(tokio::spawn(async move {
+            storage.delete_series(&uuid).await.map(|_| ())
+        }));
+    }
+    for series in &kept {
+        for minute in 1..=3 {
+            let storage = storage.clone();
+            let series = series.clone();
+            tasks.push(tokio::spawn(async move {
+                publish(&storage, &series, float_samples(&[minute])).await
+            }));
+        }
+    }
+    for task in tasks {
+        task.await??;
+    }
+
+    let mut uuids = series_uuids(&storage).await?;
+    uuids.sort();
+    let mut expected: Vec<Uuid> = kept.iter().map(|series| series.uuid).collect();
+    expected.sort();
+    assert_eq!(uuids, expected);
+    for series in &kept {
+        assert_eq!(stored_minutes(&storage, series).await?, vec![0, 1, 2, 3]);
+    }
+
+    Ok(())
+}
+
 /// The documented correction recipe: delete the bad range, then publish the fixed samples.
 async fn assert_correction_recipe_for_backend(db_type: DatabaseType) -> Result<()> {
     let Some(test_db) = open(&db_type).await? else {
@@ -361,6 +470,18 @@ macro_rules! backend_tests {
             #[serial]
             async fn delete_series() -> Result<()> {
                 assert_delete_series_for_backend($db_type).await
+            }
+
+            #[tokio::test]
+            #[serial]
+            async fn concurrent_delete_series() -> Result<()> {
+                assert_concurrent_delete_series_for_backend($db_type).await
+            }
+
+            #[tokio::test]
+            #[serial]
+            async fn concurrent_publish_and_delete() -> Result<()> {
+                assert_concurrent_publish_and_delete_for_backend($db_type).await
             }
 
             #[tokio::test]

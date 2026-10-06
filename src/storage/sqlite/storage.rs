@@ -128,7 +128,10 @@ impl StorageInstance for SqliteStorage {
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
         let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
         let uuid_string = parsed_uuid.to_string();
-        let mut transaction = self.pool.begin().await?;
+        // BEGIN IMMEDIATE takes the write lock up front, so that a concurrent delete waits
+        // (up to busy_timeout) instead of failing at once with SQLITE_BUSY_SNAPSHOT: a deferred
+        // transaction that reads first cannot be upgraded to a write after another commit.
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
         let sensor_id: Option<i64> =
             sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = ?")
