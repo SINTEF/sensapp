@@ -9,7 +9,7 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM rust:1.98-slim-bookworm AS chef
+FROM rust:1.99-slim-bookworm AS chef
 
 ARG DUCKDB_DOWNLOAD_LIB="1"
 

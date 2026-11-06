@@ -17,7 +17,7 @@ services:
       - postgres-test-data:/var/lib/postgresql
 
   timescaledb:
-    image: timescale/timescaledb:2.30.2-pg16
+    image: timescale/timescaledb:2.31.0-pg18
     container_name: sensapp-timescaledb
     environment:
       POSTGRES_USER: postgres
@@ -31,10 +31,10 @@ services:
       timeout: 5s
       retries: 20
     volumes:
-      - timescaledb-test-data:/var/lib/postgresql/data
+      - timescaledb-pg18-test-data:/var/lib/postgresql
 
   clickhouse:
-    image: clickhouse/clickhouse-server:24.8
+    image: clickhouse/clickhouse-server:26.8
     container_name: sensapp-clickhouse
     environment:
       CLICKHOUSE_DB: sensapp_test
@@ -71,6 +71,6 @@ services:
 
 volumes:
   postgres-test-data:
-  timescaledb-test-data:
+  timescaledb-pg18-test-data:
   clickhouse-test-data:
   rrdcached-test-data:
