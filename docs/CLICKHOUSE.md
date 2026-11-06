@@ -93,7 +93,7 @@ docker run -d --name sensapp-clickhouse \
   -e CLICKHOUSE_DB=sensapp \
   -e CLICKHOUSE_USER=default \
   -e CLICKHOUSE_PASSWORD=password \
-  clickhouse/clickhouse-server:24.8
+  clickhouse/clickhouse-server:26.8
 ```
 
 Example SensApp run command:

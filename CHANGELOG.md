@@ -3,6 +3,19 @@
 SensApp is pre-production: breaking changes happen between minor versions and are listed first.
 Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASING.md).
 
+## Unreleased
+
+### Changed and fixed
+
+- Dependencies refreshed to their latest versions: Rust (DuckDB 2.0, tower-http 0.7, sentry 0.49,
+  prometheus-client 0.25, sha2 0.11, and more), frontend (TypeScript 6.0, vite 8.3.6, jsdom 31),
+  and the Python SDK (polars 2, pyarrow 26).
+- JWTs are handled by the aws-lc-rs backend of `jsonwebtoken`, which removes `rsa` and `crypto-bigint` 0.5
+  from the build along with their advisories (RUSTSEC-2023-0071, RUSTSEC-2026-0387). `cargo audit` and
+  `npm audit` run clean, without ignores.
+- Tested on ClickHouse 26.8 LTS and TimescaleDB 2.31 on PostgreSQL 18. The local TimescaleDB test volume
+  has a new name, as the PostgreSQL 18 image keeps its data elsewhere.
+
 ## 0.4.1
 
 ### Added

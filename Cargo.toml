@@ -41,9 +41,9 @@ arrow-array = "60"
 anyhow = "1.0"
 async-trait = "0.1"
 thiserror = "2.0"
-sha2 = "0.10"
+sha2 = "0.11"
 axum = { version = "0.8", features = ["multipart", "macros"] }
-base64 = "0.22"
+base64 = "0.23"
 futures = "0.3"
 sqlx = { version = "0.9", features = [
   "runtime-tokio",
@@ -56,15 +56,15 @@ tokio = { version = "1.48", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = "0.7"
 tower = { version = "0.5", features = ["full"] }
-tower-http = { version = "0.6", features = ["full"] }
+tower-http = { version = "0.7", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.18", features = ["serde"] }
 fastrand = "2"
-getrandom = "0.3"
+getrandom = "0.4"
 csv-async = "1.3"
 rust_decimal = "1.39"
-geo = "0.32"
+geo = "0.33"
 cached = { version = "4", features = ["async"] }
 nom = "8.0"
 sindit-senml = "0.3"
@@ -89,7 +89,7 @@ smallvec = "1.15"
 once_cell = "1.21.4"
 urlencoding = "2.1"
 hybridmap = "0.1.3"
-sentry = { version = "0.47", features = ["anyhow", "tower"] }
+sentry = { version = "0.49", features = ["anyhow", "tower"] }
 url = "2.5"
 gcp-bigquery-client = { version = "0.28", optional = true }
 utoipa = { version = "6", features = ["axum_extras"] }
@@ -106,18 +106,18 @@ clickhouse = { version = "0.15", features = [
   "rustls-tls-aws-lc",
   "rustls-tls-native-roots",
 ], optional = true }
-jsonwebtoken = { version = "11", features = ["rust_crypto"] }
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 rustls = "0.23"
 rusty-promql-parser = "0.2.1"
-prometheus-client = "0.24"
+prometheus-client = "0.25"
 simplify-polyline = "0.5"
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
 temp-env = "0.3"
 tokio-test = "0.4"
-serial_test = "3.1"
-jsonwebtoken = { version = "11", features = ["rust_crypto"] }
+serial_test = "4"
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 # Re-import the same crate with test-utils feature for integration tests
 sensapp = { path = ".", features = ["test-utils"], default-features = false }
 
