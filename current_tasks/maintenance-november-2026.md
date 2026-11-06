@@ -18,14 +18,38 @@ security advisories, and refresh the image and CI pins. Upgrades that need real 
 
 ## Progress
 
-- [ ] Rust compatible updates
-- [ ] Rust majors
-- [ ] Rust security audit
-- [ ] Frontend to latest
-- [ ] Python SDK to latest
-- [ ] Images and CI pins
-- [ ] Checks: clippy, tests, live smoke test, CI
+- [x] Rust compatible updates, DuckDB 2.0 included, without code changes.
+- [x] Rust majors: all eight, only sentry needed a change (`ClientOptions` is non-exhaustive, built
+  with its builder now). `cargo outdated --root-deps-only` is empty.
+- [x] Rust security audit: a new advisory, RUSTSEC-2026-0387 (crypto-bigint 0.5), came with the old
+  RSA one through the `rust_crypto` backend of jsonwebtoken. SensApp only uses HS256, and aws-lc-rs is
+  already compiled in for rustls, so jsonwebtoken now uses `aws_lc_rs`. `cargo audit` is clean without
+  ignores, and the ignore is gone from `Makefile.toml`.
+- [x] Frontend to latest, TypeScript 6.0 (see deferred), vite 8.3.6, jsdom 31. `minimatch` is
+  overridden to 11 under the lint tooling. npm audit is clean. Lint (80 files), typecheck, 287 tests,
+  and the build pass.
+- [x] Python SDK on polars 2 and pyarrow 26 without code changes. 69 unit tests and the 2 live tests
+  pass. The pytest-asyncio fixture loop scope is explicit, to silence its new warning.
+- [x] Images and CI pins: ClickHouse 26.8 LTS, TimescaleDB 2.31.0 on pg18 (new volume name and
+  mount path), `rust:1.99`, actions/checkout v7, setup-python v7, setup-uv v10, pre-commit/action 3.0.1.
+- [x] Local matrix after all upgrades: default, SQLite, DuckDB, PostgreSQL, TimescaleDB, ClickHouse,
+  RRDCached, all green. Live smoke test on SQLite: write, series catalog, `/ui`, Prometheus
+  exposition, readiness, and the SDK live tests.
+- [ ] GitHub CI on the branch.
 
 ## Deferred
 
-None yet.
+- TypeScript 7: typescript-eslint 8.72 accepts `<6.1.0`. See `ideas/frontend-typescript-7.md`.
+- Tailwind 4.3.5: published during the pass without its `@tailwindcss/oxide` package. The lock holds
+  4.3.4, and the `^4.3.4` range takes 4.3.5 on the next refresh.
+- `@types/node` stays on 24, to match the Node 24 runtime.
+- npm overrides for `js-yaml` and `minimatch`: see `ideas/remove-frontend-npm-overrides.md`.
+- `pre-commit autoupdate` wanted to move gitleaks from v8.30.1 to v8.30.0, a tag-ordering quirk,
+  not applied.
+
+## Notes
+
+- The DuckDB doctest fails locally on macOS, on `main` too: the doctest binary does not find the
+  downloaded `libduckdb.dylib`. Not a regression.
+- ClickHouse 26.8 may no longer lose lightweight deletes like 24.8 did. The check-and-repeat in
+  `src/storage/clickhouse/mod.rs` stays, it is cheap.
