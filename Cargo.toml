@@ -106,7 +106,7 @@ clickhouse = { version = "0.15", features = [
   "rustls-tls-aws-lc",
   "rustls-tls-native-roots",
 ], optional = true }
-jsonwebtoken = { version = "11", features = ["rust_crypto"] }
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 rustls = "0.23"
 rusty-promql-parser = "0.2.1"
 prometheus-client = "0.25"
@@ -117,7 +117,7 @@ clap = { version = "4", features = ["derive"] }
 temp-env = "0.3"
 tokio-test = "0.4"
 serial_test = "4"
-jsonwebtoken = { version = "11", features = ["rust_crypto"] }
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 # Re-import the same crate with test-utils feature for integration tests
 sensapp = { path = ".", features = ["test-utils"], default-features = false }
 
