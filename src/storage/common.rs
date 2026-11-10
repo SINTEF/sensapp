@@ -23,7 +23,9 @@ pub fn unique_sensors<'a>(
                 unique.insert(sensor.uuid, sensor);
             }
             Some(first) => {
-                if first.name != sensor.name || first.sensor_type != sensor.sensor_type {
+                let same_name =
+                    names_match(sensor, &first.name) || names_match(first, &sensor.name);
+                if !same_name || first.sensor_type != sensor.sensor_type {
                     return Err(identity_mismatch(sensor));
                 }
             }
@@ -35,7 +37,9 @@ pub fn unique_sensors<'a>(
 /// Refuse a write that names a stored sensor UUID with another name or type than the stored ones.
 ///
 /// The name is what the token allow lists check, and the type chooses the table the samples go
-/// to: both must be those of the stored sensor. The unit and the labels are not compared, see
+/// to: both must be those of the stored sensor. A write that gives no name, only the UUID, appends
+/// to the stored series whatever its name (the allow lists then check the UUID, which they do not
+/// list unless an administrator put it there). The unit and the labels are not compared, see
 /// `docs/DATAMODEL.md`.
 pub fn check_sensor_identity(
     sensor: &Sensor,
@@ -43,11 +47,17 @@ pub fn check_sensor_identity(
     stored_type: &str,
 ) -> std::result::Result<(), StorageError> {
     let same_type = stored_type.parse::<SensorType>() == Ok(sensor.sensor_type);
-    if sensor.name == stored_name && same_type {
+    if names_match(sensor, stored_name) && same_type {
         Ok(())
     } else {
         Err(identity_mismatch(sensor))
     }
+}
+
+/// Whether the name of `sensor` is `name`, or is no name at all: the importers use the UUID as the
+/// name of a series given by its UUID only (SenML without `_name`, Arrow with only `sensor_id`).
+fn names_match(sensor: &Sensor, name: &str) -> bool {
+    sensor.name == name || sensor.name == sensor.uuid.to_string()
 }
 
 fn identity_mismatch(sensor: &Sensor) -> StorageError {

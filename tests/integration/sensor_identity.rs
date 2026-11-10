@@ -223,3 +223,42 @@ async fn a_write_with_the_same_name_and_type_appends_whatever_the_unit_and_label
     );
     Ok(())
 }
+
+/// A write that names no series, only its UUID (the importers then use the UUID as the name, as
+/// SenML without `_name` or Arrow with only `sensor_id` do), appends to the stored series whatever
+/// its name. The type must still be the stored one.
+#[tokio::test]
+#[serial]
+async fn a_write_with_only_the_uuid_appends_to_the_stored_series() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if !applies_to(&test_db) {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let stored = stored_sensor("identity_unnamed")?;
+    publish(&storage, &[(stored.clone(), 0)]).await?;
+
+    let unnamed = |sensor_type| {
+        Arc::new(Sensor::new(
+            stored.uuid,
+            stored.uuid.to_string(),
+            sensor_type,
+            None,
+            None,
+        ))
+    };
+    assert_identity_mismatch(
+        publish(&storage, &[(unnamed(SensorType::Integer), 1)]).await,
+        "only the UUID, with another type",
+    );
+    publish(&storage, &[(unnamed(SensorType::Float), 1)]).await?;
+
+    let data = storage
+        .query_sensor_data(&stored.uuid.to_string(), None, None, None)
+        .await?
+        .expect("the series should exist");
+    assert_eq!(data.sensor.name, stored.name, "the stored name stays");
+    assert_eq!(data.samples.len(), 2);
+    Ok(())
+}
