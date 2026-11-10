@@ -26,7 +26,7 @@ use crate::http::metrics::__path_prometheus_metrics;
 use crate::http::prometheus_read::__path_prometheus_remote_read;
 use crate::http::prometheus_write::__path_publish_prometheus;
 use crate::http::simple_promql::__path_simple_promql_query;
-use crate::importers::csv::publish_csv_async;
+use crate::importers::csv::{parse_csv_data_grid, publish_parsed_csv, read_csv_data_grid};
 use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::Json;
@@ -509,7 +509,12 @@ async fn publish_csv_format(
         .delimiter(b',') // Use comma for standard CSV
         .create_reader(reader);
 
-    publish_csv_async(csv_reader, storage)
+    let data_grid = read_csv_data_grid(csv_reader)
+        .await
+        .map_err(AppError::internal_server_error)?;
+    // Errors from parsing are caused by the payload
+    let parsed = parse_csv_data_grid(data_grid).map_err(AppError::bad_request)?;
+    publish_parsed_csv(parsed, storage)
         .await
         .map_err(AppError::internal_server_error)
 }

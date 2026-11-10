@@ -20,11 +20,19 @@ use std::{collections::HashMap, sync::Arc};
 // Type alias to simplify complex HashMap type for clippy
 type SensorDataMap = HashMap<String, (Arc<Sensor>, Vec<(SensAppDateTime, InferedValue)>)>;
 
+/// Reads, parses and publishes a CSV stream.
 pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
-    mut csv_reader: AsyncReader<R>,
+    csv_reader: AsyncReader<R>,
     storage: Arc<dyn StorageInstance>,
 ) -> Result<IngestionStats> {
-    // Read all CSV data into a StringDataGrid
+    let parsed = parse_csv_data_grid(read_csv_data_grid(csv_reader).await?)?;
+    publish_parsed_csv(parsed, storage).await
+}
+
+/// Reads all the CSV records.
+pub async fn read_csv_data_grid<R: io::AsyncRead + Unpin + Send>(
+    mut csv_reader: AsyncReader<R>,
+) -> Result<StringDataGrid> {
     let headers = csv_reader.headers().await?.clone();
     let column_names = headers.iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
@@ -37,30 +45,32 @@ pub async fn publish_csv_async<R: io::AsyncRead + Unpin + Send>(
         rows.push(row);
     }
 
-    let data_grid = StringDataGrid::new(column_names.clone(), rows)?;
+    StringDataGrid::new(column_names, rows)
+}
 
-    // Parse the CSV data
-    let parsed_data = parse_csv_data_grid(data_grid)?;
+/// Publishes the series parsed from a CSV.
+pub async fn publish_parsed_csv(
+    parsed_data: ParsedCsv,
+    storage: Arc<dyn StorageInstance>,
+) -> Result<IngestionStats> {
     let series = parsed_data.len();
     let samples = parsed_data.values().map(|(_, values)| values.len()).sum();
 
-    // Use BatchBuilder to publish the data
     let mut batch_builder = BatchBuilder::new()?;
-
     for (_sensor_name, (sensor, samples)) in parsed_data {
         batch_builder.add(sensor, samples).await?;
     }
-
-    // Send all batches to storage
     batch_builder.send_what_is_left(storage).await?;
 
     Ok(IngestionStats::new(series, samples))
 }
 
+/// The series of a CSV, by name.
+pub type ParsedCsv = HashMap<String, (Arc<Sensor>, TypedSamples)>;
+
 /// Parse CSV data grid into sensors and their samples
-fn parse_csv_data_grid(
-    data_grid: StringDataGrid,
-) -> Result<HashMap<String, (Arc<Sensor>, TypedSamples)>> {
+/// Errors here come from the payload.
+pub fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<ParsedCsv> {
     let column_names = &data_grid.column_names;
     let rows = &data_grid.rows;
 
@@ -102,6 +112,16 @@ fn parse_csv_data_grid(
         .as_ref()
         .and_then(|name| column_names.iter().position(|col| col == name));
 
+    // Wide format: each column is a series named after its header, so a header given twice would
+    // put two columns, possibly of two types, in one series
+    let long = sensor_name_idx.is_some() && value_idx.is_some();
+    if !long {
+        let mut seen = std::collections::HashSet::new();
+        if let Some(duplicate) = column_names.iter().find(|name| !seen.insert(name.as_str())) {
+            return Err(anyhow!("The column '{duplicate}' is given twice"));
+        }
+    }
+
     let mut sensors_data: SensorDataMap = HashMap::new();
 
     // Process each row
@@ -125,18 +145,8 @@ fn parse_csv_data_grid(
                 .map(|idx| row[idx].clone())
                 .filter(|s| !s.is_empty());
 
-            sensors_data
-                .entry(sensor_name.clone())
-                .or_insert_with(|| {
-                    let sensor_type = inferred_value_to_sensor_type(&value);
-                    let unit = unit_name.map(|name| Unit::new(name, None));
-                    let sensor = Arc::new(
-                        Sensor::new_without_uuid(sensor_name, sensor_type, unit, None).unwrap(),
-                    );
-                    (sensor, Vec::new())
-                })
-                .1
-                .push((datetime, value));
+            let unit = unit_name.map(|name| Unit::new(name, None));
+            series_entry(&mut sensors_data, sensor_name, &value, unit)?.push((datetime, value));
         } else if datetime_idx.is_some() {
             // Wide format: each column (except datetime) is a sensor
             let mut sensor_count = 0;
@@ -148,17 +158,7 @@ fn parse_csv_data_grid(
                 let value = parse_value_from_inferred(&inferred_columns[col_idx], row_idx)?;
                 let sensor_name = col_name.clone();
 
-                sensors_data
-                    .entry(sensor_name.clone())
-                    .or_insert_with(|| {
-                        let sensor_type = inferred_value_to_sensor_type(&value);
-                        let sensor = Arc::new(
-                            Sensor::new_without_uuid(sensor_name, sensor_type, None, None).unwrap(),
-                        );
-                        (sensor, Vec::new())
-                    })
-                    .1
-                    .push((datetime, value));
+                series_entry(&mut sensors_data, sensor_name, &value, None)?.push((datetime, value));
                 sensor_count += 1;
             }
 
@@ -298,6 +298,25 @@ fn inferred_value_to_sensor_type(value: &InferedValue) -> SensorType {
     }
 }
 
+/// The samples of the series `name`, created with the type of `value` when it is new. A name the
+/// series identity refuses (a control character) is an error of the payload.
+fn series_entry<'a>(
+    sensors_data: &'a mut SensorDataMap,
+    name: String,
+    value: &InferedValue,
+    unit: Option<Unit>,
+) -> Result<&'a mut Vec<(SensAppDateTime, InferedValue)>> {
+    let entry = match sensors_data.entry(name) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            let sensor_type = inferred_value_to_sensor_type(value);
+            let sensor = Sensor::new_without_uuid(entry.key().clone(), sensor_type, unit, None)?;
+            entry.insert((Arc::new(sensor), Vec::new()))
+        }
+    };
+    Ok(&mut entry.1)
+}
+
 fn convert_samples_to_typed_samples(
     samples: Vec<(SensAppDateTime, InferedValue)>,
     sensor_type: &SensorType,
@@ -307,39 +326,39 @@ fn convert_samples_to_typed_samples(
             let typed_samples = samples
                 .into_iter()
                 .map(|(datetime, value)| match value {
-                    InferedValue::Integer(val) => Sample {
+                    InferedValue::Integer(val) => Ok(Sample {
                         datetime,
                         value: val,
-                    },
-                    _ => unreachable!("Sensor type mismatch"),
+                    }),
+                    other => Err(type_mismatch(sensor_type, &other)),
                 })
-                .collect();
+                .collect::<Result<_>>()?;
             Ok(TypedSamples::Integer(typed_samples))
         }
         SensorType::Float => {
             let typed_samples = samples
                 .into_iter()
                 .map(|(datetime, value)| match value {
-                    InferedValue::Float(val) => Sample {
+                    InferedValue::Float(val) => Ok(Sample {
                         datetime,
                         value: val,
-                    },
-                    _ => unreachable!("Sensor type mismatch"),
+                    }),
+                    other => Err(type_mismatch(sensor_type, &other)),
                 })
-                .collect();
+                .collect::<Result<_>>()?;
             Ok(TypedSamples::Float(typed_samples))
         }
         SensorType::Numeric => {
             let typed_samples = samples
                 .into_iter()
                 .map(|(datetime, value)| match value {
-                    InferedValue::Numeric(val) => Sample {
+                    InferedValue::Numeric(val) => Ok(Sample {
                         datetime,
                         value: val,
-                    },
-                    _ => unreachable!("Sensor type mismatch"),
+                    }),
+                    other => Err(type_mismatch(sensor_type, &other)),
                 })
-                .collect();
+                .collect::<Result<_>>()?;
             Ok(TypedSamples::Numeric(typed_samples))
         }
         SensorType::String => {
@@ -349,42 +368,46 @@ fn convert_samples_to_typed_samples(
                     let string_value = match value {
                         InferedValue::String(val) => val,
                         InferedValue::DateTime(val) => val.to_rfc3339(),
-                        _ => unreachable!("Sensor type mismatch"),
+                        other => return Err(type_mismatch(sensor_type, &other)),
                     };
-                    Sample {
+                    Ok(Sample {
                         datetime,
                         value: string_value,
-                    }
+                    })
                 })
-                .collect();
+                .collect::<Result<_>>()?;
             Ok(TypedSamples::String(typed_samples))
         }
         SensorType::Boolean => {
             let typed_samples = samples
                 .into_iter()
                 .map(|(datetime, value)| match value {
-                    InferedValue::Boolean(val) => Sample {
+                    InferedValue::Boolean(val) => Ok(Sample {
                         datetime,
                         value: val,
-                    },
-                    _ => unreachable!("Sensor type mismatch"),
+                    }),
+                    other => Err(type_mismatch(sensor_type, &other)),
                 })
-                .collect();
+                .collect::<Result<_>>()?;
             Ok(TypedSamples::Boolean(typed_samples))
         }
         SensorType::Json => {
             let typed_samples = samples
                 .into_iter()
                 .map(|(datetime, value)| match value {
-                    InferedValue::Json(val) => Sample {
+                    InferedValue::Json(val) => Ok(Sample {
                         datetime,
                         value: (*val).clone(),
-                    },
-                    _ => unreachable!("Sensor type mismatch"),
+                    }),
+                    other => Err(type_mismatch(sensor_type, &other)),
                 })
-                .collect();
+                .collect::<Result<_>>()?;
             Ok(TypedSamples::Json(typed_samples))
         }
         _ => Err(anyhow!("Unsupported sensor type: {:?}", sensor_type)),
     }
+}
+
+fn type_mismatch(sensor_type: &SensorType, value: &InferedValue) -> anyhow::Error {
+    anyhow!("A {sensor_type} series cannot hold the value {value:?}")
 }

@@ -11,6 +11,9 @@ forever and blocks that remote-write shard.
 - **CSV**: `src/http/server.rs:512-514` maps every `publish_csv_async` error to
   `AppError::internal_server_error`, including "CSV contains no data rows". CSV is also the default for
   unknown content types.
+  *Partly done in task 3 (`handler-panics-kill-the-instance.md`)*: the handler now reads, parses and
+  publishes in three steps, and parse errors (`parse_csv_data_grid`) answer 400. Errors while reading the
+  records (malformed quoting, the body limit) still answer 500.
 - **Prometheus remote write**: `src/http/prometheus_write.rs:128-130` (`parse_remote_write_request(&bytes)?`)
   and `:166` (`Sensor::new_without_uuid(...)?`) go through `From<anyhow::Error>` to 500. This covers bad
   snappy, bad protobuf, "decompressed body exceeds the limit", and a label value containing 0x1F (legal in
