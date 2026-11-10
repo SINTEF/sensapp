@@ -239,12 +239,9 @@ fn convert_arrow_array_to_typed_samples(
 
             let samples: Result<SmallVec<[Sample<Decimal>; 4]>> = (0..decimal_array.len())
                 .map(|i| {
-                    let raw_value = decimal_array.value(i);
-                    // Convert i128 back to Decimal with proper scale
-                    let decimal = Decimal::from_i128_with_scale(raw_value, *scale as u32);
                     Ok(Sample {
                         datetime: timestamps[i],
-                        value: decimal,
+                        value: arrow_decimal(decimal_array.value(i), *scale)?,
                     })
                 })
                 .collect();
@@ -348,6 +345,20 @@ fn convert_arrow_array_to_typed_samples(
 }
 
 /// Helper functions
+/// An Arrow decimal (`raw` × 10^-`scale`) as a `Decimal`. Arrow allows a scale up to 38 and a
+/// negative scale; `Decimal` holds 96 bits and a scale up to 28, so the rest is an error.
+fn arrow_decimal(raw: i128, scale: i8) -> Result<Decimal> {
+    let out_of_range = || anyhow!("The decimal {raw}e{} is outside the Numeric range", -scale);
+    if scale >= 0 {
+        return Decimal::try_from_i128_with_scale(raw, scale as u32).map_err(|_| out_of_range());
+    }
+    let mut value = Decimal::try_from_i128_with_scale(raw, 0).map_err(|_| out_of_range())?;
+    for _ in 0..scale.unsigned_abs() {
+        value = value.checked_mul(Decimal::TEN).ok_or_else(out_of_range)?;
+    }
+    Ok(value)
+}
+
 fn find_column_index(schema: &arrow::datatypes::Schema, column_name: &str) -> Option<usize> {
     schema
         .fields()
@@ -766,6 +777,36 @@ mod tests {
             assert_eq!(imported.sensor_type, sensor_type);
             assert_eq!(entries[0].1, samples(datetime), "{sensor_type:?}");
         }
+    }
+
+    /// Arrow decimals that `Decimal` cannot hold are refused, and a negative scale is understood.
+    #[test]
+    fn test_arrow_decimals_outside_the_numeric_range_are_refused() {
+        use rust_decimal::Decimal;
+
+        let datetime = microseconds_to_sensapp_datetime(1_640_995_200_000_000).unwrap();
+        let convert = |raw: i128, precision: u8, scale: i8| {
+            let array: ArrayRef = Arc::new(
+                Decimal128Array::from(vec![raw])
+                    .with_precision_and_scale(precision, scale)
+                    .unwrap(),
+            );
+            convert_arrow_array_to_typed_samples(&array, &[datetime]).map(|(_, samples)| {
+                match samples {
+                    TypedSamples::Numeric(samples) => samples[0].value,
+                    other => panic!("expected numeric samples, got {other:?}"),
+                }
+            })
+        };
+
+        assert_eq!(convert(1234, 10, 2).unwrap(), Decimal::new(1234, 2));
+        assert_eq!(convert(12, 10, -2).unwrap(), Decimal::new(1200, 0));
+        // 1.5 with 30 digits after the point: more than the 28 `Decimal` keeps
+        assert!(convert(15 * 10_i128.pow(29), 38, 30).is_err());
+        // More than 96 bits
+        assert!(convert(1 << 100, 38, 2).is_err());
+        // 1 × 10^38: more than 96 bits once multiplied
+        assert!(convert(1, 10, -38).is_err());
     }
 
     #[test]
