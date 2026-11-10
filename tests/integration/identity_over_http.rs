@@ -202,3 +202,45 @@ async fn an_export_imported_again_goes_to_its_series() -> Result<()> {
     assert_eq!(listed.series.len(), 1);
     Ok(())
 }
+
+/// SenML numbers came back as Float, and a Float write under the UUID of an Integer series is
+/// refused (409): an Integer export could not be imported again.
+#[tokio::test]
+#[serial]
+async fn an_integer_senml_export_imported_again_goes_to_its_series() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if !applies_to(&test_db) {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let app = app(storage.clone());
+    let sensor = Arc::new(Sensor::new_without_uuid(
+        format!("count_{}", Uuid::new_v4()),
+        SensorType::Integer,
+        None,
+        None,
+    )?);
+    let mut sensors = SensAppVec::new();
+    sensors.push(SingleSensorBatch::new(
+        sensor.clone(),
+        TypedSamples::Integer(
+            vec![Sample {
+                datetime: hifitime::Epoch::from_unix_seconds(1_700_000_000.0),
+                value: 42,
+            }]
+            .into(),
+        ),
+    ));
+    storage.publish(Arc::new(Batch::new(sensors))).await?;
+    let stored = storage
+        .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
+        .await?
+        .expect("the series should exist");
+
+    let senml = serde_json::to_vec(&SenMLConverter::to_senml_json(&stored)?)?;
+    let (status, message) = post(&app, &token(None), SENML, senml).await;
+    assert!(status.is_success(), "{status} {message}");
+    assert_eq!(sample_count(&storage, sensor.uuid).await?, 2);
+    Ok(())
+}

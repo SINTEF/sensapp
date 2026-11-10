@@ -56,9 +56,8 @@ changes every derived UUID.
 
 Two importers also accept an explicit UUID, which then identifies the series:
 
-- **SenML**: a base name (`bn`) that is a UUID, as written by the SenML export. The name is read
-  from the `_name` field when present. SenML has no labels, so the unit is the only extra input to the
-  derived UUID: publishing the same name with and without a unit creates two series.
+- **SenML**: a base name (`bn`) that is a hyphenated UUID, as written by the SenML export. The name is
+  read from the `_name` field when present, the labels from `_labels` (see [SENML.md](SENML.md)).
 - **Arrow**: the `sensapp.sensor.uuid` schema metadata or a `sensor_id` column. Without a UUID, the
   sensor name (`sensapp.sensor.name` metadata or `sensor_name` column) is required. A payload with
   neither is rejected with `400`.

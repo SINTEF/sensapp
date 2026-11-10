@@ -26,12 +26,12 @@ impl SenMLConverter {
     pub fn to_senml_json_multi(sensor_data_list: &[SensorData]) -> Result<Value> {
         let mut all_records = Vec::new();
 
-        for (i, sensor_data) in sensor_data_list.iter().enumerate() {
+        for sensor_data in sensor_data_list {
             let records = Self::sensor_data_to_senml_records(sensor_data)?;
             if let Some(records_array) = records.as_array() {
                 let mut records_vec = records_array.clone();
                 // Only keep bver for the very first record of the entire array
-                if i > 0
+                if !all_records.is_empty()
                     && let Some(first_record) = records_vec.first_mut()
                     && let Some(obj) = first_record.as_object_mut()
                 {
@@ -46,6 +46,10 @@ impl SenMLConverter {
 
     /// Internal function to convert a single SensorData to SenML records
     fn sensor_data_to_senml_records(sensor_data: &SensorData) -> Result<Value> {
+        // An empty series has no record: a record without a value is read as the value 0
+        if sensor_data.samples.is_empty() {
+            return Ok(json!([]));
+        }
         let mut senml_records = Vec::new();
 
         // Get the first timestamp to use as base time
@@ -130,8 +134,20 @@ impl SenMLConverter {
         base_record.insert("bt".to_string(), json!(base_time as f64 / 1_000_000.0)); // Convert to seconds
         base_record.insert("bver".to_string(), json!(10)); // SenML version
 
-        if let Some(ref unit) = sensor_data.sensor.unit {
-            base_record.insert("bu".to_string(), json!(unit.name));
+        // `bu` is sticky: a series without a unit writes an empty one, or it would get the unit of
+        // the series before it in the document
+        let unit = sensor_data.sensor.unit.as_ref();
+        base_record.insert(
+            "bu".to_string(),
+            json!(unit.map_or("", |unit| unit.name.as_str())),
+        );
+        // The type, for the types that the value field does not tell (Integer, Numeric and JSON
+        // are numbers and text). Not for Location, exported as two series of numbers.
+        if sensor_data.sensor.sensor_type != crate::datamodel::SensorType::Location {
+            base_record.insert(
+                "_type".to_string(),
+                json!(sensor_data.sensor.sensor_type.to_string().to_lowercase()),
+            );
         }
 
         // Add labels as extensions (non-standard but useful)

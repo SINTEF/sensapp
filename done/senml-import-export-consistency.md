@@ -48,3 +48,46 @@ the importer, an empty series exported then imported (no sample), an Integer ser
 ## Done when
 
 The tests pass and the SenML section of the docs lists what a round trip keeps.
+
+## Outcome (10 November 2026)
+
+Every finding was right; each got a failing test first.
+
+Import (`src/importers/senml.rs`, rewritten around one pass over the parsed records and their raw JSON,
+which `sindit-senml` resolves one for one):
+
+1. **Mixed value types** are refused (`400`), naming the series and the time of the record. **A record
+   without a value** (only base fields) is no sample; `sindit-senml` gives it the value 0, so it is
+   recognised on the raw record (no `v`, `vs`, `vb`, `vd`). **A sum without a value** is refused.
+2. **Types**: a `_type` extension field gives the type; Integer reads the number as written (exact for
+   every `i64`, or a whole float within ±2^53), Numeric reads it as written into a `Decimal`, JSON parses
+   `vs`. Without `_type`, the value field decides, as before. `_type: location` is refused.
+3. **Only the hyphenated UUID form** is a series UUID.
+4. Already done in task 3 (the raw records are parsed once).
+- Also: `_labels` is imported (the export wrote it, the import dropped it), an empty `bu` is no unit, and
+  the series come back in document order instead of `HashMap` order.
+
+Export (`src/exporters/senml.rs`):
+
+5. **`bu` on every series**, empty when the series has no unit.
+6. **An empty series writes no record.** `bver` stays on the first record of the document even when the
+   first series is empty.
+7. **`_type`** on the base record of every series but Location (its first record is the `lat` series).
+   Location still exports as two Float series; Numeric goes through a JSON number (an `f64`).
+
+Tests: unit `test_records_of_another_value_type_are_refused`, `test_a_sum_without_a_value_is_refused`,
+`test_a_record_without_a_value_is_no_sample`, `test_only_a_hyphenated_uuid_is_a_uuid`,
+`test_export_then_import_keeps_types_units_and_labels` (Integer 2^60 + 1, Numeric, JSON, Float, Boolean,
+with and without units, with labels, one document), `test_an_empty_series_exports_nothing`; over HTTP
+`identity_over_http::an_integer_senml_export_imported_again_goes_to_its_series` (was `409`).
+
+`docs/SENML.md` (new) lists the import rules, the extension fields and what a round trip keeps;
+`docs/DATA_LIFECYCLE.md` no longer says SenML has no labels.
+
+One existing test passed only because of finding 6:
+`simple_promql::test_simple_promql_hyphenated_metric_name_via_name_matcher` read a 5 minute window over
+samples 28 to 30 minutes old, and the empty series came back as one SenML record without a value. Its window
+is now 1 hour.
+
+Suites, all green: SQLite full (302 unit, 342 integration) and PostgreSQL full (308, 343), clippy
+`--all-features --tests`. SenML is the same for every backend, so other backends were not run.
