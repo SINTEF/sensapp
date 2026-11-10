@@ -21,33 +21,33 @@ pub fn micros_to_datetime(micros: i64) -> SensAppDateTime {
     SensAppDateTime::from_unix_microseconds_i64(micros)
 }
 
-pub fn decimal_to_clickhouse_raw(value: &Decimal) -> Result<i128> {
-    let mut normalized = if value.scale() > CLICKHOUSE_NUMERIC_SCALE {
-        value.round_dp_with_strategy(
-            CLICKHOUSE_NUMERIC_SCALE,
-            RoundingStrategy::MidpointNearestEven,
-        )
-    } else {
-        *value
-    };
-    // `rescale` keeps a smaller scale when the mantissa would pass 96 bits: the raw value would
-    // then be read back divided by a power of ten
-    normalized.rescale(CLICKHOUSE_NUMERIC_SCALE);
-    if normalized.scale() != CLICKHOUSE_NUMERIC_SCALE {
-        return Err(StorageError::InvalidDataFormat {
-            message: format!(
-                "the value {value} is too large for ClickHouse, which keeps {CLICKHOUSE_NUMERIC_SCALE} digits after the point within 28 digits"
-            ),
-            sensor_context: "numeric".to_string(),
-        }
-        .into());
-    }
-    Ok(normalized.mantissa())
+/// The raw `Decimal(38, 8)` of a value: its mantissa at scale 8. A `Decimal` has 96 bits of
+/// mantissa, and 2^96 × 10^8 is under 10^38, so every value fits; more than 8 digits after the
+/// point are rounded.
+pub fn decimal_to_clickhouse_raw(value: &Decimal) -> i128 {
+    let value = value.round_dp_with_strategy(
+        CLICKHOUSE_NUMERIC_SCALE,
+        RoundingStrategy::MidpointNearestEven,
+    );
+    value.mantissa() * 10_i128.pow(CLICKHOUSE_NUMERIC_SCALE - value.scale())
 }
 
-/// A stored value or an aggregate over 96 bits does not fit in a `Decimal`.
+/// The `Decimal` of a raw `Decimal(38, 8)`. A stored value always comes back exactly, without its
+/// trailing zeros. An aggregate may have more digits than the 96 bits of a `Decimal`: its last
+/// decimals are then rounded away, as `Decimal` arithmetic does, and one over the range of a
+/// `Decimal` is an error.
 pub fn decimal_from_clickhouse_raw(raw: i128) -> Result<Decimal, StorageError> {
-    Decimal::try_from_i128_with_scale(raw, CLICKHOUSE_NUMERIC_SCALE).map_err(|_| {
+    let (mut mantissa, mut scale) = (raw, CLICKHOUSE_NUMERIC_SCALE);
+    while scale > 0 && mantissa % 10 == 0 {
+        mantissa /= 10;
+        scale -= 1;
+    }
+    while scale > 0 && Decimal::try_from_i128_with_scale(mantissa, scale).is_err() {
+        // Half away from zero
+        mantissa = (mantissa + mantissa.signum() * 5) / 10;
+        scale -= 1;
+    }
+    Decimal::try_from_i128_with_scale(mantissa, scale).map_err(|_| {
         StorageError::InvalidDataFormat {
             message: format!(
                 "the value {raw}e-{CLICKHOUSE_NUMERIC_SCALE} is outside the Numeric range"
@@ -71,9 +71,9 @@ async fn existing_ids(
     for chunk in ids.chunks(ID_LOOKUP_CHUNK) {
         let mut cursor = client
             .query(&format!(
-                "SELECT {id_column} FROM {table} WHERE has(?, {id_column})"
+                "SELECT {id_column} FROM {table} WHERE {id_column} IN {{ids:Array(UInt64)}}"
             ))
-            .bind(chunk)
+            .param("ids", chunk)
             .fetch::<u64>()
             .map_err(|e| map_clickhouse_error(e, None, None))?;
         while let Some(id) = cursor.next().await? {
@@ -109,7 +109,7 @@ where
 }
 
 /// The ids among the keys of `sensors` that are stored, after checking that each stored sensor
-/// has the name and the type of the sensor of the batch. ClickHouse has no transaction: two writers
+/// is the sensor of the batch (and not another UUID with the same key) and has its name and type. ClickHouse has no transaction: two writers
 /// that register one new UUID with two identities at the same moment are not caught here.
 async fn existing_sensors(
     client: &clickhouse::Client,
@@ -118,6 +118,8 @@ async fn existing_sensors(
     #[derive(Row, Deserialize)]
     struct StoredSensor {
         sensor_id: u64,
+        #[serde(with = "clickhouse::serde::uuid")]
+        uuid: Uuid,
         name: String,
         r#type: String,
     }
@@ -125,12 +127,19 @@ async fn existing_sensors(
     let mut existing = HashSet::new();
     for chunk in ids.chunks(ID_LOOKUP_CHUNK) {
         let mut cursor = client
-            .query("SELECT sensor_id, name, type FROM sensors WHERE has(?, sensor_id)")
-            .bind(chunk)
+            .query(
+                "SELECT sensor_id, uuid, name, type FROM sensors \
+                 WHERE sensor_id IN {ids:Array(UInt64)}",
+            )
+            .param("ids", chunk)
             .fetch::<StoredSensor>()
             .map_err(|e| map_clickhouse_error(e, None, None))?;
         while let Some(stored) = cursor.next().await? {
-            check_sensor_identity(sensors[&stored.sensor_id], &stored.name, &stored.r#type)?;
+            let sensor = sensors[&stored.sensor_id];
+            if stored.uuid != sensor.uuid {
+                return Err(StorageError::SensorKeyCollision { uuid: sensor.uuid }.into());
+            }
+            check_sensor_identity(sensor, &stored.name, &stored.r#type)?;
             existing.insert(stored.sensor_id);
         }
     }
@@ -151,10 +160,15 @@ async fn existing_sensors(
 /// and labels, so they cannot change afterwards. A sensor that exists must have the stored name
 /// and type, see `check_sensor_identity`.
 pub async fn register_sensors(client: &clickhouse::Client, sensors: &[&Sensor]) -> Result<()> {
-    let by_id: HashMap<u64, &Sensor> = unique_sensors(sensors)?
-        .into_values()
-        .map(|sensor| (uuid_to_sensor_id(&sensor.uuid), sensor))
-        .collect();
+    let mut by_id: HashMap<u64, &Sensor> = HashMap::new();
+    for sensor in unique_sensors(sensors)?.into_values() {
+        if by_id
+            .insert(uuid_to_sensor_id(&sensor.uuid), sensor)
+            .is_some()
+        {
+            return Err(StorageError::SensorKeyCollision { uuid: sensor.uuid }.into());
+        }
+    }
     let existing = existing_sensors(client, &by_id).await?;
     let new_sensors: Vec<(u64, &Sensor)> = by_id
         .into_iter()
@@ -343,22 +357,43 @@ mod tests {
     use super::*;
     use clickhouse::error::Error;
 
-    /// ClickHouse keeps 8 digits after the point, so a `Decimal` over 96 - 27 bits of integer part
-    /// cannot be stored, and a stored value or sum over 96 bits cannot be read.
+    /// `Decimal(38, 8)` holds every `Decimal` at scale 8 (96 bits × 10^8 is under 10^38): large
+    /// values were stored divided by a power of ten, then refused.
     #[test]
-    fn decimals_outside_the_clickhouse_range_are_errors() {
-        let raw = decimal_to_clickhouse_raw(&Decimal::new(1234, 2)).unwrap();
-        assert_eq!(raw, 1_234_000_000);
+    fn decimals_round_trip_through_clickhouse() {
+        let round_trip = |value: Decimal| {
+            decimal_from_clickhouse_raw(decimal_to_clickhouse_raw(&value)).unwrap()
+        };
         assert_eq!(
-            decimal_from_clickhouse_raw(raw).unwrap(),
-            Decimal::new(1234, 2)
+            decimal_to_clickhouse_raw(&Decimal::new(1234, 2)),
+            1_234_000_000
+        );
+        for value in [
+            Decimal::new(1234, 2),
+            Decimal::new(-5, 8),
+            Decimal::from_i128_with_scale(10_i128.pow(21), 0),
+            Decimal::MAX,
+            Decimal::MIN,
+            Decimal::from_i128_with_scale(123_456_789_012_345_678_901_234_567, 8),
+        ] {
+            assert_eq!(round_trip(value), value, "{value}");
+        }
+        // More than 8 digits after the point are rounded to 8
+        assert_eq!(
+            round_trip(Decimal::from_i128_with_scale(1_234_567_896, 9)),
+            Decimal::new(123_456_790, 8)
         );
 
-        // 10^25 needs 33 digits at scale 8, `Decimal` holds 28
-        let large = Decimal::from_i128_with_scale(10_i128.pow(25), 0);
-        assert!(decimal_to_clickhouse_raw(&large).is_err());
-        // A sum over 96 bits
-        assert!(decimal_from_clickhouse_raw(10_i128.pow(30)).is_err());
+        // An aggregate with more digits than a `Decimal` holds is rounded, as `Decimal` arithmetic
+        // rounds: 10^21 + 1/3 at scale 8 is 30 digits, over 96 bits
+        let raw = 10_i128.pow(29) + 33_333_333;
+        assert_eq!(
+            decimal_from_clickhouse_raw(raw).unwrap(),
+            Decimal::from_i128_with_scale(10_i128.pow(28) + 3_333_333, 7)
+        );
+        // An aggregate over the range of a `Decimal`
+        assert!(decimal_from_clickhouse_raw(10_i128.pow(37)).is_err());
+        assert!(decimal_from_clickhouse_raw(-(10_i128.pow(37))).is_err());
     }
 
     fn bad_response(code: u32) -> Error {

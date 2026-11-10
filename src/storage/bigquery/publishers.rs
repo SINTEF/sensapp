@@ -182,10 +182,12 @@ impl BigQueryStorage {
     /// themselves, so a series is never listed with a part of its labels missing. Two writers can
     /// register the same series at the same time; the rows are identical and the reads collapse them.
     pub(super) async fn register_sensors(&self, sensors: &[&Sensor]) -> Result<()> {
-        let mut by_id: HashMap<i64, &Sensor> = unique_sensors(sensors)?
-            .into_values()
-            .map(|sensor| (sensor_id(sensor), sensor))
-            .collect();
+        let mut by_id: HashMap<i64, &Sensor> = HashMap::new();
+        for sensor in unique_sensors(sensors)?.into_values() {
+            if by_id.insert(sensor_id(sensor), sensor).is_some() {
+                return Err(StorageError::SensorKeyCollision { uuid: sensor.uuid }.into());
+            }
+        }
         by_id.retain(|id, sensor| !self.is_registered(*id, sensor));
         if by_id.is_empty() {
             return Ok(());
@@ -249,13 +251,13 @@ impl BigQueryStorage {
         Ok(())
     }
 
-    /// Which of the sensors are stored, after checking that each stored sensor has the name and
-    /// the type of the sensor of the batch. Without a transaction, two writers that register one
+    /// Which of the sensors are stored, after checking that each stored sensor is the sensor of the
+    /// batch (and not another UUID with the same `sensor_id`) and has its name and type. Without a transaction, two writers that register one
     /// new UUID with two identities at the same moment are not caught here.
     async fn existing_sensors(&self, sensors: &HashMap<i64, &Sensor>) -> Result<Vec<i64>> {
         let ids: Vec<i64> = sensors.keys().copied().collect();
         let sql = format!(
-            "SELECT DISTINCT sensor_id, name, type FROM {} WHERE sensor_id IN UNNEST(@ids)",
+            "SELECT DISTINCT sensor_id, uuid, name, type FROM {} WHERE sensor_id IN UNNEST(@ids)",
             self.table("sensors")
         );
         let stored = self
@@ -266,15 +268,19 @@ impl BigQueryStorage {
                 |row| {
                     Ok((
                         super::client::required(row.get_i64(0), "sensor_id")?,
-                        super::client::required(row.get_string(1), "name")?,
-                        super::client::required(row.get_string(2), "type")?,
+                        super::client::required(row.get_string(1), "uuid")?,
+                        super::client::required(row.get_string(2), "name")?,
+                        super::client::required(row.get_string(3), "type")?,
                     ))
                 },
             )
             .await?;
         let mut existing = Vec::with_capacity(stored.len());
-        for (id, name, sensor_type) in stored {
+        for (id, uuid, name, sensor_type) in stored {
             if let Some(sensor) = sensors.get(&id) {
+                if uuid != sensor.uuid.to_string() {
+                    return Err(StorageError::SensorKeyCollision { uuid: sensor.uuid }.into());
+                }
                 check_sensor_identity(sensor, &name, &sensor_type)?;
                 existing.push(id);
             }

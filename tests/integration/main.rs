@@ -24,6 +24,7 @@ mod identity_over_http;
 mod influxdb_integration;
 mod ingestion;
 mod jwt_auth;
+mod numeric_values;
 mod parser_edge_cases;
 mod prometheus_metrics;
 mod prometheus_remote_read_integration;

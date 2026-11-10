@@ -170,7 +170,7 @@ impl SqliteStorage {
                 format!(
                     "WITH bucketed AS (
                        SELECT sensor_id, timestamp_us, {value} AS value,
-                              (?4 + ((timestamp_us - ?4) / ?3) * ?3) AS bucket_us
+                              (timestamp_us - (((timestamp_us - ?4) % ?3) + ?3) % ?3) AS bucket_us
                        FROM {table}
                        WHERE sensor_id IN ({placeholders})
                          AND timestamp_us >= COALESCE(?1, -9223372036854775807)
@@ -202,7 +202,7 @@ impl SqliteStorage {
                 format!(
                     "WITH bucketed AS (
                        SELECT sensor_id, timestamp_us, value,
-                              (?4 + ((timestamp_us - ?4) / ?3) * ?3) AS bucket_us
+                              (timestamp_us - (((timestamp_us - ?4) % ?3) + ?3) % ?3) AS bucket_us
                        FROM {table}
                        WHERE sensor_id IN ({placeholders})
                          AND timestamp_us >= COALESCE(?1, -9223372036854775807)

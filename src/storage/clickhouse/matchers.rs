@@ -31,9 +31,10 @@ impl ClickHouseStorage {
                 .client
                 .query(
                     "SELECT sensor_id, name, COALESCE(description, '') AS description \
-                     FROM labels FINAL WHERE has(?, sensor_id) ORDER BY sensor_id, name",
+                     FROM labels FINAL WHERE sensor_id IN {ids:Array(UInt64)} \
+                     ORDER BY sensor_id, name",
                 )
-                .bind(chunk)
+                .param("ids", chunk)
                 .fetch::<LabelRow>()
                 .map_err(|e| map_clickhouse_error(e, None, None))?;
             while let Some(row) = cursor.next().await? {

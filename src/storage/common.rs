@@ -126,9 +126,12 @@ pub fn duplicate_key_columns(table: &str, time_column: &str) -> String {
 /// stores the same bits as a signed `INT64`).
 ///
 /// The ids are stored, so this function is part of the on-disk format and must never change:
-/// the XOR of the two big-endian 64-bit halves of the UUID. Sensor UUIDs are hashes, so the
-/// result is uniformly distributed. Do not use `std`'s `DefaultHasher` here, its algorithm is
-/// explicitly allowed to change between Rust releases, which would orphan every stored sample.
+/// the XOR of the two big-endian 64-bit halves of the UUID. The UUIDs SensApp derives are hashes,
+/// so their keys are uniformly distributed, but SenML and Arrow writers choose theirs, and two
+/// chosen UUIDs can have the same key (`(a, b)` and `(b, a)`). The registration refuses a UUID whose
+/// key belongs to another one (`StorageError::SensorKeyCollision`), and the reads by UUID compare
+/// the stored UUID. Do not use `std`'s `DefaultHasher` here, its algorithm is explicitly allowed to
+/// change between Rust releases, which would orphan every stored sample.
 pub fn uuid_to_sensor_id(uuid: &Uuid) -> u64 {
     let value = uuid.as_u128();
     ((value >> 64) as u64) ^ (value as u64)

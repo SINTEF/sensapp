@@ -42,6 +42,13 @@ pub enum StorageError {
         sensor_type: String,
     },
 
+    /// A new sensor UUID whose 64-bit storage key (ClickHouse, BigQuery) is the key of another
+    /// stored sensor, or of another sensor of the same batch. Such a sensor cannot be stored.
+    #[error(
+        "Sensor {uuid} has the same storage key as another sensor of this database: use another UUID"
+    )]
+    SensorKeyCollision { uuid: Uuid },
+
     /// Configuration error
     #[error("Configuration error: {0}")]
     Configuration(String),

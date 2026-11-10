@@ -79,10 +79,13 @@ impl ClickHouseStorage {
     /// The start of the bucket of a sample. Select it under another name than `timestamp_us`
     /// (`AS bucket_us`): ClickHouse resolves an alias in `WHERE`, so `timestamp_us >= ?` would test
     /// the bucket instead of the sample, and the samples outside of the window would be counted.
+    ///
+    /// The start is at or before the sample: `intDiv` truncates towards zero, which put a sample
+    /// before the origin (before 1970 without a start) in the next bucket.
     fn aggregated_bucket_expr(query: &AggregatedSamplesQuery) -> String {
         format!(
-            "{} + intDiv(timestamp_us - {}, {}) * {}",
-            query.origin_us, query.origin_us, query.step_us, query.step_us
+            "timestamp_us - positiveModulo(timestamp_us - {}, {})",
+            query.origin_us, query.step_us
         )
     }
 
@@ -267,7 +270,8 @@ impl ClickHouseStorage {
             .fetch::<SensorMetadataRow>()
             .map_err(|e| map_clickhouse_error(e, Some(uuid), None))?;
 
-        let Some(row) = sensor_cursor.next().await? else {
+        // Another UUID may have the same key: it is never stored, see `register_sensors`
+        let Some(row) = sensor_cursor.next().await?.filter(|row| row.uuid == uuid) else {
             return Ok(None);
         };
 
@@ -596,15 +600,7 @@ impl StorageInstance for ClickHouseStorage {
             )
         })?;
         let sensor_id = uuid_to_sensor_id(&uuid);
-
-        let existing: u64 = self
-            .client
-            .query("SELECT count() FROM sensors WHERE sensor_id = ?")
-            .bind(sensor_id)
-            .fetch_one()
-            .await
-            .context("Failed to look up sensor")?;
-        if existing == 0 {
+        if self.get_sensor_metadata(sensor_uuid).await?.is_none() {
             return Ok(false);
         }
 
@@ -925,9 +921,8 @@ impl StorageInstance for ClickHouseStorage {
             .fetch::<SensorMetadataRow>()
             .map_err(|e| map_clickhouse_error(e, Some(uuid), None))?;
 
-        let row = if let Some(row) = sensor_cursor.next().await? {
-            row
-        } else {
+        // Another UUID may have the same key: it is never stored, see `register_sensors`
+        let Some(row) = sensor_cursor.next().await?.filter(|row| row.uuid == uuid) else {
             return Ok(None);
         };
 
@@ -1008,7 +1003,7 @@ impl StorageInstance for ClickHouseStorage {
                     sensor_id,
                     start_time_us,
                     end_time_us,
-                    step_us: step_ms * 1000,
+                    step_us: step_ms.checked_mul(1000).context("step is too large")?,
                     origin_us: start_time_us.unwrap_or(0),
                     aggregation,
                     limit: options.limit,
@@ -1769,11 +1764,15 @@ fn clickhouse_time_where(start_time_us: Option<i64>, end_time_us: Option<i64>) -
     conditions
 }
 
+/// The aggregate of the values of a bucket. Sums are computed on a wider type and cast back with
+/// `accurateCast`, which fails when the result does not fit: `sum` of `Int64` and of
+/// `Decimal(38, 8)` wraps silently. The Numeric average is the exact sum divided by the count,
+/// truncated to 8 decimals: `avg` of a decimal is a `Float64`.
 fn clickhouse_integer_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Min => "min(value)",
         Aggregation::Max => "max(value)",
-        Aggregation::Sum => "sum(value)",
+        Aggregation::Sum => "accurateCast(sum(toInt128(value)), 'Int64')",
         Aggregation::First => "argMin(value, timestamp_us)",
         Aggregation::Last | Aggregation::Latest => "argMax(value, timestamp_us)",
         Aggregation::Avg | Aggregation::Count => unreachable!("handled separately"),
@@ -1794,10 +1793,10 @@ fn clickhouse_float_expression(aggregation: Aggregation) -> &'static str {
 
 fn clickhouse_numeric_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
-        Aggregation::Avg => "toDecimal128(avg(value), 8)",
+        Aggregation::Avg => "accurateCast(sum(toDecimal256(value, 8)) / count(), 'Decimal(38, 8)')",
         Aggregation::Min => "min(value)",
         Aggregation::Max => "max(value)",
-        Aggregation::Sum => "sum(value)",
+        Aggregation::Sum => "accurateCast(sum(toDecimal256(value, 8)), 'Decimal(38, 8)')",
         Aggregation::First => "argMin(value, timestamp_us)",
         Aggregation::Last | Aggregation::Latest => "argMax(value, timestamp_us)",
         Aggregation::Count => unreachable!("handled separately"),

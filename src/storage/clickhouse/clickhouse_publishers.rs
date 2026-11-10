@@ -191,7 +191,7 @@ impl<'a> ClickHousePublisher<'a> {
             let row = NumericValueRow {
                 sensor_id,
                 timestamp_us: datetime_to_micros(&sample.datetime),
-                value: decimal_to_clickhouse_raw(&sample.value)?,
+                value: decimal_to_clickhouse_raw(&sample.value),
             };
             inserter
                 .write(&row)

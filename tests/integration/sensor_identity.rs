@@ -262,3 +262,84 @@ async fn a_write_with_only_the_uuid_appends_to_the_stored_series() -> Result<()>
     assert_eq!(data.samples.len(), 2);
     Ok(())
 }
+
+/// ClickHouse and BigQuery key a series by a 64-bit fold of its UUID (the XOR of its halves), and
+/// SenML and Arrow writers choose their UUIDs: `(a, b)` and `(b, a)` have the same key. The second
+/// sensor was never registered, its samples went to the first series, and reads and deletes of
+/// its UUID acted on the first series. Backends keyed by the UUID store both.
+#[tokio::test]
+#[serial]
+async fn two_uuids_with_the_same_storage_key_never_share_a_series() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if !applies_to(&test_db) {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let (high, low) = (fastrand::u64(..), fastrand::u64(..));
+    // The same name, so that only the UUID tells the sensors apart
+    let sensor = |high: u64, low: u64, name: &str| {
+        Arc::new(Sensor::new(
+            Uuid::from_u64_pair(high, low),
+            format!("{name}_{}", high.min(low)),
+            SensorType::Float,
+            None,
+            None,
+        ))
+    };
+    let first = sensor(high, low, "fold");
+    let second = sensor(low, high, "fold");
+    let third = sensor(high ^ 1, low ^ 1, "fold_in_a_batch");
+    let fourth = sensor(low ^ 1, high ^ 1, "fold_in_a_batch");
+    publish(&storage, &[(first.clone(), 0)]).await?;
+
+    let refused = |result: Result<()>| match result {
+        Ok(()) => false,
+        Err(error) => {
+            assert!(
+                matches!(
+                    error.downcast_ref::<StorageError>(),
+                    Some(StorageError::SensorKeyCollision { .. })
+                ),
+                "expected a key collision, got {error:#}"
+            );
+            true
+        }
+    };
+    let samples = |sensor: Arc<Sensor>| {
+        let storage = storage.clone();
+        async move {
+            Ok::<_, anyhow::Error>(
+                storage
+                    .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
+                    .await?
+                    .map(|data| (data.sensor.name, data.samples.len())),
+            )
+        }
+    };
+
+    // Against a stored sensor
+    if refused(publish(&storage, &[(second.clone(), 1)]).await) {
+        assert_eq!(samples(second.clone()).await?, None);
+        assert!(!storage.delete_series(&second.uuid.to_string()).await?);
+    } else {
+        assert_eq!(
+            samples(second.clone()).await?,
+            Some((second.name.clone(), 1))
+        );
+    }
+    assert_eq!(samples(first.clone()).await?, Some((first.name.clone(), 1)));
+
+    // Within one batch
+    if refused(publish(&storage, &[(third.clone(), 0), (fourth.clone(), 1)]).await) {
+        assert_eq!(samples(third).await?, None);
+        assert_eq!(samples(fourth).await?, None);
+    } else {
+        assert_eq!(samples(third.clone()).await?, Some((third.name.clone(), 1)));
+        assert_eq!(
+            samples(fourth.clone()).await?,
+            Some((fourth.name.clone(), 1))
+        );
+    }
+    Ok(())
+}

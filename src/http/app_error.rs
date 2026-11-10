@@ -87,7 +87,8 @@ impl IntoResponse for AppError {
                 StorageError::SensorNotFound { .. } | StorageError::MetricNotFound { .. } => {
                     (StatusCode::NOT_FOUND, storage_error.to_string())
                 }
-                StorageError::SensorIdentityMismatch { .. } => {
+                StorageError::SensorIdentityMismatch { .. }
+                | StorageError::SensorKeyCollision { .. } => {
                     (StatusCode::CONFLICT, storage_error.to_string())
                 }
                 #[cfg(any(
