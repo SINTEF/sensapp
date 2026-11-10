@@ -183,9 +183,14 @@ impl std::fmt::Display for LabelMatcher {
     }
 }
 
-// Conversion from Prometheus LabelMatcher
-impl From<&crate::parsing::prometheus::remote_read_models::LabelMatcher> for LabelMatcher {
-    fn from(m: &crate::parsing::prometheus::remote_read_models::LabelMatcher) -> Self {
+// Conversion from Prometheus LabelMatcher. A type Prometheus does not have is an error, and not
+// read as `=`: a reader would get another answer than the one it asked for.
+impl TryFrom<&crate::parsing::prometheus::remote_read_models::LabelMatcher> for LabelMatcher {
+    type Error = anyhow::Error;
+
+    fn try_from(
+        m: &crate::parsing::prometheus::remote_read_models::LabelMatcher,
+    ) -> Result<Self, Self::Error> {
         use crate::parsing::prometheus::remote_read_models::label_matcher::Type;
 
         let matcher_type = match Type::try_from(m.r#type) {
@@ -193,11 +198,10 @@ impl From<&crate::parsing::prometheus::remote_read_models::LabelMatcher> for Lab
             Ok(Type::Neq) => MatcherType::NotEqual,
             Ok(Type::Re) => MatcherType::RegexMatch,
             Ok(Type::Nre) => MatcherType::RegexNotMatch,
-            // Default to Equal for unknown types (defensive)
-            Err(_) => MatcherType::Equal,
+            Err(_) => anyhow::bail!("Unknown label matcher type {}", m.r#type),
         };
 
-        Self::new(m.name.clone(), m.value.clone(), matcher_type)
+        Ok(Self::new(m.name.clone(), m.value.clone(), matcher_type))
     }
 }
 
@@ -290,11 +294,12 @@ mod tests {
         use crate::parsing::prometheus::remote_read_models::{
             LabelMatcher as Remote, label_matcher::Type,
         };
-        let matcher = LabelMatcher::from(&Remote {
+        let matcher = LabelMatcher::try_from(&Remote {
             r#type: Type::Re as i32,
             name: "region".to_string(),
             value: "eu-.*".to_string(),
-        });
+        })
+        .unwrap();
         assert_eq!(matcher.matcher_type, MatcherType::RegexMatch);
         assert_eq!(matcher.value, "^(?:eu-.*)$");
     }
@@ -336,7 +341,7 @@ mod tests {
             name: "__name__".to_string(),
             value: "cpu_usage".to_string(),
         };
-        let matcher: LabelMatcher = (&prom_eq).into();
+        let matcher = LabelMatcher::try_from(&prom_eq).unwrap();
         assert_eq!(matcher.name, "__name__");
         assert_eq!(matcher.value, "cpu_usage");
         assert_eq!(matcher.matcher_type, MatcherType::Equal);
@@ -347,7 +352,7 @@ mod tests {
             name: "env".to_string(),
             value: "test".to_string(),
         };
-        let matcher: LabelMatcher = (&prom_neq).into();
+        let matcher = LabelMatcher::try_from(&prom_neq).unwrap();
         assert_eq!(matcher.matcher_type, MatcherType::NotEqual);
 
         // Test RE
@@ -356,7 +361,7 @@ mod tests {
             name: "instance".to_string(),
             value: "server-[0-9]+".to_string(),
         };
-        let matcher: LabelMatcher = (&prom_re).into();
+        let matcher = LabelMatcher::try_from(&prom_re).unwrap();
         assert_eq!(matcher.matcher_type, MatcherType::RegexMatch);
 
         // Test NRE
@@ -365,7 +370,7 @@ mod tests {
             name: "job".to_string(),
             value: "test.*".to_string(),
         };
-        let matcher: LabelMatcher = (&prom_nre).into();
+        let matcher = LabelMatcher::try_from(&prom_nre).unwrap();
         assert_eq!(matcher.matcher_type, MatcherType::RegexNotMatch);
     }
 
@@ -373,13 +378,13 @@ mod tests {
     fn test_from_prometheus_label_matcher_unknown_type() {
         use crate::parsing::prometheus::remote_read_models::LabelMatcher as PromLabelMatcher;
 
-        // Test unknown type defaults to Equal
+        // An unknown type is refused
         let prom_unknown = PromLabelMatcher {
             r#type: 999, // Invalid type
             name: "test".to_string(),
             value: "value".to_string(),
         };
-        let matcher: LabelMatcher = (&prom_unknown).into();
-        assert_eq!(matcher.matcher_type, MatcherType::Equal);
+        let error = LabelMatcher::try_from(&prom_unknown).unwrap_err();
+        assert!(error.to_string().contains("999"), "{error}");
     }
 }

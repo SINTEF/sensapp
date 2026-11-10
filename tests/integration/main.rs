@@ -26,6 +26,7 @@ mod ingestion;
 mod jwt_auth;
 mod numeric_values;
 mod parser_edge_cases;
+mod payload_errors;
 mod prometheus_metrics;
 mod prometheus_remote_read_integration;
 mod prometheus_write_integration;

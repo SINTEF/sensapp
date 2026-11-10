@@ -118,6 +118,24 @@ Backpressure only works if clients listen to it. The [Python SDK](PYTHON_SDK.md#
 - Retry at one layer only, not in the client library and again in a proxy or an agent: 3 layers × 3 retries is 27 attempts for one request.
 - Stop retrying when your own deadline has passed.
 
+### Status codes of the writes
+
+The writes (`/publish`, the InfluxDB write and the Prometheus remote write) answer:
+
+| Status | Meaning | Retry? |
+| --- | --- | --- |
+| `200` (`/publish`) or `204` | Everything was stored. | |
+| `400` | The payload can never be stored: it cannot be read (CSV rows of different lengths, text that is not UTF-8, line protocol, Snappy or protobuf that cannot be decoded, no rows), or it holds what SensApp refuses (a NUL character in a name, unit, label or value, a vertical tab or a separator 0x1C to 0x1F in a name, unit or label, a time outside years 1 to 9999, values of two types for one series, a series without `__name__`). Nothing was stored. | No |
+| `401`, `403` | No valid token, or a token without the write scope or the sensor. | No |
+| `408` | The body did not arrive within `SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS`. Nothing was stored. | Yes |
+| `409` | A sensor UUID is already used by another series. | No |
+| `413` | The body is larger than `SENSAPP_HTTP_BODY_LIMIT`. Send smaller requests. | No |
+| `500` | The storage failed on its own (a rejected statement, a bug). The write may be stored in part. | No |
+| `503` | Shed with `Retry-After` (nothing was stored), or the database is unavailable (may be stored in part). | Yes |
+| `504` | The write took longer than `SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS`. It may be stored in part. | Yes |
+
+Prometheus and Telegraf retry every `5xx`. This is why a payload that can never be stored is a `400`: answered with a `500`, it would be sent again forever and block its remote-write shard.
+
 ## Shutdown
 
 SensApp stops on SIGTERM (what `docker stop` and Kubernetes send) and on Ctrl+C (SIGINT). It takes no new connection, lets the requests in flight finish, and exits with code 0 once they are done. Each request is still bounded by its timeout, so the drain lasts at most `SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS` (300 s) for writes, or `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS` while a vacuum runs. An instance with nothing in flight stops at once.

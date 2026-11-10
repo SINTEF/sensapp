@@ -13,6 +13,26 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+/// Whether a string or JSON value holds U+0000. PostgreSQL refuses it in a text and in a `jsonb`,
+/// so it is refused on every backend, as a payload error.
+fn holds_a_nul(samples: &TypedSamples) -> bool {
+    fn json_holds_a_nul(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::String(text) => text.contains('\0'),
+            serde_json::Value::Array(values) => values.iter().any(json_holds_a_nul),
+            serde_json::Value::Object(map) => map
+                .iter()
+                .any(|(key, value)| key.contains('\0') || json_holds_a_nul(value)),
+            _ => false,
+        }
+    }
+    match samples {
+        TypedSamples::String(samples) => samples.iter().any(|sample| sample.value.contains('\0')),
+        TypedSamples::Json(samples) => samples.iter().any(|sample| json_holds_a_nul(&sample.value)),
+        _ => false,
+    }
+}
+
 /// A batch builder is used to build a batch from a stream of samples.
 pub struct BatchBuilder {
     batch_size: usize,
@@ -41,6 +61,13 @@ impl BatchBuilder {
         }) {
             return Err(StorageError::InvalidDataFormat {
                 message: format!("the time {datetime} is outside years 1 to 9999"),
+                sensor_context: sensor.name.clone(),
+            }
+            .into());
+        }
+        if holds_a_nul(&samples) {
+            return Err(StorageError::InvalidDataFormat {
+                message: "a value holds a NUL character, which PostgreSQL cannot store".to_string(),
                 sensor_context: sensor.name.clone(),
             }
             .into());

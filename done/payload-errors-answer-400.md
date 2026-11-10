@@ -54,3 +54,50 @@ answers 5xx.
 ## Done when
 
 The tests pass and `docs/` lists the status codes of the write endpoints.
+
+## Outcome (10 November 2026)
+
+`tests/integration/payload_errors.rs` sends each bad payload through the real router and lists every case
+that does not answer 4xx (or answers with more than 1,000 bytes). Before the fix, 10 of 14 cases answered
+500 on PostgreSQL:
+
+- a CSV row longer than its header;
+- a NUL in a CSV string value, in a CSV sensor name, in a SenML JSON value and in a SenML label;
+- a 0x1F in an InfluxDB tag;
+- bad Snappy and bad protobuf on the remote write;
+- a 0x1F and a NUL in a remote-write label.
+
+`application/senml+json` was parsed as CSV (400 "CSV contains no data rows"). An unknown remote-read
+matcher type answered 200 as if it were `=`.
+
+Fixed:
+
+- **Validation errors are typed.** Names, units and labels with a NUL, a vertical tab or a separator, a
+  NUL in a string or JSON value (`BatchBuilder::add`, which every importer goes through), and samples of
+  another type than their series are `StorageError::InvalidDataFormat`. `From<anyhow::Error>` already
+  maps that to 400, so every handler gets it without a change at its call sites. This covers InfluxDB,
+  remote write, SenML, CSV and Arrow, including the SenML `batch_builder.add` errors. Units were not
+  validated at all before; they now are, as names are. NUL is refused on every backend, though only
+  PostgreSQL fails on it, so that every backend behaves the same.
+- **CSV reading errors are 400.** The body is already buffered by the body-limit layer, so reading the
+  records can only fail on the payload. The body limit itself is a 413 before the handler.
+- **Remote write parse errors are 400**, as on the remote read.
+- **`+json` media types are SenML.**
+- **An unknown matcher type is a 400** (`TryFrom` instead of `From`).
+- **Short messages**: the type mismatch of `SingleSensorBatch::append` no longer prints every sample,
+  the CSV type error shows the first 80 characters of the value, and the name and label errors show the
+  first 64. The time-column error that printed a whole column was already fixed in an earlier task.
+- **Regex matchers** are left to `postgres-regex-validation-and-statement-timeout.md` (task 12), as the
+  task says.
+
+A storage failure still answers 500: `real_router::real_server_errors_are_still_logged_as_errors`.
+
+Decision: a remote write with one invalid series is refused whole with a 400. Nothing is stored, and the
+message names the series. Skipping the bad series and storing the rest would be friendlier to Prometheus,
+but a partial write with a 400 is harder to reason about. KISS, as the task allows.
+
+Documented in `docs/CONFIGURATION.md`, which now has a table of the status codes of the writes.
+
+Suites: SQLite full (305 unit, 350 integration) and PostgreSQL full (311 unit, 350 integration) passed.
+`cargo clippy --all-features --tests` is clean. The validation runs before the storage, so no other
+backend was run.

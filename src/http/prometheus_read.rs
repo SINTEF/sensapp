@@ -146,7 +146,12 @@ async fn query_sensor_data_for_prometheus(
     state: &HttpServerState,
     query: &Query,
 ) -> Result<Vec<crate::datamodel::SensorData>, AppError> {
-    let matchers: Vec<LabelMatcher> = query.matchers.iter().map(LabelMatcher::from).collect();
+    let matchers = query
+        .matchers
+        .iter()
+        .map(LabelMatcher::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::bad_request)?;
     let start_time = SensAppDateTime::from_unix_milliseconds_i64(query.start_timestamp_ms);
     let end_time = SensAppDateTime::from_unix_milliseconds_i64(query.end_timestamp_ms);
 

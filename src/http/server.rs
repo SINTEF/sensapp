@@ -502,7 +502,8 @@ async fn publish_sensors_data(
             .unwrap_or("text/csv");
 
         match content_type {
-            ct if ct.contains("application/json") => {
+            // `application/senml+json` (RFC 8428) and the other `+json` media types too
+            ct if ct.contains("application/json") || ct.contains("+json") => {
                 publish_json_format(body, state.storage.clone()).await
             }
             ct if ct.contains("application/vnd.apache.arrow.stream")
@@ -579,9 +580,11 @@ async fn publish_csv_format(
         .delimiter(b',') // Use comma for standard CSV
         .create_reader(reader);
 
+    // The body is already in memory (`enforce_request_body_limit`): reading the records fails on
+    // the payload only, a row of another length or a text that is not UTF-8
     let data_grid = read_csv_data_grid(csv_reader)
         .await
-        .map_err(AppError::internal_server_error)?;
+        .map_err(AppError::bad_request)?;
     // Errors from parsing are caused by the payload
     let parsed = parse_csv_data_grid(data_grid).map_err(AppError::bad_request)?;
     publish_parsed_csv(parsed, storage)

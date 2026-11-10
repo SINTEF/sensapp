@@ -1,7 +1,7 @@
 use crate::config;
 
 use super::{SensorType, sensapp_vec::SensAppLabels, unit::Unit};
-use anyhow::{Error, anyhow};
+use anyhow::Error;
 use cached::macros::cached;
 use once_cell::sync::OnceCell;
 use smallvec::SmallVec;
@@ -64,8 +64,24 @@ fn sort_labels(labels: &mut SensAppLabels) {
 ///
 /// Returns:
 /// * `bool`: `true` if any of the special characters are found, `false` otherwise.
+///
+/// NUL (0x00) is refused too: PostgreSQL cannot store it in a text, so every backend refuses it the
+/// same way, with a 400.
 fn contains_special_chars(s: &str) -> bool {
-    s.bytes().any(|b| matches!(b, 11 | 28 | 29 | 30 | 31))
+    s.bytes().any(|b| matches!(b, 0 | 11 | 28 | 29 | 30 | 31))
+}
+
+/// The error of a name, unit or label that holds a character SensApp cannot store. A payload error
+/// (`InvalidDataFormat` is a 400), which shows the start of the text only.
+fn special_chars_error(what: &str, text: &str, sensor: &str) -> Error {
+    crate::storage::StorageError::InvalidDataFormat {
+        message: format!(
+            "the {what} {:?} holds a NUL, a vertical tab or a separator (0x1C to 0x1F)",
+            text.chars().take(64).collect::<String>()
+        ),
+        sensor_context: sensor.chars().take(64).collect(),
+    }
+    .into()
 }
 
 type NameToUuidKey = [u8; 32];
@@ -86,10 +102,12 @@ fn compute_uuid_buffer(
     sorted_labels: &Option<SensAppLabels>,
 ) -> Result<Vec<u8>, Error> {
     if contains_special_chars(name) {
-        return Err(anyhow!(
-            "The name '{}' contains special characters. Please remove them.",
-            name
-        ));
+        return Err(special_chars_error("name", name, name));
+    }
+    if let Some(unit) = unit
+        && contains_special_chars(&unit.name)
+    {
+        return Err(special_chars_error("unit", &unit.name, name));
     }
     let mut buffer_size = name.len()
         + 1 // Record Separator (RS) - ASCII 30 (0x1E)
@@ -104,16 +122,10 @@ fn compute_uuid_buffer(
     if let Some(sorted_labels) = sorted_labels {
         for (key, value) in sorted_labels.iter() {
             if contains_special_chars(key) {
-                return Err(anyhow!(
-                    "The tag key '{}' contains special characters. Please remove them.",
-                    key
-                ));
+                return Err(special_chars_error("label name", key, name));
             }
             if contains_special_chars(value) {
-                return Err(anyhow!(
-                    "The tag value '{}' contains special characters. Please remove them.",
-                    value
-                ));
+                return Err(special_chars_error("label value", value, name));
             }
             buffer_size += key.len()
             + 1 // Unit Separator (US) - ASCII 31 (0x1F)

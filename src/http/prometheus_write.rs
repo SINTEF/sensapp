@@ -127,7 +127,10 @@ pub async fn publish_prometheus(
 
         verify_headers(&headers)?;
 
-        let write_request = parse_remote_write_request(&bytes)?;
+        // A request that cannot be read is a 400: Prometheus drops it instead of sending it again
+        let write_request = parse_remote_write_request(&bytes).map_err(|error| {
+            AppError::bad_request(anyhow::anyhow!("Failed to parse write request: {error}"))
+        })?;
 
         if write_request.timeseries.is_empty() {
             return Ok::<_, AppError>((StatusCode::NO_CONTENT, 0usize, 0usize));

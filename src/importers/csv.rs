@@ -432,5 +432,7 @@ fn convert_samples_to_typed_samples(
 }
 
 fn type_mismatch(sensor_type: &SensorType, value: &InferedValue) -> anyhow::Error {
-    anyhow!("A {sensor_type} series cannot hold the value {value:?}")
+    // The start of the value only: a cell can be as long as the body
+    let value: String = format!("{value:?}").chars().take(80).collect();
+    anyhow!("A {sensor_type} series cannot hold the value {value}")
 }
