@@ -10,6 +10,10 @@ Sensors can have labels attached to them, which are key-value pairs. Those are n
 
 Labels are part of the identity of a sensor. The UUID that SensApp derives from a name, a type, a unit and labels covers them, so a Prometheus or InfluxDB series whose label changes is another sensor, with its own history. The labels of a sensor are written when it is created and never updated: publishing again a UUID that exists, which only a client that chooses its own UUIDs can do (an Arrow stream, SenML), adds the samples and keeps the labels it was created with. This is the same on every backend.
 
+A write that names a UUID that exists must give the stored **name** and **type** of that sensor, or no name at all (a SenML record without `_name`, an Arrow upload with only `sensor_id`: the series is then the one of the UUID, whatever its name). Otherwise the whole request is refused with `409 Conflict`, and the answer does not tell the stored name. The name is what token allow lists check, and the type chooses where the samples are stored, so neither may differ. The unit and the labels are not compared: an import may leave them out, and the ones the sensor was created with stay. One request that gives one UUID two names or two types is refused the same way. ClickHouse and BigQuery have no transactions: two requests that create one new UUID with two identities at the same moment are not caught.
+
+An Arrow upload whose `sensapp.sensor.type` metadata is not the type of its `value` column is refused with `400`, except a text column declared `json`, which is how the Arrow export writes JSON series: its values are parsed as JSON.
+
 SensApp distinguises between:
 
  - **Integer** values, which are 64 bits integers.

@@ -63,6 +63,10 @@ Two importers also accept an explicit UUID, which then identifies the series:
   sensor name (`sensapp.sensor.name` metadata or `sensor_name` column) is required. A payload with
   neither is rejected with `400`.
 
+A UUID that exists must come with the stored name and type of its series, or with no name: another name
+or type is refused with `409` ([DATAMODEL.md](DATAMODEL.md)). Importing an export under a renamed series
+is therefore refused; import it without the name, or publish it as a new series.
+
 ### Publishing the same timestamp twice keeps both samples
 
 Writes are plain appends. Publishing a sample at a `(series, timestamp)` that already exists stores a second
