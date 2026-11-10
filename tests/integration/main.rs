@@ -17,6 +17,7 @@ mod crud_dcat_api;
 mod data_lifecycle;
 mod datamodel;
 mod deduplication;
+mod exact_timestamps;
 mod health_check;
 mod identity_over_http;
 mod influxdb_integration;

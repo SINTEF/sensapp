@@ -35,13 +35,24 @@ pub struct TimeScaleDBStorage {
     deduplicate_on_ingest: AtomicBool,
 }
 
+/// A read bound, clamped to what both `OffsetDateTime` and PostgreSQL hold: an open end such as
+/// `i64::MAX` milliseconds (a Prometheus remote read) stays the far future instead of becoming 1970.
+/// Written samples do not come here: `sensapp_datetime_to_offset_datetime` refuses them.
 fn micros_to_offset_datetime(timestamp_us: i64) -> sqlx::types::time::OffsetDateTime {
-    sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((timestamp_us as i128) * 1000)
+    /// About 3990 BC, after PostgreSQL's first timestamp (4713 BC)
+    const MIN_US: i64 = -188_000_000_000_000_000;
+    /// 9999-12-31T23:59:59.999999Z, the last `OffsetDateTime`
+    const MAX_US: i64 = 253_402_300_799_999_999;
+    let timestamp_us = timestamp_us.clamp(MIN_US, MAX_US);
+    sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(timestamp_us) * 1000)
         .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
 }
 
 fn offset_datetime_to_sensapp(datetime: sqlx::types::time::OffsetDateTime) -> SensAppDateTime {
-    SensAppDateTime::from_unix_microseconds_i64((datetime.unix_timestamp_nanos() / 1000) as i64)
+    // Within ±9999 years: the microseconds fit in an `i64`
+    SensAppDateTime::from_unix_microseconds_i64(
+        datetime.unix_timestamp_nanos().div_euclid(1000) as i64
+    )
 }
 
 impl TimeScaleDBStorage {
@@ -2014,7 +2025,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2024,14 +2035,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<NumericValueRow> = sqlx::query_as(
             r#"
@@ -2052,10 +2057,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value = row.value;
             samples.push(Sample { datetime, value });
         }
@@ -2117,7 +2119,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2127,14 +2129,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<StringValueRow> = sqlx::query_as(
             r#"
@@ -2157,10 +2153,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value = row.string_value;
             samples.push(Sample { datetime, value });
         }
@@ -2175,7 +2168,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2185,14 +2178,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<BooleanValueRow> = sqlx::query_as(
             r#"
@@ -2213,10 +2200,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value = row.value;
             samples.push(Sample { datetime, value });
         }
@@ -2231,7 +2215,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2242,14 +2226,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<LocationValueRow> = sqlx::query_as(
             r#"
@@ -2270,10 +2248,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value = geo::Point::new(row.longitude, row.latitude);
             samples.push(Sample { datetime, value });
         }
@@ -2288,7 +2263,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2298,14 +2273,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<JsonValueRow> = sqlx::query_as(
             r#"
@@ -2326,10 +2295,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value: serde_json::Value = row.value;
             samples.push(Sample { datetime, value });
         }
@@ -2344,7 +2310,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2354,14 +2320,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<BlobValueRow> = sqlx::query_as(
             r#"
@@ -2382,10 +2342,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value = row.value;
             samples.push(Sample { datetime, value });
         }
