@@ -1,16 +1,8 @@
 use crate::datamodel::Sensor;
 use crate::datamodel::unit::Unit;
 use anyhow::Result;
-use cached::macros::cached;
 use sqlx::{Sqlite, Transaction, prelude::*};
-use uuid::Uuid;
 
-#[cached(
-    ttl_secs = 120,
-    sync_writes = "default",
-    key = "String",
-    convert = { label_name.to_string() }
-)]
 pub async fn get_label_name_id_or_create(
     transaction: &mut Transaction<'_, Sqlite>,
     label_name: &str,
@@ -53,12 +45,6 @@ pub async fn get_label_name_id_or_create(
     Ok(label_name_id)
 }
 
-#[cached(
-    ttl_secs = 120,
-    sync_writes = "default",
-    key = "String",
-    convert = { label_description.to_string() }
-)]
 pub async fn get_label_description_id_or_create(
     transaction: &mut Transaction<'_, Sqlite>,
     label_description: &str,
@@ -101,12 +87,6 @@ pub async fn get_label_description_id_or_create(
     Ok(label_description_id)
 }
 
-#[cached(
-    ttl_secs = 120,
-    sync_writes = "default",
-    key = "String",
-    convert = { unit.name.clone() }
-)]
 pub async fn get_unit_id_or_create(
     transaction: &mut Transaction<'_, Sqlite>,
     unit: &Unit,
@@ -150,12 +130,6 @@ pub async fn get_unit_id_or_create(
     Ok(unit_id)
 }
 
-#[cached(
-    ttl_secs = 120,
-    sync_writes = "default",
-    key = "Uuid",
-    convert = { sensor.uuid }
-)]
 pub async fn get_sensor_id_or_create_sensor(
     transaction: &mut Transaction<'_, Sqlite>,
     sensor: &Sensor,
@@ -228,12 +202,6 @@ pub async fn get_sensor_id_or_create_sensor(
     Ok(sensor_id)
 }
 
-#[cached(
-    ttl_secs = 120,
-    sync_writes = "default",
-    key = "String",
-    convert = { string_value.to_string() }
-)]
 pub async fn get_string_value_id_or_create(
     transaction: &mut Transaction<'_, Sqlite>,
     string_value: &str,
@@ -264,16 +232,4 @@ pub async fn get_string_value_id_or_create(
     .bind(string_value);
     let string_id = transaction.execute(create_query).await?.last_insert_rowid();
     Ok(string_id)
-}
-
-/// Forget the cached id of a deleted sensor.
-///
-/// Without this, publishing the same sensor again within the cache TTL would write
-/// samples under a sensor id that no longer exists.
-pub async fn forget_sensor_id(sensor_uuid: &Uuid) {
-    use cached::Cached;
-    let _ = GET_SENSOR_ID_OR_CREATE_SENSOR
-        .write()
-        .await
-        .cache_remove(sensor_uuid);
 }

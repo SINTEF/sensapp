@@ -1,5 +1,5 @@
 use super::sqlite_publishers::*;
-use super::sqlite_utilities::{forget_sensor_id, get_sensor_id_or_create_sensor};
+use super::sqlite_utilities::get_sensor_id_or_create_sensor;
 use super::storage_query_helpers::{
     sqlite_bucketed_cte, sqlite_first_last_query, sqlite_float_expression, sqlite_group_by_clause,
     sqlite_integer_expression, sqlite_numeric_expression,
@@ -161,7 +161,6 @@ impl StorageInstance for SqliteStorage {
             .await?;
 
         transaction.commit().await?;
-        forget_sensor_id(&parsed_uuid).await;
         Ok(true)
     }
 
@@ -978,30 +977,6 @@ impl StorageInstance for SqliteStorage {
         tx.commit()
             .await
             .context("Failed to commit test data cleanup transaction")?;
-
-        // Step 5: Clear all cached function caches
-        // The cached macro generates cache variables named after the function in uppercase
-        use cached::Cached;
-        super::sqlite_utilities::GET_LABEL_NAME_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        super::sqlite_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        super::sqlite_utilities::GET_UNIT_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        super::sqlite_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
-            .write()
-            .await
-            .cache_clear();
-        super::sqlite_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
 
         Ok(())
     }
