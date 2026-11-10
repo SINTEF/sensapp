@@ -374,37 +374,7 @@ impl StorageInstance for PostgresStorage {
 
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
         let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
-        let mut transaction = self.pool.begin().await?;
-
-        let sensor_id: Option<i64> =
-            sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = $1")
-                .bind(parsed_uuid)
-                .fetch_optional(&mut *transaction)
-                .await?;
-        let Some(sensor_id) = sensor_id else {
-            return Ok(false);
-        };
-
-        for table in VALUE_TABLES {
-            // `table` comes from the static VALUE_TABLES list
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "DELETE FROM {table} WHERE sensor_id = $1"
-            )))
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        sqlx::query("DELETE FROM labels WHERE sensor_id = $1")
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("DELETE FROM sensors WHERE sensor_id = $1")
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-
-        transaction.commit().await?;
-        Ok(true)
+        crate::storage::pg_sensor_registration::delete_series(&self.pool, parsed_uuid, false).await
     }
 
     async fn delete_series_samples(

@@ -134,15 +134,23 @@ How it works, and what it costs. The statement that writes the samples of a batc
 
 Two requests that write the same new sample at the same moment, on different instances, store it once on the SQL backends: the second waits for the first to commit. This is also what makes the retry of a request that timed out safe while the first one is still running.
 
+## Deleting a series that is being written to
+
+SensApp runs as several instances, so a series can be deleted while another instance writes to it. The delete answers without error, and so does the write. A sample whose write was answered before the delete started is gone, and one written after the delete answered is kept: it starts the series again, with the same UUID. A write that runs during the delete may land on either side.
+
+- PostgreSQL and TimescaleDB lock the sensor row first. A write either commits before the delete, which then removes its samples, or waits for it and registers the series again.
+- SQLite and DuckDB have a single writer.
+- ClickHouse has no transaction. It deletes the samples, then the labels, then the sensor row, as no write registers a series again while its sensor row exists, and then deletes the samples that a write made in the meantime, unless a write registered the series again. A write that read the sensor row before the delete and writes its samples after the delete has finished leaves samples without a sensor row: they are not read, and they come back if the series is written again before another delete of the same UUID. Every delete of the UUID removes them, even when the series no longer exists. Two deletes of the same series at the same time, with a write, can leave the series without its labels.
+
 ## Backend support
 
 | Backend | Delete samples | Delete series | Remove duplicates | Notes |
 |---|---|---|---|---|
 | PostgreSQL | yes | yes | yes | Space is reused by autovacuum, run `POST /api/v1/admin/vacuum` to compact (and to remove duplicate samples) |
 | SQLite | yes | yes | yes | `VACUUM` shrinks the file |
-| TimescaleDB | yes | yes | yes | Works on compressed chunks. `DELETE` on a compressed chunk decompresses what it touches first, which is slower. The vacuum decompresses only the chunks that hold duplicates, removes them and compresses those chunks again |
+| TimescaleDB | yes | yes | yes | Works on compressed chunks. `DELETE` on a compressed chunk decompresses what it touches first, which is slower, and has no limit of rows (`timescaledb.max_tuples_decompressed_per_dml_transaction` is lifted for the delete). The vacuum decompresses only the chunks that hold duplicates, removes them and compresses those chunks again |
 | DuckDB | yes | yes | yes | Exact duplicates are found with `rowid` |
-| ClickHouse | yes | yes | yes | Lightweight `DELETE`: rows disappear from queries at once and are physically removed by later merges. The sample count is taken just before the delete. ClickHouse 24.8 can lose a delete while background merges run, so SensApp checks that the rows are gone and deletes again if not |
+| ClickHouse | yes | yes | yes | Lightweight `DELETE`: rows disappear from queries at once and are physically removed by later merges. The sample count is taken just before the delete. ClickHouse 24.8 can lose a delete while background merges run, so SensApp checks that the rows are gone and deletes again if not. A series being written to: see above |
 | BigQuery | yes | yes | no | `DELETE` statements, which bill the bytes they scan. BigQuery runs 2 mutating statements at a time per table and queues 20: deleting many series at once fails. Duplicates cannot be removed: `501 Not Implemented` |
 | RRDCached | no | no | no | Returns `501 Not Implemented` |
 

@@ -462,3 +462,73 @@ async fn writes_reach_compressed_chunks() -> Result<()> {
     assert_eq!(count(&floats).await?, remaining);
     Ok(())
 }
+
+/// TimescaleDB limits the rows a statement may decompress
+/// (`timescaledb.max_tuples_decompressed_per_dml_transaction`, 100,000 by default). Deleting a
+/// range or a series over more compressed samples than that must still work. The limit is lowered
+/// to 10 for this test, so that a few samples are enough.
+#[tokio::test]
+#[serial]
+async fn deletes_over_compressed_chunks_are_not_limited() -> Result<()> {
+    let Some(fixture) = setup().await? else {
+        return Ok(());
+    };
+    let test_db = &fixture.test_db;
+    compress(test_db, None).await?;
+
+    let pool = sqlx::PgPool::connect(&test_db.connection_string.replacen(
+        "timescaledb://",
+        "postgres://",
+        1,
+    ))
+    .await?;
+    let database: String = sqlx::query_scalar("SELECT current_database()")
+        .fetch_one(&pool)
+        .await?;
+    let setting = |value: &str| {
+        format!(
+            "ALTER DATABASE \"{database}\" {value} timescaledb.max_tuples_decompressed_per_dml_transaction"
+        )
+    };
+    sqlx::query(sqlx::AssertSqlSafe(setting("SET") + " = 10"))
+        .execute(&pool)
+        .await?;
+
+    let result = async {
+        // New connections, which read the lowered limit
+        let storage = sensapp::storage::storage_factory::create_storage_from_connection_string(
+            &test_db.connection_string,
+        )
+        .await?;
+        let samples = |uuid: String| {
+            let storage = storage.clone();
+            async move {
+                Ok::<_, anyhow::Error>(
+                    storage
+                        .query_sensor_data(&uuid, None, None, None)
+                        .await?
+                        .map_or(0, |data| data.samples.len()),
+                )
+            }
+        };
+
+        // Three weeks of one series, 84 compressed samples
+        let first = fixture.floats[0].uuid.to_string();
+        let deleted = storage
+            .delete_series_samples(&first, at(0.0), at(21.0 * DAY - 1.0))
+            .await?;
+        assert_eq!(deleted, Some(84));
+        assert_eq!(samples(first).await?, SAMPLES - 84);
+
+        let second = fixture.floats[1].uuid.to_string();
+        assert!(storage.delete_series(&second).await?);
+        assert_eq!(samples(second).await?, 0);
+        Ok(())
+    }
+    .await;
+
+    sqlx::query(sqlx::AssertSqlSafe(setting("RESET")))
+        .execute(&pool)
+        .await?;
+    result
+}

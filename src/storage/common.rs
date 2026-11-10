@@ -691,6 +691,10 @@ pub(crate) fn aggregation_overflow() -> anyhow::Error {
 
 /// The error of a database whose sum left the range of its type: SQLite fails with "integer
 /// overflow", PostgreSQL with `numeric_value_out_of_range` (22003). An [`aggregation_overflow`].
+#[cfg_attr(
+    not(any(feature = "sqlite", feature = "postgres", feature = "timescaledb")),
+    allow(dead_code)
+)]
 pub(crate) fn sql_sum_overflow(error: sqlx::Error) -> anyhow::Error {
     let out_of_range = match &error {
         sqlx::Error::Database(database) => {

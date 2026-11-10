@@ -370,6 +370,56 @@ impl ClickHouseStorage {
         ))
     }
 
+    /// Deletes the samples of a sensor id that has no sensor row, until there are none or a
+    /// publish registers the sensor again (the samples are then those of the new series).
+    ///
+    /// A publish that found the sensor before a delete removed it writes its samples after: they
+    /// are left without a sensor row, and would come back with the series when it is published
+    /// again. A lost lightweight delete (see `delete_until_gone`) leaves samples too. The delete of
+    /// a series calls this at its end, and the delete of a series that does not exist as well, so
+    /// that a later delete removes what an earlier one left.
+    async fn delete_samples_without_sensor(&self, sensor_id: u64) -> Result<()> {
+        const MAX_ATTEMPTS: u32 = 5;
+        // One query for the 8 tables: the first row of each table that has samples of the id
+        let tables_with_samples = VALUE_TABLES
+            .iter()
+            .map(|table| format!("(SELECT '{table}' FROM {table} WHERE sensor_id = ? LIMIT 1)"))
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        for _ in 0..MAX_ATTEMPTS {
+            let sensors: u64 = self
+                .client
+                .query("SELECT count() FROM sensors WHERE sensor_id = ?")
+                .bind(sensor_id)
+                .fetch_one()
+                .await?;
+            if sensors > 0 {
+                return Ok(());
+            }
+            let mut query = self.client.query(&tables_with_samples);
+            for _ in VALUE_TABLES {
+                query = query.bind(sensor_id);
+            }
+            let tables: Vec<String> = query.fetch_all().await?;
+            if tables.is_empty() {
+                return Ok(());
+            }
+            for table in VALUE_TABLES {
+                if tables.iter().any(|name| name == table) {
+                    self.client
+                        .query(&format!("DELETE FROM {table} WHERE sensor_id = ?"))
+                        .bind(sensor_id)
+                        .execute()
+                        .await?;
+                }
+            }
+        }
+        Err(anyhow::anyhow!(
+            "samples of sensor id {sensor_id} are still left without their sensor after \
+             {MAX_ATTEMPTS} deletes"
+        ))
+    }
+
     async fn query_latest_timestamp_us(
         &self,
         table_name: &str,
@@ -600,15 +650,27 @@ impl StorageInstance for ClickHouseStorage {
             )
         })?;
         let sensor_id = uuid_to_sensor_id(&uuid);
-        if self.get_sensor_metadata(sensor_uuid).await?.is_none() {
+        let Some((_, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            // A publish that overlapped an earlier delete may have left samples behind
+            self.delete_samples_without_sensor(sensor_id).await?;
             return Ok(false);
-        }
+        };
 
-        for table in VALUE_TABLES.into_iter().chain(["labels", "sensors"]) {
+        // ClickHouse has no transaction: the samples first, as no publish registers the sensor
+        // again while its row exists, then the labels and the sensor row
+        let table = Self::sensor_table_name(sensor.sensor_type);
+        self.client
+            .query(&format!("DELETE FROM {table} WHERE sensor_id = ?"))
+            .bind(sensor_id)
+            .execute()
+            .await
+            .with_context(|| format!("Failed to delete series rows from {table}"))?;
+        for table in ["labels", "sensors"] {
             self.delete_until_gone(table, "sensor_id = ?", |query| query.bind(sensor_id))
                 .await
                 .with_context(|| format!("Failed to delete series rows from {table}"))?;
         }
+        self.delete_samples_without_sensor(sensor_id).await?;
 
         Ok(true)
     }

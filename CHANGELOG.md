@@ -33,6 +33,10 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
   subquery evaluates there: the Prometheus UI, which does not align its queries, gets the raw samples. A
   plain selector or an aggregation whose end is off the step is answered on both grids, which a subquery
   (`max_over_time(sum(x)[1h:5m])`) needs. Checked live against Prometheus 3.13.
+- Deleting a series while another instance writes to it: PostgreSQL and TimescaleDB answered `500` on a
+  foreign key, and ClickHouse left the samples of the write without a sensor row, back when the series was
+  written again. Both now answer, see [docs/DATA_LIFECYCLE.md](docs/DATA_LIFECYCLE.md). TimescaleDB deletes
+  over more than 100,000 compressed samples no longer fail on the decompression limit.
 - Prometheus remote read: the series are sorted by label set, a series that fails to encode fails the
   request instead of missing from it, hints out of range get the raw samples instead of overflowing, and
   nothing is printed on stdout (the library denies `print_stdout`).

@@ -278,3 +278,78 @@ dictionary!(
     "labels_description_dictionary",
     "description"
 );
+
+/// Delete a series, its samples, its labels and its sensor row, in one transaction. False when
+/// it does not exist.
+///
+/// The sensor row is locked first (`FOR UPDATE`). A writer that inserts a sample of the series
+/// holds a `FOR KEY SHARE` lock on that row through the foreign key: either the delete waits for
+/// the writer to commit and deletes its samples too, or the writer waits for the delete, then
+/// fails on the foreign key and registers the sensor again, as `publish` tries again. Without
+/// the lock, a sample written between the delete of the samples and the delete of the sensor made
+/// the delete fail on the foreign key.
+///
+/// On TimescaleDB (`timescaledb`), a writer that creates a chunk can be in a deadlock with the
+/// delete. PostgreSQL aborts one of them, and the delete tries again after a random pause. The
+/// samples of compressed chunks are deleted whatever their number, see
+/// [`unlimited_decompression`].
+pub async fn delete_series(pool: &sqlx::PgPool, uuid: Uuid, timescaledb: bool) -> Result<bool> {
+    const ATTEMPTS: usize = 5;
+    let mut attempt = 1;
+    loop {
+        match delete_series_once(pool, uuid, timescaledb).await {
+            Err(error) if attempt < ATTEMPTS && crate::storage::common::is_deadlock(&error) => {
+                tokio::time::sleep(std::time::Duration::from_millis(fastrand::u64(10..60))).await;
+            }
+            result => return result,
+        }
+        attempt += 1;
+    }
+}
+
+/// TimescaleDB refuses a statement that decompresses more than
+/// `timescaledb.max_tuples_decompressed_per_dml_transaction` rows (100,000 by default), so a
+/// delete over the compressed chunks of a large series failed. A delete is asked for and is
+/// expected to happen: no limit for the transaction.
+pub async fn unlimited_decompression(connection: &mut PgConnection) -> Result<()> {
+    sqlx::query("SET LOCAL timescaledb.max_tuples_decompressed_per_dml_transaction = 0")
+        .execute(connection)
+        .await?;
+    Ok(())
+}
+
+async fn delete_series_once(pool: &sqlx::PgPool, uuid: Uuid, timescaledb: bool) -> Result<bool> {
+    let mut transaction = pool.begin().await?;
+    if timescaledb {
+        unlimited_decompression(&mut transaction).await?;
+    }
+    let sensor_id: Option<i64> =
+        sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = $1 FOR UPDATE")
+            .bind(uuid)
+            .fetch_optional(&mut *transaction)
+            .await?;
+    let Some(sensor_id) = sensor_id else {
+        return Ok(false);
+    };
+
+    for table in crate::storage::common::VALUE_TABLES {
+        // `table` comes from the static VALUE_TABLES list
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE sensor_id = $1"
+        )))
+        .bind(sensor_id)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    sqlx::query("DELETE FROM labels WHERE sensor_id = $1")
+        .bind(sensor_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM sensors WHERE sensor_id = $1")
+        .bind(sensor_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    transaction.commit().await?;
+    Ok(true)
+}

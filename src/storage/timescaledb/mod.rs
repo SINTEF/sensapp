@@ -740,37 +740,7 @@ impl StorageInstance for TimeScaleDBStorage {
 
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
         let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
-        let mut transaction = self.pool.begin().await?;
-
-        let sensor_id: Option<i64> =
-            sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = $1")
-                .bind(parsed_uuid)
-                .fetch_optional(&mut *transaction)
-                .await?;
-        let Some(sensor_id) = sensor_id else {
-            return Ok(false);
-        };
-
-        for table in VALUE_TABLES {
-            // `table` comes from the static VALUE_TABLES list
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "DELETE FROM {table} WHERE sensor_id = $1"
-            )))
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        sqlx::query("DELETE FROM labels WHERE sensor_id = $1")
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("DELETE FROM sensors WHERE sensor_id = $1")
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-
-        transaction.commit().await?;
-        Ok(true)
+        crate::storage::pg_sensor_registration::delete_series(&self.pool, parsed_uuid, true).await
     }
 
     async fn delete_series_samples(
@@ -793,6 +763,8 @@ impl StorageInstance for TimeScaleDBStorage {
             SensorType::Json => "json_values",
             SensorType::Blob => "blob_values",
         };
+        let mut transaction = self.pool.begin().await?;
+        crate::storage::pg_sensor_registration::unlimited_decompression(&mut transaction).await?;
         // `table` comes from the match above
         let result = sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM {table} WHERE sensor_id = $1 AND time >= $2 AND time <= $3"
@@ -800,8 +772,9 @@ impl StorageInstance for TimeScaleDBStorage {
         .bind(sensor_id)
         .bind(micros_to_offset_datetime(datetime_to_micros(&start_time)))
         .bind(micros_to_offset_datetime(datetime_to_micros(&end_time)))
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
+        transaction.commit().await?;
 
         Ok(Some(result.rows_affected()))
     }

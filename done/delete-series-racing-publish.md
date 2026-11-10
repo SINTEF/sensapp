@@ -57,3 +57,58 @@ no samples without a sensor row (check with a direct count where the backend all
 ## Done when
 
 The test passes on every backend that supports deletes, or the documented exception is asserted.
+
+## Outcome (11 November 2026)
+
+Test first: `data_lifecycle::<backend>::publish_racing_delete_of_the_same_series`. One task publishes 30
+single samples to a series while another deletes that series again and again. The deleter waits for a
+publish to return between deletes, so no publish meets two of them. Neither may fail; a sample whose
+publish returned before the last delete started must be gone, and one published after it returned must
+be kept. Then the series is deleted once more and published again, and must hold only the new sample,
+which catches samples left without a sensor row.
+
+Before the fix, 5 runs each, without the pool limit:
+
+| Backend | Result |
+| --- | --- |
+| PostgreSQL | 5 of 5 failed: the delete fails on `float_values_sensor_id_fkey` |
+| TimescaleDB | 5 of 5 failed: the same |
+| ClickHouse | 5 of 5 failed: samples were left behind, minutes 14 to 30 came back with the series after the last delete |
+| SQLite, DuckDB | pass (a single writer; on SQLite the delete waits for the publisher to finish) |
+
+Note: the local suite runner set `SENSAPP_PG_POOL_MAX_CONNECTIONS=1`, which serialises a publish and a
+delete, and the test passed there 15 times. CI uses the default pool. Race tests must run with a pool.
+
+Fixed:
+
+- PostgreSQL and TimescaleDB share `pg_sensor_registration::delete_series`, which starts with
+  `SELECT .. FOR UPDATE` on the sensor row and retries a deadlock (5 attempts, random pause). 8 of 8 runs
+  pass, with 8 to 13 deletes per run.
+- ClickHouse deletes the samples of the sensor's table (once), then the labels and the sensor row (checked,
+  as before), then `delete_samples_without_sensor`. That function deletes what is left while the sensor row
+  is absent and stops when a publish registers it again. A delete of a UUID with no sensor row runs it too,
+  so a later delete removes what an earlier one left. The value tables are no longer checked one by one:
+  under a continuous writer that check failed with "still has rows". A lost delete is caught by the final
+  pass. 8 of 8 runs pass.
+- TimescaleDB, compressed chunks: confirmed with the limit lowered to 10 ("tuple decompression limit
+  exceeded"). Range deletes and series deletes run `SET LOCAL
+  timescaledb.max_tuples_decompressed_per_dml_transaction = 0`. Test
+  `timescale_compressed::deletes_over_compressed_chunks_are_not_limited`, which lowers the limit for its
+  database and resets it.
+
+Accepted and documented in `docs/DATA_LIFECYCLE.md` ("Deleting a series that is being written to"):
+
+- On ClickHouse, a write that read the sensor row before a delete and lands after it has finished leaves
+  samples without a sensor row until the next delete of the UUID. They come back if the series is written
+  again first.
+- On ClickHouse, two concurrent deletes of a series plus a write can leave the series without its labels.
+
+Also fixed: `sql_sum_overflow` (task 14) warned about dead code in a ClickHouse-only build.
+
+Suites:
+
+- Full runs: SQLite (367 integration tests) and PostgreSQL (368).
+- `data_lifecycle` and `timescale_compressed` on TimescaleDB (13 tests).
+- `data_lifecycle` on ClickHouse and on DuckDB (9 tests each).
+- `data_lifecycle` 5 times each with a full pool on PostgreSQL, TimescaleDB, ClickHouse and DuckDB.
+- `cargo check` of each single-backend build; `cargo clippy` and `cargo clippy --all-features --tests` are clean.
