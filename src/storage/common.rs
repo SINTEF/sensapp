@@ -4,7 +4,6 @@ use crate::storage::{
     Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, SimplifyOptions, StorageError,
 };
 use anyhow::{Result, anyhow};
-use hifitime::Unit;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use simplify_polyline::{Point, simplify};
 use smallvec::smallvec;
@@ -144,11 +143,9 @@ pub fn unit_name_to_id(name: &str) -> u64 {
     u64::from_le_bytes(bytes)
 }
 
-/// Convert SensAppDateTime to Unix microseconds for database storage
+/// Unix microseconds, as every backend stores them: rounded down, exact integer arithmetic.
 pub fn datetime_to_micros(datetime: &SensAppDateTime) -> i64 {
-    // Use to_unix with Microsecond unit to get a f64 in microseconds,
-    // then convert to i64. This properly handles the Unix time reference.
-    datetime.to_unix(Unit::Microsecond).floor() as i64
+    datetime.to_unix_microseconds_i64()
 }
 
 pub fn apply_query_options(
@@ -718,6 +715,30 @@ mod tests {
 
     use super::*;
     use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+
+    /// Microseconds survive the trip through a `SensAppDateTime`, across 1900 to 2200. The float
+    /// conversion lost one microsecond on about a quarter of them outside 2005 to 2038.
+    #[test]
+    fn microseconds_round_trip_exactly() {
+        const YEAR_US: i64 = 31_556_952_000_000;
+        let mut rng = fastrand::Rng::with_seed(4);
+        let mut values: Vec<i64> = (0..2000)
+            .map(|_| rng.i64(-70 * YEAR_US..230 * YEAR_US))
+            .collect();
+        values.extend([1_073_741_824_001_000, 0, -1, 1]);
+        let wrong: Vec<i64> = values
+            .into_iter()
+            .filter(|&micros| {
+                datetime_to_micros(&SensAppDateTime::from_unix_microseconds_i64(micros)) != micros
+            })
+            .collect();
+        assert!(
+            wrong.is_empty(),
+            "{} wrong, first {:?}",
+            wrong.len(),
+            wrong.first()
+        );
+    }
 
     /// Two values that each fit in a `Decimal` (up to 7.9 × 10^28) but not their sum.
     #[test]

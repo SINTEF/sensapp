@@ -6,6 +6,20 @@ pub trait SensAppDateTimeExt {
     fn from_unix_microseconds_i64(timestamp: i64) -> Self;
     fn from_unix_milliseconds_i64(timestamp: i64) -> Self;
     fn from_unix_seconds_i64(timestamp: i64) -> Self;
+    /// Nanoseconds since the Unix epoch, exact.
+    fn to_unix_nanoseconds_i128(&self) -> i128;
+    /// Microseconds since the Unix epoch, rounded down, saturating to `i64`.
+    fn to_unix_microseconds_i64(&self) -> i64;
+    /// Milliseconds since the Unix epoch, rounded down, saturating to `i64`.
+    fn to_unix_milliseconds_i64(&self) -> i64;
+    /// Seconds since the Unix epoch, rounded down, saturating to `i64`.
+    fn to_unix_seconds_i64(&self) -> i64;
+}
+
+/// `value` / `unit` rounded down, clamped to the `i64` range.
+fn floor_div_saturating(value: i128, unit: i128) -> i64 {
+    let value = value.div_euclid(unit);
+    i64::try_from(value).unwrap_or(if value < 0 { i64::MIN } else { i64::MAX })
 }
 
 impl SensAppDateTimeExt for SensAppDateTime {
@@ -21,12 +35,26 @@ impl SensAppDateTimeExt for SensAppDateTime {
     fn from_unix_seconds_i64(timestamp: i64) -> Self {
         Self::from_utc_duration(UNIX_REF_EPOCH.to_utc_duration() + timestamp * Unit::Second)
     }
+    // Integer arithmetic on hifitime durations, the reverse of the constructors above. Going
+    // through `to_unix(..)`, an `f64`, lost a microsecond on some timestamps.
+    fn to_unix_nanoseconds_i128(&self) -> i128 {
+        (self.to_utc_duration() - UNIX_REF_EPOCH.to_utc_duration()).total_nanoseconds()
+    }
+    fn to_unix_microseconds_i64(&self) -> i64 {
+        floor_div_saturating(self.to_unix_nanoseconds_i128(), 1_000)
+    }
+    fn to_unix_milliseconds_i64(&self) -> i64 {
+        floor_div_saturating(self.to_unix_nanoseconds_i128(), 1_000_000)
+    }
+    fn to_unix_seconds_i64(&self) -> i64 {
+        floor_div_saturating(self.to_unix_nanoseconds_i128(), 1_000_000_000)
+    }
 }
 
 use hifitime::{UNIX_REF_EPOCH, Unit};
 use sqlx::types::time::OffsetDateTime;
 pub fn sensapp_datetime_to_offset_datetime(datetime: &SensAppDateTime) -> Result<OffsetDateTime> {
-    let unix_timestamp_us = datetime.to_unix(Unit::Microsecond).floor() as i128;
+    let unix_timestamp_us = datetime.to_unix_microseconds_i64() as i128;
     Ok(OffsetDateTime::from_unix_timestamp_nanos(
         unix_timestamp_us * 1_000_i128,
     )?)
