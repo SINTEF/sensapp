@@ -14,6 +14,12 @@ pub struct SenMLImporter;
 impl SenMLImporter {
     /// Parse SenML JSON and create sensor data grouped by sensor name
     pub fn from_senml_json(json_str: &str) -> Result<Vec<(String, SensorData)>> {
+        // The raw records, read before the parser for what it does not give or check
+        let raw_records = match serde_json::from_str(json_str) {
+            Ok(serde_json::Value::Array(records)) => records,
+            _ => Vec::new(), // the parser reports what is wrong
+        };
+        Self::check_times(&raw_records)?;
         let records = parse_json(json_str, None)?;
 
         if records.is_empty() {
@@ -30,7 +36,7 @@ impl SenMLImporter {
                 .push(record);
         }
 
-        let export_names = Self::exported_sensor_names(json_str);
+        let export_names = Self::exported_sensor_names(&raw_records);
         let mut result = Vec::new();
 
         for (sensor_name, sensor_records) in sensors_map {
@@ -108,14 +114,31 @@ impl SenMLImporter {
     ///
     /// The SenML parser does not expose extension fields, so the raw JSON is scanned again.
     /// Base names are sticky in SenML: `_name` belongs to the `bn` in effect for its record.
-    fn exported_sensor_names(json_str: &str) -> HashMap<Uuid, String> {
-        let mut names = HashMap::new();
-        let Ok(serde_json::Value::Array(records)) = serde_json::from_str(json_str) else {
-            return names;
-        };
+    /// Refuses a `t` or `bt` too far in the past. `sindit-senml` reads a time under 2^28 as
+    /// relative to now and adds it to the current date without a check, which panics when the
+    /// result leaves chrono's range (about 262,000 years). Times after that are absolute and
+    /// already refused by the parser when out of range.
+    fn check_times(records: &[serde_json::Value]) -> Result<()> {
+        /// About 3,000 years: `bt + t` stays far within chrono's range
+        const EARLIEST_SECONDS: f64 = -1e11;
+        for record in records {
+            for field in ["t", "bt"] {
+                if let Some(seconds) = record.get(field).and_then(|value| value.as_f64())
+                    && seconds < EARLIEST_SECONDS
+                {
+                    return Err(anyhow::anyhow!(
+                        "The SenML time {field}={seconds} is too far in the past"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 
+    fn exported_sensor_names(records: &[serde_json::Value]) -> HashMap<Uuid, String> {
+        let mut names = HashMap::new();
         let mut base_name = String::new();
-        for record in &records {
+        for record in records {
             if let Some(bn) = record.get("bn").and_then(|value| value.as_str()) {
                 base_name = bn.to_string();
             }

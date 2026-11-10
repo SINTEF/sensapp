@@ -207,3 +207,23 @@ async fn a_numeric_sum_over_the_decimal_range_is_refused() -> Result<()> {
     );
     Ok(())
 }
+
+#[tokio::test]
+#[serial]
+async fn a_senml_time_out_of_range_is_refused() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let app = app(test_db.storage());
+
+    // Negative times are relative to now; these are beyond what a date can hold
+    for time in ["-1e13", "1e300", "-1e300"] {
+        let senml = format!(r#"[{{"n":"panic_senml","t":{time},"v":1}}]"#);
+        let request = Request::post("/publish")
+            .header("content-type", "application/json")
+            .body(Body::from(senml))
+            .unwrap();
+        let response = send(&app, request).await;
+        assert_refused_then_alive(&app, response).await;
+    }
+    Ok(())
+}
