@@ -205,19 +205,24 @@ async fn ensure_units(
         r#"
         INSERT INTO units (name, description)
         SELECT * FROM unnest($1::text[], $2::text[])
-        ON CONFLICT (name) DO NOTHING
+        ON CONFLICT ((md5(name))) DO NOTHING
         "#,
     )
     .bind(&names)
     .bind(&descriptions)
     .execute(&mut *connection)
     .await?;
-    let rows: Vec<(i64, String)> =
-        sqlx::query_as("SELECT id, name FROM units WHERE name = ANY($1)")
-            .bind(&names)
-            .fetch_all(connection)
-            .await?;
-    Ok(rows.into_iter().map(|(id, name)| (name, id)).collect())
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        r#"
+        SELECT id, name FROM units
+        WHERE md5(name) = ANY(ARRAY(SELECT md5(v) FROM unnest($1::text[]) AS v))
+          AND name = ANY($1)
+        "#,
+    )
+    .bind(&names)
+    .fetch_all(connection)
+    .await?;
+    crate::storage::pg_strings::all_found(names.len(), rows)
 }
 
 /// One statement pair per dictionary table, written out so that the table and the column are
@@ -241,9 +246,9 @@ macro_rules! dictionary {
                 $table,
                 " (",
                 $column,
-                ") SELECT unnest($1::text[]) ON CONFLICT (",
+                ") SELECT unnest($1::text[]) ON CONFLICT ((md5(",
                 $column,
-                ") DO NOTHING"
+                "))) DO NOTHING"
             ))
             .bind(&values)
             .execute(&mut *connection)
@@ -253,14 +258,16 @@ macro_rules! dictionary {
                 $column,
                 " FROM ",
                 $table,
-                " WHERE ",
+                " WHERE md5(",
+                $column,
+                ") = ANY(ARRAY(SELECT md5(v) FROM unnest($1::text[]) AS v)) AND ",
                 $column,
                 " = ANY($1)"
             ))
             .bind(&values)
             .fetch_all(connection)
             .await?;
-            Ok(rows.into_iter().map(|(id, value)| (value, id)).collect())
+            crate::storage::pg_strings::all_found(values.len(), rows)
         }
     };
 }

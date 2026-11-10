@@ -288,3 +288,41 @@ pub mod rrdcached;
 
 #[cfg(feature = "clickhouse")]
 pub mod clickhouse;
+
+#[cfg(test)]
+mod migration_tests {
+    /// sqlx runs each migration in a transaction of its own and records it in the same one. A
+    /// migration that commits by itself leaves its changes applied and unrecorded if the process
+    /// stops before the record: the next start applies it again. The PostgreSQL migration to
+    /// microseconds does, and stays as it is: its checksum is recorded in every database.
+    #[test]
+    fn migrations_do_not_open_transactions_of_their_own() {
+        let statement =
+            regex::Regex::new(r"(?im)^\s*(BEGIN|COMMIT|ROLLBACK|START\s+TRANSACTION)\b[^;\n]*;")
+                .unwrap();
+        let storage = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/storage");
+        let mut checked = 0;
+        for backend in std::fs::read_dir(storage).unwrap() {
+            let migrations = backend.unwrap().path().join("migrations");
+            let Ok(files) = std::fs::read_dir(&migrations) else {
+                continue;
+            };
+            for file in files {
+                let path = file.unwrap().path();
+                if path
+                    .ends_with("postgresql/migrations/20250121000000_migrate_to_microseconds.sql")
+                {
+                    continue;
+                }
+                let sql = std::fs::read_to_string(&path).unwrap();
+                assert!(
+                    !statement.is_match(&sql),
+                    "{} manages its own transaction",
+                    path.display()
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 10, "{checked} migrations found");
+    }
+}

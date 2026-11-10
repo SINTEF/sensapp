@@ -24,6 +24,7 @@ mod identity_over_http;
 mod influxdb_integration;
 mod ingestion;
 mod jwt_auth;
+mod long_texts;
 mod numeric_values;
 mod parser_edge_cases;
 mod payload_errors;

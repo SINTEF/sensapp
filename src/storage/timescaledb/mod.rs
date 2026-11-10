@@ -160,7 +160,8 @@ impl TimeScaleDBStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description = ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND md5(ldd.description) = md5(${1}) AND ldd.description = ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -176,7 +177,8 @@ impl TimeScaleDBStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description = ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND md5(ldd.description) = md5(${1}) AND ldd.description = ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -192,7 +194,8 @@ impl TimeScaleDBStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description ~ ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND ldd.description ~ ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -208,7 +211,8 @@ impl TimeScaleDBStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description ~ ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND ldd.description ~ ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -1587,9 +1591,9 @@ impl StorageInstance for TimeScaleDBStorage {
             .await?;
 
         // Preserve units and ensure common test units exist
-        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
 
         tx.commit()

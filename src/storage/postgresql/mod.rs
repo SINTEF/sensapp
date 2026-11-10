@@ -1069,13 +1069,13 @@ impl StorageInstance for PostgresStorage {
         // But we need to ensure common test units exist
 
         // Insert common test units if they don't exist (using ON CONFLICT DO NOTHING for idempotency)
-        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('m', 'Meters') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('m', 'Meters') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('kg', 'Kilograms') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('kg', 'Kilograms') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
 
         // Reset sequences for clean test data
