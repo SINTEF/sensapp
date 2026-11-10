@@ -1,11 +1,13 @@
+use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{Sample, SensAppDateTime, SensorData, TypedSamples};
 use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose};
 use serde_json::{Map, Value, json};
 
-/// Helper function to get milliseconds from SensAppDateTime
-fn datetime_to_ms(datetime: &SensAppDateTime) -> i64 {
-    (datetime.to_unix_seconds() * 1000.0) as i64 + datetime.milliseconds() as i64
+/// Unix microseconds of a sample. SenML times are `f64` seconds: around today they keep a
+/// fraction of a microsecond, so the import gets the same microseconds back.
+fn datetime_to_us(datetime: &SensAppDateTime) -> i64 {
+    datetime.to_unix_microseconds_i64()
 }
 
 /// Converter for SensorData to SenML JSON format
@@ -51,7 +53,7 @@ impl SenMLConverter {
             TypedSamples::Integer(samples) => {
                 let first_time = samples
                     .first()
-                    .map(|s| datetime_to_ms(&s.datetime))
+                    .map(|s| datetime_to_us(&s.datetime))
                     .unwrap_or(0);
                 (
                     first_time,
@@ -61,7 +63,7 @@ impl SenMLConverter {
             TypedSamples::Numeric(samples) => {
                 let first_time = samples
                     .first()
-                    .map(|s| datetime_to_ms(&s.datetime))
+                    .map(|s| datetime_to_us(&s.datetime))
                     .unwrap_or(0);
                 (
                     first_time,
@@ -71,14 +73,14 @@ impl SenMLConverter {
             TypedSamples::Float(samples) => {
                 let first_time = samples
                     .first()
-                    .map(|s| datetime_to_ms(&s.datetime))
+                    .map(|s| datetime_to_us(&s.datetime))
                     .unwrap_or(0);
                 (first_time, Self::process_float_samples(samples, first_time))
             }
             TypedSamples::String(samples) => {
                 let first_time = samples
                     .first()
-                    .map(|s| datetime_to_ms(&s.datetime))
+                    .map(|s| datetime_to_us(&s.datetime))
                     .unwrap_or(0);
                 (
                     first_time,
@@ -88,7 +90,7 @@ impl SenMLConverter {
             TypedSamples::Boolean(samples) => {
                 let first_time = samples
                     .first()
-                    .map(|s| datetime_to_ms(&s.datetime))
+                    .map(|s| datetime_to_us(&s.datetime))
                     .unwrap_or(0);
                 (
                     first_time,
@@ -98,7 +100,7 @@ impl SenMLConverter {
             TypedSamples::Location(samples) => {
                 let first_time = samples
                     .first()
-                    .map(|s| datetime_to_ms(&s.datetime))
+                    .map(|s| datetime_to_us(&s.datetime))
                     .unwrap_or(0);
                 (
                     first_time,
@@ -108,14 +110,14 @@ impl SenMLConverter {
             TypedSamples::Json(samples) => {
                 let first_time = samples
                     .first()
-                    .map(|s| datetime_to_ms(&s.datetime))
+                    .map(|s| datetime_to_us(&s.datetime))
                     .unwrap_or(0);
                 (first_time, Self::process_json_samples(samples, first_time))
             }
             TypedSamples::Blob(samples) => {
                 let first_time = samples
                     .first()
-                    .map(|s| datetime_to_ms(&s.datetime))
+                    .map(|s| datetime_to_us(&s.datetime))
                     .unwrap_or(0);
                 (first_time, Self::process_blob_samples(samples, first_time))
             }
@@ -125,7 +127,7 @@ impl SenMLConverter {
         let mut base_record = Map::new();
         base_record.insert("bn".to_string(), json!(sensor_data.sensor.uuid.to_string()));
         base_record.insert("_name".to_string(), json!(sensor_data.sensor.name));
-        base_record.insert("bt".to_string(), json!(base_time as f64 / 1000.0)); // Convert to seconds
+        base_record.insert("bt".to_string(), json!(base_time as f64 / 1_000_000.0)); // Convert to seconds
         base_record.insert("bver".to_string(), json!(10)); // SenML version
 
         if let Some(ref unit) = sensor_data.sensor.unit {
@@ -158,7 +160,7 @@ impl SenMLConverter {
 
     fn process_integer_samples(
         samples: &crate::datamodel::SensAppVec<Sample<i64>>,
-        base_time_ms: i64,
+        base_time_us: i64,
     ) -> Vec<Value> {
         samples
             .iter()
@@ -169,7 +171,7 @@ impl SenMLConverter {
                     record.insert("t".to_string(), json!(0)); // First sample at base time
                 } else {
                     let relative_time =
-                        (datetime_to_ms(&sample.datetime) - base_time_ms) as f64 / 1000.0;
+                        (datetime_to_us(&sample.datetime) - base_time_us) as f64 / 1_000_000.0;
                     record.insert("t".to_string(), json!(relative_time));
                 }
                 record.insert("v".to_string(), json!(sample.value));
@@ -180,7 +182,7 @@ impl SenMLConverter {
 
     fn process_numeric_samples(
         samples: &crate::datamodel::SensAppVec<Sample<rust_decimal::Decimal>>,
-        base_time_ms: i64,
+        base_time_us: i64,
     ) -> Vec<Value> {
         samples
             .iter()
@@ -191,7 +193,7 @@ impl SenMLConverter {
                     record.insert("t".to_string(), json!(0));
                 } else {
                     let relative_time =
-                        (datetime_to_ms(&sample.datetime) - base_time_ms) as f64 / 1000.0;
+                        (datetime_to_us(&sample.datetime) - base_time_us) as f64 / 1_000_000.0;
                     record.insert("t".to_string(), json!(relative_time));
                 }
                 record.insert(
@@ -205,7 +207,7 @@ impl SenMLConverter {
 
     fn process_float_samples(
         samples: &crate::datamodel::SensAppVec<Sample<f64>>,
-        base_time_ms: i64,
+        base_time_us: i64,
     ) -> Vec<Value> {
         samples
             .iter()
@@ -216,7 +218,7 @@ impl SenMLConverter {
                     record.insert("t".to_string(), json!(0));
                 } else {
                     let relative_time =
-                        (datetime_to_ms(&sample.datetime) - base_time_ms) as f64 / 1000.0;
+                        (datetime_to_us(&sample.datetime) - base_time_us) as f64 / 1_000_000.0;
                     record.insert("t".to_string(), json!(relative_time));
                 }
                 record.insert("v".to_string(), json!(sample.value));
@@ -227,7 +229,7 @@ impl SenMLConverter {
 
     fn process_string_samples(
         samples: &crate::datamodel::SensAppVec<Sample<String>>,
-        base_time_ms: i64,
+        base_time_us: i64,
     ) -> Vec<Value> {
         samples
             .iter()
@@ -238,7 +240,7 @@ impl SenMLConverter {
                     record.insert("t".to_string(), json!(0));
                 } else {
                     let relative_time =
-                        (datetime_to_ms(&sample.datetime) - base_time_ms) as f64 / 1000.0;
+                        (datetime_to_us(&sample.datetime) - base_time_us) as f64 / 1_000_000.0;
                     record.insert("t".to_string(), json!(relative_time));
                 }
                 record.insert("vs".to_string(), json!(sample.value));
@@ -249,7 +251,7 @@ impl SenMLConverter {
 
     fn process_boolean_samples(
         samples: &crate::datamodel::SensAppVec<Sample<bool>>,
-        base_time_ms: i64,
+        base_time_us: i64,
     ) -> Vec<Value> {
         samples
             .iter()
@@ -260,7 +262,7 @@ impl SenMLConverter {
                     record.insert("t".to_string(), json!(0));
                 } else {
                     let relative_time =
-                        (datetime_to_ms(&sample.datetime) - base_time_ms) as f64 / 1000.0;
+                        (datetime_to_us(&sample.datetime) - base_time_us) as f64 / 1_000_000.0;
                     record.insert("t".to_string(), json!(relative_time));
                 }
                 record.insert("vb".to_string(), json!(sample.value));
@@ -271,7 +273,7 @@ impl SenMLConverter {
 
     fn process_location_samples(
         samples: &crate::datamodel::SensAppVec<Sample<geo::Point>>,
-        base_time_ms: i64,
+        base_time_us: i64,
     ) -> Vec<Value> {
         // For location, we create separate lat/lon records
         let mut records = Vec::new();
@@ -280,7 +282,7 @@ impl SenMLConverter {
             let relative_time = if i == 0 {
                 0.0
             } else {
-                (datetime_to_ms(&sample.datetime) - base_time_ms) as f64 / 1000.0
+                (datetime_to_us(&sample.datetime) - base_time_us) as f64 / 1_000_000.0
             };
 
             // Latitude record
@@ -303,7 +305,7 @@ impl SenMLConverter {
 
     fn process_json_samples(
         samples: &crate::datamodel::SensAppVec<Sample<serde_json::Value>>,
-        base_time_ms: i64,
+        base_time_us: i64,
     ) -> Vec<Value> {
         samples
             .iter()
@@ -314,7 +316,7 @@ impl SenMLConverter {
                     record.insert("t".to_string(), json!(0));
                 } else {
                     let relative_time =
-                        (datetime_to_ms(&sample.datetime) - base_time_ms) as f64 / 1000.0;
+                        (datetime_to_us(&sample.datetime) - base_time_us) as f64 / 1_000_000.0;
                     record.insert("t".to_string(), json!(relative_time));
                 }
                 // Convert JSON value to string for SenML
@@ -326,7 +328,7 @@ impl SenMLConverter {
 
     fn process_blob_samples(
         samples: &crate::datamodel::SensAppVec<Sample<Vec<u8>>>,
-        base_time_ms: i64,
+        base_time_us: i64,
     ) -> Vec<Value> {
         samples
             .iter()
@@ -337,7 +339,7 @@ impl SenMLConverter {
                     record.insert("t".to_string(), json!(0));
                 } else {
                     let relative_time =
-                        (datetime_to_ms(&sample.datetime) - base_time_ms) as f64 / 1000.0;
+                        (datetime_to_us(&sample.datetime) - base_time_us) as f64 / 1_000_000.0;
                     record.insert("t".to_string(), json!(relative_time));
                 }
                 // Encode binary data as base64 for SenML

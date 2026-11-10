@@ -1,7 +1,7 @@
+use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::unit::Unit;
 use crate::datamodel::{Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples};
 use anyhow::Result;
-use sindit_senml::time::datetime_to_timestamp;
 use sindit_senml::{SenMLResolvedRecord, SenMLValueField, parse_json};
 use smallvec::SmallVec;
 use std::collections::HashMap;
@@ -153,11 +153,14 @@ impl SenMLImporter {
     }
 
     /// Convert sindit-senml DateTime to SensAppDateTime using the time module
+    /// The time, rounded to the microsecond. SenML times are `f64` seconds and the parser truncates
+    /// their fraction to nanoseconds: `.123` arrives as `.122999999`.
     fn record_time_to_sensapp_datetime(record: &SenMLResolvedRecord) -> SensAppDateTime {
-        let (timestamp, precise_timestamp) = datetime_to_timestamp(&record.time);
-        // Use precise timestamp if available (has sub-second precision), otherwise use integer timestamp
-        let seconds = precise_timestamp.unwrap_or(timestamp as f64);
-        SensAppDateTime::from_unix_seconds(seconds)
+        let seconds = record.time.timestamp();
+        let micros = (i64::from(record.time.timestamp_subsec_nanos()) + 500) / 1000;
+        SensAppDateTime::from_unix_microseconds_i64(
+            seconds.saturating_mul(1_000_000).saturating_add(micros),
+        )
     }
 
     fn infer_sensor_type(record: &SenMLResolvedRecord) -> Result<SensorType> {
@@ -292,6 +295,51 @@ mod tests {
         } else {
             panic!("Wrong sample type");
         }
+    }
+
+    /// The SenML export added the millisecond part twice (`.250` came out at `.500`) and kept only
+    /// milliseconds; the import went through `f64` seconds. Export then import keeps every
+    /// microsecond and the order.
+    #[test]
+    fn test_export_then_import_keeps_the_microseconds() {
+        use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+        _ = crate::config::load_configuration();
+
+        let micros: [i64; 6] = [
+            1_700_000_000_250_000,
+            1_700_000_000_900_000,
+            1_700_000_001_100_000,
+            1_700_000_001_999_000,
+            1_700_000_002_123_456,
+            1_073_741_824_001_000,
+        ];
+        let samples = micros
+            .iter()
+            .map(|&us| Sample {
+                datetime: SensAppDateTime::from_unix_microseconds_i64(us),
+                value: 1.5,
+            })
+            .collect();
+        let sensor = Sensor::new(
+            Uuid::new_v4(),
+            "times".to_string(),
+            SensorType::Float,
+            None,
+            None,
+        );
+        let exported =
+            SenMLConverter::to_senml_json(&SensorData::new(sensor, TypedSamples::Float(samples)))
+                .unwrap()
+                .to_string();
+        let imported = SenMLImporter::from_senml_json(&exported).unwrap();
+        let TypedSamples::Float(samples) = &imported[0].1.samples else {
+            panic!("float samples expected");
+        };
+        let back: Vec<i64> = samples
+            .iter()
+            .map(|sample| sample.datetime.to_unix_microseconds_i64())
+            .collect();
+        assert_eq!(back, micros, "{exported}");
     }
 
     #[test]
