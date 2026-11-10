@@ -138,13 +138,29 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
     let timestamps = timestamps?;
 
     // Convert values based on data type
-    let (derived_sensor_type, typed_samples) =
+    let (column_type, typed_samples) =
         convert_arrow_array_to_typed_samples(value_array, &timestamps)?;
+
+    // The type of the series is the type of its value column. The metadata may only say the same,
+    // or say JSON for a text column (JSON series are exported as text): otherwise the samples would
+    // be stored in the table of their column while the series is registered with another type.
+    let (sensor_type, typed_samples) = match extract_sensor_type(batch) {
+        None => (column_type, typed_samples),
+        Some(declared) if declared == column_type => (declared, typed_samples),
+        Some(SensorType::Json) if column_type == SensorType::String => {
+            (SensorType::Json, parse_json_samples(typed_samples)?)
+        }
+        Some(declared) => {
+            return Err(anyhow!(
+                "The series is declared as {declared} (sensapp.sensor.type) but its value \
+                 column holds {column_type} values"
+            ));
+        }
+    };
 
     // Extract sensor metadata
     let sensor_id = extract_sensor_id(batch, sensor_id_idx)?;
     let sensor_name = extract_sensor_name(batch, sensor_name_idx);
-    let sensor_type = extract_sensor_type(batch).unwrap_or(derived_sensor_type);
     let unit = extract_sensor_unit(batch);
     let labels = extract_sensor_labels(batch)?;
 
@@ -382,6 +398,25 @@ fn extract_sensor_name(batch: &RecordBatch, sensor_name_idx: Option<usize>) -> O
                 }
             })
     })
+}
+
+/// The text samples of a series declared as JSON, parsed.
+fn parse_json_samples(samples: TypedSamples) -> Result<TypedSamples> {
+    let TypedSamples::String(samples) = samples else {
+        return Err(anyhow!("JSON values must be in a text column"));
+    };
+    let samples = samples
+        .into_iter()
+        .map(|sample| {
+            let value = serde_json::from_str(&sample.value)
+                .map_err(|error| anyhow!("Invalid JSON value in a JSON series: {error}"))?;
+            Ok(Sample {
+                datetime: sample.datetime,
+                value,
+            })
+        })
+        .collect::<Result<_>>()?;
+    Ok(TypedSamples::Json(samples))
 }
 
 fn extract_sensor_type(batch: &RecordBatch) -> Option<SensorType> {
@@ -630,6 +665,107 @@ mod tests {
         assert_eq!(from_column.uuid, uuid);
         assert_eq!(without_name.uuid, uuid);
         assert_eq!(without_name.name, uuid.to_string());
+    }
+
+    /// A type in the metadata that is not the type of the value column is refused: the samples
+    /// would go to the table of their column while the series is registered with another type.
+    #[test]
+    fn test_metadata_type_must_match_the_value_column() {
+        let error = sensor_of(&batch_with_identity(
+            &[("sensapp.sensor.type", "integer")],
+            None,
+            Some("temp"),
+        ))
+        .unwrap_err();
+        assert!(error.to_string().contains("declared as Integer"), "{error}");
+
+        let same = sensor_of(&batch_with_identity(
+            &[("sensapp.sensor.type", "float")],
+            None,
+            Some("temp"),
+        ))
+        .unwrap();
+        assert_eq!(same.sensor_type, SensorType::Float);
+    }
+
+    /// Every type exported as one series comes back with its type and its samples.
+    #[test]
+    fn test_single_series_export_imports_back_with_its_type() {
+        use crate::datamodel::{Sample, SensorData};
+        use crate::exporters::arrow::ArrowConverter;
+        use geo::Point;
+        use rust_decimal::Decimal;
+
+        let datetime = microseconds_to_sensapp_datetime(1_640_995_200_000_000).unwrap();
+        /// A type, and samples of that type at the given time
+        type Case = (SensorType, fn(SensAppDateTime) -> TypedSamples);
+        let all: [Case; 8] = [
+            (SensorType::Integer, |datetime| {
+                TypedSamples::Integer(smallvec::smallvec![Sample {
+                    datetime,
+                    value: 42
+                }])
+            }),
+            (SensorType::Numeric, |datetime| {
+                TypedSamples::Numeric(smallvec::smallvec![Sample {
+                    datetime,
+                    value: Decimal::new(1234, 2)
+                }])
+            }),
+            (SensorType::Float, |datetime| {
+                TypedSamples::Float(smallvec::smallvec![Sample {
+                    datetime,
+                    value: 1.5
+                }])
+            }),
+            (SensorType::String, |datetime| {
+                TypedSamples::String(smallvec::smallvec![Sample {
+                    datetime,
+                    value: "on".to_string()
+                }])
+            }),
+            (SensorType::Boolean, |datetime| {
+                TypedSamples::Boolean(smallvec::smallvec![Sample {
+                    datetime,
+                    value: true
+                }])
+            }),
+            (SensorType::Location, |datetime| {
+                TypedSamples::Location(smallvec::smallvec![Sample {
+                    datetime,
+                    value: Point::new(10.4, 63.4)
+                }])
+            }),
+            (SensorType::Json, |datetime| {
+                TypedSamples::Json(smallvec::smallvec![Sample {
+                    datetime,
+                    value: serde_json::json!({"state": "on"})
+                }])
+            }),
+            (SensorType::Blob, |datetime| {
+                TypedSamples::Blob(smallvec::smallvec![Sample {
+                    datetime,
+                    value: vec![1, 2, 3]
+                }])
+            }),
+        ];
+        for (sensor_type, samples) in all {
+            let sensor = Sensor::new(
+                Uuid::new_v4(),
+                "series".to_string(),
+                sensor_type,
+                None,
+                None,
+            );
+            let exported = SensorData::new(sensor, samples(datetime));
+            let batch = ArrowConverter::to_record_batch(&exported).unwrap();
+
+            let map = convert_record_batch_to_sensors(&batch)
+                .unwrap_or_else(|error| panic!("{sensor_type:?}: {error}"));
+            let (imported, entries) = map.into_values().next().unwrap();
+            assert_eq!(imported.sensor_type, sensor_type);
+            assert_eq!(entries[0].1, samples(datetime), "{sensor_type:?}");
+        }
     }
 
     #[test]
