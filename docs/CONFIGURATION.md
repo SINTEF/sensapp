@@ -118,6 +118,14 @@ Backpressure only works if clients listen to it. The [Python SDK](PYTHON_SDK.md#
 - Retry at one layer only, not in the client library and again in a proxy or an agent: 3 layers × 3 retries is 27 attempts for one request.
 - Stop retrying when your own deadline has passed.
 
+## Shutdown
+
+SensApp stops on SIGTERM (what `docker stop` and Kubernetes send) and on Ctrl+C (SIGINT). It takes no new connection, lets the requests in flight finish, and exits with code 0 once they are done. Each request is still bounded by its timeout, so the drain lasts at most `SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS` (300 s) for writes, or `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS` while a vacuum runs. An instance with nothing in flight stops at once.
+
+Give the container a grace period that covers the write timeout, or a write can be cut in the middle: its batches already stored stay stored, and its retry stores them again (see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts)). The Helm chart sets `terminationGracePeriodSeconds: 330`. `docker stop` waits only 10 s by default: use `docker stop --time 330`, or `stop_grace_period: 330s` in Docker Compose.
+
+`/health/ready` does not change during the drain: SensApp stops accepting connections when the signal arrives, so no probe would see it, and Kubernetes takes a terminating pod out of its Service by itself.
+
 ## Request IDs
 
 Every request gets an `x-request-id` header in its response, errors and `503`s included. A value sent by the client or by a reverse proxy is kept, otherwise SensApp generates a UUID. The same ID is in the `request_id` field of the request's log lines, so a failure reported by a client can be found in the logs.

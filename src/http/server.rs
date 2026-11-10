@@ -380,11 +380,30 @@ fn log_failed_response(
     }
 }
 
+/// Wait for Ctrl+C (SIGINT) or SIGTERM, which `docker stop` and Kubernetes send. SensApp is PID 1 in
+/// its image, where an unhandled SIGTERM is ignored: the container would be killed at the end of
+/// its grace period, in the middle of its writes. After the signal the server takes no new
+/// connection and the requests in flight finish, each within its own timeout.
 async fn shutdown_signal() {
-    // Wait for the CTRL+C signal
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install shutdown CTRL+C signal handler");
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install the Ctrl+C signal handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install the SIGTERM signal handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+    tracing::info!("Shutting down: the requests in flight finish, no new connection is accepted");
 }
 
 /// The size and the time allowed to a request body that is read before its handler runs.

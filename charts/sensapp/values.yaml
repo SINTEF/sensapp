@@ -112,6 +112,11 @@ secretEnv: {}
 extraEnv: []
 extraEnvFrom: []
 
+# On SIGTERM, SensApp takes no new connection and lets the requests in flight finish, then exits.
+# A write may take up to SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS (300 s): the grace period covers it,
+# so a rollout does not cut writes in the middle. A pod with nothing in flight stops at once.
+terminationGracePeriodSeconds: 330
+
 livenessProbe:
   httpGet:
     path: /health/live
