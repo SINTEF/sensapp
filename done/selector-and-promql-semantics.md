@@ -51,3 +51,51 @@ invalid regex (400), `offset` (400), a remote-write series read back with a sing
 ## Done when
 
 The tests pass on all backends and `docs/DATAMODEL.md` matches the behaviour.
+
+## Outcome (10 November 2026)
+
+Each item was reproduced by a failing test first. The exception is the halving page loop of item 5,
+which `crud_dcat_api::test_series_selector_paginates_matching_series` exercises.
+
+1. **The metric name in selectors.**
+   - `parse_selector_to_matchers` turns the metric name into a `__name__=` matcher.
+   - A new `SensorFilter` (`crud.rs`) replaces `sensor_matches_matchers`. It compares `__name__` with
+     the sensor name, compiles each regex once (the value is already anchored), and gives the matchers
+     the meaning the backends give them: a negative matcher matches a sensor without the label.
+   - `/series` and the latest-sample scrape both use it.
+   - Before the fix, `{__name__="temperature"}` listed nothing.
+   - Decision: the filter stays in memory, because `query_sensors_by_labels` has no pagination and
+     `/series` pages with bookmarks. Pushing it to storage would need a paginated selector read on
+     every backend.
+2. **Invalid regexes.** They already answered 400 since task 12 (`LabelMatcher::try_new`). The in-memory
+   filter no longer swallows a compile error, and the new test covers `=~` and `!~` on both endpoints.
+3. **`__name__` stored as a label by remote write.** Remote write no longer stores it. Remote read
+   returned it twice before the fix. `build_prometheus_labels` also skips a stored `__name__`, so the
+   series written before this version are read with one name.
+   - Decision for `unit`: it stays both a label and the unit of the sensor. The label set then round
+     trips, and the read does not add it twice.
+   - Breaking: a remote-write series written again becomes a new series (CHANGELOG, Unreleased).
+4. **`offset` and `@`.** They answer 400, in `/api/v1/query` and in the selectors of `/series` and
+   `/prometheus/metrics`. Before the fix, they were ignored with a 200.
+5. **Filtered catalog pages.**
+   - A filtered page no longer reads a prefix of the storage again to find its bookmark. That second
+     read assumed that nothing had changed in between: a series deleted between the two reads shifted
+     the bookmark and skipped a series.
+   - Each page now ends where a storage page ends. A storage page that holds more matches than the page
+     still lacks is read again, half as long.
+   - Decision: a scoped token still lists the catalog page by page. The allow list is a list of exact
+     names, and `list_series` takes one metric name.
+6. **Selector reads with a restricted token.** `AuthorizedStorage` no longer discovers every matching
+   sensor and then reads them one by one. It adds a `__name__=~` matcher of the allowed names, escaped
+   with `regex::escape`, and calls the backend's own `query_selector` and `query_selector_aggregated`.
+   The series and sample limits therefore apply in the database.
+   - Test: `jwt_auth::sensor_allow_list_names_are_not_patterns_in_selectors`. The names hold `.` and
+     `|`, next to a decoy (`cpuXusage`) that an unescaped name would match.
+
+**Suites run.**
+- Full: SQLite and PostgreSQL (358 integration tests each).
+- TimescaleDB, DuckDB and ClickHouse: `selector_semantics`, `jwt_auth`, `crud_dcat`, `remote_read`,
+  `simple_promql`, `prometheus_metrics` and the `selector_*` tests (105 each).
+- BigQuery was not run live. Its `query_selector` now receives two `__name__` matchers when a token is
+  restricted.
+- `cargo clippy --all-features --tests` is clean.

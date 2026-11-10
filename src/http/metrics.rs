@@ -1,5 +1,5 @@
 use super::app_error::AppError;
-use super::crud::{parse_selector_to_matchers, sensor_matches_matchers};
+use super::crud::{SensorFilter, parse_selector_to_matchers};
 use super::state::HttpServerState;
 use axum::body::Body;
 use axum::extract::{MatchedPath, Query, Request, State};
@@ -355,8 +355,8 @@ async fn render_latest_sample_metrics(
         return Ok(String::new());
     }
 
-    let label_matchers = match &query.selector {
-        Some(selector) => Some(parse_selector_to_matchers(selector)?),
+    let filter = match &query.selector {
+        Some(selector) => Some(SensorFilter::new(parse_selector_to_matchers(selector)?)?),
         None => None,
     };
 
@@ -379,8 +379,8 @@ async fn render_latest_sample_metrics(
                 continue;
             }
 
-            if let Some(matchers) = &label_matchers
-                && !sensor_matches_matchers(&sensor, matchers)
+            if let Some(filter) = &filter
+                && !filter.matches(&sensor)
             {
                 continue;
             }

@@ -147,9 +147,12 @@ pub async fn publish_prometheus(
             let mut unit: Option<Unit> = None;
             for label in time_serie.labels {
                 match label.name.as_str() {
+                    // The name of the sensor, and not one of its labels: the reads add it back
                     "__name__" => {
-                        name = Some(label.value.clone());
+                        name = Some(label.value);
+                        continue;
                     }
+                    // The unit of the sensor, kept as a label too so the label set round trips
                     "unit" => {
                         unit = Some(Unit::new(label.value.clone(), None));
                     }

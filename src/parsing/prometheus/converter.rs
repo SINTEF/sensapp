@@ -47,8 +47,9 @@ pub fn build_prometheus_labels(sensor: &crate::datamodel::Sensor) -> Vec<Label> 
         value: sensor.name.clone(),
     });
 
-    // Add all other labels
-    for (key, value) in sensor.labels.iter() {
+    // Add all other labels. Remote write stored `__name__` among the labels before 0.5: the name
+    // of the sensor is the one that counts
+    for (key, value) in sensor.labels.iter().filter(|(key, _)| key != "__name__") {
         labels.push(Label {
             name: key.clone(),
             value: value.clone(),

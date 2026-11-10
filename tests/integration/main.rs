@@ -41,6 +41,7 @@ mod rolled_back_publish;
 mod rrdcached_integration;
 mod selector_aggregated;
 mod selector_reads;
+mod selector_semantics;
 mod sensor_identity;
 mod simple_promql;
 mod time_window_reads;

@@ -124,6 +124,11 @@ fn selector_query(
     selector: &rusty_promql_parser::VectorSelector,
     window_ms: i64,
 ) -> Result<ParsedQuery, AppError> {
+    if selector.offset.is_some() || selector.at.is_some() {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "offset and @ are not supported. {SIMPLE_QUERY_HINT}"
+        )));
+    }
     let matchers = extract_matchers_from_vector_selector(selector)?;
 
     if matchers.is_empty() {

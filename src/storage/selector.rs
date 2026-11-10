@@ -20,7 +20,7 @@ pub enum SelectorLimitExceeded {
 pub type SelectorRead = std::result::Result<Vec<SensorData>, SelectorLimitExceeded>;
 
 /// Read the series matching `matchers` one after the other: the portable implementation, used
-/// by backends that have no cheaper way, and when a token only sees some of the sensors.
+/// by backends that have no cheaper way.
 ///
 /// The matching sensors are discovered first, then each series is read with what is left of the
 /// `max_samples` budget, which is exceeded as soon as one more sample than the budget is found.

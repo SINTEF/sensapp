@@ -3,6 +3,18 @@
 SensApp is pre-production: breaking changes happen between minor versions and are listed first.
 Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASING.md).
 
+## Unreleased
+
+### Breaking
+
+- **Prometheus remote write no longer stores `__name__` among the labels** of a series, which made remote
+  read return it twice. The labels are part of a series' identity, so a series written by remote write
+  before this version and written again after it becomes a new series. The old one keeps its samples and
+  is still read with one `__name__`.
+- `/series?selector=` and `/prometheus/metrics?selector=` select by the metric name: `temperature{room="a"}`
+  and `{__name__="temperature"}` used to ignore the name.
+- `offset` and `@` in a selector or a `/api/v1/query` answer `400` instead of being ignored.
+
 ## 0.4.2
 
 A maintenance release: dependencies and security fixes, no change in behaviour.

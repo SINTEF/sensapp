@@ -954,6 +954,66 @@ async fn sensor_allow_list_limits_cross_series_aggregation() {
     assert!(nothing.is_empty());
 }
 
+/// A selector read by a token restricted to some sensor names finds exactly those, whatever
+/// characters the names hold: the names are not patterns.
+#[tokio::test]
+#[serial]
+async fn sensor_allow_list_names_are_not_patterns_in_selectors() {
+    sensapp::config::load_configuration_for_tests().unwrap();
+    let db = TestDb::new().await.expect("test db");
+    let storage = db.storage();
+    let auth = AuthConfig::from_secret(TEST_SECRET).unwrap();
+    let app = build_test_router(storage.clone(), Some(auth));
+
+    let recent = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 60;
+    let senml: Vec<String> = ["cpu.usage", "cpuXusage", "temp.x", "tempYx", "other"]
+        .iter()
+        .map(|name| format!(r#"{{"n":"{name}","v":1,"t":{recent},"_labels":{{"room":"a"}}}}"#))
+        .collect();
+    publish_senml_data(&format!("[{}]", senml.join(",")), storage.clone())
+        .await
+        .unwrap();
+
+    let token = sensor_token("read", &["cpu.usage", "temp.x", "a|"]);
+    let names = |query: &str| {
+        let app = app.clone();
+        let token = token.clone();
+        let query = urlencoding::encode(query).into_owned();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::get(format!("/api/v1/query?format=jsonl&query={query}"))
+                        .header("authorization", format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let mut names: Vec<String> = String::from_utf8_lossy(&bytes)
+                .lines()
+                .map(|line| {
+                    let line: serde_json::Value = serde_json::from_str(line).unwrap();
+                    line["sensor_name"].as_str().unwrap_or_default().to_string()
+                })
+                .collect();
+            names.sort();
+            names.dedup();
+            names
+        }
+    };
+    assert_eq!(names(r#"{room="a"}"#).await, ["cpu.usage", "temp.x"]);
+    assert_eq!(names(r#"{__name__=~"temp.*"}"#).await, ["temp.x"]);
+    assert_eq!(names(r#"sum({room="a"})"#).await.len(), 1);
+}
+
 // ---------------------------------------------------------------------------
 // Tests: deleting series and samples
 // ---------------------------------------------------------------------------

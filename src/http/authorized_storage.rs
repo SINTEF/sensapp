@@ -30,6 +30,28 @@ impl AuthorizedStorage {
         self.access.can_access_sensor(name)
     }
 
+    /// The matchers of a selector, restricted to the sensors the token sees by one more
+    /// `__name__` matcher, so the backend's own read and its limits apply. `None` when the token
+    /// sees no sensor at all.
+    fn restrict(&self, matchers: &[LabelMatcher]) -> Option<Vec<LabelMatcher>> {
+        let Some(allow_list) = &self.access.sensor_allow_list else {
+            return Some(matchers.to_vec());
+        };
+        if allow_list.is_empty() {
+            return None;
+        }
+        // The names are literals: `regex::escape` only escapes punctuation, which every backend
+        // reads as the character itself
+        let names = allow_list
+            .iter()
+            .map(|name| regex::escape(name))
+            .collect::<Vec<_>>()
+            .join("|");
+        let mut restricted = matchers.to_vec();
+        restricted.push(LabelMatcher::regex("__name__", names));
+        Some(restricted)
+    }
+
     /// Whether the token may act on the sensor with this UUID.
     ///
     /// Sensors the token cannot access are reported like missing ones, as the read
@@ -188,32 +210,19 @@ impl StorageInstance for AuthorizedStorage {
         max_series: usize,
         max_samples: usize,
     ) -> Result<SelectorRead> {
-        if self.access.sensor_allow_list.is_none() {
-            // The token sees every sensor: the backend's own read applies as is
-            return self
-                .inner
-                .query_selector(
-                    matchers,
-                    start_time,
-                    end_time,
-                    numeric_only,
-                    max_series,
-                    max_samples,
-                )
-                .await;
-        }
-        // Otherwise the limits only count the sensors the token sees: read through the
-        // filtered methods of this wrapper
-        crate::storage::selector::query_selector_sequential(
-            self,
-            matchers,
-            start_time,
-            end_time,
-            numeric_only,
-            max_series,
-            max_samples,
-        )
-        .await
+        let Some(matchers) = self.restrict(matchers) else {
+            return Ok(Ok(Vec::new()));
+        };
+        self.inner
+            .query_selector(
+                &matchers,
+                start_time,
+                end_time,
+                numeric_only,
+                max_series,
+                max_samples,
+            )
+            .await
     }
 
     async fn query_selector_aggregated(
@@ -223,21 +232,12 @@ impl StorageInstance for AuthorizedStorage {
         max_series: usize,
         max_samples: usize,
     ) -> Result<SelectorRead> {
-        if self.access.sensor_allow_list.is_none() {
-            return self
-                .inner
-                .query_selector_aggregated(matchers, options, max_series, max_samples)
-                .await;
-        }
-        // Only the sensors the token sees count for the limits: read through the filtered methods
-        crate::storage::selector::query_selector_aggregated_sequential(
-            self,
-            matchers,
-            options,
-            max_series,
-            max_samples,
-        )
-        .await
+        let Some(matchers) = self.restrict(matchers) else {
+            return Ok(Ok(Vec::new()));
+        };
+        self.inner
+            .query_selector_aggregated(&matchers, options, max_series, max_samples)
+            .await
     }
 
     async fn health_check(&self) -> Result<()> {

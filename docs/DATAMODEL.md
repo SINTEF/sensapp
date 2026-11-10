@@ -134,7 +134,9 @@ erDiagram
 
 ## Label Selectors
 
-Selectors (`/api/v1/query`, `/series?selector=`, Prometheus remote read) use the Prometheus operators `=`, `!=`, `=~` and `!~` on labels, and on the metric name with `__name__`.
+Selectors (`/api/v1/query`, `/series?selector=`, `/prometheus/metrics?selector=`, Prometheus remote read) use the Prometheus operators `=`, `!=`, `=~` and `!~` on labels, and on the metric name with `__name__`. A metric name in front of the braces is the same as `__name__="name"`: `temperature{room="a"}` selects the series named `temperature` whose `room` is `a`. A regex that is not RE2, or that a backend would read otherwise, is refused with `400`, and so are the `offset` and `@` modifiers, which SensApp does not implement.
+
+A series written by Prometheus remote write is named after its `__name__` label, which is not stored among its labels, and the reads add it back. Its `unit` label is both a label and the unit of the series.
 
 A regular expression matches the **whole** value, as in Prometheus: `region=~"eu"` selects the series whose region is exactly `eu`, not `eu-west` nor `europe`. Use `eu.*` for a prefix, `.*west.*` for a part, and `eu|us` for alternatives (the alternation is anchored as a whole). SensApp anchors the pattern as `^(?:pattern)$` when it reads the selector, so every backend behaves the same. Case-insensitive matching works with a leading flag, `region=~"(?i)EU.*"`.
 
