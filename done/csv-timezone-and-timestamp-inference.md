@@ -49,3 +49,28 @@ format without a datetime column (400), epoch milliseconds, a `date` + `uptime` 
 ## Done when
 
 The tests pass and `docs/` describes how CSV timestamps are read.
+
+## Outcome (10 November 2026)
+
+| Item | Result | Commit |
+| --- | --- | --- |
+| 1. Offset sign | Confirmed, and two more unit tests asserted the wrong sign (`00:00+01:00` expected at 01:00Z, `00:00+02:00` at 02:00Z). | `34e49d8` |
+| 2. Row index as time | Confirmed (long format stored 1970 + row). **A CSV without a time column is now refused (400)** in both layouts, with the columns found and what a time column looks like. Rows are never numbered as times. | `719ebe2` |
+| 3. Integer epochs always seconds | Confirmed (milliseconds became year 56387, and since task 4 that is a 400). The unit comes from the largest value of the column: under 10^11 seconds, 10^14 milliseconds, 10^17 microseconds, nanoseconds above. No query parameter: the thresholds cover today's data in every unit, and KISS. | `719ebe2` |
+| 4. False-positive time column | Confirmed with `01/06/2024` dates. Two changes: a date alone (`2024-06-01`) is now a time, so the reported `date,temperature,uptime` file works; and a number column that does not read as times only counts as the time axis when its name is an exact time name (`time`, `date`, `created_at`…), not when it only contains `time` (`uptime`) — then the CSV is refused. The `time` column of relative times (the ebike test data) is still chosen. "Reads as times" now accepts all four epoch units. | `34e49d8`, `719ebe2` |
+| 5. Float epoch column | Confirmed (500 with the whole column in the message). Same unit rule, rounded to the microsecond. The error for any other column type is short and names the column. | `719ebe2` |
+| 6. Silent loss | Confirmed. **Decision: the `iso8601` crate is replaced by chrono** (already in the tree through `sindit-senml`). Fractions keep microseconds; trailing text makes the cell a string; an offset after a space (`… +0200`) is applied instead of dropped; a space is accepted as the date/time separator; no offset is UTC (documented). Week and ordinal dates are no longer recognised (they were computed from 1 January, wrongly): they are strings. | `34e49d8` |
+
+One more change, found on the way: a column of times that is not the time axis was stored as RFC 3339 text
+(`2024-07-01` became `2024-07-01T00:00:00 UTC`). It is now a string series with its cells as written. Without it,
+parsing dates alone would have rewritten date-valued string series.
+
+Tests: parser unit tests (`infer::parsing::tests::datetime`: offsets, local forms, fractions, other text), guesser
+unit tests, and `tests/integration/csv_timestamps.rs` through `/publish`: offset datetimes, a space separator,
+epochs in four units, a float epoch, a `date` + `uptime` file, a value column of dates, and three CSVs without a
+usable time column (400). `parser_edge_cases` now expects a date alone to be a time.
+
+Docs: `docs/CSV_IMPORT.md` describes the layouts, the choice of the time column, the time formats and the epoch
+units.
+
+Suites: SQLite and PostgreSQL in full (no backend code changed). `cargo clippy --tests`: clean.
