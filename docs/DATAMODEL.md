@@ -18,7 +18,7 @@ SensApp distinguises between:
 
  - **Integer** values, which are 64 bits integers.
  - **Float** values, which are IEEE 754 64 bits floating point numbers. Those are **approximates** values, check the section about floating point numbers for more information.
- - **Numeric** values, which are decimal numbers, that shouldn't be approximate values. This is not supported by SQLite 3, it was during the SQLite4 experimental project, but is supported by PostGreSQL and ClickHouse.
+ - **Numeric** values, which are decimal numbers, that shouldn't be approximate values. This is not supported by SQLite 3, it was during the SQLite4 experimental project, but is supported by PostGreSQL and ClickHouse. In memory they are `rust_decimal::Decimal`: 96 bits of digits (about 28) and up to 28 digits after the point. A value, an Arrow decimal, or a sum or average outside that range is refused with an error. ClickHouse stores them as `Decimal(38, 8)`: 8 digits after the point (more are rounded), so a value needs at most 20 digits before the point there, and a larger one is refused.
  - **String** values, which are UTF-8 encoded strings.
  - **Boolean** values, which are true or false.
  - **Locations** values, which are latitude and longitude coordinates, with an optional altitude. We consider earth as the center of the universe. _Do not_ use this type for space projects, and rely on multiple sensors instead.
