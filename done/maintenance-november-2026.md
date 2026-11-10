@@ -38,7 +38,8 @@ security advisories, and refresh the image and CI pins. Upgrades that need real 
 - [x] The 15 open Dependabot alerts on `main` are fixed on the branch. The critical one is `zip` 6,
   a build dependency of `libduckdb-sys` 1.10505 that DuckDB 2.0 no longer has. The others are undici
   (8.12.4 now), vite (8.3.6), and rustls (0.23.46). `cargo audit` did not report `zip` or rustls.
-- [ ] GitHub CI on the branch. `astral-sh/setup-uv` has no floating `v10` tag, so it is pinned to v10.3.3.
+- [x] GitHub CI on PR #57 (merged 6 November) and on `main`. `astral-sh/setup-uv` has no floating
+  `v10` tag, so it is pinned to v10.3.3. Shipped in 0.4.2.
 
 ## Deferred
 

@@ -412,7 +412,10 @@ dependencies = ["fmt-check", "clippy-all"]
 [tasks.security-audit]
 description = "Run security audit"
 command = "cargo"
-args = ["audit"]
+# RUSTSEC-2026-0459: the SQLite bundled by libsqlite3-sys < 0.39 can leak memory when it opens a database with a
+# crafted -wal file. sqlx 0.9.0 caps libsqlite3-sys below 0.38, and SensApp only opens the database the operator
+# configures. See ideas/sqlite-rustsec-2026-0459.md.
+args = ["audit", "--ignore", "RUSTSEC-2026-0459"]
 
 [tasks.clippy-all]
 description = "Run clippy on all storage backend features"

@@ -3,7 +3,9 @@
 SensApp is pre-production: breaking changes happen between minor versions and are listed first.
 Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASING.md).
 
-## Unreleased
+## 0.4.2
+
+A maintenance release: dependencies and security fixes, no change in behaviour.
 
 ### Changed and fixed
 
@@ -13,6 +15,12 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 - JWTs are handled by the aws-lc-rs backend of `jsonwebtoken`, which removes `rsa` and `crypto-bigint` 0.5
   from the build along with their advisories (RUSTSEC-2023-0071, RUSTSEC-2026-0387). `cargo audit` and
   `npm audit` run clean, without ignores.
+- The open Dependabot alerts are fixed: `zip` 6 (critical, a build dependency of the previous DuckDB crate,
+  gone with DuckDB 2.0), rustls 0.23.46, and, in the frontend tooling, vite and undici.
+- Known: the SQLite bundled by sqlx 0.9.0 is affected by RUSTSEC-2026-0459 (CVE-2026-119375), a memory leak when
+  SQLite opens a database with a crafted `-wal` file. No sqlx release has the fix yet. SensApp only opens the
+  SQLite database it is configured with, so the risk is limited to whoever can already write in that directory.
+  `cargo audit` ignores it until sqlx is updated.
 - Tested on ClickHouse 26.8 LTS and TimescaleDB 2.31 on PostgreSQL 18. The local TimescaleDB test volume
   has a new name, as the PostgreSQL 18 image keeps its data elsewhere.
 
