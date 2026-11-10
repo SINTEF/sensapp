@@ -68,6 +68,15 @@ fn identity_mismatch(sensor: &Sensor) -> StorageError {
     }
 }
 
+/// Whether a write failed because another transaction deleted one of its sensors: a foreign-key
+/// violation on the samples, or a sensor gone during its registration. The write can be tried
+/// again.
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+pub fn sensor_deleted_during_write(error: &anyhow::Error) -> bool {
+    is_foreign_key_violation(error)
+        || error.is::<crate::storage::pg_sensor_registration::SensorDeletedDuringWrite>()
+}
+
 /// Whether an error comes from a foreign-key violation reported by the database.
 ///
 /// The PostgreSQL-based backends use it to detect a cached sensor id whose sensor was

@@ -13,7 +13,7 @@
 
 use super::{
     DEFAULT_QUERY_LIMIT, SensorAvailabilitySummary, StorageError, StorageInstance,
-    common::{VALUE_TABLES, datetime_to_micros, is_foreign_key_violation},
+    common::{VALUE_TABLES, datetime_to_micros, sensor_deleted_during_write},
 };
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
@@ -318,7 +318,7 @@ impl StorageInstance for PostgresStorage {
     }
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
         match self.publish_once(&batch).await {
-            Err(error) if is_foreign_key_violation(&error) => {
+            Err(error) if sensor_deleted_during_write(&error) => {
                 // Another SensApp instance deleted a sensor between its registration and the
                 // insert of its samples. The transaction was rolled back: try again, which
                 // registers the sensors again.
@@ -1114,10 +1114,10 @@ impl PostgresStorage {
 
         let mut guards = Vec::with_capacity(batch.sensors.len());
         for single_sensor_batch in batch.sensors.as_ref() {
-            guards.push((
-                sensor_ids[&single_sensor_batch.sensor.uuid],
-                single_sensor_batch.samples.read().await,
-            ));
+            let sensor_id = *sensor_ids
+                .get(&single_sensor_batch.sensor.uuid)
+                .context("a sensor of the batch was not registered")?;
+            guards.push((sensor_id, single_sensor_batch.samples.read().await));
         }
         let samples: Vec<(i64, &TypedSamples)> = guards
             .iter()

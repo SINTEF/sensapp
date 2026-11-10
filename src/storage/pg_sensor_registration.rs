@@ -116,6 +116,11 @@ pub async fn register_sensors(
     if !others.is_empty() {
         ids.extend(fetch_sensor_ids(connection, &unique, others).await?);
     }
+    // A sensor another transaction created, then a third one deleted before the read above, has
+    // no id. Trying again creates it.
+    if let Some(uuid) = unique.keys().find(|uuid| !ids.contains_key(*uuid)) {
+        return Err(SensorDeletedDuringWrite(*uuid).into());
+    }
 
     // The labels of the sensors this call created
     let mut label_sensor_ids: Vec<i64> = Vec::new();
@@ -148,6 +153,12 @@ pub async fn register_sensors(
 
     Ok(ids)
 }
+
+/// A sensor of the batch was deleted by another transaction while the batch was written. The
+/// transaction is rolled back; the write can be tried again.
+#[derive(Debug, thiserror::Error)]
+#[error("sensor {0} was deleted while it was written to")]
+pub struct SensorDeletedDuringWrite(pub Uuid);
 
 /// The ids of the stored sensors among `uuids`, after checking that each has the name and the type
 /// of the sensor of the batch (`sensors`) with its UUID.
