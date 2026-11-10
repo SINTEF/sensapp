@@ -9,6 +9,9 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use sensapp::config::load_configuration_for_tests;
+use sensapp::datamodel::batch::{Batch, SingleSensorBatch};
+use sensapp::datamodel::sensapp_vec::SensAppVec;
+use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples};
 use sensapp::http::metrics::HttpMetrics;
 use sensapp::http::server::{RouterSettings, build_router};
 use sensapp::http::state::HttpServerState;
@@ -147,5 +150,60 @@ async fn a_wide_csv_with_the_same_header_twice_is_refused() -> Result<()> {
     // Two columns named `a` with different types
     let csv = "datetime,a,a\n2024-01-01T00:00:00Z,1,1.5\n";
     assert_refused_then_alive(&app, post_csv(&app, csv).await).await;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn a_numeric_sum_over_the_decimal_range_is_refused() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let app = app(storage.clone());
+
+    // Two values of 5 × 10^28 in one bucket: each fits in a `Decimal` (up to 7.9 × 10^28), their
+    // sum does not
+    let sensor = Arc::new(Sensor::new_without_uuid(
+        format!("panic_numeric_{}", uuid::Uuid::new_v4().simple()),
+        SensorType::Numeric,
+        None,
+        None,
+    )?);
+    let large = rust_decimal::Decimal::from_i128_with_scale(5 * 10_i128.pow(28), 0);
+    let samples = [0.0, 1.0].map(|seconds| Sample {
+        datetime: hifitime::Epoch::from_unix_seconds(1_700_000_000.0 + seconds),
+        value: large,
+    });
+    let mut batches = SensAppVec::new();
+    batches.push(SingleSensorBatch::new(
+        sensor.clone(),
+        TypedSamples::Numeric(samples.into_iter().collect()),
+    ));
+    // Some backends cannot store such a value (ClickHouse keeps 8 digits after the point): then
+    // there is nothing to sum
+    if storage
+        .publish(Arc::new(Batch::new(batches)))
+        .await
+        .is_err()
+    {
+        return Ok(());
+    }
+
+    let data = format!("/series/{}?step=1h&aggregation=sum", sensor.uuid);
+    let (status, body) = send(&app, Request::get(&data).body(Body::empty()).unwrap()).await;
+    assert!(
+        !status.is_success(),
+        "expected an error, got {status}: {body}"
+    );
+    let (status, _) = send(
+        &app,
+        Request::get("/health/live").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the server answers the next request"
+    );
     Ok(())
 }

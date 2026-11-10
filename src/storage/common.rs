@@ -577,6 +577,10 @@ fn aggregate_integer_samples(
     })
 }
 
+fn numeric_overflow() -> anyhow::Error {
+    anyhow!("numeric aggregation overflowed")
+}
+
 fn aggregate_numeric_samples(
     samples: &[Sample<Decimal>],
     origin_us: i64,
@@ -598,7 +602,8 @@ fn aggregate_numeric_samples(
             step_us,
         );
         let mut end = index;
-        let mut sum = Decimal::ZERO;
+        // `None` once the sum leaves the `Decimal` range: only Sum and Avg need it
+        let mut sum = Some(Decimal::ZERO);
         let mut min = samples[index].value;
         let mut max = samples[index].value;
         let first = samples[index].value;
@@ -613,7 +618,7 @@ fn aggregate_numeric_samples(
             ) == bucket_us
         {
             let value = samples[end].value;
-            sum += value;
+            sum = sum.and_then(|sum| sum.checked_add(value));
             min = min.min(value);
             max = max.max(value);
             last = value;
@@ -625,7 +630,7 @@ fn aggregate_numeric_samples(
         match aggregation {
             Aggregation::Avg => output_numeric.push(Sample {
                 datetime,
-                value: sum / Decimal::from(count),
+                value: sum.ok_or_else(numeric_overflow)? / Decimal::from(count),
             }),
             Aggregation::Min => output_numeric.push(Sample {
                 datetime,
@@ -637,7 +642,7 @@ fn aggregate_numeric_samples(
             }),
             Aggregation::Sum => output_numeric.push(Sample {
                 datetime,
-                value: sum,
+                value: sum.ok_or_else(numeric_overflow)?,
             }),
             Aggregation::First => output_numeric.push(Sample {
                 datetime,
@@ -704,6 +709,19 @@ mod tests {
 
     use super::*;
     use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+
+    /// Two values that each fit in a `Decimal` (up to 7.9 × 10^28) but not their sum.
+    #[test]
+    fn a_numeric_sum_over_the_decimal_range_is_an_error() {
+        let large = Decimal::from_i128_with_scale(5 * 10_i128.pow(28), 0);
+        let samples = [0.0, 1.0].map(|seconds| Sample {
+            datetime: SensAppDateTime::from_unix_seconds(seconds),
+            value: large,
+        });
+        assert!(aggregate_numeric_samples(&samples, 0, 60_000_000, Aggregation::Sum).is_err());
+        assert!(aggregate_numeric_samples(&samples, 0, 60_000_000, Aggregation::Avg).is_err());
+        assert!(aggregate_numeric_samples(&samples, 0, 60_000_000, Aggregation::Max).is_ok());
+    }
 
     #[test]
     fn test_datetime_to_micros() {
