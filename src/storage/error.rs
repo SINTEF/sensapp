@@ -33,6 +33,15 @@ pub enum StorageError {
     #[error("Metric not found: {metric_name}")]
     MetricNotFound { metric_name: String },
 
+    /// A write names a sensor UUID that is stored, or given in the same batch, with another name
+    /// or type. The message does not tell the stored name: the writer may not be allowed to see it.
+    #[error("Sensor {uuid} exists with another name or type than '{name}' ({sensor_type})")]
+    SensorIdentityMismatch {
+        uuid: Uuid,
+        name: String,
+        sensor_type: String,
+    },
+
     /// Configuration error
     #[error("Configuration error: {0}")]
     Configuration(String),

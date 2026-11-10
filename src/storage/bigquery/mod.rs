@@ -2,7 +2,9 @@
 //! differently, and `docs/BIGQUERY.md` for the limits and the setup.
 
 use crate::{
-    datamodel::{Metric, SensAppDateTime, SensorData, SensorType, batch::Batch, unit::Unit},
+    datamodel::{
+        Metric, SensAppDateTime, Sensor, SensorData, SensorType, batch::Batch, unit::Unit,
+    },
     storage::{
         DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, LabelMatcher, ListSeriesResult,
         MAX_LIST_SERIES_LIMIT, SensorDataQueryOptions, StorageError, StorageInstance,
@@ -49,9 +51,11 @@ const LEGACY_TABLES: [&str; 4] = [
     "sensor_labels_view",
 ];
 
-/// Ids with the time they were seen, forgotten after `lifespan` and when there are too many.
+/// Ids with the time they were seen and the identity (name and type) they were stored with,
+/// forgotten after `lifespan` and when there are too many. A write with another identity is not a
+/// hit: it is looked up, and refused when the stored identity differs.
 struct RegisteredIds {
-    seen: HashMap<i64, Instant>,
+    seen: HashMap<i64, (Instant, u64)>,
     lifespan: Duration,
     capacity: usize,
 }
@@ -65,21 +69,21 @@ impl RegisteredIds {
         }
     }
 
-    fn contains(&self, id: i64) -> bool {
+    fn contains(&self, id: i64, identity: u64) -> bool {
         self.seen
             .get(&id)
-            .is_some_and(|seen| seen.elapsed() < self.lifespan)
+            .is_some_and(|(seen, stored)| *stored == identity && seen.elapsed() < self.lifespan)
     }
 
-    fn insert(&mut self, id: i64) {
+    fn insert(&mut self, id: i64, identity: u64) {
         if self.seen.len() >= self.capacity {
             let lifespan = self.lifespan;
-            self.seen.retain(|_, seen| seen.elapsed() < lifespan);
+            self.seen.retain(|_, (seen, _)| seen.elapsed() < lifespan);
             if self.seen.len() >= self.capacity {
                 self.seen.clear();
             }
         }
-        self.seen.insert(id, Instant::now());
+        self.seen.insert(id, (Instant::now(), identity));
     }
 
     fn remove(&mut self, id: i64) {
@@ -90,6 +94,15 @@ impl RegisteredIds {
     fn clear(&mut self) {
         self.seen.clear();
     }
+}
+
+/// The name and the type of a sensor, hashed, for `RegisteredIds`.
+fn identity_fingerprint(sensor: &Sensor) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    sensor.name.hash(&mut hasher);
+    sensor.sensor_type.to_string().hash(&mut hasher);
+    hasher.finish()
 }
 
 pub struct BigQueryStorage {
@@ -151,12 +164,14 @@ impl BigQueryStorage {
         self.registered.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn is_registered(&self, sensor_id: i64) -> bool {
-        self.registered().contains(sensor_id)
+    fn is_registered(&self, sensor_id: i64, sensor: &Sensor) -> bool {
+        self.registered()
+            .contains(sensor_id, identity_fingerprint(sensor))
     }
 
-    fn remember_registered(&self, sensor_id: i64) {
-        self.registered().insert(sensor_id);
+    fn remember_registered(&self, sensor_id: i64, sensor: &Sensor) {
+        self.registered()
+            .insert(sensor_id, identity_fingerprint(sensor));
     }
 
     fn forget_registered(&self, sensor_id: i64) {
@@ -582,22 +597,23 @@ mod tests {
     #[test]
     fn registered_ids_expire_and_are_bounded() {
         let mut ids = RegisteredIds::new(Duration::from_secs(60), 2);
-        ids.insert(1);
-        assert!(ids.contains(1) && !ids.contains(2));
+        ids.insert(1, 10);
+        assert!(ids.contains(1, 10) && !ids.contains(2, 10));
+        assert!(!ids.contains(1, 11), "another identity is not a hit");
         ids.remove(1);
-        assert!(!ids.contains(1));
+        assert!(!ids.contains(1, 10));
 
         // Too many: forgotten all at once, never a growing map
-        ids.insert(1);
-        ids.insert(2);
-        ids.insert(3);
-        assert!(ids.contains(3) && ids.seen.len() <= 2);
+        ids.insert(1, 10);
+        ids.insert(2, 10);
+        ids.insert(3, 10);
+        assert!(ids.contains(3, 10) && ids.seen.len() <= 2);
         ids.clear();
-        assert!(!ids.contains(3));
+        assert!(!ids.contains(3, 10));
 
         let mut short = RegisteredIds::new(Duration::ZERO, 10);
-        short.insert(1);
-        assert!(!short.contains(1), "expired at once");
+        short.insert(1, 10);
+        assert!(!short.contains(1, 10), "expired at once");
     }
 
     #[test]

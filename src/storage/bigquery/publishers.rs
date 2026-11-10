@@ -6,7 +6,9 @@ use super::client::{grpc_code_is_transient, int_array_param, map_error};
 use super::rows::{self, *};
 use crate::datamodel::{Sensor, TypedSamples, batch::Batch};
 use crate::storage::StorageError;
-use crate::storage::common::{datetime_to_micros, unit_name_to_id, uuid_to_sensor_id};
+use crate::storage::common::{
+    check_sensor_identity, datetime_to_micros, unique_sensors, unit_name_to_id, uuid_to_sensor_id,
+};
 use anyhow::Result;
 use futures::future::try_join_all;
 use gcp_bigquery_client::google::cloud::bigquery::storage::v1::append_rows_response::Response;
@@ -180,20 +182,19 @@ impl BigQueryStorage {
     /// themselves, so a series is never listed with a part of its labels missing. Two writers can
     /// register the same series at the same time; the rows are identical and the reads collapse them.
     pub(super) async fn register_sensors(&self, sensors: &[&Sensor]) -> Result<()> {
-        let mut by_id: HashMap<i64, &Sensor> = HashMap::with_capacity(sensors.len());
-        for sensor in sensors {
-            by_id.entry(sensor_id(sensor)).or_insert(sensor);
-        }
-        by_id.retain(|id, _| !self.is_registered(*id));
+        let mut by_id: HashMap<i64, &Sensor> = unique_sensors(sensors)?
+            .into_values()
+            .map(|sensor| (sensor_id(sensor), sensor))
+            .collect();
+        by_id.retain(|id, sensor| !self.is_registered(*id, sensor));
         if by_id.is_empty() {
             return Ok(());
         }
 
-        let ids: Vec<i64> = by_id.keys().copied().collect();
-        let stored = self.existing_ids("sensors", "sensor_id", &ids).await?;
-        for id in &stored {
-            self.remember_registered(*id);
-            by_id.remove(id);
+        for id in self.existing_sensors(&by_id).await? {
+            if let Some(sensor) = by_id.remove(&id) {
+                self.remember_registered(id, sensor);
+            }
         }
         if by_id.is_empty() {
             return Ok(());
@@ -242,10 +243,43 @@ impl BigQueryStorage {
             })
             .collect();
         self.append("sensors", &rows::SENSORS, sensor_rows).await?;
-        for id in by_id.keys() {
-            self.remember_registered(*id);
+        for (id, sensor) in &by_id {
+            self.remember_registered(*id, sensor);
         }
         Ok(())
+    }
+
+    /// Which of the sensors are stored, after checking that each stored sensor has the name and
+    /// the type of the sensor of the batch. Without a transaction, two writers that register one
+    /// new UUID with two identities at the same moment are not caught here.
+    async fn existing_sensors(&self, sensors: &HashMap<i64, &Sensor>) -> Result<Vec<i64>> {
+        let ids: Vec<i64> = sensors.keys().copied().collect();
+        let sql = format!(
+            "SELECT DISTINCT sensor_id, name, type FROM {} WHERE sensor_id IN UNNEST(@ids)",
+            self.table("sensors")
+        );
+        let stored = self
+            .query_rows(
+                "look up sensors",
+                sql,
+                vec![int_array_param("ids", &ids)],
+                |row| {
+                    Ok((
+                        super::client::required(row.get_i64(0), "sensor_id")?,
+                        super::client::required(row.get_string(1), "name")?,
+                        super::client::required(row.get_string(2), "type")?,
+                    ))
+                },
+            )
+            .await?;
+        let mut existing = Vec::with_capacity(stored.len());
+        for (id, name, sensor_type) in stored {
+            if let Some(sensor) = sensors.get(&id) {
+                check_sensor_identity(sensor, &name, &sensor_type)?;
+                existing.push(id);
+            }
+        }
+        Ok(existing)
     }
 
     /// Which of the `ids` are in the column `column` of `table`.

@@ -87,6 +87,9 @@ impl IntoResponse for AppError {
                 StorageError::SensorNotFound { .. } | StorageError::MetricNotFound { .. } => {
                     (StatusCode::NOT_FOUND, storage_error.to_string())
                 }
+                StorageError::SensorIdentityMismatch { .. } => {
+                    (StatusCode::CONFLICT, storage_error.to_string())
+                }
                 #[cfg(any(
                     feature = "postgres",
                     feature = "sqlite",

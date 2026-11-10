@@ -1,10 +1,11 @@
 use crate::datamodel::SensAppDateTime;
 use crate::datamodel::{Sensor, sensapp_datetime::SensAppDateTimeExt, unit::Unit};
 use crate::storage::StorageError;
+use crate::storage::common::{check_sensor_identity, unique_sensors};
 use anyhow::Result;
 use clickhouse::Row;
 use rust_decimal::{Decimal, RoundingStrategy};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -88,6 +89,35 @@ where
     Ok(())
 }
 
+/// The ids among the keys of `sensors` that are stored, after checking that each stored sensor
+/// has the name and the type of the sensor of the batch. ClickHouse has no transaction: two writers
+/// that register one new UUID with two identities at the same moment are not caught here.
+async fn existing_sensors(
+    client: &clickhouse::Client,
+    sensors: &HashMap<u64, &Sensor>,
+) -> Result<HashSet<u64>> {
+    #[derive(Row, Deserialize)]
+    struct StoredSensor {
+        sensor_id: u64,
+        name: String,
+        r#type: String,
+    }
+    let ids: Vec<u64> = sensors.keys().copied().collect();
+    let mut existing = HashSet::new();
+    for chunk in ids.chunks(ID_LOOKUP_CHUNK) {
+        let mut cursor = client
+            .query("SELECT sensor_id, name, type FROM sensors WHERE has(?, sensor_id)")
+            .bind(chunk)
+            .fetch::<StoredSensor>()
+            .map_err(|e| map_clickhouse_error(e, None, None))?;
+        while let Some(stored) = cursor.next().await? {
+            check_sensor_identity(sensors[&stored.sensor_id], &stored.name, &stored.r#type)?;
+            existing.insert(stored.sensor_id);
+        }
+    }
+    Ok(existing)
+}
+
 /// Make sure every sensor of a batch exists, with a handful of statements whatever the number
 /// of sensors: one lookup, then one INSERT for the new units, one for their labels and one for
 /// the new sensors. A Prometheus request carries thousands of series: doing this sensor by
@@ -99,16 +129,14 @@ where
 /// `ReplacingMergeTree` tables collapse.
 ///
 /// Labels are written only for new sensors: a sensor UUID is derived from its name, type, unit
-/// and labels, so they cannot change afterwards.
+/// and labels, so they cannot change afterwards. A sensor that exists must have the stored name
+/// and type, see `check_sensor_identity`.
 pub async fn register_sensors(client: &clickhouse::Client, sensors: &[&Sensor]) -> Result<()> {
-    let mut by_id: HashMap<u64, &Sensor> = HashMap::with_capacity(sensors.len());
-    for sensor in sensors {
-        by_id
-            .entry(uuid_to_sensor_id(&sensor.uuid))
-            .or_insert(sensor);
-    }
-    let ids: Vec<u64> = by_id.keys().copied().collect();
-    let existing = existing_ids(client, "sensors", "sensor_id", &ids).await?;
+    let by_id: HashMap<u64, &Sensor> = unique_sensors(sensors)?
+        .into_values()
+        .map(|sensor| (uuid_to_sensor_id(&sensor.uuid), sensor))
+        .collect();
+    let existing = existing_sensors(client, &by_id).await?;
     let new_sensors: Vec<(u64, &Sensor)> = by_id
         .into_iter()
         .filter(|(sensor_id, _)| !existing.contains(sensor_id))

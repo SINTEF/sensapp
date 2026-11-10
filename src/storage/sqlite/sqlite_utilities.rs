@@ -8,6 +8,7 @@
 //! insert that follows it.
 
 use crate::datamodel::Sensor;
+use crate::storage::common::{check_sensor_identity, unique_sensors};
 use anyhow::{Context, Result};
 use serde_json::json;
 use sqlx::{Sqlite, Transaction};
@@ -15,17 +16,19 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use uuid::Uuid;
 
 /// The sensor ids of the given sensors, creating the ones that do not exist with their unit and
-/// labels.
+/// labels. A sensor that exists must have the stored name and type, see `check_sensor_identity`.
 pub async fn register_sensors(
     transaction: &mut Transaction<'_, Sqlite>,
     sensors: &[&Sensor],
 ) -> Result<HashMap<Uuid, i64>> {
-    let mut unique: BTreeMap<Uuid, &Sensor> = BTreeMap::new();
-    for sensor in sensors {
-        unique.entry(sensor.uuid).or_insert(sensor);
-    }
+    let unique = unique_sensors(sensors)?;
     let uuids: Vec<String> = unique.keys().map(Uuid::to_string).collect();
-    let mut ids = fetch_sensor_ids(transaction, &uuids).await?;
+    let mut ids = HashMap::with_capacity(unique.len());
+    for (uuid, sensor_id, name, sensor_type) in fetch_sensors(transaction, &uuids).await? {
+        let sensor = unique[&uuid];
+        check_sensor_identity(sensor, &name, &sensor_type)?;
+        ids.insert(uuid, sensor_id);
+    }
     let missing: Vec<&Sensor> = unique
         .values()
         .filter(|sensor| !ids.contains_key(&sensor.uuid))
@@ -113,18 +116,22 @@ pub async fn register_sensors(
     Ok(ids)
 }
 
-async fn fetch_sensor_ids(
+/// The UUID, id, name and type of the stored sensors among `uuids`.
+async fn fetch_sensors(
     transaction: &mut Transaction<'_, Sqlite>,
     uuids: &[String],
-) -> Result<HashMap<Uuid, i64>> {
-    let rows: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT uuid, sensor_id FROM sensors WHERE uuid IN (SELECT value FROM json_each(?1))",
+) -> Result<Vec<(Uuid, i64, String, String)>> {
+    let rows: Vec<(String, i64, String, String)> = sqlx::query_as(
+        "SELECT uuid, sensor_id, name, type FROM sensors \
+         WHERE uuid IN (SELECT value FROM json_each(?1))",
     )
     .bind(serde_json::to_string(uuids)?)
     .fetch_all(&mut **transaction)
     .await?;
     rows.into_iter()
-        .map(|(uuid, sensor_id)| Ok((Uuid::parse_str(&uuid)?, sensor_id)))
+        .map(|(uuid, sensor_id, name, sensor_type)| {
+            Ok((Uuid::parse_str(&uuid)?, sensor_id, name, sensor_type))
+        })
         .collect()
 }
 

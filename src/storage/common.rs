@@ -1,15 +1,62 @@
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
-use crate::datamodel::{Sample, SensAppDateTime, SensorData, SensorType, TypedSamples};
+use crate::datamodel::{Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples};
 use crate::storage::{
-    Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, SimplifyOptions,
+    Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, SimplifyOptions, StorageError,
 };
 use anyhow::{Result, anyhow};
 use hifitime::Unit;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use simplify_polyline::{Point, simplify};
 use smallvec::smallvec;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
+
+/// The sensors of a batch, one per UUID, in UUID order. A UUID given twice with another name or
+/// type is refused: its samples would be written under one identity whatever the other says.
+pub fn unique_sensors<'a>(
+    sensors: &[&'a Sensor],
+) -> std::result::Result<BTreeMap<Uuid, &'a Sensor>, StorageError> {
+    let mut unique: BTreeMap<Uuid, &Sensor> = BTreeMap::new();
+    for sensor in sensors {
+        match unique.get(&sensor.uuid) {
+            None => {
+                unique.insert(sensor.uuid, sensor);
+            }
+            Some(first) => {
+                if first.name != sensor.name || first.sensor_type != sensor.sensor_type {
+                    return Err(identity_mismatch(sensor));
+                }
+            }
+        }
+    }
+    Ok(unique)
+}
+
+/// Refuse a write that names a stored sensor UUID with another name or type than the stored ones.
+///
+/// The name is what the token allow lists check, and the type chooses the table the samples go
+/// to: both must be those of the stored sensor. The unit and the labels are not compared, see
+/// `docs/DATAMODEL.md`.
+pub fn check_sensor_identity(
+    sensor: &Sensor,
+    stored_name: &str,
+    stored_type: &str,
+) -> std::result::Result<(), StorageError> {
+    let same_type = stored_type.parse::<SensorType>() == Ok(sensor.sensor_type);
+    if sensor.name == stored_name && same_type {
+        Ok(())
+    } else {
+        Err(identity_mismatch(sensor))
+    }
+}
+
+fn identity_mismatch(sensor: &Sensor) -> StorageError {
+    StorageError::SensorIdentityMismatch {
+        uuid: sensor.uuid,
+        name: sensor.name.clone(),
+        sensor_type: sensor.sensor_type.to_string(),
+    }
+}
 
 /// Whether an error comes from a foreign-key violation reported by the database.
 ///

@@ -9,12 +9,14 @@
 //! nothing is cached, so there is no stale id after a rollback or a deletion by another instance.
 
 use crate::datamodel::Sensor;
+use crate::storage::common::{check_sensor_identity, unique_sensors};
 use anyhow::Result;
 use sqlx::PgConnection;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use uuid::Uuid;
 
-/// The sensor ids of the given sensors, creating the ones that do not exist.
+/// The sensor ids of the given sensors, creating the ones that do not exist. A sensor that exists
+/// must have the stored name and type, see `check_sensor_identity`.
 ///
 /// Concurrent writers registering the same new sensor are safe: every insert is
 /// `ON CONFLICT DO NOTHING`, and the ids are read again afterwards. Values are sorted before they
@@ -32,13 +34,11 @@ pub async fn register_sensors(
     sensors: &[&Sensor],
     lock_first: &[&'static str],
 ) -> Result<HashMap<Uuid, i64>> {
-    let mut unique: HashMap<Uuid, &Sensor> = HashMap::with_capacity(sensors.len());
-    for sensor in sensors {
-        unique.entry(sensor.uuid).or_insert(sensor);
-    }
+    let unique = unique_sensors(sensors)?;
 
-    let mut ids = fetch_sensor_ids(connection, unique.keys().copied().collect()).await?;
-    let mut missing: Vec<&Sensor> = unique
+    let mut ids = fetch_sensor_ids(connection, &unique, unique.keys().copied().collect()).await?;
+    // In UUID order, from the BTreeMap
+    let missing: Vec<&Sensor> = unique
         .values()
         .filter(|sensor| !ids.contains_key(&sensor.uuid))
         .copied()
@@ -46,7 +46,6 @@ pub async fn register_sensors(
     if missing.is_empty() {
         return Ok(ids);
     }
-    missing.sort_by_key(|sensor| sensor.uuid);
 
     if !lock_first.is_empty() {
         // `ONLY`: without it the lock is taken on every chunk too. The names are static.
@@ -115,7 +114,7 @@ pub async fn register_sensors(
         .filter(|uuid| !created.contains_key(uuid))
         .collect();
     if !others.is_empty() {
-        ids.extend(fetch_sensor_ids(connection, others).await?);
+        ids.extend(fetch_sensor_ids(connection, &unique, others).await?);
     }
 
     // The labels of the sensors this call created
@@ -150,16 +149,24 @@ pub async fn register_sensors(
     Ok(ids)
 }
 
+/// The ids of the stored sensors among `uuids`, after checking that each has the name and the type
+/// of the sensor of the batch (`sensors`) with its UUID.
 async fn fetch_sensor_ids(
     connection: &mut PgConnection,
+    sensors: &BTreeMap<Uuid, &Sensor>,
     uuids: Vec<Uuid>,
 ) -> Result<HashMap<Uuid, i64>> {
-    let rows: Vec<(Uuid, i64)> =
-        sqlx::query_as("SELECT uuid, sensor_id FROM sensors WHERE uuid = ANY($1)")
+    let rows: Vec<(Uuid, i64, String, String)> =
+        sqlx::query_as("SELECT uuid, sensor_id, name, type FROM sensors WHERE uuid = ANY($1)")
             .bind(&uuids)
             .fetch_all(connection)
             .await?;
-    Ok(rows.into_iter().collect())
+    let mut ids = HashMap::with_capacity(rows.len());
+    for (uuid, sensor_id, name, sensor_type) in rows {
+        check_sensor_identity(sensors[&uuid], &name, &sensor_type)?;
+        ids.insert(uuid, sensor_id);
+    }
+    Ok(ids)
 }
 
 async fn ensure_units(
