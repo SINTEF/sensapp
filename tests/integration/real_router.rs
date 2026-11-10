@@ -32,7 +32,8 @@ fn ensure_config() {
 const SECRET: &str = "test-secret-0123456789abcdef012345";
 
 /// A storage that makes every write, and the removal of duplicates, take `publish_delay` before
-/// it reaches the real one, or fail a write when `fail_publish` is set.
+/// it reaches the real one. When `fail_publish` is set, a write fails and listing the metrics
+/// panics.
 #[derive(Debug)]
 struct SlowStorage {
     inner: Arc<dyn StorageInstance>,
@@ -81,6 +82,9 @@ impl StorageInstance for SlowStorage {
         self.inner.list_series(metric_filter, limit, bookmark).await
     }
     async fn list_metrics(&self) -> Result<Vec<Metric>> {
+        if self.fail_publish {
+            panic!("the metrics are gone for a reason of their own");
+        }
         self.inner.list_metrics().await
     }
     async fn query_sensor_data(
@@ -477,6 +481,38 @@ async fn real_server_errors_are_still_logged_as_errors() -> Result<()> {
             .any(|line| line.contains(" ERROR ") && line.contains("failing-id-9")),
         "an error with the request id was expected: {lines:#?}"
     );
+    Ok(())
+}
+
+/// A panic in a handler is a 500 for that request, logged with its request id, and the instance
+/// keeps answering. The binary used to exit on any panic.
+#[tokio::test]
+#[serial]
+async fn a_panic_in_a_handler_is_a_500_and_the_server_keeps_answering() -> Result<()> {
+    let (_db, router) = router_with(Duration::ZERO, true, None, settings()).await?;
+    let (logs, _guard) = capture_logs();
+
+    let mut request = get_request("/metrics");
+    request
+        .headers_mut()
+        .insert("x-request-id", "panicking-id-7".parse()?);
+    let (status, headers, body) = send(&router, request).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(headers["x-request-id"], "panicking-id-7");
+    assert!(
+        !body.contains("reason of their own"),
+        "the panic message is not sent to the client: {body}"
+    );
+    let lines = logs.lines();
+    assert!(
+        lines.iter().any(|line| line.contains("panicked")
+            && line.contains("reason of their own")
+            && line.contains("panicking-id-7")),
+        "the panic is logged with the request id: {lines:#?}"
+    );
+
+    let (status, _, _) = send(&router, get_request("/health/live")).await;
+    assert_eq!(status, StatusCode::OK);
     Ok(())
 }
 

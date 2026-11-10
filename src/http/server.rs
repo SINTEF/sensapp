@@ -51,6 +51,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
+use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::classify::ServerErrorsFailureClass;
 use tower_http::request_id::MakeRequestUuid;
 use tower_http::trace;
@@ -296,6 +297,9 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
         .layer(timeout_layer(settings.request_timeout))
         .merge(write_routes)
         .merge(maintenance_routes)
+        // A panic in a handler is a logged 500 for that request only. Inside the metrics and the
+        // trace layers, so that it is counted and logged with its request id.
+        .layer(CatchPanicLayer::custom(panic_response))
         .layer(axum::middleware::from_fn_with_state(
             state.metrics.clone(),
             track_http_metrics,
@@ -326,6 +330,22 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         .await?;
 
     Ok(())
+}
+
+/// The answer to a request whose handler panicked. The panic message was already printed by the
+/// panic hook; it is logged again here within the request span, and not sent to the client.
+fn panic_response(panic: Box<dyn std::any::Any + Send + 'static>) -> Response {
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or("unknown panic");
+    tracing::error!("Request handler panicked: {message}");
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({ "error": "Internal Server Error" })),
+    )
+        .into_response()
 }
 
 /// Log a 5xx response, at the level that fits it. The default logs every one of them as an

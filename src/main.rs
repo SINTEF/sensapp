@@ -90,12 +90,9 @@ async fn async_main() -> Result<()> {
         .context("Failed to create or migrate database schema")?;
     println!("✅ Storage backend initialized successfully");
 
-    // Exit the program if a panic occurs
-    let default_panic = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        default_panic(info);
-        std::process::exit(1);
-    }));
+    // A panic in a request handler is answered with a 500 (`CatchPanicLayer` in `build_router`)
+    // and the instance keeps serving: exiting would let one bad request, retried by its client,
+    // stop every instance in turn. There is no long-lived background task to lose.
 
     let endpoint = config.endpoint;
     let port = config.port;
