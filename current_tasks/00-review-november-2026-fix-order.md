@@ -68,6 +68,12 @@ The suggested solutions are suggestions. Where a file says "decide", write the d
 | 19 | `bigquery-and-rrdcached-corrections.md` | Experimental backends. |
 | 20 | `auth-config-and-deployment-hardening.md` | Many small independent items. |
 
+### Added during the fixes
+
+| # | Task file | Why now |
+| --- | --- | --- |
+| 21 | `sensor-key-blake3.md` | Breaking change to the ClickHouse and BigQuery keys: best done before more data is stored there. After task 7. |
+
 ## Dependencies between tasks
 
 - Task 2 before 7 and 8 (they use the registration check).
