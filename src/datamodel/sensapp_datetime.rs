@@ -23,6 +23,13 @@ pub const EARLIEST_UNIX_US: i64 = -62_135_596_800_000_000;
 /// 9999-12-31T23:59:59.999999Z in Unix microseconds.
 pub const LATEST_UNIX_US: i64 = 253_402_300_799_999_999;
 
+/// A read bound in Unix microseconds, clamped to the times that can be stored. Every stored
+/// sample is inside, so the read finds the same samples, and an open end such as `i64::MAX`
+/// milliseconds (a Prometheus remote read) stays something the databases accept.
+pub fn clamp_to_storable_micros(micros: i64) -> i64 {
+    micros.clamp(EARLIEST_UNIX_US, LATEST_UNIX_US)
+}
+
 /// `value` / `unit` rounded down, clamped to the `i64` range.
 fn floor_div_saturating(value: i128, unit: i128) -> i64 {
     let value = value.div_euclid(unit);

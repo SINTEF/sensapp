@@ -22,14 +22,9 @@ const LABEL_LOOKUP_CHUNK: usize = 2000;
 /// `LIMIT` takes an INT64
 pub(super) const MAX_LIMIT: usize = i64::MAX as usize;
 
-/// BigQuery's TIMESTAMP goes from year 1 to year 9999
-const MIN_MICROS: i64 = -62_135_596_800_000_000;
-const MAX_MICROS: i64 = 253_402_300_799_999_999;
-
-/// A bound of a time window, that `TIMESTAMP_MICROS` accepts.
-pub fn clamp_micros(micros: i64) -> i64 {
-    micros.clamp(MIN_MICROS, MAX_MICROS)
-}
+/// A bound of a time window, that `TIMESTAMP_MICROS` accepts: BigQuery's TIMESTAMP goes from year
+/// 1 to year 9999, the times SensApp stores.
+pub use crate::datamodel::sensapp_datetime::clamp_to_storable_micros as clamp_micros;
 
 pub fn parse_uuid(sensor_uuid: &str) -> Result<Uuid> {
     Uuid::from_str(sensor_uuid).map_err(|error| {
@@ -414,11 +409,23 @@ mod tests {
     #[test]
     fn window_bounds_stay_inside_the_timestamp_range() {
         assert_eq!(clamp_micros(0), 0);
-        assert_eq!(clamp_micros(i64::MIN), MIN_MICROS);
-        assert_eq!(clamp_micros(i64::MAX), MAX_MICROS);
+        assert_eq!(
+            clamp_micros(i64::MIN),
+            crate::datamodel::sensapp_datetime::EARLIEST_UNIX_US
+        );
+        assert_eq!(
+            clamp_micros(i64::MAX),
+            crate::datamodel::sensapp_datetime::LATEST_UNIX_US
+        );
         // 0001-01-01 and 9999-12-31 23:59:59.999999 UTC
-        assert_eq!(MIN_MICROS / 1_000_000, -62_135_596_800);
-        assert_eq!(MAX_MICROS, 253_402_300_800 * 1_000_000 - 1);
+        assert_eq!(
+            crate::datamodel::sensapp_datetime::EARLIEST_UNIX_US / 1_000_000,
+            -62_135_596_800
+        );
+        assert_eq!(
+            crate::datamodel::sensapp_datetime::LATEST_UNIX_US,
+            253_402_300_800 * 1_000_000 - 1
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::datamodel::batch::Batch;
-use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+use crate::datamodel::sensapp_datetime::{SensAppDateTimeExt, clamp_to_storable_micros};
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::unit::Unit;
 use crate::datamodel::{
@@ -159,8 +159,8 @@ impl StorageInstance for DuckDBStorage {
             .context("Failed to parse sensor UUID")?
             .to_string();
         // DuckDB stores microsecond timestamps
-        let start_time_us = start_time.to_unix_microseconds_i64();
-        let end_time_us = end_time.to_unix_microseconds_i64();
+        let start_time_us = clamp_to_storable_micros(start_time.to_unix_microseconds_i64());
+        let end_time_us = clamp_to_storable_micros(end_time.to_unix_microseconds_i64());
 
         spawn_blocking(move || -> Result<Option<u64>> {
             let connection = connection.blocking_lock();
@@ -418,8 +418,10 @@ impl StorageInstance for DuckDBStorage {
     ) -> Result<Option<crate::datamodel::SensorData>> {
         let connection = Arc::clone(&self.connection);
         let sensor_uuid = sensor_uuid.to_string();
-        let start_time_us = start_time.map(|time| time.to_unix_microseconds_i64());
-        let end_time_us = end_time.map(|time| time.to_unix_microseconds_i64());
+        let start_time_us =
+            start_time.map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
+        let end_time_us =
+            end_time.map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
 
         spawn_blocking(move || -> Result<Option<SensorData>> {
             let connection = connection.blocking_lock();
@@ -718,8 +720,10 @@ impl StorageInstance for DuckDBStorage {
 
                 let start_time_us = options
                     .start_time
-                    .map(|time| time.to_unix_microseconds_i64());
-                let end_time_us = options.end_time.map(|time| time.to_unix_microseconds_i64());
+                    .map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
+                let end_time_us = options
+                    .end_time
+                    .map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
                 let origin_us = start_time_us.unwrap_or(0);
 
                 let samples = match sensor.sensor_type {
@@ -810,8 +814,10 @@ impl StorageInstance for DuckDBStorage {
     ) -> Result<Option<SensorData>> {
         let connection = Arc::clone(&self.connection);
         let sensor_uuid_owned = sensor_uuid.to_string();
-        let start_time_us = start_time.map(|time| time.to_unix_microseconds_i64());
-        let end_time_us = end_time.map(|time| time.to_unix_microseconds_i64());
+        let start_time_us =
+            start_time.map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
+        let end_time_us =
+            end_time.map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
 
         let latest_timestamp_us = spawn_blocking(move || -> Result<Option<i64>> {
             let connection = connection.blocking_lock();
@@ -857,8 +863,8 @@ impl StorageInstance for DuckDBStorage {
     ) -> Result<Option<SensorAvailabilitySummary>> {
         let connection = Arc::clone(&self.connection);
         let sensor_uuid_owned = sensor_uuid.to_string();
-        let start_time_us = start_time.to_unix_microseconds_i64();
-        let end_time_us = end_time.to_unix_microseconds_i64();
+        let start_time_us = clamp_to_storable_micros(start_time.to_unix_microseconds_i64());
+        let end_time_us = clamp_to_storable_micros(end_time.to_unix_microseconds_i64());
 
         spawn_blocking(move || -> Result<Option<SensorAvailabilitySummary>> {
             let connection = connection.blocking_lock();

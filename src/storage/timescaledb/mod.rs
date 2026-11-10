@@ -35,15 +35,12 @@ pub struct TimeScaleDBStorage {
     deduplicate_on_ingest: AtomicBool,
 }
 
-/// A read bound, clamped to what both `OffsetDateTime` and PostgreSQL hold: an open end such as
-/// `i64::MAX` milliseconds (a Prometheus remote read) stays the far future instead of becoming 1970.
-/// Written samples do not come here: `sensapp_datetime_to_offset_datetime` refuses them.
+/// A read bound. Clamped to the times that can be stored (years 1 to 9999, inside both
+/// `OffsetDateTime` and PostgreSQL): an open end such as `i64::MAX` milliseconds (a Prometheus
+/// remote read) stays the far future instead of becoming 1970. Written samples do not come here:
+/// `sensapp_datetime_to_offset_datetime` refuses them.
 fn micros_to_offset_datetime(timestamp_us: i64) -> sqlx::types::time::OffsetDateTime {
-    /// About 3990 BC, after PostgreSQL's first timestamp (4713 BC)
-    const MIN_US: i64 = -188_000_000_000_000_000;
-    /// 9999-12-31T23:59:59.999999Z, the last `OffsetDateTime`
-    const MAX_US: i64 = 253_402_300_799_999_999;
-    let timestamp_us = timestamp_us.clamp(MIN_US, MAX_US);
+    let timestamp_us = crate::datamodel::sensapp_datetime::clamp_to_storable_micros(timestamp_us);
     sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(timestamp_us) * 1000)
         .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
 }
