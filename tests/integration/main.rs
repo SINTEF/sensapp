@@ -18,6 +18,7 @@ mod data_lifecycle;
 mod datamodel;
 mod deduplication;
 mod health_check;
+mod identity_over_http;
 mod influxdb_integration;
 mod ingestion;
 mod jwt_auth;
