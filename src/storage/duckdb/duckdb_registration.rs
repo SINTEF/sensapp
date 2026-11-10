@@ -103,11 +103,16 @@ pub fn register_sensors(
                 bail!("sensor {} was not created", sensor.uuid);
             };
             for (name, description) in sensor.labels.iter() {
-                appender.append_row(params![
-                    sensor_id,
-                    label_names[name.as_str()],
-                    label_descriptions[description.as_str()]
-                ])?;
+                let (Some(name_id), Some(description_id)) = (
+                    label_names.get(name.as_str()),
+                    label_descriptions.get(description.as_str()),
+                ) else {
+                    bail!(
+                        "the label {name} of sensor {} was not registered",
+                        sensor.uuid
+                    );
+                };
+                appender.append_row(params![sensor_id, name_id, description_id])?;
             }
         }
         appender.flush()?;
