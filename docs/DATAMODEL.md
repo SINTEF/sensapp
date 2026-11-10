@@ -14,6 +14,8 @@ A write that names a UUID that exists must give the stored **name** and **type**
 
 An Arrow upload whose `sensapp.sensor.type` metadata is not the type of its `value` column is refused with `400`, except a text column declared `json`, which is how the Arrow export writes JSON series: its values are parsed as JSON.
 
+An Arrow batch holds the samples of one sensor: a `sensor_id` or `sensor_name` column must hold the same value on every row (text, or a dictionary of text), and a column that names two sensors, or has a null, is refused with `400`. Send one batch per sensor. A null timestamp is refused with `400`. A null value is no sample: the row is dropped (a location with a null latitude or longitude too), and a batch of only null values stores nothing.
+
 SensApp distinguises between:
 
  - **Integer** values, which are 64 bits integers.

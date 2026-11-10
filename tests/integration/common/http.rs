@@ -319,7 +319,7 @@ async fn test_publish_handler(
             )
         })?;
 
-        let sensor_data_maps = parse_arrow_sensors(&body_bytes).map_err(|e| {
+        let sensor_data_maps = parse_arrow_sensors(&body_bytes, 64 * 1024 * 1024).map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
                 format!("Invalid Arrow format: {}", e),

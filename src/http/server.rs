@@ -506,9 +506,13 @@ async fn publish_arrow_format(
         .await
         .map_err(|e| AppError::bad_request(anyhow::anyhow!("Failed to read Arrow body: {}", e)))?;
 
+    // Compressed buffers may not expand past the body limit, as for gzip and snappy bodies
+    let max_decompressed_bytes = crate::config::get()?.parse_http_body_limit()?;
+
     // Errors from parsing are caused by the payload
     let sensor_data_maps =
-        crate::importers::arrow::parse_arrow_sensors(&body_bytes).map_err(AppError::bad_request)?;
+        crate::importers::arrow::parse_arrow_sensors(&body_bytes, max_decompressed_bytes)
+            .map_err(AppError::bad_request)?;
 
     crate::importers::arrow::publish_arrow_sensors(sensor_data_maps, storage)
         .await
