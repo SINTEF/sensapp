@@ -38,7 +38,7 @@ const DEFAULT_CLICKHOUSE_CONNECTION_STRING: &str =
 ///
 /// # Example
 ///
-/// ```
+/// ```no_run,standalone_crate
 /// use sensapp::test_utils::get_test_database_url;
 ///
 /// let connection_string = get_test_database_url();

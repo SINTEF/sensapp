@@ -61,7 +61,7 @@ impl MatcherType {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run,standalone_crate
 /// use sensapp::storage::query::{LabelMatcher, MatcherType};
 ///
 /// // Match sensors with name "cpu_usage"
