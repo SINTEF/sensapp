@@ -21,8 +21,8 @@ An Arrow batch holds the samples of one sensor: a `sensor_id` or `sensor_name` c
 SensApp distinguises between:
 
  - **Integer** values, which are 64 bits integers.
- - **Float** values, which are IEEE 754 64 bits floating point numbers. Those are **approximates** values, check the section about floating point numbers for more information.
- - **Numeric** values, which are decimal numbers, that shouldn't be approximate values. This is not supported by SQLite 3, it was during the SQLite4 experimental project, but is supported by PostGreSQL and ClickHouse. In memory they are `rust_decimal::Decimal`: 96 bits of digits (about 28) and up to 28 digits after the point. A value, an Arrow decimal, or a sum or average outside that range is refused with an error. ClickHouse stores them as `Decimal(38, 8)`: 8 digits after the point (more are rounded), and every value of a `Decimal` fits. Its sums are computed on wider types, so a sum over the range is an error and not a wrapped number, and its average is exact to 8 digits.
+ - **Float** values, which are IEEE 754 64 bits floating point numbers. Those are **approximates** values, check the section about floating point numbers for more information. See [Non-finite floats](#non-finite-floats) for NaN and the infinities.
+ - **Numeric** values, which are decimal numbers, that shouldn't be approximate values. In memory they are `rust_decimal::Decimal`: 96 bits of digits (about 28) and up to 28 digits after the point. A value or an Arrow decimal outside that range is refused with an error. SQLite stores them as text, normalised (`1.00` is stored as `1`, so that it is a duplicate of `1`). ClickHouse stores them as `Decimal(38, 8)`, DuckDB as `DECIMAL(38, 9)` and BigQuery as `NUMERIC`: 8, 9 and 9 digits after the point, more are rounded, and every value of a `Decimal` fits. See [Aggregating Numeric values](#aggregating-numeric-values).
  - **String** values, which are UTF-8 encoded strings.
  - **Boolean** values, which are true or false.
  - **Locations** values, which are latitude and longitude coordinates, with an optional altitude. We consider earth as the center of the universe. _Do not_ use this type for space projects, and rely on multiple sensors instead.
@@ -199,6 +199,38 @@ There are high chances than your sensors will not be able to measure a value wit
 
 One safe solution is to store your values as strings. This is not going to be as efficient, but it should keep the precision along all your data pipelines.
 
+
+## Aggregating Numeric values
+
+The aggregations of Numeric values are exact on every backend:
+
+- `min` and `max` compare numbers. SQLite stores the values as text, so it computes the buckets of Numeric
+  series from the stored values, in SensApp, instead of comparing text in SQL.
+- `sum` is the exact sum. A sum that a `Decimal` cannot hold is refused with `400`, and so is a sum of an
+  Integer series outside the 64-bit range. A shorter `step` makes smaller sums.
+- `avg` is the exact sum divided by the count, rounded to the 28 digits of a `Decimal`. The databases
+  return the sum, and SensApp divides it: PostgreSQL divides large values with 16 significant digits, and
+  DuckDB through a float. An average whose sum does not fit is refused with `400`, even when the average
+  itself would fit. ClickHouse computes its average rounded to 8 digits after the point, and BigQuery its
+  own, rounded to 9.
+
+The Arrow export writes Numeric values as a `Decimal128` with 18 digits after the point, rounded. When a
+value of the export has more than 20 digits before the point, the scale is 38 minus those digits instead,
+at least 9, so that every value fits.
+
+## Non-finite floats
+
+- **The infinities are values.** `+Inf` and `-Inf` are stored and read back on every backend (RRDcached
+  aside, which stores consolidated rows). They are the extremes of `min` and `max`. `simplify` keeps
+  them as they are, and simplifies the other samples.
+- **NaN is no value.** A write that holds a NaN float or coordinate is refused with `400`: SQLite cannot
+  store it, and the backends order it differently in `min` and `max`. Prometheus remote write is the
+  exception. Prometheus writes a NaN *stale marker* when a series disappears, and a rule can compute NaN.
+  A `400` would make Prometheus drop the whole request, so the remote write drops its NaN samples instead.
+- **In JSON**, which has no NaN and no infinity, the JSON Lines export and `/series/{uuid}/last` write
+  them as the texts of Prometheus: `"+Inf"`, `"-Inf"`, and `"NaN"` (the average of `+Inf` and `-Inf`). The
+  SenML export leaves those samples out: SenML has no way to write them. CSV writes `inf`, `-inf` and
+  `NaN`, and Arrow writes them as floats.
 
 ## String Deduplication using Dictionaries
 

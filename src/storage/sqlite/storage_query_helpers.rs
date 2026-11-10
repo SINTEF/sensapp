@@ -93,15 +93,3 @@ pub(super) fn sqlite_float_expression(aggregation: Aggregation) -> &'static str 
         }
     }
 }
-
-pub(super) fn sqlite_numeric_expression(aggregation: Aggregation) -> &'static str {
-    match aggregation {
-        Aggregation::Avg => "AVG(value)",
-        Aggregation::Min => "MIN(value)",
-        Aggregation::Max => "MAX(value)",
-        Aggregation::Sum => "SUM(value)",
-        Aggregation::First | Aggregation::Last | Aggregation::Latest | Aggregation::Count => {
-            unreachable!("handled separately")
-        }
-    }
-}

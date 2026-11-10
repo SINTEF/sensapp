@@ -379,9 +379,12 @@ fn last_sample_json(samples: &crate::datamodel::TypedSamples) -> Option<(String,
                 json!(sample.value.to_string()),
             )
         }),
-        crate::datamodel::TypedSamples::Float(samples) => samples
-            .last()
-            .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),
+        crate::datamodel::TypedSamples::Float(samples) => samples.last().map(|sample| {
+            (
+                sample.datetime.to_rfc3339(),
+                crate::exporters::float_to_json(sample.value),
+            )
+        }),
         crate::datamodel::TypedSamples::String(samples) => samples
             .last()
             .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),

@@ -1017,11 +1017,12 @@ mod rrdcached_tests {
             .body(Body::from(body))?;
         assert_eq!(send(&router, request).await.0, StatusCode::NO_CONTENT);
 
+        // `__name__` is the name of the series, and not one of its labels
         let uuid = SensorModel::new_without_uuid(
             name.clone(),
             SensorType::Float,
             None,
-            Some(vec![("__name__".to_string(), name)].into_iter().collect()),
+            Some(Vec::<(String, String)>::new().into_iter().collect()),
         )?
         .uuid;
         let (status, body) = send(

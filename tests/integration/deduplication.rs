@@ -718,3 +718,31 @@ async fn at_ingestion_samples_are_deduplicated_against_compressed_chunks() -> Re
     assert_eq!(count(&storage, float).await?, 5);
     Ok(())
 }
+
+/// 1.0 and 1.00 are the same Numeric value, so the second is a duplicate. SQLite stores the
+/// values as text, and compared "1.0" with "1.00".
+#[tokio::test]
+#[serial]
+async fn at_ingestion_equal_numerics_are_duplicates() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    if !deduplicate_on_ingest(&storage, true).await? {
+        return Ok(());
+    }
+    let sensor = sensor("equal_numerics", SensorType::Numeric, Uuid::new_v4())?;
+    for (mantissa, scale) in [(10, 1), (100, 2), (1, 0)] {
+        let sample = Sample {
+            datetime: at(0),
+            value: rust_decimal::Decimal::new(mantissa, scale),
+        };
+        publish(
+            &storage,
+            &sensor,
+            TypedSamples::Numeric(vec![sample].into()),
+        )
+        .await?;
+    }
+    assert_eq!(count(&storage, &sensor).await?, 1);
+    Ok(())
+}

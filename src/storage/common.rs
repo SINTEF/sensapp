@@ -7,6 +7,7 @@ use anyhow::{Result, anyhow};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use smallvec::smallvec;
 use std::collections::{BTreeMap, BTreeSet};
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// The sensors of a batch, one per UUID, in UUID order. A UUID given twice with another name or
@@ -431,6 +432,9 @@ fn simplify_indices(points: &[[f64; 2]], tolerance: f64, high_quality: bool) -> 
         .collect()
 }
 
+/// The indices of the samples a simplification keeps. It runs over the finite values, scaled to
+/// the unit square: the non-finite ones (an infinity, NaN from an aggregation) have no place on a
+/// line, and are all kept.
 fn simplify_indices_f64<V, F>(
     samples: &[Sample<V>],
     value_fn: F,
@@ -440,35 +444,54 @@ fn simplify_indices_f64<V, F>(
 where
     F: Fn(&Sample<V>) -> f64,
 {
-    if samples.len() <= 2 {
-        return Ok((0..samples.len()).collect());
-    }
-
-    let min_ts = datetime_to_micros(&samples[0].datetime);
-    let max_ts = datetime_to_micros(&samples[samples.len() - 1].datetime);
-    let mut min_val = f64::INFINITY;
-    let mut max_val = f64::NEG_INFINITY;
-    for sample in samples {
-        let value = value_fn(sample);
-        min_val = min_val.min(value);
-        max_val = max_val.max(value);
-    }
-
-    let ts_span = (max_ts - min_ts).max(1) as f64;
-    let value_span = (max_val - min_val).abs().max(f64::EPSILON);
-
-    let points: Vec<[f64; 2]> = samples
+    let finite: Vec<(usize, i64, f64)> = samples
         .iter()
-        .map(|sample| {
-            [
-                (datetime_to_micros(&sample.datetime) - min_ts) as f64 / ts_span,
-                (value_fn(sample) - min_val) / value_span,
-            ]
+        .enumerate()
+        .map(|(index, sample)| {
+            (
+                index,
+                datetime_to_micros(&sample.datetime),
+                value_fn(sample),
+            )
         })
+        .filter(|(_, _, value)| value.is_finite())
         .collect();
-
-    let keep_indices = simplify_indices(&points, tolerance, high_quality);
-    Ok(keep_indices)
+    let mut keep: Vec<usize> = if finite.len() <= 2 {
+        finite.iter().map(|(index, _, _)| *index).collect()
+    } else {
+        let min_ts = finite[0].1;
+        let max_ts = finite[finite.len() - 1].1;
+        let (min_val, max_val) = finite.iter().fold(
+            (f64::INFINITY, f64::NEG_INFINITY),
+            |(min, max), (_, _, value)| (min.min(*value), max.max(*value)),
+        );
+        let ts_span = (max_ts - min_ts).max(1) as f64;
+        let value_span = (max_val - min_val).abs().max(f64::EPSILON);
+        let points: Vec<[f64; 2]> = finite
+            .iter()
+            .map(|(_, timestamp, value)| {
+                [
+                    (timestamp - min_ts) as f64 / ts_span,
+                    (value - min_val) / value_span,
+                ]
+            })
+            .collect();
+        simplify_indices(&points, tolerance, high_quality)
+            .into_iter()
+            .map(|kept| finite[kept].0)
+            .collect()
+    };
+    if finite.len() < samples.len() {
+        keep.extend(
+            samples
+                .iter()
+                .enumerate()
+                .filter(|(_, sample)| !value_fn(sample).is_finite())
+                .map(|(index, _)| index),
+        );
+        keep.sort_unstable();
+    }
+    Ok(keep)
 }
 
 pub(crate) fn bucket_start(timestamp_us: i64, origin_us: i64, step_us: i64) -> i64 {
@@ -625,7 +648,7 @@ fn aggregate_integer_samples(
             }),
             Aggregation::Sum => output_int.push(Sample {
                 datetime,
-                value: i64::try_from(sum).map_err(|_| anyhow!("integer aggregation overflowed"))?,
+                value: i64::try_from(sum).map_err(|_| aggregation_overflow())?,
             }),
             Aggregation::First => output_int.push(Sample {
                 datetime,
@@ -655,11 +678,69 @@ fn aggregate_integer_samples(
     })
 }
 
-fn numeric_overflow() -> anyhow::Error {
-    anyhow!("numeric aggregation overflowed")
+/// A sum of a bucket that the type of the series cannot hold (an `i64`, a `Decimal`): an error of
+/// the request, which can ask for a shorter step, and not of the server.
+pub(crate) fn aggregation_overflow() -> anyhow::Error {
+    crate::storage::StorageError::invalid_data_format(
+        "the sum of a bucket does not fit in the type of the series: use a shorter step",
+        None,
+        None,
+    )
+    .into()
 }
 
-fn aggregate_numeric_samples(
+/// The error of a database whose sum left the range of its type: SQLite fails with "integer
+/// overflow", PostgreSQL with `numeric_value_out_of_range` (22003). An [`aggregation_overflow`].
+pub(crate) fn sql_sum_overflow(error: sqlx::Error) -> anyhow::Error {
+    let out_of_range = match &error {
+        sqlx::Error::Database(database) => {
+            database.code().as_deref() == Some("22003")
+                || database.message().contains("integer overflow")
+        }
+        _ => false,
+    };
+    if out_of_range {
+        aggregation_overflow()
+    } else {
+        error.into()
+    }
+}
+
+/// A Numeric aggregate that a database returned as text: a value, or `sum/count` for an average.
+/// The average is divided here, so that it is the exact average on every backend: SQL databases
+/// give it with their own precision (PostgreSQL with 16 significant digits for large values, DuckDB
+/// through a float). A sum that a `Decimal` cannot hold is an [`aggregation_overflow`]; extra
+/// digits after the point are rounded.
+#[cfg_attr(
+    not(any(feature = "postgres", feature = "timescaledb", feature = "duckdb")),
+    allow(dead_code)
+)]
+pub(crate) fn numeric_aggregate_from_text(text: &str) -> Result<Decimal> {
+    let (sum, count) = match text.split_once('/') {
+        Some((sum, count)) => (sum, Some(count)),
+        None => (text, None),
+    };
+    let sum = Decimal::from_str(sum.trim()).map_err(|error| {
+        if error.to_string().contains("overflow") {
+            aggregation_overflow()
+        } else {
+            anyhow!("unreadable Numeric aggregate {text:?}: {error}")
+        }
+    })?;
+    match count {
+        None => Ok(sum),
+        Some(count) => {
+            let count: i64 = count
+                .trim()
+                .parse()
+                .map_err(|error| anyhow!("unreadable count in {text:?}: {error}"))?;
+            sum.checked_div(Decimal::from(count))
+                .ok_or_else(aggregation_overflow)
+        }
+    }
+}
+
+pub(crate) fn aggregate_numeric_samples(
     samples: &[Sample<Decimal>],
     origin_us: i64,
     step_us: i64,
@@ -708,7 +789,7 @@ fn aggregate_numeric_samples(
         match aggregation {
             Aggregation::Avg => output_numeric.push(Sample {
                 datetime,
-                value: sum.ok_or_else(numeric_overflow)? / Decimal::from(count),
+                value: sum.ok_or_else(aggregation_overflow)? / Decimal::from(count),
             }),
             Aggregation::Min => output_numeric.push(Sample {
                 datetime,
@@ -720,7 +801,7 @@ fn aggregate_numeric_samples(
             }),
             Aggregation::Sum => output_numeric.push(Sample {
                 datetime,
-                value: sum.ok_or_else(numeric_overflow)?,
+                value: sum.ok_or_else(aggregation_overflow)?,
             }),
             Aggregation::First => output_numeric.push(Sample {
                 datetime,

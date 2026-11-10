@@ -171,16 +171,23 @@ pub async fn publish_prometheus(
 
             let sensor = Sensor::new_without_uuid(name, SensorType::Float, unit, Some(labels))?;
 
+            // NaN is not stored: Prometheus writes a NaN stale marker when a series disappears,
+            // and a rule can compute NaN. A 400 would make Prometheus drop the whole request
             let samples = TypedSamples::Float(
                 time_serie
                     .samples
                     .into_iter()
+                    .filter(|sample| !sample.value.is_nan())
                     .map(|sample| Sample {
                         datetime: SensAppDateTime::from_unix_milliseconds_i64(sample.timestamp),
                         value: sample.value,
                     })
                     .collect(),
             );
+            if samples.is_empty() {
+                // Only stale markers: nothing to store, not even the series
+                continue;
+            }
 
             series += 1;
             sample_count += samples.len();

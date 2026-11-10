@@ -25,6 +25,7 @@ mod influxdb_integration;
 mod ingestion;
 mod jwt_auth;
 mod long_texts;
+mod non_finite_values;
 mod numeric_values;
 mod parser_edge_cases;
 mod payload_errors;

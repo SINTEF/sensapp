@@ -616,14 +616,18 @@ pub(super) fn timescaledb_float_expression(aggregation: Aggregation) -> &'static
     }
 }
 
+/// The Numeric aggregates as text, read with [`numeric_aggregate_from_text`]: the average as
+/// `sum/count`, divided in Rust, as on PostgreSQL.
+///
+/// [`numeric_aggregate_from_text`]: crate::storage::common::numeric_aggregate_from_text
 pub(super) fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
-        Aggregation::Avg => "AVG(value)",
-        Aggregation::Min => "MIN(value)",
-        Aggregation::Max => "MAX(value)",
-        Aggregation::Sum => "SUM(value)",
-        Aggregation::First => "first(value, time)",
-        Aggregation::Last | Aggregation::Latest => "last(value, time)",
+        Aggregation::Avg => "SUM(value)::text || '/' || COUNT(*)",
+        Aggregation::Min => "MIN(value)::text",
+        Aggregation::Max => "MAX(value)::text",
+        Aggregation::Sum => "SUM(value)::text",
+        Aggregation::First => "first(value, time)::text",
+        Aggregation::Last | Aggregation::Latest => "last(value, time)::text",
         Aggregation::Count => unreachable!("handled separately"),
     }
 }
@@ -1744,7 +1748,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1774,7 +1779,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1806,7 +1812,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1855,7 +1862,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1887,7 +1895,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1936,7 +1945,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1951,7 +1961,7 @@ impl TimeScaleDBStorage {
                 #[derive(sqlx::FromRow)]
                 struct Row {
                     bucket_time: sqlx::types::time::OffsetDateTime,
-                    value: rust_decimal::Decimal,
+                    value: String,
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -1968,13 +1978,14 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
                     samples.push(Sample {
                         datetime: offset_datetime_to_sensapp(row.bucket_time),
-                        value: row.value,
+                        value: crate::storage::common::numeric_aggregate_from_text(&row.value)?,
                     });
                 }
                 Ok(TypedSamples::Numeric(samples))

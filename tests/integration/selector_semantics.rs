@@ -2,7 +2,7 @@
 //! `__name__` select the series by name, and what SensApp does not implement is refused instead of
 //! ignored. These tests run on the backend selected by `TEST_DATABASE_URL`, through the real router.
 
-use crate::common::TestDb;
+use crate::common::{DatabaseType, TestDb};
 use anyhow::Result;
 use axum::Router;
 use axum::body::Body;
@@ -92,6 +92,10 @@ async fn listed(app: &Router, selector: &str) -> Vec<String> {
 async fn series_selectors_select_by_metric_name() -> Result<()> {
     ensure_config();
     let db = TestDb::new().await?;
+    // RRDcached keeps no names nor labels
+    if db.db_type == DatabaseType::RRDcached {
+        return Ok(());
+    }
     let storage = db.storage();
     let mut batch = BatchBuilder::new()?;
     for (name, room) in [
@@ -196,6 +200,10 @@ async fn selectors_sensapp_cannot_honour_are_400() -> Result<()> {
 async fn remote_write_then_read_keeps_one_metric_name() -> Result<()> {
     ensure_config();
     let db = TestDb::new().await?;
+    // RRDcached keeps no names nor labels
+    if db.db_type == DatabaseType::RRDcached {
+        return Ok(());
+    }
     let app = app(db.storage());
 
     let labels = [

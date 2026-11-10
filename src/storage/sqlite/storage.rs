@@ -2,7 +2,7 @@ use super::sqlite_publishers::*;
 use super::sqlite_utilities::{ensure_string_values, register_sensors};
 use super::storage_query_helpers::{
     sqlite_bucketed_cte, sqlite_first_last_query, sqlite_float_expression, sqlite_group_by_clause,
-    sqlite_integer_expression, sqlite_numeric_expression,
+    sqlite_integer_expression,
 };
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
@@ -1435,7 +1435,8 @@ impl SqliteStorage {
                 .bind(origin_us)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1558,7 +1559,7 @@ impl SqliteStorage {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn query_numeric_samples_aggregated(
+    pub(super) async fn query_numeric_samples_aggregated(
         &self,
         sensor_id: i64,
         start_time: Option<i64>,
@@ -1626,43 +1627,32 @@ impl SqliteStorage {
                 for row in rows {
                     samples.push(Sample {
                         datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
-                        value: Decimal::from_str(&row.value)
+                        value: Decimal::from_str_exact(&row.value)
                             .context("Failed to parse aggregated SQLite numeric value")?,
                     });
                 }
                 Ok(TypedSamples::Numeric(samples))
             }
-            _ => {
-                #[derive(sqlx::FromRow)]
-                struct Row {
-                    timestamp_us: i64,
-                    value: String,
+            // SQLite stores the values as text, and its MIN and MAX compare text, its SUM and AVG
+            // go through a float: the buckets are computed here, exactly, from the stored values
+            Aggregation::Min | Aggregation::Max | Aggregation::Sum | Aggregation::Avg => {
+                // `usize::MAX` is a limit of -1 for SQLite: no limit
+                let TypedSamples::Numeric(samples) = self
+                    .query_numeric_samples(sensor_id, start_time, end_time, Some(usize::MAX))
+                    .await?
+                else {
+                    unreachable!("numeric samples")
+                };
+                let mut buckets = crate::storage::common::aggregate_numeric_samples(
+                    &samples,
+                    origin_us,
+                    step_us,
+                    aggregation,
+                )?;
+                if let TypedSamples::Numeric(buckets) = &mut buckets {
+                    buckets.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
                 }
-
-                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_us AS timestamp_us, CAST({} AS TEXT) AS value {}",
-                    sqlite_bucketed_cte("numeric_values"),
-                    sqlite_numeric_expression(aggregation),
-                    sqlite_group_by_clause()
-                )))
-                .bind(sensor_id)
-                .bind(start_time)
-                .bind(end_time)
-                .bind(step_us)
-                .bind(origin_us)
-                .bind(limit)
-                .fetch_all(&self.pool)
-                .await?;
-
-                let mut samples = smallvec![];
-                for row in rows {
-                    samples.push(Sample {
-                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
-                        value: Decimal::from_str(&row.value)
-                            .context("Failed to parse aggregated SQLite numeric value")?,
-                    });
-                }
-                Ok(TypedSamples::Numeric(samples))
+                Ok(buckets)
             }
         }
     }
@@ -1701,7 +1691,8 @@ impl SqliteStorage {
         let mut samples = smallvec![];
         for row in rows {
             let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = Decimal::from_str(&row.value).context("Failed to parse decimal value")?;
+            let value =
+                Decimal::from_str_exact(&row.value).context("Failed to parse decimal value")?;
             samples.push(Sample { datetime, value });
         }
 

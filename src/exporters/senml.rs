@@ -225,17 +225,18 @@ impl SenMLConverter {
         samples: &crate::datamodel::SensAppVec<Sample<f64>>,
         base_time_us: i64,
     ) -> Vec<Value> {
+        // SenML has no way to write NaN or an infinity, which JSON would write as null: those
+        // samples are left out
         samples
             .iter()
-            .enumerate()
-            .map(|(i, sample)| {
+            .filter(|sample| sample.value.is_finite())
+            .map(|sample| {
                 let mut record = Map::new();
-                if i == 0 {
+                let relative_us = datetime_to_us(&sample.datetime) - base_time_us;
+                if relative_us == 0 {
                     record.insert("t".to_string(), json!(0));
                 } else {
-                    let relative_time =
-                        (datetime_to_us(&sample.datetime) - base_time_us) as f64 / 1_000_000.0;
-                    record.insert("t".to_string(), json!(relative_time));
+                    record.insert("t".to_string(), json!(relative_us as f64 / 1_000_000.0));
                 }
                 record.insert("v".to_string(), json!(sample.value));
                 json!(record)

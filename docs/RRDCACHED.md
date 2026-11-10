@@ -152,7 +152,9 @@ rrdtool tune /var/lib/rrdcached/db/<uuid>.rrd --heartbeat sensapp:3600
   has newer data, and two instances that write the same series at the same time can only both keep the samples that
   are in order.
 - Times before 1970 are not stored.
-- A value that is `NaN` (a Prometheus stale marker) is an unknown value: it is stored as a hole.
+- `NaN` never reaches RRDcached: a write that holds one is refused with `400`, and Prometheus remote write drops
+  its NaN samples (the stale markers), see [DATAMODEL.md](DATAMODEL.md#non-finite-floats). A series that stops
+  being written becomes unknown in RRDcached after its heartbeat anyway.
 
 ## How the data is read
 

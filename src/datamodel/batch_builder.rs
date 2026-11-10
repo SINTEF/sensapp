@@ -33,6 +33,18 @@ fn holds_a_nul(samples: &TypedSamples) -> bool {
     }
 }
 
+/// Whether a float or a coordinate is NaN. NaN is no value: SQLite cannot store it, and the
+/// backends order it differently, so it is refused on every backend. The infinities are values.
+fn holds_a_nan(samples: &TypedSamples) -> bool {
+    match samples {
+        TypedSamples::Float(samples) => samples.iter().any(|sample| sample.value.is_nan()),
+        TypedSamples::Location(samples) => samples
+            .iter()
+            .any(|sample| sample.value.x().is_nan() || sample.value.y().is_nan()),
+        _ => false,
+    }
+}
+
 /// A batch builder is used to build a batch from a stream of samples.
 pub struct BatchBuilder {
     batch_size: usize,
@@ -68,6 +80,13 @@ impl BatchBuilder {
         if holds_a_nul(&samples) {
             return Err(StorageError::InvalidDataFormat {
                 message: "a value holds a NUL character, which PostgreSQL cannot store".to_string(),
+                sensor_context: sensor.name.clone(),
+            }
+            .into());
+        }
+        if holds_a_nan(&samples) {
+            return Err(StorageError::InvalidDataFormat {
+                message: "a value is NaN, which is not a number to store".to_string(),
                 sensor_context: sensor.name.clone(),
             }
             .into());

@@ -210,7 +210,11 @@ impl ClickHouseStorage {
                     .fetch::<(u64, i64, $value)>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut result: HashMap<u64, TypedSamples> = HashMap::new();
-                while let Some((sensor_id, timestamp_us, value)) = cursor.next().await? {
+                while let Some((sensor_id, timestamp_us, value)) = cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     if let TypedSamples::$variant(samples) = result
                         .entry(sensor_id)
                         .or_insert_with(|| empty_samples(SensorType::$variant))

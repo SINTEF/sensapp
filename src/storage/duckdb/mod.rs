@@ -1339,7 +1339,10 @@ fn duckdb_query_integer_samples_aggregated(
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_us: i64 = row.get(0)?;
-                let value: i64 = row.get(1)?;
+                // The sum of BIGINTs is a HUGEINT
+                let value: i128 = row.get(1)?;
+                let value = i64::try_from(value)
+                    .map_err(|_| crate::storage::common::aggregation_overflow())?;
                 samples.push(Sample {
                     datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
                         timestamp_us,
@@ -1525,8 +1528,11 @@ fn duckdb_query_numeric_samples_aggregated(
             Ok(TypedSamples::Numeric(samples))
         }
         _ => {
+            // As text, the average as `sum/count`: AVG of a DECIMAL is a DOUBLE in DuckDB
             let expression = match aggregation {
-                Aggregation::Avg => "CAST(AVG(value) AS VARCHAR)",
+                Aggregation::Avg => {
+                    "CAST(SUM(value) AS VARCHAR) || '/' || CAST(COUNT(*) AS VARCHAR)"
+                }
                 Aggregation::Min => "CAST(MIN(value) AS VARCHAR)",
                 Aggregation::Max => "CAST(MAX(value) AS VARCHAR)",
                 Aggregation::Sum => "CAST(SUM(value) AS VARCHAR)",
@@ -1539,26 +1545,37 @@ fn duckdb_query_numeric_samples_aggregated(
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![
-                sensor_id,
-                start_time_us,
-                end_time_us,
-                origin_us,
-                limit
-            ])?;
+            let mut rows = statement
+                .query(duckdb::params![
+                    sensor_id,
+                    start_time_us,
+                    end_time_us,
+                    origin_us,
+                    limit
+                ])
+                .map_err(sum_overflow)?;
             let mut samples = smallvec![];
-            while let Some(row) = rows.next()? {
+            while let Some(row) = rows.next().map_err(sum_overflow)? {
                 let timestamp_us: i64 = row.get(0)?;
                 let value: String = row.get(1)?;
                 samples.push(Sample {
                     datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
                         timestamp_us,
                     ),
-                    value: Decimal::from_str(&value)
-                        .context("Failed to parse DuckDB aggregated numeric value")?,
+                    value: crate::storage::common::numeric_aggregate_from_text(&value)?,
                 });
             }
             Ok(TypedSamples::Numeric(samples))
         }
+    }
+}
+
+/// DuckDB fails with "Overflow in SUM" when the sum of DECIMALs leaves DECIMAL(38): an error of
+/// the request, as on the other backends.
+fn sum_overflow(error: duckdb::Error) -> anyhow::Error {
+    if error.to_string().contains("Overflow in SUM") {
+        crate::storage::common::aggregation_overflow()
+    } else {
+        error.into()
     }
 }

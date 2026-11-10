@@ -92,7 +92,9 @@ pub async fn publish_numeric_values(
         query.push_values(chunk, |mut row, value| {
             row.push_bind(sensor_id)
                 .push_bind(datetime_to_micros(&value.datetime))
-                .push_bind(value.value.to_string());
+                // Normalised: 1.0 and 1.00 are the same value, and must be the same text for the
+                // deduplication, which compares the stored text
+                .push_bind(value.value.normalize().to_string());
         });
         insert_end(
             &mut query,
@@ -111,13 +113,8 @@ pub async fn publish_float_values(
     values: &[Sample<f64>],
     deduplicate: bool,
 ) -> Result<()> {
-    // SQLite's REAL type doesn't support NaN or Inf - they get converted to NULL
-    // which violates the NOT NULL constraint. Skip these values.
-    let finite_values: Vec<&Sample<f64>> = values
-        .iter()
-        .filter(|value| value.value.is_finite())
-        .collect();
-    for chunk in finite_values.chunks(MAX_ROWS_PER_INSERT) {
+    // A REAL holds the infinities. NaN would become NULL, but the batch builder refuses it
+    for chunk in values.chunks(MAX_ROWS_PER_INSERT) {
         let mut query = insert_start(
             "float_values",
             "sensor_id, timestamp_us, value",

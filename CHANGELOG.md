@@ -14,6 +14,16 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 - `/series?selector=` and `/prometheus/metrics?selector=` select by the metric name: `temperature{room="a"}`
   and `{__name__="temperature"}` used to ignore the name.
 - `offset` and `@` in a selector or a `/api/v1/query` answer `400` instead of being ignored.
+- **NaN is refused** with `400` in every write, instead of being stored on some backends and dropped on
+  SQLite. Prometheus remote write drops its NaN samples (stale markers). The infinities are stored on every
+  backend, SQLite included, and the JSON Lines export and `/last` write them, and NaN, as `"+Inf"`, `"-Inf"`
+  and `"NaN"` instead of `null`. The SenML export leaves them out.
+- **Numeric aggregations are exact**: SQLite compared the values as text, PostgreSQL averaged large values
+  with 16 significant digits, and DuckDB through a float. A sum that does not fit, Numeric or Integer,
+  answers `400` instead of `500`, and so does its average. SQLite stores Numeric values normalised.
+- The Arrow export of Numeric values lowers the scale of its `Decimal128` below 18 when a value needs more
+  than 20 digits before the point. A value with more than 18 digits after the point is rounded, where it was
+  written off by a power of ten, and a large value wrapped.
 
 ## 0.4.2
 

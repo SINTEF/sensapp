@@ -1269,7 +1269,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1298,7 +1302,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1328,7 +1336,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1370,7 +1382,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1400,7 +1416,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1442,7 +1462,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1472,7 +1496,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: decimal_from_clickhouse_raw(row.value)?,
@@ -1793,7 +1821,11 @@ fn clickhouse_float_expression(aggregation: Aggregation) -> &'static str {
 
 fn clickhouse_numeric_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
-        Aggregation::Avg => "accurateCast(sum(toDecimal256(value, 8)) / count(), 'Decimal(38, 8)')",
+        // The sum must fit in a `Decimal`, as on the other backends, where the average is the
+        // sum divided by the count
+        Aggregation::Avg => {
+            "accurateCast((sum(toDecimal256(value, 8)) + throwIf(abs(sum(toDecimal256(value, 8))) > toDecimal256('79228162514264337593543950335', 0), 'the sum of a bucket does not fit')) / count(), 'Decimal(38, 8)')"
+        }
         Aggregation::Min => "min(value)",
         Aggregation::Max => "max(value)",
         Aggregation::Sum => "accurateCast(sum(toDecimal256(value, 8)), 'Decimal(38, 8)')",

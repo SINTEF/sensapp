@@ -289,6 +289,17 @@ pub fn classify_clickhouse_error(error: &clickhouse::error::Error) -> StorageErr
         {
             StorageError::Unavailable(message.clone())
         }
+        // The `accurateCast` and the `throwIf` of an aggregation whose sum leaves the type of
+        // the series (CANNOT_CONVERT_TYPE, FUNCTION_THROW_IF_VALUE_IS_NON_ZERO)
+        Error::BadResponse(message)
+            if server_error_code(message).is_some_and(|code| code == 70 || code == 395) =>
+        {
+            StorageError::invalid_data_format(
+                "the sum of a bucket does not fit in the type of the series: use a shorter step",
+                None,
+                None,
+            )
+        }
         other => StorageError::OperationFailed {
             operation: "ClickHouse request".to_string(),
             details: other.to_string(),
