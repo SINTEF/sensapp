@@ -52,6 +52,20 @@ impl TypedSamples {
         }
     }
 
+    /// The times of the samples, in order.
+    pub fn datetimes(&self) -> Box<dyn Iterator<Item = SensAppDateTime> + '_> {
+        match self {
+            TypedSamples::Integer(vec) => Box::new(vec.iter().map(|s| s.datetime)),
+            TypedSamples::Numeric(vec) => Box::new(vec.iter().map(|s| s.datetime)),
+            TypedSamples::Float(vec) => Box::new(vec.iter().map(|s| s.datetime)),
+            TypedSamples::String(vec) => Box::new(vec.iter().map(|s| s.datetime)),
+            TypedSamples::Boolean(vec) => Box::new(vec.iter().map(|s| s.datetime)),
+            TypedSamples::Location(vec) => Box::new(vec.iter().map(|s| s.datetime)),
+            TypedSamples::Blob(vec) => Box::new(vec.iter().map(|s| s.datetime)),
+            TypedSamples::Json(vec) => Box::new(vec.iter().map(|s| s.datetime)),
+        }
+    }
+
     /// Keep the first `len` samples.
     pub fn truncate(&mut self, len: usize) {
         match self {

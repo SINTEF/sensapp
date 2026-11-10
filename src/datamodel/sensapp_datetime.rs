@@ -16,6 +16,13 @@ pub trait SensAppDateTimeExt {
     fn to_unix_seconds_i64(&self) -> i64;
 }
 
+/// 0001-01-01T00:00:00Z in Unix microseconds. With [`LATEST_UNIX_US`], the times every backend
+/// stores: BigQuery's `TIMESTAMP` and TimescaleDB (through `OffsetDateTime`) stop at years 1 and
+/// 9999. Writes outside are refused.
+pub const EARLIEST_UNIX_US: i64 = -62_135_596_800_000_000;
+/// 9999-12-31T23:59:59.999999Z in Unix microseconds.
+pub const LATEST_UNIX_US: i64 = 253_402_300_799_999_999;
+
 /// `value` / `unit` rounded down, clamped to the `i64` range.
 fn floor_div_saturating(value: i128, unit: i128) -> i64 {
     let value = value.div_euclid(unit);

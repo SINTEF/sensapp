@@ -2,7 +2,11 @@ use super::{
     Sensor, TypedSamples,
     batch::{Batch, SingleSensorBatch},
 };
-use crate::{datamodel::SensAppVec, storage::StorageInstance};
+use crate::datamodel::sensapp_datetime::{EARLIEST_UNIX_US, LATEST_UNIX_US, SensAppDateTimeExt};
+use crate::{
+    datamodel::SensAppVec,
+    storage::{StorageError, StorageInstance},
+};
 use anyhow::Error;
 use hybridmap::HybridMap;
 use std::sync::Arc;
@@ -29,7 +33,18 @@ impl BatchBuilder {
         })
     }
 
+    /// Adds samples to the batch. A sample outside years 1 to 9999 is refused, see
+    /// [`EARLIEST_UNIX_US`].
     pub async fn add(&mut self, sensor: Arc<Sensor>, samples: TypedSamples) -> Result<(), Error> {
+        if let Some(datetime) = samples.datetimes().find(|datetime| {
+            !(EARLIEST_UNIX_US..=LATEST_UNIX_US).contains(&datetime.to_unix_microseconds_i64())
+        }) {
+            return Err(StorageError::InvalidDataFormat {
+                message: format!("the time {datetime} is outside years 1 to 9999"),
+                sensor_context: sensor.name.clone(),
+            }
+            .into());
+        }
         let uuid = sensor.uuid;
         let mut write_guard = self.single_sensor_batches.write().await;
         let single_sensor_batches = &mut *write_guard;
@@ -214,6 +229,33 @@ mod tests {
         config::load_configuration,
         datamodel::{Sample, SensorType, sensapp_vec::SensAppLabels},
     };
+
+    /// Times outside years 1 to 9999 are refused as invalid data (a 400), the edges are kept.
+    #[tokio::test]
+    async fn test_times_outside_years_1_to_9999_are_refused() {
+        load_configuration().unwrap();
+        let at = |us: i64| {
+            TypedSamples::Float(smallvec::smallvec![Sample {
+                datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(us),
+                value: 1.0,
+            }])
+        };
+        let sensor = create_test_sensor(Uuid::new_v4());
+        let mut builder = BatchBuilder::new().unwrap();
+        for us in [EARLIEST_UNIX_US, LATEST_UNIX_US, 0] {
+            builder.add(sensor.clone(), at(us)).await.unwrap();
+        }
+        for us in [EARLIEST_UNIX_US - 1, LATEST_UNIX_US + 1, i64::MAX, i64::MIN] {
+            let error = builder.add(sensor.clone(), at(us)).await.unwrap_err();
+            assert!(
+                matches!(
+                    error.downcast_ref::<StorageError>(),
+                    Some(StorageError::InvalidDataFormat { .. })
+                ),
+                "{us}: {error}"
+            );
+        }
+    }
 
     // Utility function to create a test sensor
     fn create_test_sensor(uuid: Uuid) -> Arc<Sensor> {
