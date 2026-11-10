@@ -243,20 +243,18 @@ pub(crate) fn parse_selector_to_matchers(selector: &str) -> Result<Vec<LabelMatc
 
     // Extract matchers from the AST
     match ast {
-        Expr::VectorSelector(vs) => {
-            let matchers: Vec<LabelMatcher> = vs
-                .matchers
-                .iter()
-                .map(|m| {
-                    LabelMatcher::new(
-                        m.name.clone(),
-                        m.value.clone(),
-                        convert_label_match_op(m.op),
-                    )
-                })
-                .collect();
-            Ok(matchers)
-        }
+        Expr::VectorSelector(vs) => vs
+            .matchers
+            .iter()
+            .map(|m| {
+                LabelMatcher::try_new(
+                    m.name.clone(),
+                    m.value.clone(),
+                    convert_label_match_op(m.op),
+                )
+                .map_err(AppError::bad_request)
+            })
+            .collect(),
         _ => Err(AppError::bad_request(anyhow::anyhow!(
             "Selector must be a simple label selector like '{{env=\"prod\"}}'"
         ))),
