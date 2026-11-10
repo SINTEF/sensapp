@@ -37,6 +37,18 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS", default = 30)]
     pub http_body_read_timeout_seconds: u64,
 
+    /// Longest a PostgreSQL or TimescaleDB statement may run before the database cancels it, in
+    /// seconds, 0 for no limit. A request that times out does not cancel its statement: without it,
+    /// a few slow statements would hold every connection of the pool. A little more than
+    /// `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS` by default. The vacuum has the maintenance timeout.
+    #[config(env = "SENSAPP_PG_STATEMENT_TIMEOUT_SECONDS", default = 130)]
+    pub pg_statement_timeout_seconds: u64,
+
+    /// Longest a PostgreSQL or TimescaleDB statement may wait for a lock, in seconds, 0 for no
+    /// limit.
+    #[config(env = "SENSAPP_PG_LOCK_TIMEOUT_SECONDS", default = 60)]
+    pub pg_lock_timeout_seconds: u64,
+
     /// Time the maintenance request (`POST /api/v1/admin/vacuum`) may take before it is answered
     /// with a 504. Removing duplicates scans every value table, so it is much longer than the
     /// timeout of the other requests.

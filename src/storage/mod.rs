@@ -263,6 +263,8 @@ pub mod pg_samples;
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]
 pub mod pg_sensor_registration;
 #[cfg(any(feature = "postgres", feature = "timescaledb"))]
+pub mod pg_session;
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
 pub mod pg_strings;
 
 // Storage backends - conditionally compiled based on features

@@ -79,7 +79,10 @@ impl PostgresStorage {
                     Ok(())
                 })
             })
-            .connect_with(connect_options)
+            .connect_with(crate::storage::pg_session::with_timeouts(
+                connect_options,
+                connection_string,
+            ))
             .await
             .context("Failed to create postgres pool")?;
 
@@ -329,8 +332,9 @@ impl StorageInstance for PostgresStorage {
     }
 
     async fn vacuum(&self) -> Result<()> {
+        let mut connection = crate::storage::pg_session::maintenance_connection(&self.pool).await?;
         sqlx::query("VACUUM")
-            .execute(&self.pool)
+            .execute(&mut connection)
             .await
             .context("Failed to vacuum database")?;
 
@@ -347,6 +351,7 @@ impl StorageInstance for PostgresStorage {
         // fails. Within a group of equal samples the first one written is kept. `(tableoid, ctid)`
         // identifies a row of a partitioned table; the table names and the columns come from
         // static lists.
+        let mut connection = crate::storage::pg_session::maintenance_connection(&self.pool).await?;
         let mut removed = 0;
         for table in VALUE_TABLES {
             let columns = crate::storage::common::duplicate_key_columns(table, "timestamp_us");
@@ -359,7 +364,7 @@ impl StorageInstance for PostgresStorage {
                    WHERE duplicate_rank > 1)"
             );
             removed += sqlx::query(sqlx::AssertSqlSafe(sql))
-                .execute(&self.pool)
+                .execute(&mut connection)
                 .await
                 .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
                 .rows_affected();
