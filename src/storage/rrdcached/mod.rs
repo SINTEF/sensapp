@@ -118,7 +118,7 @@ fn is_existing_file(error: &RRDCachedClientError) -> bool {
 }
 
 fn unix_seconds(datetime: &SensAppDateTime) -> i64 {
-    datetime.to_unix_seconds().floor() as i64
+    datetime.to_unix_seconds_i64()
 }
 
 fn now_seconds() -> i64 {

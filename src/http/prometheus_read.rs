@@ -604,7 +604,9 @@ fn extract_prom_samples_for_chunks(
                 .iter()
                 .map(|s| PromSample {
                     value: s.value,
-                    timestamp: s.datetime.to_unix_milliseconds().floor() as i64,
+                    timestamp: crate::parsing::prometheus::converter::datetime_to_millis(
+                        &s.datetime,
+                    ),
                 })
                 .collect();
             Some(prom_samples)
@@ -614,7 +616,9 @@ fn extract_prom_samples_for_chunks(
                 .iter()
                 .map(|s| PromSample {
                     value: s.value as f64,
-                    timestamp: s.datetime.to_unix_milliseconds().floor() as i64,
+                    timestamp: crate::parsing::prometheus::converter::datetime_to_millis(
+                        &s.datetime,
+                    ),
                 })
                 .collect();
             Some(prom_samples)
@@ -626,7 +630,9 @@ fn extract_prom_samples_for_chunks(
                 .filter_map(|s| {
                     s.value.to_f64().map(|value| PromSample {
                         value,
-                        timestamp: s.datetime.to_unix_milliseconds().floor() as i64,
+                        timestamp: crate::parsing::prometheus::converter::datetime_to_millis(
+                            &s.datetime,
+                        ),
                     })
                 })
                 .collect();

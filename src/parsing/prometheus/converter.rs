@@ -126,7 +126,8 @@ fn typed_samples_to_prom_samples(typed_samples: &TypedSamples) -> Option<Vec<Pro
 /// Unix timestamp in milliseconds (i64)
 #[inline]
 pub(crate) fn datetime_to_millis(datetime: &crate::datamodel::SensAppDateTime) -> i64 {
-    (datetime.to_unix_milliseconds()).floor() as i64
+    use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+    datetime.to_unix_milliseconds_i64()
 }
 
 #[cfg(test)]
