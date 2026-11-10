@@ -31,6 +31,7 @@ mod query_export;
 mod query_sensors_by_labels;
 mod real_router;
 mod regex_matchers;
+mod request_panics;
 mod rolled_back_publish;
 mod rrdcached_integration;
 mod selector_aggregated;

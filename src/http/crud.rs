@@ -87,6 +87,11 @@ pub(crate) mod promql_duration {
                 .ok_or_else(|| anyhow!("Duration '{}' is too large", input))?;
         }
 
+        // A step of zero has no buckets: Prometheus refuses it too
+        if total_ms == 0 {
+            return Err(anyhow!("Duration '{}' must be greater than zero", input));
+        }
+
         Ok(total_ms)
     }
 }
@@ -1378,7 +1383,10 @@ pub async fn get_series_availability(
 
                 let start_us = crate::storage::common::datetime_to_micros(&start_time);
                 let end_us = crate::storage::common::datetime_to_micros(&end_time);
-                let total = ((end_us - start_us).div_euclid(step_us) + 1).max(1) as usize;
+                let window_us = end_us.checked_sub(start_us).ok_or_else(|| {
+                    AppError::bad_request(anyhow::anyhow!("the time window is too large"))
+                })?;
+                let total = (window_us.div_euclid(step_us) + 1).max(1) as usize;
                 let covered = summary.covered_buckets.unwrap_or(0);
 
                 (
@@ -1567,6 +1575,8 @@ mod tests {
             250
         );
         assert!(promql_duration::parse_duration_millis("bad").is_err());
+        assert!(promql_duration::parse_duration_millis("0s").is_err());
+        assert!(promql_duration::parse_duration_millis("0h0m").is_err());
     }
 
     #[test]
