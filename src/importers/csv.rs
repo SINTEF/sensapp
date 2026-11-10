@@ -1,7 +1,7 @@
 use crate::{
     datamodel::{
         Sample, SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
-        unit::Unit,
+        sensapp_datetime::SensAppDateTimeExt, unit::Unit,
     },
     importers::IngestionStats,
     infer::{
@@ -130,7 +130,7 @@ pub fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<ParsedCsv> {
             parse_datetime_from_inferred(&inferred_columns[dt_idx], row_idx)?
         } else {
             // Use row index as timestamp if no datetime column
-            SensAppDateTime::from_unix_seconds(row_idx as f64)
+            SensAppDateTime::from_unix_seconds_i64(row_idx as i64)
         };
 
         if let (Some(sensor_name_idx), Some(value_idx)) = (sensor_name_idx, value_idx) {
@@ -217,7 +217,7 @@ fn parse_datetime_from_inferred(column: &InferedColumn, row_idx: usize) -> Resul
         }
         InferedColumn::Integer(values) => {
             if row_idx < values.len() {
-                Ok(SensAppDateTime::from_unix_seconds(values[row_idx] as f64))
+                Ok(SensAppDateTime::from_unix_seconds_i64(values[row_idx]))
             } else {
                 Err(anyhow!(
                     "Row index {} out of bounds for integer datetime column",
