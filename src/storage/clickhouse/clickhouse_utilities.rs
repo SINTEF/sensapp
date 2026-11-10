@@ -30,12 +30,31 @@ pub fn decimal_to_clickhouse_raw(value: &Decimal) -> Result<i128> {
     } else {
         *value
     };
+    // `rescale` keeps a smaller scale when the mantissa would pass 96 bits: the raw value would
+    // then be read back divided by a power of ten
     normalized.rescale(CLICKHOUSE_NUMERIC_SCALE);
+    if normalized.scale() != CLICKHOUSE_NUMERIC_SCALE {
+        return Err(StorageError::InvalidDataFormat {
+            message: format!(
+                "the value {value} is too large for ClickHouse, which keeps {CLICKHOUSE_NUMERIC_SCALE} digits after the point within 28 digits"
+            ),
+            sensor_context: "numeric".to_string(),
+        }
+        .into());
+    }
     Ok(normalized.mantissa())
 }
 
-pub fn decimal_from_clickhouse_raw(raw: i128) -> Decimal {
-    Decimal::from_i128_with_scale(raw, CLICKHOUSE_NUMERIC_SCALE)
+/// A stored value or an aggregate over 96 bits does not fit in a `Decimal`.
+pub fn decimal_from_clickhouse_raw(raw: i128) -> Result<Decimal, StorageError> {
+    Decimal::try_from_i128_with_scale(raw, CLICKHOUSE_NUMERIC_SCALE).map_err(|_| {
+        StorageError::InvalidDataFormat {
+            message: format!(
+                "the value {raw}e-{CLICKHOUSE_NUMERIC_SCALE} is outside the Numeric range"
+            ),
+            sensor_context: "numeric".to_string(),
+        }
+    })
 }
 
 /// Ids sent to ClickHouse in one query: a few thousand keeps the statement small.
@@ -323,6 +342,24 @@ pub mod test_utils {
 mod tests {
     use super::*;
     use clickhouse::error::Error;
+
+    /// ClickHouse keeps 8 digits after the point, so a `Decimal` over 96 - 27 bits of integer part
+    /// cannot be stored, and a stored value or sum over 96 bits cannot be read.
+    #[test]
+    fn decimals_outside_the_clickhouse_range_are_errors() {
+        let raw = decimal_to_clickhouse_raw(&Decimal::new(1234, 2)).unwrap();
+        assert_eq!(raw, 1_234_000_000);
+        assert_eq!(
+            decimal_from_clickhouse_raw(raw).unwrap(),
+            Decimal::new(1234, 2)
+        );
+
+        // 10^25 needs 33 digits at scale 8, `Decimal` holds 28
+        let large = Decimal::from_i128_with_scale(10_i128.pow(25), 0);
+        assert!(decimal_to_clickhouse_raw(&large).is_err());
+        // A sum over 96 bits
+        assert!(decimal_from_clickhouse_raw(10_i128.pow(30)).is_err());
+    }
 
     fn bad_response(code: u32) -> Error {
         Error::BadResponse(format!(

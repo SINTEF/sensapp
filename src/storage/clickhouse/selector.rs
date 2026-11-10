@@ -6,8 +6,8 @@ use super::clickhouse_utilities::{
     decimal_from_clickhouse_raw, map_clickhouse_error, micros_to_datetime,
 };
 use crate::datamodel::{Sample, SensAppDateTime, Sensor, SensorType, TypedSamples};
-use crate::storage::LabelMatcher;
 use crate::storage::selector::{AggregatedRead, BulkSelectorBackend, empty_samples};
+use crate::storage::{LabelMatcher, StorageError};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -106,7 +106,7 @@ impl BulkSelectorBackend for ClickHouseStorage {
                     {
                         samples.push(Sample {
                             datetime: micros_to_datetime(timestamp_us),
-                            value: decimal_from_clickhouse_raw(raw),
+                            value: decimal_from_clickhouse_raw(raw)?,
                         });
                     }
                 }
@@ -215,10 +215,10 @@ impl ClickHouseStorage {
                         .entry(sensor_id)
                         .or_insert_with(|| empty_samples(SensorType::$variant))
                     {
-                        let convert: fn($value) -> _ = $convert;
+                        let convert: fn($value) -> Result<_, StorageError> = $convert;
                         samples.push(Sample {
                             datetime: micros_to_datetime(timestamp_us),
-                            value: convert(value),
+                            value: convert(value)?,
                         });
                     }
                 }
@@ -227,8 +227,8 @@ impl ClickHouseStorage {
         }
 
         Ok(match aggregated_kind(sensor_type, read.aggregation) {
-            AggregatedKind::Integer => fetch!(i64, Integer, |value| value),
-            AggregatedKind::Float => fetch!(f64, Float, |value| value),
+            AggregatedKind::Integer => fetch!(i64, Integer, Ok),
+            AggregatedKind::Float => fetch!(f64, Float, Ok),
             AggregatedKind::Numeric => fetch!(i128, Numeric, decimal_from_clickhouse_raw),
         })
     }

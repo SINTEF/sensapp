@@ -1480,7 +1480,7 @@ impl ClickHouseStorage {
                 while let Some(row) = rows_cursor.next().await? {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
-                        value: decimal_from_clickhouse_raw(row.value),
+                        value: decimal_from_clickhouse_raw(row.value)?,
                     });
                 }
                 Ok(TypedSamples::Numeric(samples))
@@ -1577,7 +1577,7 @@ impl ClickHouseStorage {
                     while let Some((timestamp_us, value_raw)) = result_cursor.next().await? {
                         samples.push(Sample {
                             datetime: micros_to_datetime(timestamp_us),
-                            value: decimal_from_clickhouse_raw(value_raw),
+                            value: decimal_from_clickhouse_raw(value_raw)?,
                         });
                     }
                 }
