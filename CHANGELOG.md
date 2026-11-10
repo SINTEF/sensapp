@@ -13,8 +13,8 @@ A maintenance release: dependencies and security fixes, no change in behaviour.
   prometheus-client 0.25, sha2 0.11, and more), frontend (TypeScript 6.0, vite 8.3.6, jsdom 31),
   and the Python SDK (polars 2, pyarrow 26).
 - JWTs are handled by the aws-lc-rs backend of `jsonwebtoken`, which removes `rsa` and `crypto-bigint` 0.5
-  from the build along with their advisories (RUSTSEC-2023-0071, RUSTSEC-2026-0387). `cargo audit` and
-  `npm audit` run clean, without ignores.
+  from the build along with their advisories (RUSTSEC-2023-0071, RUSTSEC-2026-0387). `npm audit` runs
+  clean, and `cargo audit` has one ignore, below.
 - The open Dependabot alerts are fixed: `zip` 6 (critical, a build dependency of the previous DuckDB crate,
   gone with DuckDB 2.0), rustls 0.23.46, and, in the frontend tooling, vite and undici.
 - Known: the SQLite bundled by sqlx 0.9.0 is affected by RUSTSEC-2026-0459 (CVE-2026-119375), a memory leak when
