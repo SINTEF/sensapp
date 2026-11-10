@@ -1,5 +1,5 @@
 use super::sqlite_publishers::*;
-use super::sqlite_utilities::get_sensor_id_or_create_sensor;
+use super::sqlite_utilities::{ensure_string_values, register_sensors};
 use super::storage_query_helpers::{
     sqlite_bucketed_cte, sqlite_first_last_query, sqlite_float_expression, sqlite_group_by_clause,
     sqlite_integer_expression, sqlite_numeric_expression,
@@ -24,6 +24,7 @@ use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 use sqlx::{Sqlite, Transaction};
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -84,9 +85,36 @@ impl StorageInstance for SqliteStorage {
         // writer commits in between, its first write fails at once with "database is locked",
         // whatever the busy timeout.
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        // The sensors and the strings of the whole batch are registered first, with a few
+        // statements, see `sqlite_utilities`.
+        let sensors: Vec<&Sensor> = batch
+            .sensors
+            .iter()
+            .map(|single_sensor_batch| single_sensor_batch.sensor.as_ref())
+            .collect();
+        let sensor_ids = register_sensors(&mut transaction, &sensors).await?;
+        let mut strings: BTreeSet<String> = BTreeSet::new();
         for single_sensor_batch in batch.sensors.as_ref() {
-            self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
-                .await?;
+            if let TypedSamples::String(samples) = &*single_sensor_batch.samples.read().await {
+                strings.extend(samples.iter().map(|sample| sample.value.clone()));
+            }
+        }
+        let string_ids = ensure_string_values(
+            &mut transaction,
+            strings.iter().map(String::as_str).collect(),
+        )
+        .await?;
+
+        for single_sensor_batch in batch.sensors.as_ref() {
+            let sensor_id = sensor_ids[&single_sensor_batch.sensor.uuid];
+            self.publish_single_sensor_batch(
+                &mut transaction,
+                single_sensor_batch,
+                sensor_id,
+                &string_ids,
+            )
+            .await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -1205,9 +1233,9 @@ impl SqliteStorage {
         &self,
         transaction: &mut Transaction<'_, Sqlite>,
         single_sensor_batch: &SingleSensorBatch,
+        sensor_id: i64,
+        string_ids: &HashMap<&str, i64>,
     ) -> Result<()> {
-        let sensor_id =
-            get_sensor_id_or_create_sensor(transaction, &single_sensor_batch.sensor).await?;
         let deduplicate = self.deduplicate_on_ingest.load(Ordering::Relaxed);
         {
             let samples_guard = single_sensor_batch.samples.read().await;
@@ -1222,7 +1250,8 @@ impl SqliteStorage {
                     publish_float_values(transaction, sensor_id, samples, deduplicate).await?;
                 }
                 TypedSamples::String(samples) => {
-                    publish_string_values(transaction, sensor_id, samples, deduplicate).await?;
+                    publish_string_values(transaction, sensor_id, samples, string_ids, deduplicate)
+                        .await?;
                 }
                 TypedSamples::Boolean(samples) => {
                     publish_boolean_values(transaction, sensor_id, samples, deduplicate).await?;
