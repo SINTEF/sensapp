@@ -166,8 +166,18 @@ def test_remote_read_hints() -> None:
     def over(function, seconds):
         return lambda t: function(window("a", t, seconds))
 
+    def subquery(outer, inner, seconds, step):
+        # A subquery evaluates on the multiples of its step in (t - range, t]
+        def value(t):
+            first = (t - seconds) // step * step + step
+            return outer(inner(u) for u in range(first, t + 1, step))
+
+        return value
+
     selector = f'{{__name__=~"hints_{tag}_.*"}}'
-    one = names["a"]
+    one, two = names["a"], names["b"]
+    # Evaluations at 7 minutes past a multiple of 15 minutes: not on the grid of a subquery
+    off = 420
     cases = [
         # (expression, step, expected value at the evaluation time, answered in the database?)
         (f"avg_over_time({one}[1h])", HOUR, over(mean, HOUR), True),
@@ -203,18 +213,57 @@ def test_remote_read_hints() -> None:
             lambda t: max(window("a", t - 1800 * i, 300)[-1] for i in range(4)),
             False,
         ),
+        # Two selectors: the query starts with the 20 minutes of the second, the buckets of
+        # the first start with its own range
+        (
+            f"max_over_time({one}[15m]) + 0 * max_over_time({two}[20m])",
+            900,
+            over(max, 900),
+            True,
+        ),
+        # Evaluations off the grid of the step: a range query is answered on the grid of its
+        # end, and the hints cannot tell it from a subquery
+        (f"sum({selector})", HOUR, across(sum), True, off),
+        (one, 900, lambda t: window("a", t, 300)[-1], True, off),
+        (f"max_over_time({one}[1h])", HOUR, over(max, HOUR), False, off),
+        # A subquery of an aggregation or of a function over a range, evaluated on the multiples
+        # of 15 minutes
+        (
+            f"max_over_time(sum({selector})[1h:15m])",
+            HOUR,
+            subquery(max, across(sum), HOUR, 900),
+            True,
+            off,
+        ),
+        (
+            f"max_over_time(max_over_time({one}[15m])[1h:15m])",
+            HOUR,
+            subquery(max, over(max, 900), HOUR, 900),
+            False,
+            off,
+        ),
+        (
+            f"min_over_time(sum({selector})[1h:15m])",
+            HOUR,
+            subquery(min, across(sum), HOUR, 900),
+            True,
+        ),
     ]
 
     failures = []
-    for expression, step, expected, _in_database in cases:
+    for expression, step, expected, _in_database, *shift in cases:
         # The first evaluation time is chosen so that every window is full of samples.
-        start, end = t0 + 2 * HOUR, t0 + 5 * HOUR
-        got = query_range(expression, start, end, step)
+        start, end = t0 + 2 * HOUR + sum(shift), t0 + 5 * HOUR + sum(shift)
+        try:
+            got = query_range(expression, start, end, step)
+        except AssertionError as error:
+            failures.append(str(error))
+            continue
         for t in range(start, end + 1, step):
             want = expected(t)
             if t not in got or abs(got[t] - want) > 1e-9 * max(1.0, abs(want)):
                 failures.append(
-                    f"{expression} step={step}s at T0+{(t - t0) / HOUR:.2f}h: "
+                    f"{expression} step={step}s at T0+{(t - t0) / HOUR:.3f}h: "
                     f"Prometheus says {got.get(t)}, the raw samples say {want}"
                 )
                 break

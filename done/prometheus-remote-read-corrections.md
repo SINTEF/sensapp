@@ -52,3 +52,37 @@ the hint decisions.
 ## Done when
 
 The live tests pass and `done/remote-read-hints-semantics.md` is amended with what was learnt.
+
+## Outcome (11 November 2026)
+
+Items 2 and 3 were checked in the Prometheus 3.13.4 source before any change, and every item had a failing
+test first. Details of the Prometheus behaviour: [remote-read-hints-semantics.md](remote-read-hints-semantics.md).
+
+Fixed:
+
+1. The 17 `println!` calls are gone (the useful ones were already `debug!`), the per-request `info!` logs
+   are `debug!`, and `src/lib.rs` has `#![cfg_attr(not(test), deny(clippy::print_stdout))]`. The binary
+   (`main.rs`, which holds the CLI) is a separate crate and keeps its prints.
+2. Confirmed: the query bounds are those of the whole expression. The buckets now start at
+   `hints.start_ms` and stop at `min(hints.end_ms, query.end_timestamp_ms)`. Anchoring on the hints is
+   what the single-selector analysis already relied on, so it was chosen over the raw fallback.
+3. Confirmed, and wider than stated: a subquery of a `*_over_time` (`max_over_time(max_over_time(x[15m])[1h:15m])`)
+   was wrong too. `*_over_time` buckets now need the first evaluation on a multiple of the step, and the
+   latest samples answer the grid of the end and the grid of the step when they differ (two reads,
+   merged per series). Cost: the Prometheus UI, which does not align its queries, gets raw samples for
+   `*_over_time`.
+4. Both response types sort the series of a query by label set (label by label, name then value, byte
+   order). Integration test with an uppercase label name, on both response types.
+5. An encode error answers 500 instead of dropping the series.
+6. `checked_*` arithmetic on the hints; out-of-range hints get the raw samples (unit test with
+   `i64::MIN`/`i64::MAX`, which panicked before).
+7. The comment of `build_prometheus_labels` is right; `test_calculate_crc32` pins
+   `crc32c("123456789") == 0xE3069283`. One frame per series is kept.
+
+Tests: 4 unit tests of the hint decisions, 2 backend-generic integration tests (both grids, label set
+order). Two existing integration tests sent hints Prometheus never sends (a range starting on a multiple
+of the step instead of 1 ms after it); they now send the real ones.
+
+Suites: SQLite full (366 integration), PostgreSQL full (367), the 18 remote read tests on TimescaleDB,
+DuckDB and ClickHouse, the live harness against Prometheus 3.13.4 (passes; the previous commit fails 3
+of the 7 new queries), `cargo clippy` and `cargo clippy --all-features --tests` clean.

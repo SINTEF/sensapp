@@ -25,6 +25,18 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
   than 20 digits before the point. A value with more than 18 digits after the point is rounded, where it was
   written off by a power of ten, and a large value wrapped.
 
+### Changed and fixed
+
+- Prometheus remote read: the buckets of a `*_over_time` hint start with the range of their own selector,
+  not with the earliest selector of the query (`max_over_time(x[2m]) > y` was off by one minute), and stop
+  at the end of the query. They are only used when the evaluations are on multiples of the step, as a
+  subquery evaluates there: the Prometheus UI, which does not align its queries, gets the raw samples. A
+  plain selector or an aggregation whose end is off the step is answered on both grids, which a subquery
+  (`max_over_time(sum(x)[1h:5m])`) needs. Checked live against Prometheus 3.13.
+- Prometheus remote read: the series are sorted by label set, a series that fails to encode fails the
+  request instead of missing from it, hints out of range get the raw samples instead of overflowing, and
+  nothing is printed on stdout (the library denies `print_stdout`).
+
 ## 0.4.2
 
 A maintenance release: dependencies and security fixes, no change in behaviour.

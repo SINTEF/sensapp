@@ -37,7 +37,7 @@ pub fn sensor_data_to_timeseries(sensor_data: &SensorData) -> Option<TimeSeries>
 /// * `sensor` - The SensApp sensor to extract labels from
 ///
 /// # Returns
-/// A vector of Prometheus Label structs, sorted by name with `__name__` first.
+/// A vector of Prometheus Label structs, sorted by name in byte order.
 pub fn build_prometheus_labels(sensor: &crate::datamodel::Sensor) -> Vec<Label> {
     let mut labels = Vec::with_capacity(1 + sensor.labels.len());
 
@@ -56,7 +56,8 @@ pub fn build_prometheus_labels(sensor: &crate::datamodel::Sensor) -> Vec<Label> 
         });
     }
 
-    // Sort labels by name (Prometheus convention, __name__ will sort first due to underscore)
+    // Sort labels by name, byte order like Prometheus: `__name__` is not always first, as
+    // uppercase letters sort before `_`
     labels.sort_by(|a, b| a.name.cmp(&b.name));
 
     labels
