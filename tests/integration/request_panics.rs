@@ -124,6 +124,33 @@ async fn a_zero_step_is_refused() -> Result<()> {
     Ok(())
 }
 
+/// A step longer than the years SensApp can store is refused. 200 million years fit in an `i64`
+/// of milliseconds, but not once multiplied into microseconds by the SQL of the buckets.
+#[tokio::test]
+#[serial]
+async fn a_step_longer_than_the_storable_years_is_refused() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let app = app(storage.clone());
+    let uuid = one_series(&app, &storage).await?;
+
+    for path in [
+        format!("/series/{uuid}?step=200000000y&aggregation=avg"),
+        format!(
+            "/series/{uuid}/availability?start=2024-01-01T00:00:00Z&end=2024-01-02T00:00:00Z&step=200000000y"
+        ),
+    ] {
+        let (status, body) = send(&app, Request::get(&path).body(Body::empty()).unwrap()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}: {body}");
+    }
+    // The longest step that makes sense is still accepted
+    let path = format!("/series/{uuid}?step=9000y&aggregation=avg");
+    let (status, body) = send(&app, Request::get(&path).body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    Ok(())
+}
+
 #[tokio::test]
 #[serial]
 async fn a_csv_name_with_a_control_character_is_refused() -> Result<()> {

@@ -856,6 +856,39 @@ impl StorageInstance for TimeScaleDBStorage {
         let mut last_sensor_id = None;
         let mut sensors = Vec::with_capacity(sensor_rows.len().min(effective_limit));
 
+        // The labels of the whole page in one query, not one per series
+        #[derive(sqlx::FromRow)]
+        struct LabelRow {
+            sensor_id: i64,
+            label_name: String,
+            label_value: String,
+        }
+        let sensor_ids: Vec<i64> = sensor_rows
+            .iter()
+            .take(effective_limit)
+            .filter_map(|row| row.sensor_id)
+            .collect();
+        let labels_rows: Vec<LabelRow> = sqlx::query_as(
+            r#"
+            SELECT l.sensor_id, lnd.name as label_name, ldd.description as label_value
+            FROM labels l
+            JOIN labels_name_dictionary lnd ON l.name = lnd.id
+            JOIN labels_description_dictionary ldd ON l.description = ldd.id
+            WHERE l.sensor_id = ANY($1)
+            "#,
+        )
+        .bind(&sensor_ids)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to query the labels of the series")?;
+        let mut labels_by_sensor: HashMap<i64, SensAppLabels> = HashMap::new();
+        for label_row in labels_rows {
+            labels_by_sensor
+                .entry(label_row.sensor_id)
+                .or_default()
+                .push((label_row.label_name, label_row.label_value));
+        }
+
         for sensor_row in sensor_rows.into_iter().take(effective_limit) {
             // Parse sensor metadata with improved error handling
             let sensor_uuid = sensor_row
@@ -913,35 +946,7 @@ impl StorageInstance for TimeScaleDBStorage {
             })?;
             last_sensor_id = Some(sensor_id);
 
-            #[derive(sqlx::FromRow)]
-            struct LabelRow {
-                label_name: String,
-                label_value: String,
-            }
-
-            let labels_rows: Vec<LabelRow> = sqlx::query_as(
-                r#"
-                SELECT lnd.name as label_name, ldd.description as label_value
-                FROM labels l
-                JOIN labels_name_dictionary lnd ON l.name = lnd.id
-                JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                WHERE l.sensor_id = $1
-                "#,
-            )
-            .bind(sensor_id)
-            .fetch_all(&self.pool)
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to query labels for sensor UUID={} name='{}'",
-                    sensor_uuid, sensor_name
-                )
-            })?;
-
-            let mut labels: crate::datamodel::sensapp_vec::SensAppLabels = smallvec::smallvec![];
-            for label_row in labels_rows {
-                labels.push((label_row.label_name, label_row.label_value));
-            }
+            let labels = labels_by_sensor.remove(&sensor_id).unwrap_or_default();
 
             let sensor = crate::datamodel::Sensor::new(
                 sensor_uuid,

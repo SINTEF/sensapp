@@ -888,6 +888,10 @@ impl StorageInstance for PostgresStorage {
                 .await?
             }
         };
+        // The samples of that time were deleted between the two statements
+        if samples.is_empty() {
+            return Ok(None);
+        }
 
         Ok(Some(SensorData::new(sensor, samples)))
     }

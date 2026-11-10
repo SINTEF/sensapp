@@ -8,10 +8,15 @@ use super::{DEFAULT_QUERY_LIMIT, PostgresStorage};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{Sample, SensAppDateTime, Sensor, SensorType, TypedSamples};
 use anyhow::Result;
+use futures::StreamExt;
+use futures::future::BoxFuture;
 use geo::Point;
 use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 use std::collections::HashMap;
+
+/// The samples of the sensors of one type, by sensor
+type QueryFuture = BoxFuture<'static, Result<HashMap<i64, TypedSamples>>>;
 
 impl PostgresStorage {
     /// Batch query samples for multiple sensors, grouped by sensor type.
@@ -57,11 +62,13 @@ impl PostgresStorage {
             }
         }
 
-        // Spawn concurrent tasks for each sensor type that has data
-        let handles = [
-            (!integer_sensors.is_empty()).then(|| {
+        // One query per sensor type that has data, two at a time. Plain futures, not spawned
+        // tasks: when the request is dropped (a timeout, a client gone), they stop with it, and a
+        // request holds at most two connections of the pool.
+        let queries: [Option<QueryFuture>; 8] = [
+            (!integer_sensors.is_empty()).then(|| -> QueryFuture {
                 let pool = self.pool.clone();
-                tokio::spawn(async move {
+                Box::pin(async move {
                     Self::batch_query_integer_samples_owned(
                         &pool,
                         integer_sensors,
@@ -72,9 +79,9 @@ impl PostgresStorage {
                     .await
                 })
             }),
-            (!numeric_sensors.is_empty()).then(|| {
+            (!numeric_sensors.is_empty()).then(|| -> QueryFuture {
                 let pool = self.pool.clone();
-                tokio::spawn(async move {
+                Box::pin(async move {
                     Self::batch_query_numeric_samples_owned(
                         &pool,
                         numeric_sensors,
@@ -85,9 +92,9 @@ impl PostgresStorage {
                     .await
                 })
             }),
-            (!float_sensors.is_empty()).then(|| {
+            (!float_sensors.is_empty()).then(|| -> QueryFuture {
                 let pool = self.pool.clone();
-                tokio::spawn(async move {
+                Box::pin(async move {
                     Self::batch_query_float_samples_owned(
                         &pool,
                         float_sensors,
@@ -98,9 +105,9 @@ impl PostgresStorage {
                     .await
                 })
             }),
-            (!string_sensors.is_empty()).then(|| {
+            (!string_sensors.is_empty()).then(|| -> QueryFuture {
                 let pool = self.pool.clone();
-                tokio::spawn(async move {
+                Box::pin(async move {
                     Self::batch_query_string_samples_owned(
                         &pool,
                         string_sensors,
@@ -111,9 +118,9 @@ impl PostgresStorage {
                     .await
                 })
             }),
-            (!boolean_sensors.is_empty()).then(|| {
+            (!boolean_sensors.is_empty()).then(|| -> QueryFuture {
                 let pool = self.pool.clone();
-                tokio::spawn(async move {
+                Box::pin(async move {
                     Self::batch_query_boolean_samples_owned(
                         &pool,
                         boolean_sensors,
@@ -124,9 +131,9 @@ impl PostgresStorage {
                     .await
                 })
             }),
-            (!location_sensors.is_empty()).then(|| {
+            (!location_sensors.is_empty()).then(|| -> QueryFuture {
                 let pool = self.pool.clone();
-                tokio::spawn(async move {
+                Box::pin(async move {
                     Self::batch_query_location_samples_owned(
                         &pool,
                         location_sensors,
@@ -137,9 +144,9 @@ impl PostgresStorage {
                     .await
                 })
             }),
-            (!json_sensors.is_empty()).then(|| {
+            (!json_sensors.is_empty()).then(|| -> QueryFuture {
                 let pool = self.pool.clone();
-                tokio::spawn(async move {
+                Box::pin(async move {
                     Self::batch_query_json_samples_owned(
                         &pool,
                         json_sensors,
@@ -150,9 +157,9 @@ impl PostgresStorage {
                     .await
                 })
             }),
-            (!blob_sensors.is_empty()).then(|| {
+            (!blob_sensors.is_empty()).then(|| -> QueryFuture {
                 let pool = self.pool.clone();
-                tokio::spawn(async move {
+                Box::pin(async move {
                     Self::batch_query_blob_samples_owned(
                         &pool,
                         blob_sensors,
@@ -165,17 +172,17 @@ impl PostgresStorage {
             }),
         ];
 
-        // Await all tasks and collect results
-        for handle in handles.into_iter().flatten() {
-            let type_results = handle.await??;
-            results.extend(type_results);
+        let mut type_results =
+            futures::stream::iter(queries.into_iter().flatten()).buffer_unordered(2);
+        while let Some(type_results) = type_results.next().await {
+            results.extend(type_results?);
         }
 
         Ok(results)
     }
 
-    // Static helper methods for concurrent execution via tokio::spawn
-    // These accept owned Vec instead of &[i64] to support spawned tasks
+    // Static helper methods for the concurrent queries, with owned arguments: the futures are
+    // 'static
 
     async fn batch_query_integer_samples_owned(
         pool: &sqlx::PgPool,

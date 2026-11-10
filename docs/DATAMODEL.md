@@ -210,6 +210,8 @@ Using a dictionary improves the performances in most cases. However if many stri
 
 In practice, we expect sensors to not generate unique distinct strings all the time, so using a dictionary should be a good idea for the majority of use cases.
 
+On PostgreSQL and TimescaleDB, the dictionaries (string values, label names and values, units) are unique by the `md5` of their text, not by the text itself. A B-tree entry holds at most about 2.7 kB, so a unique index on the text refused a longer string value or label, and the whole batch with it. A lookup compares the hash and then the text. Two different texts with the same `md5` cannot both be stored: the second is refused with a 400 rather than mixed up with the first.
+
 ## Geolocation and Coordinates Systems
 
 In the current version, the geolocalised data doesn't really mind the coordinate system used. The data is likely going to use WGS84, but it could be ETRS89 or something else. It's up to the publisher and the consumer to agree on the coordinate system used, for now.

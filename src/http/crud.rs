@@ -91,6 +91,12 @@ pub(crate) mod promql_duration {
         if total_ms == 0 {
             return Err(anyhow!("Duration '{}' must be greater than zero", input));
         }
+        if total_ms > crate::storage::data_query::MAX_STEP_MS {
+            return Err(anyhow!(
+                "Duration '{}' is longer than the years 1 to 9999 that can be stored",
+                input
+            ));
+        }
 
         Ok(total_ms)
     }
