@@ -535,26 +535,72 @@ fn format_prometheus_sample_value(value: f64) -> String {
     }
 }
 
+/// The `path` label of a request: its route, or a constant. The UI files and the requests without a
+/// route are not told apart by path, or anyone could add label values that stay in the metrics
+/// forever.
+fn path_label(request: &Request) -> String {
+    if let Some(matched_path) = request.extensions().get::<MatchedPath>() {
+        return matched_path.as_str().to_string();
+    }
+    let path = request.uri().path();
+    let ui = super::ui::UI_PATH;
+    if path
+        .strip_prefix(ui)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    {
+        format!("{ui}/*")
+    } else {
+        "unmatched".to_string()
+    }
+}
+
+/// The `method` label of a request: the standard methods, and `OTHER` for the extension methods.
+fn method_label(method: &Method) -> Method {
+    match *method {
+        Method::GET
+        | Method::POST
+        | Method::PUT
+        | Method::DELETE
+        | Method::HEAD
+        | Method::OPTIONS
+        | Method::PATCH => method.clone(),
+        _ => Method::from_bytes(b"OTHER").expect("a valid method"),
+    }
+}
+
+/// Counts a request in flight until it is dropped: when its response is built, or when the client
+/// goes away and the request future is dropped with it.
+struct InFlight<'a>(&'a HttpMetrics);
+
+impl<'a> InFlight<'a> {
+    fn new(metrics: &'a HttpMetrics) -> Self {
+        metrics.increment_in_flight();
+        Self(metrics)
+    }
+}
+
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        self.0.decrement_in_flight();
+    }
+}
+
 pub async fn track_http_metrics(
     State(metrics): State<Arc<HttpMetrics>>,
     request: Request,
     next: Next,
 ) -> Response {
-    let method = request.method().clone();
-    let path = request
-        .extensions()
-        .get::<MatchedPath>()
-        .map(|matched_path| matched_path.as_str().to_string())
-        .unwrap_or_else(|| request.uri().path().to_string());
+    let method = method_label(request.method());
+    let path = path_label(&request);
 
     if path == "/prometheus/metrics" {
         return next.run(request).await;
     }
 
-    metrics.increment_in_flight();
+    let in_flight = InFlight::new(&metrics);
     let start = Instant::now();
     let response = next.run(request).await;
-    metrics.decrement_in_flight();
+    drop(in_flight);
     metrics.observe_http_request(&method, &path, response.status(), start.elapsed());
     response
 }

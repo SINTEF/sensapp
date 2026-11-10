@@ -114,11 +114,106 @@ pub async fn query_cross_series_bounded(
     }
 }
 
+/// Longest PromQL query or selector accepted, in bytes.
+pub const MAX_PROMQL_LENGTH: usize = 4096;
+/// Deepest PromQL nesting accepted: brackets, plus the unary signs within them.
+pub const MAX_PROMQL_NESTING: usize = 64;
+
+/// Refuse a PromQL query or selector that is too long or too deeply nested to parse. The parser is
+/// a recursive descent without a depth limit: measured on a 2 MiB thread (a Tokio worker) in a
+/// debug build, 150 nested parentheses or 700 unary minus signs overflow the stack, and a stack
+/// overflow aborts the process. A release build goes about ten times deeper.
+///
+/// The nesting is counted conservatively: the depth of `(`, `[` and `{`, plus every `+` or `-` in
+/// a unary position (after the start, an opening bracket, a comma or another operator) until its
+/// bracket closes. Quoted strings are skipped, so label values may hold any character.
+pub fn check_promql_size(query: &str) -> Result<(), AppError> {
+    if query.len() > MAX_PROMQL_LENGTH {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "The PromQL query is longer than {MAX_PROMQL_LENGTH} bytes"
+        )));
+    }
+    // The unary signs of each open bracket, the outermost level first
+    let mut levels: Vec<usize> = vec![0];
+    let mut nesting = 0usize;
+    let mut unary_position = true;
+    let mut chars = query.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' | '\'' | '`' => {
+                // Skip the string, and the escaped characters of its content
+                while let Some(inner) = chars.next() {
+                    if inner == '\\' && c != '`' {
+                        chars.next();
+                    } else if inner == c {
+                        break;
+                    }
+                }
+                unary_position = false;
+            }
+            '(' | '[' | '{' => {
+                levels.push(0);
+                nesting += 1;
+                unary_position = true;
+            }
+            ')' | ']' | '}' => {
+                if levels.len() > 1 {
+                    nesting -= 1 + levels.pop().unwrap_or(0);
+                }
+                unary_position = false;
+            }
+            '+' | '-' if unary_position => {
+                if let Some(signs) = levels.last_mut() {
+                    *signs += 1;
+                }
+                nesting += 1;
+            }
+            '+' | '-' | '*' | '/' | '%' | '^' | '=' | '!' | '<' | '>' | ',' => {
+                unary_position = true;
+            }
+            c if c.is_whitespace() => {}
+            _ => unary_position = false,
+        }
+        if nesting > MAX_PROMQL_NESTING {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "The PromQL query is nested deeper than {MAX_PROMQL_NESTING} levels"
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::datamodel::{Sensor, SensorType, TypedSamples};
     use uuid::Uuid;
+
+    #[test]
+    fn promql_nesting_counts_brackets_and_unary_signs_only() {
+        let accepted = [
+            r#"sum by (room) (rate(http_requests_total{job="api", path=~"/a-(b|c)"}[5m])) - -1"#,
+            "a - b - c + d * -e",
+            &format!("x{}", " - x".repeat(1_000)),
+            &format!("{}x{}", "(".repeat(64), ")".repeat(64)),
+            &format!("{}x", "-".repeat(64)),
+            // The signs of a closed bracket no longer count
+            &format!("{}x", "(--x) + ".repeat(200)),
+            r#"{name="(((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((("}"#,
+        ];
+        for query in accepted {
+            assert!(check_promql_size(query).is_ok(), "{query}");
+        }
+        let refused = [
+            format!("{}x{}", "(".repeat(65), ")".repeat(65)),
+            format!("{}x", "-".repeat(65)),
+            format!("{}x{}", "(-".repeat(33), ")".repeat(33)),
+            format!("x{}", " + x".repeat(1_100)),
+        ];
+        for query in &refused {
+            assert!(check_promql_size(query).is_err(), "{}", &query[..20]);
+        }
+    }
 
     #[test]
     fn direct_sample_limit_has_an_explicit_boundary() {

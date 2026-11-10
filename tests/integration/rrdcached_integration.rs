@@ -932,6 +932,7 @@ mod rrdcached_tests {
                 write_timeout: Duration::from_secs(300),
                 maintenance_timeout: Duration::from_secs(3600),
                 max_concurrent_writes: 16,
+                body_read_timeout: Duration::from_secs(30),
                 ui_dir: None,
             },
         )

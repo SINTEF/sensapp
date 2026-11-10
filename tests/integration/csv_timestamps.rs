@@ -44,6 +44,7 @@ fn app(storage: Arc<dyn StorageInstance>) -> Router {
         write_timeout: Duration::from_secs(30),
         maintenance_timeout: Duration::from_secs(30),
         max_concurrent_writes: 4,
+        body_read_timeout: Duration::from_secs(30),
         ui_dir: None,
     };
     build_router(state, &settings)

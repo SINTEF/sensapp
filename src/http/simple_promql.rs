@@ -213,6 +213,7 @@ fn parse_expr(ast: Expr, query: &str) -> Result<ParsedQuery, AppError> {
 
 /// Parse and validate a PromQL query, returning the extracted information
 fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
+    super::limits::check_promql_size(query)?;
     let (rest, ast) = expr(query).map_err(|e| {
         AppError::bad_request(anyhow::anyhow!("Failed to parse PromQL query: {:?}", e))
     })?;

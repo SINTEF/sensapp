@@ -5,7 +5,6 @@ use crate::storage::{
 };
 use anyhow::{Result, anyhow};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
-use simplify_polyline::{Point, simplify};
 use smallvec::smallvec;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -349,6 +348,89 @@ fn filter_samples_by_indices<V>(
     filtered
 }
 
+/// The indices of the points that a Douglas-Peucker simplification keeps, in order. The same
+/// algorithm as `simplify-polyline` (squared distances, a radial distance pass first unless
+/// `high_quality`), but iterative: the recursive version went one level deeper per point on some
+/// series, and overflowed the stack of a Tokio worker, which aborts the process.
+fn simplify_indices(points: &[[f64; 2]], tolerance: f64, high_quality: bool) -> Vec<usize> {
+    if points.len() <= 2 {
+        return (0..points.len()).collect();
+    }
+    let tolerance = tolerance * tolerance;
+    let sq_dist = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2);
+
+    // Radial distance: drop the points too close to the last kept one, but keep the last point
+    let candidates: Vec<usize> = if high_quality {
+        (0..points.len()).collect()
+    } else {
+        let mut kept = vec![0];
+        let mut previous = 0;
+        for index in 1..points.len() {
+            if sq_dist(points[index], points[previous]) > tolerance {
+                kept.push(index);
+                previous = index;
+            }
+        }
+        let last = points.len() - 1;
+        if previous != last && points[previous] != points[last] {
+            kept.push(last);
+        }
+        kept
+    };
+
+    // Squared distance from a point to the segment from `start` to `end`
+    let sq_seg_dist = |point: [f64; 2], start: [f64; 2], end: [f64; 2]| {
+        let difference = [end[0] - start[0], end[1] - start[1]];
+        let mut closest = start;
+        let length = difference[0].powi(2) + difference[1].powi(2);
+        if length != 0.0 {
+            let t = ((point[0] - start[0]) * difference[0] + (point[1] - start[1]) * difference[1])
+                / length;
+            if t > 1.0 {
+                closest = end;
+            } else if t > 0.0 {
+                closest = [start[0] + difference[0] * t, start[1] + difference[1] * t];
+            }
+        }
+        sq_dist(point, closest)
+    };
+
+    // Douglas-Peucker over the candidates, with an explicit stack of segments
+    let mut keep = vec![false; candidates.len()];
+    keep[0] = true;
+    keep[candidates.len() - 1] = true;
+    let mut segments = vec![(0, candidates.len() - 1)];
+    while let Some((first, last)) = segments.pop() {
+        let mut max_sq_dist = tolerance;
+        let mut max_index = 0;
+        for i in first + 1..last {
+            let sq_dist = sq_seg_dist(
+                points[candidates[i]],
+                points[candidates[first]],
+                points[candidates[last]],
+            );
+            if sq_dist > max_sq_dist {
+                max_index = i;
+                max_sq_dist = sq_dist;
+            }
+        }
+        if max_sq_dist > tolerance {
+            keep[max_index] = true;
+            if max_index - first > 1 {
+                segments.push((first, max_index));
+            }
+            if last - max_index > 1 {
+                segments.push((max_index, last));
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(index, kept)| kept.then_some(index))
+        .collect()
+}
+
 fn simplify_indices_f64<V, F>(
     samples: &[Sample<V>],
     value_fn: F,
@@ -375,30 +457,17 @@ where
     let ts_span = (max_ts - min_ts).max(1) as f64;
     let value_span = (max_val - min_val).abs().max(f64::EPSILON);
 
-    let points: Vec<Point<2, f64>> = samples
+    let points: Vec<[f64; 2]> = samples
         .iter()
-        .map(|sample| Point {
-            vec: [
+        .map(|sample| {
+            [
                 (datetime_to_micros(&sample.datetime) - min_ts) as f64 / ts_span,
                 (value_fn(sample) - min_val) / value_span,
-            ],
+            ]
         })
         .collect();
 
-    let simplified = simplify(&points, tolerance, high_quality);
-    let mut keep_indices = Vec::with_capacity(simplified.len());
-    let mut search_start = 0usize;
-
-    for point in simplified {
-        let relative_index = points[search_start..]
-            .iter()
-            .position(|candidate| *candidate == point)
-            .ok_or_else(|| anyhow!("failed to map simplified points back to samples"))?;
-        let absolute_index = search_start + relative_index;
-        keep_indices.push(absolute_index);
-        search_start = absolute_index.saturating_add(1);
-    }
-
+    let keep_indices = simplify_indices(&points, tolerance, high_quality);
     Ok(keep_indices)
 }
 
@@ -683,6 +752,75 @@ fn aggregate_numeric_samples(
 
 #[cfg(test)]
 mod tests {
+
+    /// The iterative simplification keeps the points that `simplify-polyline` keeps.
+    #[test]
+    fn simplify_keeps_the_points_of_the_recursive_version() {
+        use simplify_polyline::{Point, simplify};
+        let mut rng = fastrand::Rng::with_seed(11);
+        for round in 0..200 {
+            let len = rng.usize(0..300);
+            let mut points: Vec<[f64; 2]> = Vec::with_capacity(len);
+            let mut x = 0.0;
+            for _ in 0..len {
+                x += rng.f64() * 0.01;
+                // Repeated values too, which the radial pass compares
+                points.push([x, (rng.u8(0..20) as f64) / 20.0]);
+            }
+            let tolerance = [0.0, 0.001, 0.01, 0.1][round % 4];
+            let high_quality = round % 2 == 0;
+            let reference: Vec<Point<2, f64>> = points.iter().map(|&vec| Point { vec }).collect();
+            let expected: Vec<[f64; 2]> = simplify(&reference, tolerance, high_quality)
+                .into_iter()
+                .map(|point| point.vec)
+                .collect();
+            let kept: Vec<[f64; 2]> = simplify_indices(&points, tolerance, high_quality)
+                .into_iter()
+                .map(|index| points[index])
+                .collect();
+            assert_eq!(kept, expected, "round {round}");
+        }
+    }
+
+    /// A series whose farthest point is always next to the start of the segment: the recursive
+    /// Douglas-Peucker of `simplify-polyline` went one level deeper per point, and 100,000 points
+    /// overflowed the 2 MiB stack of a Tokio worker, which aborts the process. On a 128 KiB stack
+    /// it already overflows at 1,000 points (measured), so 5,000 points keep the test fast.
+    #[test]
+    fn simplify_does_not_recurse_with_the_number_of_points() {
+        let samples: crate::datamodel::sensapp_vec::SensAppVec<Sample<f64>> = (0..5_000)
+            .map(|i| Sample {
+                datetime: SensAppDateTime::from_unix_microseconds_i64(i * 1_000_000),
+                value: if i % 2 == 0 { 1.0 } else { -1.0 } * 0.99999_f64.powi(i as i32),
+            })
+            .collect();
+        let sensor = Sensor::new(
+            uuid::Uuid::new_v4(),
+            "zigzag".to_string(),
+            SensorType::Float,
+            None,
+            None,
+        );
+        let options = SimplifyOptions {
+            tolerance: 1e-12,
+            high_quality: true,
+        };
+        let kept = std::thread::Builder::new()
+            .stack_size(128 * 1024)
+            .spawn(move || {
+                simplify_sensor_data(
+                    SensorData::new(sensor, TypedSamples::Float(samples)),
+                    options,
+                )
+                .unwrap()
+                .samples
+                .len()
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(kept, 5_000);
+    }
     // These values are stored in ClickHouse and BigQuery. If one of these tests fails, the on-disk format
     // changed: existing data would no longer be found.
     #[test]

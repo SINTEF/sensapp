@@ -116,6 +116,9 @@ pub struct RouterSettings {
     pub maintenance_timeout: Duration,
     /// Write requests handled at the same time, 0 for no limit
     pub max_concurrent_writes: usize,
+    /// Time a client has to send a buffered request body (the writes and the remote read) before
+    /// it is answered with a 408, which frees its write slot
+    pub body_read_timeout: Duration,
     /// Directory of the built web UI to serve under `/ui/`, `None` to not serve it
     pub ui_dir: Option<PathBuf>,
 }
@@ -128,6 +131,7 @@ impl RouterSettings {
             write_timeout: Duration::from_secs(config.http_write_timeout_seconds),
             maintenance_timeout: Duration::from_secs(config.http_maintenance_timeout_seconds),
             max_concurrent_writes: config.http_max_concurrent_writes,
+            body_read_timeout: Duration::from_secs(config.http_body_read_timeout_seconds),
             ui_dir: ui_directory(config),
         })
     }
@@ -144,8 +148,13 @@ fn timeout_layer(duration: Duration) -> TimeoutLayer {
 /// tests run as well.
 pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router {
     let max_body_bytes = settings.max_body_bytes;
-    let max_body_layer =
-        axum::middleware::from_fn_with_state(max_body_bytes, enforce_request_body_limit);
+    let max_body_layer = axum::middleware::from_fn_with_state(
+        BodyLimits {
+            max_bytes: max_body_bytes,
+            read_timeout: settings.body_read_timeout,
+        },
+        enforce_request_body_limit,
+    );
     let bytes_body_layer = DefaultBodyLimit::max(max_body_bytes);
     let write_limiter = WriteLimiter::new(settings.max_concurrent_writes)
         .with_shed_counter(state.metrics.writes_shed_counter());
@@ -378,20 +387,38 @@ async fn shutdown_signal() {
         .expect("failed to install shutdown CTRL+C signal handler");
 }
 
+/// The size and the time allowed to a request body that is read before its handler runs.
+#[derive(Clone, Copy, Debug)]
+struct BodyLimits {
+    max_bytes: usize,
+    read_timeout: Duration,
+}
+
+/// Read the whole body before the handler: 413 when it is too large, and 408 when the client takes
+/// longer than the read timeout to send it, which frees the write slot it holds.
 async fn enforce_request_body_limit(
-    State(max_bytes): State<usize>,
+    State(limits): State<BodyLimits>,
     request: Request,
     next: Next,
 ) -> Response {
     let (parts, body) = request.into_parts();
-    match axum::body::to_bytes(body, max_bytes).await {
-        Ok(bytes) => {
+    let max_bytes = limits.max_bytes;
+    match tokio::time::timeout(limits.read_timeout, axum::body::to_bytes(body, max_bytes)).await {
+        Ok(Ok(bytes)) => {
             next.run(Request::from_parts(parts, Body::from(bytes)))
                 .await
         }
-        Err(_) => (
+        Ok(Err(_)) => (
             StatusCode::PAYLOAD_TOO_LARGE,
             format!("Request body exceeds {max_bytes} bytes"),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::REQUEST_TIMEOUT,
+            format!(
+                "The request body was not received within {} seconds",
+                limits.read_timeout.as_secs_f64()
+            ),
         )
             .into_response(),
     }
@@ -978,7 +1005,10 @@ mod tests {
             "/publish",
             post(|body: Body| async move { axum::body::to_bytes(body, usize::MAX).await.unwrap() })
                 .layer(axum::middleware::from_fn_with_state(
-                    4usize,
+                    BodyLimits {
+                        max_bytes: 4,
+                        read_timeout: Duration::from_secs(30),
+                    },
                     enforce_request_body_limit,
                 )),
         );

@@ -110,10 +110,11 @@ jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 rustls = "0.23"
 rusty-promql-parser = "0.2.1"
 prometheus-client = "0.25"
-simplify-polyline = "0.5"
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
+# The reference of the iterative simplification in `storage::common`
+simplify-polyline = "0.5"
 temp-env = "0.3"
 tokio-test = "0.4"
 serial_test = "4"

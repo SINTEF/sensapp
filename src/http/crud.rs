@@ -218,6 +218,7 @@ fn convert_label_match_op(op: rusty_promql_parser::LabelMatchOp) -> MatcherType 
 /// - `{env="prod"}` - label matchers only
 /// - `my_metric{env="prod"}` - metric name with labels (metric name is ignored for series filtering)
 pub(crate) fn parse_selector_to_matchers(selector: &str) -> Result<Vec<LabelMatcher>, AppError> {
+    super::limits::check_promql_size(selector)?;
     // If the selector is just braces with labels, wrap it in a dummy metric name
     let query_str = if selector.trim().starts_with('{') {
         format!("dummy{}", selector)

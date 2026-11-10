@@ -126,6 +126,7 @@ fn settings() -> RouterSettings {
         write_timeout: Duration::from_secs(300),
         maintenance_timeout: Duration::from_secs(3600),
         max_concurrent_writes: 16,
+        body_read_timeout: Duration::from_secs(30),
         ui_dir: None,
     }
 }
@@ -948,5 +949,127 @@ async fn creating_a_token_is_logged_without_the_token() -> Result<()> {
     for line in &lines {
         assert!(!line.contains(made), "{line}");
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The HTTP metrics stay bounded
+// ---------------------------------------------------------------------------
+
+/// The `path` and `method` values of `sensapp_http_requests_total`.
+async fn metric_labels(router: &Router) -> std::collections::BTreeSet<String> {
+    let (_, _, body) = send(router, get_request("/prometheus/metrics")).await;
+    body.lines()
+        .filter(|line| line.starts_with("sensapp_http_requests_total{"))
+        .filter_map(|line| line.split('{').nth(1)?.split('}').next())
+        .flat_map(|labels| labels.split(','))
+        .filter(|label| !label.starts_with("status="))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Paths without a route, and the paths of the UI, are counted under constants: each distinct path
+/// stayed in the metrics forever, so anyone could make them grow without a token.
+#[tokio::test]
+#[serial]
+async fn unmatched_paths_and_methods_do_not_grow_the_metrics() -> Result<()> {
+    let dist = std::env::temp_dir().join(format!("sensapp-ui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dist)?;
+    std::fs::write(dist.join("index.html"), "<html>SensApp UI</html>")?;
+    let settings = RouterSettings {
+        ui_dir: Some(dist.clone()),
+        ..settings()
+    };
+    let (_db, router) = router(Duration::ZERO, None, settings).await?;
+
+    let random = || uuid::Uuid::new_v4().simple().to_string();
+    for _ in 0..10 {
+        send(&router, get_request(&format!("/{}", random()))).await;
+        send(&router, get_request(&format!("/ui/{}", random()))).await;
+        let request = Request::builder()
+            .method(format!("M{}", &random()[..8]).as_str())
+            .uri("/health/live")
+            .body(Body::empty())?;
+        send(&router, request).await;
+    }
+    let labels = metric_labels(&router).await;
+    let expected: std::collections::BTreeSet<String> = [
+        r#"method="GET""#,
+        r#"method="OTHER""#,
+        r#"path="/health/live""#,
+        r#"path="/ui/*""#,
+        r#"path="unmatched""#,
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    assert_eq!(labels, expected);
+
+    std::fs::remove_dir_all(dist)?;
+    Ok(())
+}
+
+/// A request whose client goes away is no longer in flight.
+#[tokio::test]
+#[serial]
+async fn a_cancelled_request_is_not_in_flight_anymore() -> Result<()> {
+    let (_db, router) = router(Duration::from_secs(5), None, settings()).await?;
+    let write = start_slow_write(&router, None).await;
+    let in_flight = |body: &str| {
+        body.lines()
+            .find_map(|line| line.strip_prefix("sensapp_http_requests_in_flight "))
+            .map(str::to_string)
+    };
+    let (_, _, body) = send(&router, get_request("/prometheus/metrics")).await;
+    assert_eq!(in_flight(&body).as_deref(), Some("1"));
+
+    write.abort();
+    let _ = write.await;
+    let (_, _, body) = send(&router, get_request("/prometheus/metrics")).await;
+    assert_eq!(in_flight(&body).as_deref(), Some("0"));
+    Ok(())
+}
+
+/// A write whose body arrives too slowly is answered with a 408 and gives its write slot back,
+/// instead of holding it for the whole write timeout.
+#[tokio::test]
+#[serial]
+async fn a_slow_body_is_a_408_that_frees_the_write_slot() -> Result<()> {
+    let settings = RouterSettings {
+        max_concurrent_writes: 1,
+        write_timeout: Duration::from_secs(5),
+        body_read_timeout: Duration::from_millis(200),
+        ..settings()
+    };
+    let (_db, router) = router(Duration::ZERO, None, settings).await?;
+
+    // The first line arrives, and the rest never does
+    let body = futures::stream::unfold(0, |chunk| async move {
+        if chunk > 0 {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+        Some((
+            Ok::<_, std::io::Error>(axum::body::Bytes::from(
+                "real_router,k=v value=1.5 1700000000000000000\n",
+            )),
+            chunk + 1,
+        ))
+    });
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v2/write?bucket=b&org=o")
+        .header("content-type", "text/plain")
+        .body(Body::from_stream(body))?;
+    let started = std::time::Instant::now();
+    let (status, _, _) = send(&router, request).await;
+    assert_eq!(status, StatusCode::REQUEST_TIMEOUT);
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+
+    let (status, _, _) = send(&router, write_request(None)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
     Ok(())
 }

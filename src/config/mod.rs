@@ -30,6 +30,13 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS", default = 300)]
     pub http_write_timeout_seconds: u64,
 
+    /// Time a client has to send the whole body of a write (`/publish`, InfluxDB and Prometheus
+    /// writes) or of a Prometheus remote read, answered with a 408 otherwise. A write holds one of
+    /// the `SENSAPP_HTTP_MAX_CONCURRENT_WRITES` slots while its body arrives, so a slow client
+    /// must not keep it for the whole write timeout.
+    #[config(env = "SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS", default = 30)]
+    pub http_body_read_timeout_seconds: u64,
+
     /// Time the maintenance request (`POST /api/v1/admin/vacuum`) may take before it is answered
     /// with a 504. Removing duplicates scans every value table, so it is much longer than the
     /// timeout of the other requests.

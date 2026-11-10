@@ -44,6 +44,7 @@ fn app(storage: Arc<dyn StorageInstance>) -> Router {
         write_timeout: Duration::from_secs(30),
         maintenance_timeout: Duration::from_secs(30),
         max_concurrent_writes: 4,
+        body_read_timeout: Duration::from_secs(30),
         ui_dir: None,
     };
     build_router(state, &settings)
@@ -225,5 +226,45 @@ async fn a_senml_time_out_of_range_is_refused() -> Result<()> {
         let response = send(&app, request).await;
         assert_refused_then_alive(&app, response).await;
     }
+    Ok(())
+}
+
+/// The PromQL parser is a recursive descent with no depth limit. Measured on a 2 MiB thread (a
+/// Tokio worker) in a debug build: 150 nested parentheses or 700 unary minus signs overflow the
+/// stack, which aborts the process. Queries and selectors are now refused above 4 KiB or 64 levels.
+#[tokio::test]
+#[serial]
+async fn deeply_nested_or_long_queries_are_refused() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let app = app(test_db.storage());
+    let queries = [
+        format!("{}x{}", "(".repeat(300), ")".repeat(300)),
+        format!("{}x", "-".repeat(1000)),
+        // Over 4 KiB (a URI is at most 64 KiB)
+        format!("x{}", " + x".repeat(1_250)),
+    ];
+    for query in &queries {
+        let query = urlencoding::encode(query);
+        for uri in [
+            format!("/api/v1/query?query={query}"),
+            format!("/series?selector={query}"),
+            format!("/prometheus/metrics?include_latest_samples=true&selector={query}"),
+        ] {
+            let (status, body) = send(&app, Request::get(&uri).body(Body::empty()).unwrap()).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{}: {body}", &uri[..40]);
+            assert!(body.contains("PromQL"), "{body}");
+        }
+    }
+    // A label value may hold any character
+    let quoted = urlencoding::encode(r#"{name="((((((((((--------"}"#);
+    let (status, body) = send(
+        &app,
+        Request::get(format!("/series?selector={quoted}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     Ok(())
 }
