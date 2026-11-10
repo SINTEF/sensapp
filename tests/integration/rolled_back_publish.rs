@@ -5,9 +5,9 @@
 //! next new row, and the samples would be filed under the wrong series or read back as another
 //! string.
 //!
-//! The tests cut a publish at many points in time, because where it stops matters and cannot be
-//! chosen from the outside. Whatever the point, every series must then read back its own samples.
-//! These tests run on the backend selected by `TEST_DATABASE_URL`.
+//! The tests cut a publish at a few points in time, because where it stops matters and cannot
+//! be chosen from the outside. Whatever the point, every series must then read back its own
+//! samples. These tests run on the backend selected by `TEST_DATABASE_URL`.
 
 use crate::common::{DatabaseType, TestDb};
 use anyhow::Result;
@@ -16,8 +16,9 @@ use sensapp::datamodel::batch::{Batch, SingleSensorBatch};
 use sensapp::datamodel::sensapp_vec::{SensAppLabels, SensAppVec};
 use sensapp::datamodel::unit::Unit;
 use sensapp::datamodel::{Sample, Sensor, SensorType, TypedSamples};
-use sensapp::storage::StorageInstance;
+use sensapp::storage::{LabelMatcher, StorageInstance};
 use serial_test::serial;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -30,11 +31,13 @@ fn ensure_config() {
     });
 }
 
-/// Series per batch: enough that a cut often lands in the middle of the registrations.
-const SERIES: usize = 100;
+/// Series per batch: a few, so that a cut of a millisecond lands in the middle of the
+/// registrations on SQLite.
+const SERIES: usize = 20;
 
-/// The publish is cut after 1, 2, ... ms.
-const CUTS_MS: std::ops::RangeInclusive<u64> = 1..=25;
+/// The publish is cut after these many milliseconds: where it stops cannot be chosen from the
+/// outside, so a few points are tried.
+const CUTS_MS: [u64; 3] = [1, 2, 5];
 
 /// 2024-01-01T00:00:00Z
 const START: f64 = 1_704_067_200.0;
@@ -44,9 +47,11 @@ fn applies_to(test_db: &TestDb) -> bool {
     test_db.db_type != DatabaseType::RRDcached
 }
 
-fn new_sensor(name: String, sensor_type: SensorType) -> Result<Arc<Sensor>> {
+/// A new series, with a `round` label shared by the series of one round so that they are read
+/// back with one query.
+fn new_sensor(name: String, round: &str, sensor_type: SensorType) -> Result<Arc<Sensor>> {
     let labels: SensAppLabels = [
-        ("run".to_string(), name.clone()),
+        ("round".to_string(), round.to_string()),
         ("room".to_string(), "lab".to_string()),
     ]
     .into_iter()
@@ -60,38 +65,29 @@ fn new_sensor(name: String, sensor_type: SensorType) -> Result<Arc<Sensor>> {
     )?))
 }
 
-fn float_batch(series: &[(Arc<Sensor>, f64)]) -> Arc<Batch> {
+fn batch<T: Clone>(
+    series: &[(Arc<Sensor>, T)],
+    typed: fn(Vec<Sample<T>>) -> TypedSamples,
+) -> Arc<Batch> {
     let mut sensors = SensAppVec::new();
     for (sensor, value) in series {
         sensors.push(SingleSensorBatch::new(
             sensor.clone(),
-            TypedSamples::Float(
-                vec![Sample {
-                    datetime: hifitime::Epoch::from_unix_seconds(START),
-                    value: *value,
-                }]
-                .into(),
-            ),
+            typed(vec![Sample {
+                datetime: hifitime::Epoch::from_unix_seconds(START),
+                value: value.clone(),
+            }]),
         ));
     }
     Arc::new(Batch::new(sensors))
 }
 
-fn string_batch(series: &[(Arc<Sensor>, String)]) -> Arc<Batch> {
-    let mut sensors = SensAppVec::new();
-    for (sensor, value) in series {
-        sensors.push(SingleSensorBatch::new(
-            sensor.clone(),
-            TypedSamples::String(
-                vec![Sample {
-                    datetime: hifitime::Epoch::from_unix_seconds(START),
-                    value: value.clone(),
-                }]
-                .into(),
-            ),
-        ));
-    }
-    Arc::new(Batch::new(sensors))
+fn floats(samples: Vec<Sample<f64>>) -> TypedSamples {
+    TypedSamples::Float(samples.into())
+}
+
+fn strings(samples: Vec<Sample<String>>) -> TypedSamples {
+    TypedSamples::String(samples.into())
 }
 
 /// Start a publish and drop it after `cut`, as the write timeout does.
@@ -100,54 +96,60 @@ async fn cut_publish(storage: &Arc<dyn StorageInstance>, batch: Arc<Batch>, cut:
     let _ = tokio::time::timeout(cut, storage.publish(batch)).await;
 }
 
-async fn assert_float_series(
+/// The series of a round, read with one selector (a bulk read on every backend): each of the
+/// `expected` series must come back with only its own value. `value_of` gives the values of a
+/// series as text.
+async fn assert_round(
     storage: &Arc<dyn StorageInstance>,
-    series: &[(Arc<Sensor>, f64)],
-    cut: Duration,
+    round: &str,
+    expected: HashMap<Uuid, String>,
+    value_of: fn(&TypedSamples) -> Vec<String>,
 ) -> Result<()> {
-    for (sensor, value) in series {
-        let data = storage
-            .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
-            .await?
-            .unwrap_or_else(|| panic!("{} is missing (cut after {cut:?})", sensor.name));
-        let TypedSamples::Float(samples) = &data.samples else {
-            panic!("{} has {:?} samples", sensor.name, data.samples);
-        };
-        assert!(!samples.is_empty(), "{} has no samples", sensor.name);
-        for sample in samples.iter() {
+    let read = storage
+        .query_selector(
+            &[LabelMatcher::eq("round", round)],
+            None,
+            None,
+            false,
+            10 * SERIES,
+            100 * SERIES,
+        )
+        .await?
+        .map_err(|exceeded| anyhow::anyhow!("{exceeded:?}"))?;
+    let mut found: HashMap<Uuid, Vec<String>> = HashMap::new();
+    for data in &read {
+        found
+            .entry(data.sensor.uuid)
+            .or_default()
+            .extend(value_of(&data.samples));
+    }
+    for (uuid, value) in &expected {
+        let values = found
+            .get(uuid)
+            .unwrap_or_else(|| panic!("series {uuid} is missing (round {round})"));
+        assert!(!values.is_empty(), "series {uuid} has no samples");
+        for found_value in values {
             assert_eq!(
-                sample.value, *value,
-                "{} reads back the samples of another series (cut after {cut:?})",
-                sensor.name
+                found_value, value,
+                "series {uuid} reads back the sample of another series (round {round})"
             );
         }
     }
     Ok(())
 }
 
-async fn assert_string_series(
-    storage: &Arc<dyn StorageInstance>,
-    series: &[(Arc<Sensor>, String)],
-    cut: Duration,
-) -> Result<()> {
-    for (sensor, value) in series {
-        let data = storage
-            .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
-            .await?
-            .unwrap_or_else(|| panic!("{} is missing (cut after {cut:?})", sensor.name));
-        let TypedSamples::String(samples) = &data.samples else {
-            panic!("{} has {:?} samples", sensor.name, data.samples);
-        };
-        assert!(!samples.is_empty(), "{} has no samples", sensor.name);
-        for sample in samples.iter() {
-            assert_eq!(
-                &sample.value, value,
-                "{} reads back another string (cut after {cut:?})",
-                sensor.name
-            );
-        }
+fn float_values(samples: &TypedSamples) -> Vec<String> {
+    match samples {
+        TypedSamples::Float(samples) => samples.iter().map(|s| s.value.to_string()).collect(),
+        other => panic!("expected float samples, got {other:?}"),
     }
-    Ok(())
+}
+
+fn string_values(samples: &TypedSamples) -> Vec<String> {
+    match samples {
+        TypedSamples::String(samples) => samples.iter().map(|s| s.value.clone()).collect(),
+        other => panic!("expected string samples, got {other:?}"),
+    }
 }
 
 /// A batch of new series is cut, then sent again with other new series. Each series must read
@@ -164,28 +166,34 @@ async fn series_of_a_cut_publish_are_registered_again_under_their_own_id() -> Re
     let run = Uuid::new_v4();
 
     for cut_ms in CUTS_MS {
-        let cut = Duration::from_millis(cut_ms);
-        let named = |kind: &str, index: usize| format!("rolled_back_{kind}_{cut_ms}_{index}_{run}");
+        let round = format!("series_{cut_ms}_{run}");
         // Distinct values, so that a series that reads back another one's sample is seen
-        let first: Vec<_> = (0..SERIES)
-            .map(|index| {
-                let value = (cut_ms * 10_000 + index as u64) as f64;
-                Ok((new_sensor(named("first", index), SensorType::Float)?, value))
-            })
-            .collect::<Result<_>>()?;
-        let others: Vec<_> = (0..SERIES)
-            .map(|index| {
-                let value = (cut_ms * 10_000 + 5_000 + index as u64) as f64;
-                Ok((new_sensor(named("other", index), SensorType::Float)?, value))
-            })
-            .collect::<Result<_>>()?;
+        let series = |kind: &str, offset: u64| -> Result<Vec<(Arc<Sensor>, f64)>> {
+            (0..SERIES)
+                .map(|index| {
+                    let name = format!("rolled_back_{kind}_{index}_{round}");
+                    let value = (offset + index as u64) as f64;
+                    Ok((new_sensor(name, &round, SensorType::Float)?, value))
+                })
+                .collect()
+        };
+        let first = series("first", 0)?;
+        let others = series("other", 1_000)?;
 
-        cut_publish(&storage, float_batch(&first), cut).await;
-
+        cut_publish(
+            &storage,
+            batch(&first, floats),
+            Duration::from_millis(cut_ms),
+        )
+        .await;
         let retry: Vec<_> = first.iter().chain(others.iter()).cloned().collect();
-        storage.publish(float_batch(&retry)).await?;
+        storage.publish(batch(&retry, floats)).await?;
 
-        assert_float_series(&storage, &retry, cut).await?;
+        let expected = retry
+            .iter()
+            .map(|(sensor, value)| (sensor.uuid, value.to_string()))
+            .collect();
+        assert_round(&storage, &round, expected, float_values).await?;
     }
     Ok(())
 }
@@ -204,31 +212,31 @@ async fn strings_of_a_cut_publish_are_stored_again_under_their_own_id() -> Resul
     let run = Uuid::new_v4();
 
     for cut_ms in CUTS_MS {
-        let cut = Duration::from_millis(cut_ms);
-        let named = |kind: &str, index: usize| format!("rolled_back_{kind}_{cut_ms}_{index}_{run}");
-        let strings = |kind: &str| -> Result<Vec<(Arc<Sensor>, String)>> {
+        let round = format!("strings_{cut_ms}_{run}");
+        // New series every time, so that only the string ids can go wrong
+        let series = |kind: &str, text: &str| -> Result<Vec<(Arc<Sensor>, String)>> {
             (0..SERIES)
                 .map(|index| {
-                    let sensor = new_sensor(named(kind, index), SensorType::String)?;
-                    let text = match kind {
-                        "other" => format!("bar_{cut_ms}_{index}_{run}"),
-                        _ => format!("foo_{cut_ms}_{index}_{run}"),
-                    };
-                    Ok((sensor, text))
+                    let name = format!("rolled_back_{kind}_{index}_{round}");
+                    let sensor = new_sensor(name, &round, SensorType::String)?;
+                    Ok((sensor, format!("{text}_{index}_{round}")))
                 })
                 .collect()
         };
 
-        // New series every time, so that only the string ids can go wrong
-        cut_publish(&storage, string_batch(&strings("first")?), cut).await;
+        let cut = Duration::from_millis(cut_ms);
+        cut_publish(&storage, batch(&series("first", "foo")?, strings), cut).await;
+        let others = series("other", "bar")?;
+        storage.publish(batch(&others, strings)).await?;
+        let again = series("again", "foo")?;
+        storage.publish(batch(&again, strings)).await?;
 
-        let others = strings("other")?;
-        storage.publish(string_batch(&others)).await?;
-        let again = strings("again")?;
-        storage.publish(string_batch(&again)).await?;
-
-        assert_string_series(&storage, &others, cut).await?;
-        assert_string_series(&storage, &again, cut).await?;
+        let expected = others
+            .iter()
+            .chain(again.iter())
+            .map(|(sensor, value)| (sensor.uuid, value.clone()))
+            .collect();
+        assert_round(&storage, &round, expected, string_values).await?;
     }
     Ok(())
 }

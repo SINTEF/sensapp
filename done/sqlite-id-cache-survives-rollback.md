@@ -56,16 +56,22 @@ after are noted here.
 ## Outcome (10 November 2026)
 
 **Confirmed by a test.** `tests/integration/rolled_back_publish.rs` has two generic tests (every backend but
-RRDcached, which keys its files by UUID and stores no strings). Each cuts a publish of 100 new series with
-`tokio::time::timeout` after 1, 2, … 25 ms, as the write timeout does, then:
+RRDcached, which keys its files by UUID and stores no strings). Each cuts a publish of 20 new series with
+`tokio::time::timeout` after 1, 2 and 5 ms, as the write timeout does, then reads the round back with one
+selector:
 
-- `series_of_a_cut_publish_are_registered_again_under_their_own_id`: sends the same series again with 100
+- `series_of_a_cut_publish_are_registered_again_under_their_own_id`: sends the same series again with 20
   other new ones. Each series must exist and read back only its own value.
 - `strings_of_a_cut_publish_are_stored_again_under_their_own_id`: new strings `foo_*` in the cut batch, then
   `bar_*`, then `foo_*` again, each time on new series so that only the string ids can go wrong.
 
-Before the fix both failed on SQLite at the first cut (1 ms): a series of the cut batch was missing from the
-catalog, and a `foo_*` series read back `bar_*`.
+Before the fix both failed on SQLite at the first cut (1 ms), three runs out of three: a series was missing
+(its sensor or its `round` label had been given an id that the rollback took back), and in the first version of
+the test a `foo_*` series read back `bar_*`.
+
+The first version of the tests cut 25 times a batch of 100 series and read each series back with its own query:
+about 15 000 series and 10 000 point reads, 82 s on TimescaleDB. That was far more than the bug needs; the
+current version takes 0.1 s (SQLite) to 3.8 s (ClickHouse).
 
 A failing batch made of valid data could not be built in a generic way (no input fails on every backend), so
 the tests use the dropped future only. They do not assert that the series of the cut batch are absent: the cut
@@ -101,6 +107,11 @@ stores of a test process no longer share state, and the string cache cannot grow
 
 The three binaries had different `shasum`s.
 
-**Backends run.** SQLite: full suite (282 unit, 318 integration tests) and `cargo clippy --tests`. DuckDB: the two
-new tests pass (30 s). The new tests on PostgreSQL, TimescaleDB and ClickHouse were not run: Docker (colima)
-was not running.
+**Backends run.** Full suites with the first version of the new tests, all green: SQLite (282 unit, 318
+integration), PostgreSQL (288, 319), TimescaleDB (288, 323), ClickHouse (296, 331). The current version of the
+two tests, alone: SQLite 0.1 s, PostgreSQL 0.5 s, TimescaleDB 1.5 s, ClickHouse 3.8 s, DuckDB 0.8 s.
+`cargo clippy --tests` is clean.
+
+Found on the way, not fixed here (see `ideas/timescaledb-slow-reads-and-test-suite.md`): the TimescaleDB suite
+takes 205 s in CI against 59 s for PostgreSQL, and a selector over string series reads them one query per series
+(200 one-sample string series: 0.9 s).
