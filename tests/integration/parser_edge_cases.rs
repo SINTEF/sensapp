@@ -115,10 +115,11 @@ mod parsing_edge_cases {
             infer_type("01/01/2024"),
             Ok(("", InferedValue::String("01/01/2024".to_string())))
         );
-        assert_eq!(
+        // A calendar date alone is a time, midnight UTC: a `date` column of dates is a time axis
+        assert!(matches!(
             infer_type("2024-01-01"),
-            Ok(("", InferedValue::String("2024-01-01".to_string())))
-        );
+            Ok(("", InferedValue::DateTime(_)))
+        ));
     }
 
     #[test]

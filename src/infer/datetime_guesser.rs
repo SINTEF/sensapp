@@ -1,22 +1,36 @@
 use super::columns::InferedColumn;
 use rust_decimal::Decimal;
 
+/// Between 2000-01-01 and 2118-01-01 in Unix seconds.
+const LIKELY_SECONDS: std::ops::RangeInclusive<i128> = 946684800..=4670438400;
+/// One second in the epoch units a time column may use: s, ms, µs, ns.
+const UNITS: [i128; 4] = [1, 1_000, 1_000_000, 1_000_000_000];
+
+/// A number that reads as a time between 2000 and 2118, in seconds, milliseconds, microseconds or
+/// nanoseconds since the Unix epoch.
 pub fn is_i64_likely_timestamp(value: i64) -> bool {
-    // Between 2000-01-01 and 2118-01-01
-    // In 2118, I will very likely be long dead, so not my problem
-    // if you somehow still use this guessing function.
-    (946684800..=4670438400).contains(&value)
+    UNITS.iter().any(|unit| {
+        (LIKELY_SECONDS.start() * unit..=LIKELY_SECONDS.end() * unit).contains(&(value as i128))
+    })
 }
 
 pub fn is_f64_likely_timestamp(value: f64) -> bool {
-    (946684800.0..=4670438400.0).contains(&value)
+    UNITS.iter().any(|&unit| {
+        let unit = unit as f64;
+        (*LIKELY_SECONDS.start() as f64 * unit..=*LIKELY_SECONDS.end() as f64 * unit)
+            .contains(&value)
+    })
 }
 
 pub fn is_decimal_likely_timestamp(value: Decimal) -> bool {
-    let from = Decimal::from(946684800i64);
-    let to = Decimal::from(4670438400i64);
-    value >= from && value <= to
+    use rust_decimal::prelude::ToPrimitive;
+    value.to_f64().is_some_and(is_f64_likely_timestamp)
 }
+
+/// The score of a number column whose values do not all read as times and whose name only contains
+/// "time" or "date": well under the threshold, so that `uptime` does not become the time axis when
+/// the real date column did not parse.
+const NOT_TIMES: isize = -50;
 
 // This function takes a column and gives a score of
 // how likely it is to be a datetime column.
@@ -37,6 +51,10 @@ pub fn datetime_guesser(column_name: &str, column: &InferedColumn) -> isize {
         "recorded_at" | "recordedat" => 36,
         _ => 0,
     };
+    // A column named for time (`time`, `created_at`) may hold relative times; a name that only
+    // contains "time" or "date" (`uptime`, `date_of_creation`) needs values that read as times
+    let exact_name = sum != 0;
+    let not_times = if exact_name { 2 } else { NOT_TIMES };
     if sum == 0 {
         // We have a few false positive like "outdated" or "candidate"
         // But this is fine.
@@ -59,7 +77,7 @@ pub fn datetime_guesser(column_name: &str, column: &InferedColumn) -> isize {
             if values.iter().all(|value| is_i64_likely_timestamp(*value)) {
                 42
             } else {
-                2
+                not_times
             }
         }
         // Same with numeric more precise type
@@ -70,7 +88,7 @@ pub fn datetime_guesser(column_name: &str, column: &InferedColumn) -> isize {
             {
                 42
             } else {
-                2
+                not_times
             }
         }
         InferedColumn::Float(values) => {
@@ -78,7 +96,7 @@ pub fn datetime_guesser(column_name: &str, column: &InferedColumn) -> isize {
             if values.iter().all(|value| is_f64_likely_timestamp(*value)) {
                 32
             } else {
-                1
+                not_times
             }
         }
         InferedColumn::Boolean(_) => -80,
@@ -123,7 +141,9 @@ mod tests {
         assert!(!is_i64_likely_timestamp(-now));
         assert!(is_i64_likely_timestamp(946684801));
         assert!(is_i64_likely_timestamp(4670438400));
-        assert!(!is_i64_likely_timestamp(2093009830983097));
+        assert!(is_i64_likely_timestamp(2093009830983097)); // microseconds, 2036
+        assert!(is_i64_likely_timestamp(1717243200000)); // milliseconds
+        assert!(!is_i64_likely_timestamp(20930098309));
     }
 
     #[test]
@@ -138,7 +158,8 @@ mod tests {
         assert!(!is_f64_likely_timestamp(-now));
         assert!(is_f64_likely_timestamp(946684801.0));
         assert!(is_f64_likely_timestamp(4670438400.0));
-        assert!(!is_f64_likely_timestamp(2093009830983097.0));
+        assert!(is_f64_likely_timestamp(2093009830983097.0));
+        assert!(!is_f64_likely_timestamp(20930098309.0));
     }
 
     #[test]
@@ -153,14 +174,20 @@ mod tests {
         assert!(!is_decimal_likely_timestamp(Decimal::new(-now, 0)));
         assert!(is_decimal_likely_timestamp(Decimal::new(946684801, 0)));
         assert!(is_decimal_likely_timestamp(Decimal::new(4670438400, 0)));
-        assert!(!is_decimal_likely_timestamp(Decimal::new(
+        assert!(is_decimal_likely_timestamp(Decimal::new(
             2093009830983097,
             0
         )));
+        assert!(!is_decimal_likely_timestamp(Decimal::new(20930098309, 0)));
     }
 
     #[test]
     fn test_datetime_guesser() {
+        // A name that only contains "time", with values that are not times
+        assert_eq!(
+            datetime_guesser("uptime", &InferedColumn::Integer(vec![100, 200])),
+            9 + NOT_TIMES
+        );
         assert_eq!(
             datetime_guesser("datetime", &InferedColumn::DateTime(vec![])),
             200
@@ -179,7 +206,7 @@ mod tests {
         );
         assert_eq!(
             datetime_guesser("created_at", &InferedColumn::Float(vec![0.0, 946684801.0])),
-            39
+            40
         );
         assert_eq!(
             datetime_guesser("updated_at", &InferedColumn::Float(vec![946684801.0])),
@@ -197,7 +224,7 @@ mod tests {
                 "date_of_creation",
                 &InferedColumn::Numeric(vec![Decimal::new(2024, 0)])
             ),
-            12
+            -40
         );
         assert_eq!(
             datetime_guesser("sensor_time_ok", &InferedColumn::Boolean(vec![false])),

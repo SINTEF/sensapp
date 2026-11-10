@@ -14,6 +14,7 @@ mod clickhouse_http_lifecycle;
 mod clickhouse_integration;
 mod cross_series_reads;
 mod crud_dcat_api;
+mod csv_timestamps;
 mod data_lifecycle;
 mod datamodel;
 mod deduplication;

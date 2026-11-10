@@ -122,16 +122,19 @@ pub fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<ParsedCsv> {
         }
     }
 
+    let Some(datetime_idx) = datetime_idx else {
+        return Err(anyhow!(
+            "No time column found among the columns {column_names:?}. Name it datetime or \
+             timestamp, with ISO 8601 times (2024-06-01T12:00:00Z) or Unix epoch numbers"
+        ));
+    };
+    let times = column_times(&inferred_columns[datetime_idx], &column_names[datetime_idx])?;
+
     let mut sensors_data: SensorDataMap = HashMap::new();
 
     // Process each row
     for (row_idx, row) in rows.iter().enumerate() {
-        let datetime = if let Some(dt_idx) = datetime_idx {
-            parse_datetime_from_inferred(&inferred_columns[dt_idx], row_idx)?
-        } else {
-            // Use row index as timestamp if no datetime column
-            SensAppDateTime::from_unix_seconds_i64(row_idx as i64)
-        };
+        let datetime = times[row_idx];
 
         if let (Some(sensor_name_idx), Some(value_idx)) = (sensor_name_idx, value_idx) {
             // Long format: one row per sample
@@ -140,36 +143,27 @@ pub fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<ParsedCsv> {
                 return Err(anyhow!("Empty sensor name found in row {}", row_idx + 1));
             }
 
-            let value = parse_value_from_inferred(&inferred_columns[value_idx], row_idx)?;
+            let value =
+                parse_value_from_inferred(&inferred_columns[value_idx], row, value_idx, row_idx)?;
             let unit_name = unit_idx
                 .map(|idx| row[idx].clone())
                 .filter(|s| !s.is_empty());
 
             let unit = unit_name.map(|name| Unit::new(name, None));
             series_entry(&mut sensors_data, sensor_name, &value, unit)?.push((datetime, value));
-        } else if datetime_idx.is_some() {
+        } else {
             // Wide format: each column (except datetime) is a sensor
-            let mut sensor_count = 0;
             for (col_idx, col_name) in column_names.iter().enumerate() {
-                if Some(col_idx) == datetime_idx {
+                if col_idx == datetime_idx {
                     continue; // Skip datetime column
                 }
 
-                let value = parse_value_from_inferred(&inferred_columns[col_idx], row_idx)?;
+                let value =
+                    parse_value_from_inferred(&inferred_columns[col_idx], row, col_idx, row_idx)?;
                 let sensor_name = col_name.clone();
 
                 series_entry(&mut sensors_data, sensor_name, &value, None)?.push((datetime, value));
-                sensor_count += 1;
             }
-
-            if sensor_count == 0 {
-                return Err(anyhow!("No sensor columns found - CSV format unclear"));
-            }
-        } else {
-            return Err(anyhow!(
-                "Unable to parse CSV: no clear datetime column and no sensor_name/value columns found. \
-                Expected either (datetime, sensor_name, value) format or (datetime, sensor1, sensor2, ...) format"
-            ));
         }
     }
 
@@ -203,36 +197,71 @@ fn find_column_index(column_names: &[String], candidates: &[&str]) -> Option<usi
     None
 }
 
-fn parse_datetime_from_inferred(column: &InferedColumn, row_idx: usize) -> Result<SensAppDateTime> {
-    match column {
-        InferedColumn::DateTime(values) => {
-            if row_idx < values.len() {
-                Ok(values[row_idx])
-            } else {
-                Err(anyhow!(
-                    "Row index {} out of bounds for datetime column",
-                    row_idx
-                ))
-            }
+/// The times of the time column. Epoch numbers are seconds, milliseconds, microseconds or
+/// nanoseconds, after the largest of the column: under 10^11 (year 5138 in seconds) seconds, under
+/// 10^14 milliseconds, under 10^17 microseconds, nanoseconds above.
+fn column_times(column: &InferedColumn, name: &str) -> Result<Vec<SensAppDateTime>> {
+    let micros_per_unit = |largest: f64| -> i64 {
+        match largest {
+            x if x < 1e11 => 1_000_000,
+            x if x < 1e14 => 1_000,
+            x if x < 1e17 => 1,
+            _ => 0, // nanoseconds: divided below
         }
+    };
+    let out_of_range = || anyhow!("The time column '{name}' holds a time outside years 1 to 9999");
+    match column {
+        InferedColumn::DateTime(values) => Ok(values.clone()),
         InferedColumn::Integer(values) => {
-            if row_idx < values.len() {
-                Ok(SensAppDateTime::from_unix_seconds_i64(values[row_idx]))
-            } else {
-                Err(anyhow!(
-                    "Row index {} out of bounds for integer datetime column",
-                    row_idx
-                ))
-            }
+            let largest = values.iter().map(|v| v.unsigned_abs()).max().unwrap_or(0);
+            let factor = micros_per_unit(largest as f64);
+            values
+                .iter()
+                .map(|&value| {
+                    let micros = if factor == 0 {
+                        Some(value.div_euclid(1000))
+                    } else {
+                        value.checked_mul(factor)
+                    };
+                    micros
+                        .map(SensAppDateTime::from_unix_microseconds_i64)
+                        .ok_or_else(out_of_range)
+                })
+                .collect()
+        }
+        InferedColumn::Float(values) => {
+            let largest = values.iter().fold(0.0_f64, |max, v| max.max(v.abs()));
+            let factor = match micros_per_unit(largest) {
+                0 => 1e-3,
+                factor => factor as f64,
+            };
+            values
+                .iter()
+                .map(|&value| {
+                    // Rounded: 1717243200.123456 × 10^6 is 1717243200123455.9 in floating point
+                    let micros = (value * factor).round();
+                    // The range check of the samples refuses what is out of years 1 to 9999
+                    if micros.is_finite() && micros.abs() < 9.2e18 {
+                        Ok(SensAppDateTime::from_unix_microseconds_i64(micros as i64))
+                    } else {
+                        Err(out_of_range())
+                    }
+                })
+                .collect()
         }
         _ => Err(anyhow!(
-            "Cannot parse datetime from column type: {:?}",
-            column
+            "The time column '{name}' holds neither ISO 8601 times nor epoch numbers"
         )),
     }
 }
 
-fn parse_value_from_inferred(column: &InferedColumn, row_idx: usize) -> Result<InferedValue> {
+/// The value of a cell. Times in a value column are text: they are kept as written.
+fn parse_value_from_inferred(
+    column: &InferedColumn,
+    row: &[String],
+    col_idx: usize,
+    row_idx: usize,
+) -> Result<InferedValue> {
     match column {
         InferedColumn::Integer(values) => {
             if row_idx < values.len() {
@@ -262,13 +291,7 @@ fn parse_value_from_inferred(column: &InferedColumn, row_idx: usize) -> Result<I
                 Err(anyhow!("Row index {} out of bounds", row_idx))
             }
         }
-        InferedColumn::DateTime(values) => {
-            if row_idx < values.len() {
-                Ok(InferedValue::DateTime(values[row_idx]))
-            } else {
-                Err(anyhow!("Row index {} out of bounds", row_idx))
-            }
-        }
+        InferedColumn::DateTime(_) => Ok(InferedValue::String(row[col_idx].clone())),
         InferedColumn::Json(values) => {
             if row_idx < values.len() {
                 Ok(InferedValue::Json(values[row_idx].clone()))
