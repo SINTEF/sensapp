@@ -70,7 +70,7 @@ nom = "8.0"
 sindit-senml = "0.3"
 serde_json = "1.0"
 hifitime = "4.2"
-iso8601 = "0.6"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 # No "bundled" feature: it compiles DuckDB from C++ source (~20 min) and disables
 # DUCKDB_DOWNLOAD_LIB. Without it, libduckdb-sys downloads the prebuilt library
 # (see .cargo/config.toml and the Dockerfile, which ships libduckdb.so).

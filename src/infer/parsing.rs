@@ -90,78 +90,52 @@ pub fn parse_json(data: &str) -> IResult<&str, InferedValue> {
     }
 }
 
-fn convert_datetime_from_iso8601_to_hifitime(
-    dt: iso8601::DateTime,
-) -> Result<hifitime::Epoch, hifitime::HifitimeError> {
-    // convert the iso8601::DateTime to a std::time::Duration first
-    let iso8601::DateTime { date, time } = dt;
-    let (year, month, day) = match date {
-        iso8601::Date::YMD { year, month, day } => (year, month as u8, day as u8),
-        iso8601::Date::Week { year, ww: _, d: _ } | iso8601::Date::Ordinal { year, ddd: _ } => {
-            (year, 1, 1)
-        }
-    };
-    let iso8601::Time {
-        hour,
-        minute,
-        second,
-        millisecond,
-        tz_offset_hours,
-        tz_offset_minutes,
-    } = time;
-    //hifitime::Epoch::from_gregorian_utc(year, month, day, hour, minute, second, nanos)
-    // convert milliseconds to nanoseconds
-    let nanos = millisecond * 1_000_000_u32;
-    let mut epoch = hifitime::Epoch::maybe_from_gregorian_utc(
-        year,
-        month,
-        day,
-        hour as u8,
-        minute as u8,
-        second as u8,
-        nanos,
-    )?;
+/// The time of a CSV cell, when the whole cell is an ISO 8601 calendar date or date and time:
+/// `2024-06-01T12:00:00.123456+02:00`, with `T` or a space between the date and the time (pandas
+/// writes a space), seconds and fraction optional, an offset `Z`, `+02:00` or `+0200`. Without an
+/// offset the time is UTC, and a date alone is midnight UTC. Week and ordinal dates are not
+/// recognised. The result is rounded down to the microsecond.
+fn parse_datetime_cell(cell: &str) -> Option<hifitime::Epoch> {
+    use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+    use chrono::{DateTime, NaiveDate, NaiveDateTime};
 
-    // Add the timezone offsets
-    if tz_offset_hours != 0 {
-        epoch += hifitime::Unit::Hour * tz_offset_hours as i64;
+    let bytes = cell.as_bytes();
+    if bytes.len() < 10 || !bytes[..4].iter().all(u8::is_ascii_digit) || bytes[4] != b'-' {
+        return None;
     }
-    if tz_offset_minutes != 0 {
-        epoch += hifitime::Unit::Minute * tz_offset_minutes as i64;
+    let mut normalized = cell.to_string();
+    if bytes.len() > 10 && bytes[10] == b' ' {
+        normalized.replace_range(10..11, "T");
+    }
+    if normalized.ends_with(['Z', 'z']) {
+        normalized.pop();
+        normalized.push_str("+00:00");
     }
 
-    // Add the weird dates offsets, this is most likely
-    // never going to be used ever, but it's here for completeness.
-    match date {
-        iso8601::Date::YMD {
-            year: _,
-            month: _,
-            day: _,
-        } => {}
-        iso8601::Date::Week { year: _, ww, d } => {
-            // This is perhaps not very resilient parsing,
-            // But you should consider the RFC 3339 profile if you care about
-            // safer date parsing.
-            epoch += hifitime::Unit::Day * (7 * (ww as i64 - 1) + (d as i64 - 1));
-        }
-        iso8601::Date::Ordinal { year: _, ddd } => {
-            epoch += hifitime::Unit::Day * (ddd as i64 - 1);
-        }
-    };
-
-    Ok(epoch)
+    let with_offset = ["%Y-%m-%dT%H:%M:%S%.f%z", "%Y-%m-%dT%H:%M%z"]
+        .iter()
+        .find_map(|format| DateTime::parse_from_str(&normalized, format).ok())
+        .map(|datetime| datetime.timestamp_micros());
+    let micros = with_offset
+        .or_else(|| {
+            ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%dT%H:%M"]
+                .iter()
+                .find_map(|format| NaiveDateTime::parse_from_str(&normalized, format).ok())
+                .map(|datetime| datetime.and_utc().timestamp_micros())
+        })
+        .or_else(|| {
+            NaiveDate::parse_from_str(&normalized, "%Y-%m-%d")
+                .ok()
+                .and_then(|date| date.and_hms_opt(0, 0, 0))
+                .map(|datetime| datetime.and_utc().timestamp_micros())
+        })?;
+    Some(hifitime::Epoch::from_unix_microseconds_i64(micros))
 }
 
 pub fn parse_iso8601_datetime(data: &str) -> IResult<&str, InferedValue> {
-    match iso8601::parsers::parse_datetime(data.as_bytes()) {
-        Ok((_, dt)) => match convert_datetime_from_iso8601_to_hifitime(dt) {
-            Ok(epoch) => Ok(("", InferedValue::DateTime(epoch))),
-            Err(_) => Err(Err::Error(nom::error::Error::new(
-                data,
-                nom::error::ErrorKind::Fail,
-            ))),
-        },
-        Err(_) => Err(Err::Error(nom::error::Error::new(
+    match parse_datetime_cell(data) {
+        Some(epoch) => Ok(("", InferedValue::DateTime(epoch))),
+        None => Err(Err::Error(nom::error::Error::new(
             data,
             nom::error::ErrorKind::Fail,
         ))),
@@ -558,98 +532,92 @@ mod tests {
     mod datetime {
         use super::*;
 
-        #[test]
-        fn test_convert_datetime_from_iso8601_to_hifitime() {
-            // Test the conversion of a date without timezone
-            let dt = iso8601::datetime("2020-01-01T00:00:00").unwrap();
-            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
-            assert_eq!(
-                epoch,
-                hifitime::Epoch::from_gregorian_utc(2020, 1, 1, 0, 0, 0, 0)
-            );
-
-            // Parse not full date
-            let dt = iso8601::datetime("2018-12-24T00:00").unwrap();
-            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
-            assert_eq!(
-                epoch,
-                hifitime::Epoch::from_gregorian_utc(2018, 12, 24, 0, 0, 0, 0)
-            );
-
-            // With Oslo timezone
-            let dt = iso8601::datetime("1969-12-24T00:00+01:00").unwrap();
-            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
-            assert_eq!(
-                epoch,
-                hifitime::Epoch::from_gregorian_utc(1969, 12, 24, 1, 0, 0, 0)
-            );
-
-            // With weird negative offset with minutes
-            let dt = iso8601::datetime("1969-12-24T00:00-01:30").unwrap();
-            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
-            assert_eq!(
-                epoch,
-                hifitime::Epoch::from_gregorian_utc(1969, 12, 23, 22, 30, 0, 0)
-            );
-
-            // Using the week format
-            let dt = iso8601::datetime("1969-W51-2T00:00").unwrap();
-            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
-            assert_eq!(
-                epoch,
-                hifitime::Epoch::from_gregorian_utc(1969, 12, 18, 0, 0, 0, 0)
-            );
-
-            // Using the ordinal format (and some weird timezone to test the offset)
-            let dt = iso8601::datetime("1969-358T14:21:32.0933+05:35").unwrap();
-            let epoch = convert_datetime_from_iso8601_to_hifitime(dt).unwrap();
-            assert_eq!(
-                epoch,
-                hifitime::Epoch::from_gregorian_utc(1969, 12, 24, 19, 56, 32, 93000000)
-            );
-
-            // Compute a date that is not valid
-            let dt = iso8601::datetime("1969-02-29T00:00:00").unwrap();
-            let epoch = convert_datetime_from_iso8601_to_hifitime(dt);
-            assert!(epoch.is_err());
+        /// The time of a cell, as Unix microseconds, or `None` when it is not a datetime.
+        fn micros(cell: &str) -> Option<i64> {
+            use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+            match parse_iso8601_datetime(cell) {
+                Ok(("", InferedValue::DateTime(epoch))) => Some(epoch.to_unix_microseconds_i64()),
+                _ => None,
+            }
         }
 
+        fn utc(y: i32, mo: u8, d: u8, h: u8, mi: u8, s: u8, us: u32) -> Option<i64> {
+            use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+            Some(
+                hifitime::Epoch::from_gregorian_utc(y, mo, d, h, mi, s, us * 1000)
+                    .to_unix_microseconds_i64(),
+            )
+        }
+
+        /// An offset is the local time minus UTC: it is subtracted. It was added.
         #[test]
-        fn test_parse_iso8601_datetime() {
+        fn offsets_are_subtracted() {
+            let noon_utc = utc(2024, 6, 1, 12, 0, 0, 0);
+            assert_eq!(micros("2024-06-01T12:00:00Z"), noon_utc);
+            assert_eq!(micros("2024-06-01T14:00:00+02:00"), noon_utc);
+            assert_eq!(micros("2024-06-01T07:00:00-05:00"), noon_utc);
+            assert_eq!(micros("2024-06-01T17:30:00+05:30"), noon_utc);
+            assert_eq!(micros("2024-06-01T14:00:00+0200"), noon_utc);
+            // An offset after a space was ignored; it is applied
+            assert_eq!(micros("2024-06-01T14:00:00 +0200"), noon_utc);
             assert_eq!(
-                parse_iso8601_datetime("2020-01-01T00:00:00Z"),
-                Ok((
-                    "",
-                    InferedValue::DateTime(hifitime::Epoch::from_gregorian_utc(
-                        2020, 1, 1, 0, 0, 0, 0
-                    ))
-                ))
+                micros("1969-12-24T00:00+01:00"),
+                utc(1969, 12, 23, 23, 0, 0, 0)
             );
             assert_eq!(
-                parse_iso8601_datetime("1969-358T14:21:32.0933+05:35"),
-                Ok((
-                    "",
-                    InferedValue::DateTime(hifitime::Epoch::from_gregorian_utc(
-                        1969, 12, 24, 19, 56, 32, 93000000
-                    ))
-                ))
+                micros("1969-12-24T00:00-01:30"),
+                utc(1969, 12, 24, 1, 30, 0, 0)
             );
+        }
 
+        /// No offset is UTC; a space separates the date and the time as well as `T` (pandas
+        /// writes it); a date alone is midnight UTC.
+        #[test]
+        fn local_forms() {
+            assert_eq!(micros("2020-01-01T00:00:00"), utc(2020, 1, 1, 0, 0, 0, 0));
+            assert_eq!(micros("2018-12-24T00:00"), utc(2018, 12, 24, 0, 0, 0, 0));
+            assert_eq!(micros("2024-06-01 12:00:00"), utc(2024, 6, 1, 12, 0, 0, 0));
             assert_eq!(
-                parse_iso8601_datetime("2024-07-32T00:00:00Z"),
-                Err(Err::Error(nom::error::Error::new(
-                    "2024-07-32T00:00:00Z",
-                    nom::error::ErrorKind::Fail
-                )))
+                micros("2024-06-01 14:00:00+02:00"),
+                utc(2024, 6, 1, 12, 0, 0, 0)
             );
+            assert_eq!(micros("2024-06-01"), utc(2024, 6, 1, 0, 0, 0, 0));
+        }
 
+        /// Fractions keep their microseconds (they were cut to milliseconds).
+        #[test]
+        fn fractions_keep_microseconds() {
             assert_eq!(
-                parse_iso8601_datetime("1969-02-29T00:00:00Z"),
-                Err(Err::Error(nom::error::Error::new(
-                    "1969-02-29T00:00:00Z",
-                    nom::error::ErrorKind::Fail
-                )))
+                micros("2024-06-01T12:00:00.123456Z"),
+                utc(2024, 6, 1, 12, 0, 0, 123_456)
             );
+            assert_eq!(
+                micros("2024-06-01T12:00:00.5Z"),
+                utc(2024, 6, 1, 12, 0, 0, 500_000)
+            );
+            // Below the microsecond, rounded down like every timestamp
+            assert_eq!(
+                micros("2024-06-01T12:00:00.123456789Z"),
+                utc(2024, 6, 1, 12, 0, 0, 123_456)
+            );
+        }
+
+        /// The whole cell must be a datetime: trailing text was ignored, an offset after a space
+        /// was lost. Impossible dates are not datetimes.
+        #[test]
+        fn other_text_is_not_a_datetime() {
+            for cell in [
+                "2024-06-01T12:00:00Zjunk",
+                "2024-07-32T00:00:00Z",
+                "1969-02-29T00:00:00Z",
+                "2024-06-01T25:00:00Z",
+                "12:00:00",
+                "2024",
+                "hello",
+                "",
+            ] {
+                assert_eq!(micros(cell), None, "{cell}");
+            }
         }
     }
 }

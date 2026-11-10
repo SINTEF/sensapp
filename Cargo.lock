@@ -2593,15 +2593,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
-name = "iso8601"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ffd3254cf2b0fc53e38414bdba99719f3e269db8a6519731b68a3a90040c41b"
-dependencies = [
- "nom 8.0.0",
-]
-
-[[package]]
 name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4137,6 +4128,7 @@ dependencies = [
  "blake3",
  "byte-unit",
  "cached",
+ "chrono",
  "clap",
  "clickhouse",
  "confique",
@@ -4151,7 +4143,6 @@ dependencies = [
  "hifitime",
  "hybridmap",
  "influxdb-line-protocol",
- "iso8601",
  "jsonwebtoken",
  "nom 8.0.0",
  "once_cell",

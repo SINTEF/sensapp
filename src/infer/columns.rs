@@ -327,8 +327,8 @@ mod tests {
                 Arc::new(json!(42)),
                 Arc::new(json!(42.83)),
                 Arc::new(json!(true)),
-                // Date is converted to UTC
-                Arc::new(json!("1951-10-26T02:00:00+00:00")),
+                // Date is converted to UTC: 00:00 at +02:00 is 22:00 the day before
+                Arc::new(json!("1951-10-25T22:00:00+00:00")),
             ])
         );
     }
@@ -343,7 +343,7 @@ mod tests {
     fn test_datetime() {
         let column = vec![
             "2020-01-01T00:00:00Z".to_string(),
-            "1969-358T14:21:32.0933+05:35".to_string(),
+            "1969-12-24T14:21:32.0933+05:35".to_string(),
         ];
 
         let infered_column = infer_column(column, true, false);
@@ -351,7 +351,7 @@ mod tests {
             infered_column,
             InferedColumn::DateTime(vec![
                 hifitime::Epoch::from_gregorian_utc(2020, 1, 1, 0, 0, 0, 0),
-                hifitime::Epoch::from_gregorian_utc(1969, 12, 24, 19, 56, 32, 93000000)
+                hifitime::Epoch::from_gregorian_utc(1969, 12, 24, 8, 46, 32, 93_300_000)
             ])
         );
     }
