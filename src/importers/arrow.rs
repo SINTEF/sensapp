@@ -1,3 +1,4 @@
+use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::{
     datamodel::{
         Sample, SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
@@ -481,10 +482,7 @@ fn extract_sensor_labels(batch: &RecordBatch) -> Result<SmallVec<[(String, Strin
 
 /// Helper function to convert microseconds since epoch to SensAppDateTime
 fn microseconds_to_sensapp_datetime(micros: i64) -> Option<SensAppDateTime> {
-    // Convert microseconds since Unix epoch to SensAppDateTime
-    // Use SensAppDateTime::from_unix_seconds which accepts seconds as f64
-    let seconds = micros as f64 / 1_000_000.0;
-    Some(SensAppDateTime::from_unix_seconds(seconds))
+    Some(SensAppDateTime::from_unix_microseconds_i64(micros))
 }
 
 #[cfg(test)]
@@ -820,6 +818,23 @@ mod tests {
         let now_micros = 1640995200000000i64; // 2022-01-01T00:00:00Z in microseconds
         let datetime = microseconds_to_sensapp_datetime(now_micros);
         assert!(datetime.is_some());
+    }
+
+    /// The import went through `f64` seconds and put about 3 % of today's timestamps one
+    /// microsecond early: an export imported again was not the same series of instants.
+    #[test]
+    fn test_imported_microseconds_are_exact() {
+        let mut rng = fastrand::Rng::with_seed(7);
+        let wrong = (0..2000)
+            .map(|_| rng.i64(1_600_000_000_000_000..1_900_000_000_000_000))
+            .filter(|&micros| {
+                microseconds_to_sensapp_datetime(micros)
+                    .unwrap()
+                    .to_unix_microseconds_i64()
+                    != micros
+            })
+            .count();
+        assert_eq!(wrong, 0);
     }
 
     #[test]
