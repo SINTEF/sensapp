@@ -97,7 +97,7 @@ impl<'a> ClickHousePublisher<'a> {
     /// Publish the samples of a single sensor batch to ClickHouse. The sensor must have been
     /// registered with `register_sensors` first.
     pub async fn publish_single_sensor_batch(&mut self, batch: &SingleSensorBatch) -> Result<()> {
-        let sensor_id = uuid_to_sensor_id(&batch.sensor.uuid);
+        let sensor_id = uuid_to_sensor_id(&batch.sensor.uuid)?;
 
         // Publish samples - need to acquire read lock first
         let samples_guard = batch.samples.read().await;

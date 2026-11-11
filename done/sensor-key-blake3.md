@@ -85,3 +85,18 @@ storage type": they need the SQLite feature, unrelated to this change.
 
 Found on the way: the configuration tests set refused values in the environment, which the other tests that
 load the configuration read since `load()` checks them (task 20). Fixed in its own commit.
+
+## Follow-up: keyed by the salt (11 November 2026)
+
+The key is now `blake3::keyed_hash` with `blake3::derive_key("SENSAPP sensor key 2026-11-11 uuid to 64-bit
+storage key", SENSAPP_SENSOR_SALT)`, a context of its own so that it differs from the key that turns a name
+into a UUID. Without a secret salt, nothing changes (the default is public); with one, nobody can search for
+colliding UUIDs offline. `uuid_to_sensor_id` and BigQuery's `uuid_id` / `sensor_id` now return a `Result`
+(the configuration may not be loaded). The salt is now part of the on-disk format of ClickHouse and BigQuery:
+documented in the changelog, `docs/CONFIGURATION.md` and `docs/DATAMODEL.md`. New pins (default salt) in
+`sensor_ids_are_pinned`, `another_salt_gives_other_keys`, and BigQuery's signed-integer test.
+
+Dropped: the pinned colliding pair, `the_pinned_collision_collides_and_structures_do_not` and the integration
+test `two_uuids_with_the_same_storage_key_never_share_a_series`. A pair for a keyed hash would need another
+brute-force search, and it was decided not to do one, BLAKE3 being trusted. **Not covered any more:** the
+`SensorKeyCollision` refusal (in a batch and against a stored sensor) has no test.

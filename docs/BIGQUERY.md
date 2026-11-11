@@ -32,7 +32,7 @@ Created by `src/storage/bigquery/migrations/init.sql`: `units`, `sensors`, `labe
 (`integer_values`, `numeric_values`, `float_values`, `string_values`, `boolean_values`, `location_values`,
 `json_values`, `blob_values`). Sample tables are partitioned by month and clustered by `sensor_id`.
 
-- **Ids** are derived from the data, like ClickHouse's: the series id is 64 bits of the BLAKE3 hash of the UUID, the unit id a
+- **Ids** are derived from the data, like ClickHouse's: the series id is 64 bits of the BLAKE3 hash of the UUID keyed by `SENSAPP_SENSOR_SALT`, the unit id a
   hash of its name (`storage::common`). BigQuery has no sequences and no unique keys, so this is what makes two
   writers that register the same series at once insert identical rows instead of two different ids. The reads
   collapse such rows.

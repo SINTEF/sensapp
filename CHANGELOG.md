@@ -7,11 +7,15 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 
 ### Breaking
 
-- **ClickHouse and BigQuery key a series by the BLAKE3 hash of its UUID** instead of the XOR of its two
+- **ClickHouse and BigQuery key a series by the keyed BLAKE3 hash of its UUID**, keyed by
+  `SENSAPP_SENSOR_SALT`, instead of the XOR of its two
   halves, which gave structured UUIDs chosen by SenML and Arrow writers the same key: `(a, b)` and `(b, a)`, and
   every UUID with equal halves. Those were refused with `409`; they are now separate series. Every stored
   `sensor_id` changes, and there is no migration: **empty a ClickHouse or BigQuery database and load it again**.
-  The new version does not find the series of a database written before by their UUID.
+  The new version does not find the series of a database written before by their UUID. The salt is now
+  part of the key: **changing `SENSAPP_SENSOR_SALT` orphans the series of a ClickHouse or BigQuery database**,
+  explicit UUIDs included. Set your own salt before ingesting: with the public default, anyone can search
+  for two UUIDs of the same key offline.
 - **Prometheus remote write no longer stores `__name__` among the labels** of a series, which made remote
   read return it twice. The labels are part of a series' identity, so a series written by remote write
   before this version and written again after it becomes a new series. The old one keeps its samples and

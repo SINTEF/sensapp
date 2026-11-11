@@ -354,7 +354,7 @@ impl BigQueryStorage {
         sensor_uuid: &str,
     ) -> Result<Option<(i64, Sensor)>> {
         let uuid = parse_uuid(sensor_uuid)?;
-        let id = uuid_id(&uuid);
+        let id = uuid_id(&uuid)?;
         let sql = self.dataset.sensors_sql(
             &[
                 "s.sensor_id = @id".to_string(),

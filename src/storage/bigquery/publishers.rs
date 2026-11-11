@@ -22,11 +22,11 @@ use std::sync::Arc;
 const NUMERIC_SCALE: u32 = 9;
 
 /// The id of a series in the tables: the bits of the 64-bit key shared with ClickHouse.
-pub fn uuid_id(uuid: &uuid::Uuid) -> i64 {
-    uuid_to_sensor_id(uuid) as i64
+pub fn uuid_id(uuid: &uuid::Uuid) -> Result<i64> {
+    Ok(uuid_to_sensor_id(uuid)? as i64)
 }
 
-pub fn sensor_id(sensor: &Sensor) -> i64 {
+pub fn sensor_id(sensor: &Sensor) -> Result<i64> {
     uuid_id(&sensor.uuid)
 }
 
@@ -54,10 +54,10 @@ struct SampleRows {
     blob: Vec<BlobValueRow>,
 }
 
-async fn sample_rows(batch: &Batch) -> SampleRows {
+async fn sample_rows(batch: &Batch) -> Result<SampleRows> {
     let mut rows = SampleRows::default();
     for single in batch.sensors.iter() {
-        let id = sensor_id(&single.sensor);
+        let id = sensor_id(&single.sensor)?;
         let samples = single.samples.read().await;
         match &*samples {
             TypedSamples::Integer(samples) => {
@@ -116,7 +116,7 @@ async fn sample_rows(batch: &Batch) -> SampleRows {
             })),
         }
     }
-    rows
+    Ok(rows)
 }
 
 impl BigQueryStorage {
@@ -159,7 +159,7 @@ impl BigQueryStorage {
     pub(super) async fn register_sensors(&self, sensors: &[&Sensor]) -> Result<()> {
         let mut by_id: HashMap<i64, &Sensor> = HashMap::new();
         for sensor in unique_sensors(sensors)?.into_values() {
-            if by_id.insert(sensor_id(sensor), sensor).is_some() {
+            if by_id.insert(sensor_id(sensor)?, sensor).is_some() {
                 return Err(StorageError::SensorKeyCollision { uuid: sensor.uuid }.into());
             }
         }
@@ -285,7 +285,7 @@ impl BigQueryStorage {
         let sensors: Vec<&Sensor> = batch.sensors.iter().map(|s| s.sensor.as_ref()).collect();
         self.register_sensors(&sensors).await?;
 
-        let rows = sample_rows(batch).await;
+        let rows = sample_rows(batch).await?;
         try_join_all([
             Box::pin(self.append("integer_values", &rows::INTEGER_VALUES, rows.integer))
                 as std::pin::Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>,
@@ -471,11 +471,17 @@ mod tests {
                 None,
             )
         };
+        // The keys of the default salt: the value of `storage::common`'s pinned test, as signed
+        crate::config::load_configuration_for_tests().unwrap();
         let positive = sensor("00000000-0000-4000-8000-000000000001");
-        assert_eq!(sensor_id(&positive), 0x20f2_b792_5b72_2ee4);
-        let negative = sensor("9d87123d-9b47-466d-9eda-001c2ecf9c54");
-        assert_eq!(sensor_id(&negative) as u64, 0xd44d_b960_a3b6_fd37);
-        assert!(sensor_id(&negative) < 0, "the top bit is the sign");
+        let negative = sensor("0123456789abcdeffedcba9876543210");
+        assert_eq!(
+            sensor_id(&positive).unwrap(),
+            0x6715_e15c_8225_7fd2,
+            "with the default SENSAPP_SENSOR_SALT"
+        );
+        assert_eq!(sensor_id(&negative).unwrap() as u64, 0xc4c6_aeff_8813_eaa2);
+        assert!(sensor_id(&negative).unwrap() < 0, "the top bit is the sign");
     }
 
     #[tokio::test]
@@ -520,7 +526,8 @@ mod tests {
                 ),
             ],
         };
-        let rows = sample_rows(&batch).await;
+        crate::config::load_configuration_for_tests().unwrap();
+        let rows = sample_rows(&batch).await.unwrap();
         assert_eq!(rows.float[0].value, precise);
         assert_eq!(rows.float[0].timestamp, 1_700_000_000_500_000);
         assert_eq!(rows.location[0].latitude, 59.987_654_321_098);

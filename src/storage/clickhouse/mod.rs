@@ -238,7 +238,7 @@ impl ClickHouseStorage {
             )
         })?;
 
-        let sensor_id = uuid_to_sensor_id(&uuid);
+        let sensor_id = uuid_to_sensor_id(&uuid)?;
 
         let sensor_query = r#"
             SELECT
@@ -649,7 +649,7 @@ impl StorageInstance for ClickHouseStorage {
                 None,
             )
         })?;
-        let sensor_id = uuid_to_sensor_id(&uuid);
+        let sensor_id = uuid_to_sensor_id(&uuid)?;
         let Some((_, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
             // A publish that overlapped an earlier delete may have left samples behind
             self.delete_samples_without_sensor(sensor_id).await?;
@@ -969,7 +969,7 @@ impl StorageInstance for ClickHouseStorage {
             )
         })?;
 
-        let sensor_id = uuid_to_sensor_id(&uuid);
+        let sensor_id = uuid_to_sensor_id(&uuid)?;
 
         // First, get sensor metadata
         let sensor_query = r#"

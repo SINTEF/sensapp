@@ -68,7 +68,7 @@ See [FRONTEND.md](FRONTEND.md).
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SENSAPP_SENSOR_SALT` | `sensapp` | Salt of the hash that turns a sensor's name, type, unit and labels into its UUID. **Changing it changes the UUID of every sensor**: existing data is no longer matched by new writes. Set it once per deployment, before ingesting. |
+| `SENSAPP_SENSOR_SALT` | `sensapp` | Salt of the hash that turns a sensor's name, type, unit and labels into its UUID. **Changing it changes the UUID of every sensor**: existing data is no longer matched by new writes. The same salt keys the 64-bit series id that ClickHouse and BigQuery derive from a UUID, explicit UUIDs included: changing it orphans the series stored there. The default is public: set your own, once per deployment, before ingesting. |
 | `SENSAPP_INFLUXDB_WITH_NUMERIC` | `false` | Store InfluxDB numbers as exact decimals instead of floats. Precise but slower. See [INFLUX_DB.md](INFLUX_DB.md). |
 
 ### Observability

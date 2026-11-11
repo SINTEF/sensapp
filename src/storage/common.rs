@@ -1,9 +1,11 @@
+use crate::config;
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples};
 use crate::storage::{
     Aggregation, SensorAvailabilitySummary, SensorDataQueryOptions, SimplifyOptions, StorageError,
 };
 use anyhow::{Result, anyhow};
+use once_cell::sync::OnceCell;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use smallvec::smallvec;
 use std::collections::{BTreeMap, BTreeSet};
@@ -122,27 +124,54 @@ pub fn duplicate_key_columns(table: &str, time_column: &str) -> String {
     }
 }
 
-/// Convert a UUID to the 64-bit key of the series in the ClickHouse and BigQuery tables (BigQuery
-/// stores the same bits as a signed `INT64`).
-///
-/// The ids are stored, so this function is part of the on-disk format and must never change: the
-/// first 8 bytes of the BLAKE3 hash of the 16 bytes of the UUID, read as a little-endian integer,
-/// like [`unit_name_to_id`]. A hash, and not a fold of the UUID, because SenML and Arrow writers
-/// choose their UUIDs, and a fold keeps their structure: the XOR of the two halves gave `(a, b)` and
-/// `(b, a)` the same key, and every UUID with equal halves the key `0`. Any 64-bit key can still
-/// collide, by chance at billions of series or on purpose in about 2^32 tries, so the registration
-/// refuses a UUID whose key belongs to another one (`StorageError::SensorKeyCollision`), and the
-/// reads by UUID compare the stored UUID. Do not use `std`'s `DefaultHasher` here, its algorithm is
-/// explicitly allowed to change between Rust releases, which would orphan every stored sample.
-pub fn uuid_to_sensor_id(uuid: &Uuid) -> u64 {
-    let hash = blake3::hash(uuid.as_bytes());
+/// Context of the key derivation of [`uuid_to_sensor_id`]. Part of the on-disk format.
+const SENSOR_KEY_CONTEXT: &str = "SENSAPP sensor key 2026-11-11 uuid to 64-bit storage key";
+
+/// The BLAKE3 key of [`uuid_to_sensor_id`], derived from `SENSAPP_SENSOR_SALT` once.
+static SENSOR_KEY: OnceCell<[u8; 32]> = OnceCell::new();
+
+/// The BLAKE3 key that the salt gives, with its own context so that it differs from the key that
+/// turns a sensor name into a UUID.
+pub fn sensor_key_from_salt(salt: &str) -> [u8; 32] {
+    blake3::derive_key(SENSOR_KEY_CONTEXT, salt.as_bytes())
+}
+
+/// First 8 bytes of the keyed BLAKE3 hash of the 16 bytes of the UUID, as a little-endian integer.
+pub fn keyed_sensor_id(key: &[u8; 32], uuid: &Uuid) -> u64 {
+    let hash = blake3::keyed_hash(key, uuid.as_bytes());
     let mut bytes = [0u8; 8];
     bytes.copy_from_slice(&hash.as_bytes()[..8]);
     u64::from_le_bytes(bytes)
 }
 
+/// Convert a UUID to the 64-bit key of the series in the ClickHouse and BigQuery tables (BigQuery
+/// stores the same bits as a signed `INT64`). Fails when the configuration is not loaded.
+///
+/// The ids are stored, so this function is part of the on-disk format and must never change: the
+/// first 8 bytes of the BLAKE3 hash of the 16 bytes of the UUID, keyed by the `SENSAPP_SENSOR_SALT`
+/// (see [`sensor_key_from_salt`]), read as a little-endian integer. **Changing the salt changes
+/// every key**: the stored series are no longer found, as for the UUIDs derived from names.
+///
+/// A hash, and not a fold of the UUID, because SenML and Arrow writers choose their UUIDs, and a
+/// fold keeps their structure: the XOR of the two halves gave `(a, b)` and `(b, a)` the same key,
+/// and every UUID with equal halves the key `0`. Keyed, so that nobody who does not know the salt
+/// can look for two UUIDs of the same key offline (about 2^32 hashes, minutes on a laptop) to race
+/// the registration of two instances. The default salt is public: a deployment that wants this
+/// protection sets its own. Any 64-bit key can still collide, by chance at billions of series, so
+/// the registration refuses a UUID whose key belongs to another one
+/// (`StorageError::SensorKeyCollision`), and the reads by UUID compare the stored UUID. Do not use
+/// `std`'s `DefaultHasher` here, its algorithm is explicitly allowed to change between Rust
+/// releases, which would orphan every stored sample.
+pub fn uuid_to_sensor_id(uuid: &Uuid) -> Result<u64> {
+    let key = SENSOR_KEY.get_or_try_init(|| {
+        Ok::<_, anyhow::Error>(sensor_key_from_salt(&config::get()?.sensor_salt))
+    })?;
+    Ok(keyed_sensor_id(key, uuid))
+}
+
 /// Id of a unit in the `units` table: the first 8 bytes of the BLAKE3 hash of its name,
-/// read as a little-endian integer. Part of the on-disk format, like [`uuid_to_sensor_id`].
+/// read as a little-endian integer. Part of the on-disk format, like [`uuid_to_sensor_id`], but not
+/// keyed.
 pub fn unit_name_to_id(name: &str) -> u64 {
     let hash = blake3::hash(name.as_bytes());
     let mut bytes = [0u8; 8];
@@ -911,45 +940,84 @@ mod tests {
         assert_eq!(kept, 5_000);
     }
     // These values are stored in ClickHouse and BigQuery. If one of these tests fails, the on-disk format
-    // changed: existing data would no longer be found.
+    // changed: existing data would no longer be found. The key is the one of the default salt, `sensapp`.
+    fn default_key() -> [u8; 32] {
+        sensor_key_from_salt("sensapp")
+    }
+
     #[test]
     fn sensor_ids_are_pinned() {
-        let id = |uuid: &str| uuid_to_sensor_id(&Uuid::parse_str(uuid).unwrap());
+        let key = default_key();
+        let id = |uuid: &str| keyed_sensor_id(&key, &Uuid::parse_str(uuid).unwrap());
+        assert_eq!(
+            key,
+            hex_key("f22312b23186ef1feceb2af417dd06162fc775e33d28e9bfd80ca8f8e967b66f")
+        );
         assert_eq!(
             id("00000000-0000-4000-8000-000000000001"),
-            0x20f2_b792_5b72_2ee4
+            0x6715_e15c_8225_7fd2
         );
         assert_eq!(
             id("9d87123d-9b47-466d-9eda-001c2ecf9c54"),
-            0xd44d_b960_a3b6_fd37
+            0x786e_da91_0dd4_992e
         );
         // The XOR of the halves gave these four the keys 0, 0, u64::MAX and u64::MAX
         assert_eq!(
             id("00000000-0000-0000-0000-000000000000"),
-            0x0b70_0423_f8df_72e5
+            0xbf19_6f2f_5841_995d
         );
         assert_eq!(
             id("ffffffff-ffff-ffff-ffff-ffffffffffff"),
-            0x079b_f2bc_6505_87c3
+            0x5a0a_1e7f_39f4_9038
         );
         assert_eq!(
             id("0123456789abcdeffedcba9876543210"),
-            0x7b5d_9e94_189f_f3ee
+            0xc4c6_aeff_8813_eaa2
         );
         assert_eq!(
             id("fedcba98765432100123456789abcdef"),
-            0x7d78_4ddf_aa2f_9145
+            0xc6f5_7eba_d251_b1ed
         );
     }
 
-    /// The pair of UUIDs that the key collision test of `tests/integration/sensor_identity.rs` uses:
-    /// two keys a brute-force search found equal. And the structures that collided under the XOR of
-    /// the halves no longer do.
+    fn hex_key(hex: &str) -> [u8; 32] {
+        *blake3::Hash::from_hex(hex).unwrap().as_bytes()
+    }
+
+    /// Another salt gives another key for the same UUID: the salt is what nobody can search for
+    /// collisions without.
     #[test]
-    fn the_pinned_collision_collides_and_structures_do_not() {
-        let id = |high: u64, low: u64| uuid_to_sensor_id(&Uuid::from_u64_pair(high, low));
-        assert_eq!(id(0, 0xb91c_a660_43fd_e277), 0xb460_1f96_ba04_7f9a);
-        assert_eq!(id(0, 0x6cda_2dee_a474_0435), 0xb460_1f96_ba04_7f9a);
+    fn another_salt_gives_other_keys() {
+        let other = sensor_key_from_salt("another salt");
+        assert_eq!(
+            other,
+            hex_key("2eceb14fa1ae50e9b784ca42f75b41e51cdf115f874547853e75774dcb23328c")
+        );
+        let uuid = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+        assert_eq!(keyed_sensor_id(&other, &uuid), 0xaeb0_c5c9_3a5f_6566);
+        assert_ne!(
+            keyed_sensor_id(&other, &uuid),
+            keyed_sensor_id(&default_key(), &uuid)
+        );
+    }
+
+    /// The function the storages call is the keyed hash of the configured salt.
+    #[test]
+    fn the_sensor_id_uses_the_configured_salt() {
+        crate::config::load_configuration_for_tests().unwrap();
+        let salt = crate::config::get().unwrap().sensor_salt.clone();
+        let uuid = Uuid::parse_str("9d87123d-9b47-466d-9eda-001c2ecf9c54").unwrap();
+        assert_eq!(
+            uuid_to_sensor_id(&uuid).unwrap(),
+            keyed_sensor_id(&sensor_key_from_salt(&salt), &uuid)
+        );
+    }
+
+    /// The structures that collided under the XOR of the halves no longer do.
+    #[test]
+    fn structured_uuids_have_different_keys() {
+        let key = default_key();
+        let id = |high: u64, low: u64| keyed_sensor_id(&key, &Uuid::from_u64_pair(high, low));
         assert_ne!(id(1, 2), id(2, 1));
         assert_ne!(id(3, 3), id(4, 4));
     }

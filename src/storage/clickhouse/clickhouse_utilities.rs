@@ -163,7 +163,7 @@ pub async fn register_sensors(client: &clickhouse::Client, sensors: &[&Sensor]) 
     let mut by_id: HashMap<u64, &Sensor> = HashMap::new();
     for sensor in unique_sensors(sensors)?.into_values() {
         if by_id
-            .insert(uuid_to_sensor_id(&sensor.uuid), sensor)
+            .insert(uuid_to_sensor_id(&sensor.uuid)?, sensor)
             .is_some()
         {
             return Err(StorageError::SensorKeyCollision { uuid: sensor.uuid }.into());
