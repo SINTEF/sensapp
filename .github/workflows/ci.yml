@@ -13,6 +13,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -25,6 +28,7 @@ jobs:
   quality-checks:
     name: Quality Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -57,6 +61,7 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -77,6 +82,7 @@ jobs:
   frontend:
     name: Frontend Quality
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -112,6 +118,7 @@ jobs:
   python-sdk:
     name: Python SDK Unit and Package
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: python/sensapp
@@ -139,14 +146,12 @@ jobs:
 
   test-matrix:
     name: Test Suite
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: quality-checks
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        rust: [stable]
-        #rust: [stable, beta]
         feature: [sqlite, postgres, clickhouse, duckdb, timescaledb, rrdcached]
         include:
           - feature: sqlite
@@ -162,9 +167,10 @@ jobs:
           - feature: rrdcached
             test-env: "TEST_DATABASE_URL_RRDCACHED=rrdcached://127.0.0.1:42217?preset=hoarder"
 
+    # Only the database of the feature under test is started: an empty image skips a service
     services:
       postgres:
-        image: postgres:18
+        image: ${{ matrix.feature == 'postgres' && 'postgres:18' || '' }}
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -177,7 +183,7 @@ jobs:
         ports:
           - 5432:5432
       clickhouse:
-        image: clickhouse/clickhouse-server:26.8
+        image: ${{ matrix.feature == 'clickhouse' && 'clickhouse/clickhouse-server:26.8' || '' }}
         env:
           CLICKHOUSE_DB: sensapp_test
           CLICKHOUSE_USER: default
@@ -191,7 +197,7 @@ jobs:
           - 8123:8123
           - 9000:9000
       timescaledb:
-        image: timescale/timescaledb:2.31.0-pg18
+        image: ${{ matrix.feature == 'timescaledb' && 'timescale/timescaledb:2.31.0-pg18' || '' }}
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -210,7 +216,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.rust }}
+          toolchain: stable
           components: clippy
 
       # Caches dependencies only (workspace crates are pruned), keyed per
@@ -289,6 +295,7 @@ jobs:
   prometheus-live:
     name: Live Prometheus Compatibility
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: quality-checks
     services:
       postgres:
@@ -321,6 +328,7 @@ jobs:
   helm-validation:
     name: Helm Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: quality-checks
 
     steps:
@@ -391,7 +399,8 @@ jobs:
             FEATURES=${{ matrix.features }}
             NO_DEFAULT_FEATURES=true
           cache-from: type=gha,scope=runtime-smoke
-          cache-to: type=gha,scope=runtime-smoke,mode=max
+          # A PR only reads: writing takes two minutes and fills the 10 GB Actions cache
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,scope=runtime-smoke,mode=max' || '' }}
 
       - name: The image refuses to start without authentication
         if: matrix.name == 'runtime'
@@ -459,6 +468,7 @@ jobs:
   bigquery-checks:
     name: BigQuery Compile and Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: quality-checks
     steps:
       - name: Checkout repository
@@ -489,60 +499,6 @@ jobs:
       # library download is slow, and it does not interact with BigQuery)
       - name: Lint the backends together
         run: cargo clippy --all-targets --no-default-features --features postgres,sqlite,timescaledb,clickhouse,rrdcached,bigquery -- -D warnings
-
-  # Disabled temporarily due to timeout issues
-  # coverage:
-  #   name: Test Coverage
-  #   runs-on: ubuntu-latest
-  #   needs: test-matrix
-  #   services:
-  #     postgres:
-  #       image: postgres:15
-  #       env:
-  #         POSTGRES_PASSWORD: postgres
-  #         POSTGRES_USER: postgres
-  #         POSTGRES_DB: sensapp
-  #       options: >-
-  #         --health-cmd pg_isready
-  #         --health-interval 10s
-  #         --health-timeout 5s
-  #         --health-retries 5
-  #       ports:
-  #         - 5432:5432
-
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v7
-
-  #     - name: Setup Rust toolchain
-  #       uses: moonrepo/setup-rust@v1
-  #       with:
-  #         channel: stable
-  #         components: llvm-tools-preview
-
-  #     - name: Install cargo-llvm-cov
-  #       uses: taiki-e/install-action@cargo-llvm-cov
-
-  #     - name: Cache cargo-make
-  #       uses: actions/cache@v5
-  #       with:
-  #         path: ~/.cargo/bin/cargo-make
-  #         key: cargo-make-${{ runner.os }}
-
-  #     - name: Install cargo-make
-  #       run: |
-  #         if ! command -v cargo-make &> /dev/null; then
-  #           cargo install cargo-make
-  #         fi
-
-  #     - name: Generate test coverage
-  #       run: cargo llvm-cov --features postgres,sqlite --no-default-features --verbose --lcov --output-path lcov.info
-
-  #     - name: Upload coverage to Codecov
-  #       uses: codecov/codecov-action@v5
-  #       with:
-  #         file: lcov.info
-  #         fail_ci_if_error: true
 
   # Multi-arch image built with one native runner per platform (amd64 on
   # ubuntu-24.04, arm64 on ubuntu-24.04-arm), no QEMU emulation. The reusable
@@ -590,6 +546,7 @@ jobs:
   helm-package:
     name: Helm Package
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [helm-validation, prometheus-live]
     if: github.event_name != 'pull_request'
     permissions:
