@@ -3,7 +3,11 @@
 SensApp is pre-production: breaking changes happen between minor versions and are listed first.
 Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASING.md).
 
-## Unreleased
+## 0.5.0
+
+The result of a full review of the logic and the safety of SensApp. Read [docs/UPGRADING.md](docs/UPGRADING.md)
+before upgrading: PostgreSQL and TimescaleDB cannot be restarted one instance at a time, and ClickHouse and
+BigQuery databases must be emptied and loaded again.
 
 ### Breaking
 

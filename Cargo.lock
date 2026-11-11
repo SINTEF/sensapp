@@ -4018,7 +4018,7 @@ checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "sensapp"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "arrow",
