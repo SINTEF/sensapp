@@ -420,3 +420,45 @@ async fn test_prometheus_write_counts_what_it_drops() -> Result<()> {
     }
     Ok(())
 }
+
+/// A second `__name__` on a series is a 400, as any other duplicate label: the last one used to win
+/// without a word.
+#[tokio::test]
+#[serial]
+async fn test_prometheus_write_refuses_a_series_with_two_names() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let state = HttpServerState {
+        name: Arc::new("SensApp Test".to_string()),
+        storage: test_db.storage(),
+        metrics: Arc::new(HttpMetrics::new()),
+        influxdb_with_numeric: false,
+        max_query_samples: sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
+        auth: None,
+    };
+    let app = Router::new()
+        .route("/api/v1/prometheus_remote_write", post(publish_prometheus))
+        .with_state(state);
+    let label = |value: &str| Label {
+        name: "__name__".to_string(),
+        value: value.to_string(),
+    };
+    let request = WriteRequest {
+        timeseries: vec![TimeSeries {
+            labels: vec![label("first_name"), label("second_name")],
+            samples: vec![PromSample {
+                value: 1.0,
+                timestamp: 1704067200000,
+            }],
+            exemplars: vec![],
+            histograms: vec![],
+        }],
+        metadata: vec![],
+    };
+    let body = snap::raw::Encoder::new().compress_vec(&request.encode_to_vec())?;
+    assert_eq!(
+        send_write_request(&app, body).await?,
+        StatusCode::BAD_REQUEST
+    );
+    Ok(())
+}

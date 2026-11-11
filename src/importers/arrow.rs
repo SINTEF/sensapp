@@ -514,7 +514,14 @@ fn convert_arrow_array_to_typed_samples(
 fn arrow_decimal(raw: i128, scale: i8) -> Result<Decimal> {
     let out_of_range = || anyhow!("The decimal {raw}e{} is outside the Numeric range", -scale);
     if scale >= 0 {
-        return Decimal::try_from_i128_with_scale(raw, scale as u32).map_err(|_| out_of_range());
+        // SensApp writes `Decimal128(38, 18)`: a value of 7.9e10 or more has a raw value over the 96
+        // bits of a `Decimal` although it fits with its trailing zeros removed
+        let (mut raw, mut scale) = (raw, scale as u32);
+        while scale > 0 && raw % 10 == 0 {
+            raw /= 10;
+            scale -= 1;
+        }
+        return Decimal::try_from_i128_with_scale(raw, scale).map_err(|_| out_of_range());
     }
     let mut value = Decimal::try_from_i128_with_scale(raw, 0).map_err(|_| out_of_range())?;
     for _ in 0..scale.unsigned_abs() {
@@ -1162,6 +1169,22 @@ mod tests {
         let values: Vec<f64> = samples.iter().map(|sample| sample.value).collect();
         // The infinity is a value
         assert_eq!(values, [1.5, f64::INFINITY]);
+    }
+
+    /// The export writes `Decimal128(38, 18)`: 10^11 is a raw value of 10^29, over 2^96.
+    #[test]
+    fn test_a_numeric_of_the_export_over_7_9e10_imports_back() {
+        assert_eq!(
+            arrow_decimal(10_i128.pow(29), 18).unwrap(),
+            Decimal::from(100_000_000_000_i64)
+        );
+        assert_eq!(
+            arrow_decimal(-(1234567890123456789_i128 * 10_i128.pow(18)), 18).unwrap(),
+            Decimal::from(-1234567890123456789_i64)
+        );
+        assert_eq!(arrow_decimal(1234, 2).unwrap(), Decimal::new(1234, 2));
+        // What cannot fit even without its zeros is still refused
+        assert!(arrow_decimal(10_i128.pow(37) + 1, 18).is_err());
     }
 
     #[test]

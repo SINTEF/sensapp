@@ -119,6 +119,8 @@ fn parse_datetime_cell(cell: &str) -> Option<hifitime::Epoch> {
     use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
     use chrono::{DateTime, NaiveDate, NaiveDateTime};
 
+    // chrono refuses trailing characters, and `infer_type_with_trim` hands the cell over whole
+    let cell = cell.trim_end();
     let bytes = cell.as_bytes();
     if bytes.len() < 10 || !bytes[..4].iter().all(u8::is_ascii_digit) || bytes[4] != b'-' {
         return None;
@@ -236,6 +238,23 @@ mod tests {
                 nom::error::ErrorKind::Digit
             )))
         );
+    }
+
+    #[test]
+    fn a_time_cell_with_trailing_whitespace_is_a_time() {
+        for cell in [
+            "2024-06-01T12:00:00Z ",
+            " 2024-06-01T12:00:00Z\t",
+            "2024-06-01 \r",
+        ] {
+            assert!(
+                matches!(
+                    infer_type_with_trim(cell),
+                    Ok((_, InferedValue::DateTime(_)))
+                ),
+                "{cell:?}"
+            );
+        }
     }
 
     #[test]

@@ -177,6 +177,13 @@ pub async fn publish_prometheus(
                 match label.name.as_str() {
                     // The name of the sensor, and not one of its labels: the reads add it back
                     "__name__" => {
+                        // The last one silently winning would store another series than the
+                        // first, and other duplicate labels are refused
+                        if name.is_some() {
+                            return Err(AppError::bad_request(anyhow::anyhow!(
+                                "A time serie has its __name__ label more than once"
+                            )));
+                        }
                         name = Some(label.value);
                         continue;
                     }
