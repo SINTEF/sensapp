@@ -65,32 +65,21 @@ pub async fn publish_arrow_sensors(
 fn parse_arrow_file(buffer: &[u8], max_decompressed_bytes: usize) -> Result<Vec<RecordBatch>> {
     check_decompressed_size(buffer, max_decompressed_bytes)?;
 
-    let stream_batches = StreamReader::try_new(Cursor::new(buffer), None)
-        .ok()
-        .map(|reader| {
-            reader
-                .into_iter()
-                .map(|batch| {
-                    batch.map_err(|e| anyhow!("Failed to read Arrow batch from stream: {}", e))
-                })
-                .collect::<Result<Vec<_>>>()
-        })
-        .transpose()?;
-
-    let batches = if let Some(batches) = stream_batches {
-        batches
+    // The reader is chosen by the test the size check used: a body that starts with the file magic
+    // is a file, anything else a stream. A reader the check did not walk the messages for would
+    // allocate the lengths a body declares.
+    let batches = if is_file(buffer) {
+        FileReader::try_new(Cursor::new(buffer), None)
+            .map_err(|e| anyhow!("Failed to create Arrow file reader: {}", e))?
+            .map(|batch| batch.map_err(|e| anyhow!("Failed to read Arrow batch from file: {}", e)))
+            .collect::<Result<Vec<_>>>()?
     } else {
-        let cursor = Cursor::new(buffer);
-        let reader = FileReader::try_new(cursor, None)
-            .map_err(|e| anyhow!("Failed to create Arrow file reader: {}", e))?;
-
-        let mut batches = Vec::new();
-        for batch_result in reader {
-            let batch =
-                batch_result.map_err(|e| anyhow!("Failed to read Arrow batch from file: {}", e))?;
-            batches.push(batch);
-        }
-        batches
+        StreamReader::try_new(Cursor::new(buffer), None)
+            .map_err(|e| anyhow!("Failed to create Arrow stream reader: {}", e))?
+            .map(|batch| {
+                batch.map_err(|e| anyhow!("Failed to read Arrow batch from stream: {}", e))
+            })
+            .collect::<Result<Vec<_>>>()?
     };
 
     if batches.is_empty() {
@@ -98,6 +87,10 @@ fn parse_arrow_file(buffer: &[u8], max_decompressed_bytes: usize) -> Result<Vec<
     }
 
     Ok(batches)
+}
+
+fn is_file(buffer: &[u8]) -> bool {
+    buffer.starts_with(ARROW_FILE_MAGIC)
 }
 
 /// The buffers of an Arrow IPC payload may be compressed (the Python SDK sends LZ4), each with
@@ -116,7 +109,7 @@ fn check_decompressed_size(buffer: &[u8], max_bytes: usize) -> Result<()> {
         Ok(())
     };
 
-    if buffer.starts_with(ARROW_FILE_MAGIC) {
+    if is_file(buffer) {
         // A file: its messages are where the footer says, as `FileReader` reads them
         for (offset, metadata_length, body_length) in file_blocks(buffer)? {
             let malformed = || anyhow!("Malformed Arrow IPC file block at byte {offset}");
@@ -136,7 +129,11 @@ fn check_decompressed_size(buffer: &[u8], max_bytes: usize) -> Result<()> {
             )?;
         }
     } else {
-        // A stream: one message after the other, as `StreamReader` reads them
+        // A stream: one message after the other, as `StreamReader` reads them. One that ends
+        // before its first message holds no data
+        if stream_message_at(buffer, 0)?.is_none() {
+            return Err(anyhow!("Arrow IPC payload contains no data batches"));
+        }
         let mut position = 0;
         while let Some((message, body, next)) = stream_message_at(buffer, position)? {
             count(message, body)?;
@@ -1231,5 +1228,66 @@ mod tests {
         assert!(forged > 0);
         let error = parse_arrow_sensors(&body, 64 * 1024 * 1024).unwrap_err();
         assert!(error.to_string().contains("decompressed"), "{error}");
+    }
+
+    /// Declared lengths of 4,000 floats forged to 2^62 bytes, wherever they appear in `body`.
+    fn forge_declared_lengths(body: &mut [u8]) {
+        let declared = (4_000 * 8_i64).to_le_bytes();
+        let mut forged = 0;
+        for start in 0..body.len() - 8 {
+            if body[start..start + 8] == declared {
+                body[start..start + 8].copy_from_slice(&(1_i64 << 62).to_le_bytes());
+                forged += 1;
+            }
+        }
+        assert!(forged > 0);
+    }
+
+    /// The size check walked a file as a stream when its leading magic was damaged, found no
+    /// message, and passed; the reader then fell back to `FileReader`, which only looks at the
+    /// trailing magic and allocated the forged length. A body that is not a file is read as a stream
+    /// and nothing else.
+    #[test]
+    fn test_a_file_with_a_damaged_leading_magic_is_refused() {
+        let mut body = compressed_zeros(4_000, true);
+        forge_declared_lengths(&mut body);
+        // Intact magic: the check walks the file
+        let error = parse_arrow_sensors(&body, 64 * 1024 * 1024).unwrap_err();
+        assert!(error.to_string().contains("decompressed"), "{error}");
+        // Leading magic zeroed: no reader may decode the footer blocks unchecked
+        body[..4].fill(0);
+        let error = parse_arrow_sensors(&body, 64 * 1024 * 1024).unwrap_err();
+        assert!(
+            !error.to_string().contains("allocat"),
+            "the reader must not run: {error}"
+        );
+        assert!(parse_arrow_sensors(&body, 64 * 1024 * 1024).is_err());
+    }
+
+    #[test]
+    fn test_an_empty_or_unreadable_stream_is_refused_before_any_reader_runs() {
+        for body in [
+            &[][..],
+            &[0, 0, 0],
+            &[0, 0, 0, 0],
+            &[0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0],
+        ] {
+            let error = parse_arrow_sensors(body, 1024).unwrap_err();
+            assert!(error.to_string().contains("no data"), "{body:?}: {error}");
+        }
+        // A stream that the stream reader refuses returns its message
+        let mut body = compressed_zeros(10, false);
+        body.truncate(body.len() / 2);
+        let error = parse_arrow_sensors(&body, 1024 * 1024).unwrap_err();
+        assert!(!error.to_string().is_empty());
+    }
+
+    /// The streams and files of other writers still import.
+    #[test]
+    fn test_streams_and_files_still_import() {
+        for file in [false, true] {
+            let body = compressed_zeros(100, file);
+            assert!(parse_arrow_sensors(&body, 1024 * 1024).is_ok(), "{file}");
+        }
     }
 }
