@@ -117,7 +117,7 @@ pub struct RouterSettings {
     /// Write requests handled at the same time, 0 for no limit
     pub max_concurrent_writes: usize,
     /// Time a client has to send a buffered request body (the writes and the remote read) before
-    /// it is answered with a 408, which frees its write slot
+    /// it is answered with a 503 and a `Retry-After`, which frees its write slot
     pub body_read_timeout: Duration,
     /// Directory of the built web UI to serve under `/ui/`, `None` to not serve it
     pub ui_dir: Option<PathBuf>,
@@ -317,8 +317,14 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
         .with_state(state)
 }
 
-pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
-    let settings = RouterSettings::from_config(&*config::get()?)?;
+pub async fn run_http_server(
+    state: HttpServerState,
+    address: SocketAddr,
+    signals: ShutdownSignals,
+) -> Result<()> {
+    let config = config::get()?;
+    let settings = RouterSettings::from_config(&config)?;
+    let limits = super::serve::ServeLimits::from_config(&config);
     let open = state.auth.is_none();
     let app = build_router(state, &settings);
     let app = if open {
@@ -340,11 +346,18 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         }
     };
 
+    let first = signals.clone();
     super::serve::serve(
         listener,
         app,
-        super::serve::ServeLimits::default(),
-        shutdown_signal(),
+        limits,
+        async move {
+            first.received(1).await;
+            tracing::info!(
+                "Shutting down: the requests in flight finish, no new connection is accepted"
+            );
+        },
+        async move { signals.received(2).await },
     )
     .await;
 
@@ -390,30 +403,61 @@ fn log_failed_response(
     }
 }
 
-/// Wait for Ctrl+C (SIGINT) or SIGTERM, which `docker stop` and Kubernetes send. SensApp is PID 1 in
-/// its image, where an unhandled SIGTERM is ignored: the container would be killed at the end of
-/// its grace period, in the middle of its writes. After the signal the server takes no new
-/// connection and the requests in flight finish, each within its own timeout.
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install the Ctrl+C signal handler");
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install the SIGTERM signal handler")
-            .recv()
-            .await;
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-    tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
+/// Counts the SIGTERM (what `docker stop` and Kubernetes send) and Ctrl+C (SIGINT) received.
+/// SensApp is PID 1 in its image, where an unhandled SIGTERM is ignored: installed first thing in
+/// `main`, so that even a long startup migration is not killed at the end of the grace period
+/// without a word. The first signal stops the server, which takes no new connection and lets the
+/// requests in flight finish (for `SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS` at most); a second one
+/// cuts them.
+#[derive(Clone, Debug)]
+pub struct ShutdownSignals {
+    received: tokio::sync::watch::Receiver<u32>,
+}
+
+impl ShutdownSignals {
+    /// Must run within the Tokio runtime.
+    pub fn install() -> Result<Self> {
+        let (sender, received) = tokio::sync::watch::channel(0_u32);
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut interrupt = signal(SignalKind::interrupt())?;
+            let mut terminate = signal(SignalKind::terminate())?;
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = interrupt.recv() => {}
+                        _ = terminate.recv() => {}
+                    }
+                    sender.send_modify(|count| *count += 1);
+                }
+            });
+        }
+        #[cfg(not(unix))]
+        tokio::spawn(async move {
+            while tokio::signal::ctrl_c().await.is_ok() {
+                sender.send_modify(|count| *count += 1);
+            }
+        });
+        Ok(Self { received })
     }
-    tracing::info!("Shutting down: the requests in flight finish, no new connection is accepted");
+
+    /// Signals that will never come, for the tests.
+    pub fn never() -> Self {
+        let (sender, received) = tokio::sync::watch::channel(0_u32);
+        std::mem::forget(sender);
+        Self { received }
+    }
+
+    /// Completes once `count` signals were received.
+    pub async fn received(&self, count: u32) {
+        let mut received = self.received.clone();
+        let _ = received.wait_for(|received| *received >= count).await;
+        // The sender lives as long as the process
+        if *received.borrow() < count {
+            std::future::pending::<()>().await;
+        }
+    }
 }
 
 /// The size and the time allowed to a request body that is read before its handler runs.
@@ -423,7 +467,7 @@ struct BodyLimits {
     read_timeout: Duration,
 }
 
-/// Read the whole body before the handler: 413 when it is too large, and 408 when the client takes
+/// Read the whole body before the handler: 413 when it is too large, and 503 when the client takes
 /// longer than the read timeout to send it, which frees the write slot it holds.
 async fn enforce_request_body_limit(
     State(limits): State<BodyLimits>,
@@ -442,14 +486,24 @@ async fn enforce_request_body_limit(
             format!("Request body exceeds {max_bytes} bytes"),
         )
             .into_response(),
-        Err(_) => (
-            StatusCode::REQUEST_TIMEOUT,
-            format!(
-                "The request body was not received within {} seconds",
-                limits.read_timeout.as_secs_f64()
-            ),
-        )
-            .into_response(),
+        // A 503 with a `Retry-After`, not a 408: Prometheus does not retry a 4xx other than 429
+        // and drops the batch, and Telegraf and the other clients do the same. Nothing was read
+        // by the handler, so the request is safe to send again.
+        Err(_) => {
+            let mut response = (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!(
+                    "The request body was not received within {} seconds, retry later",
+                    limits.read_timeout.as_secs_f64()
+                ),
+            )
+                .into_response();
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from(fastrand::u64(1..=10)),
+            );
+            response
+        }
     }
 }
 

@@ -37,7 +37,9 @@ The Helm chart sets variables through `env:` in `values.yaml` (see the [chart RE
 | `SENSAPP_HTTP_BODY_LIMIT` | `64MiB` | Largest accepted request body, also after gzip or Snappy decompression. Over the limit gives `413`. Accepts units such as `512KiB`, `64MiB`, `1GiB`, up to 2 GiB. |
 | `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS` | `120` | Time a request may take before it is answered with `504 Gateway Timeout`. Applies to everything except the writes and the vacuum. |
 | `SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS` | `300` | Same as above for the writes (`/publish`, InfluxDB write, Prometheus remote write). Their work grows with the body, see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts). |
-| `SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS` | `30` | Time a client has to send the body of a write or of a Prometheus remote read. Over it gives `408 Request Timeout` and frees the write slot. See [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts). |
+| `SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS` | `30` | Time a client has to send the body of a write or of a Prometheus remote read. Over it gives `503` with a `Retry-After` and frees the write slot. See [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts). |
+| `SENSAPP_HTTP_HEADER_READ_TIMEOUT_SECONDS` | `75` | Time a client has to send the headers of a request, and the time a connection may stay idle between two requests (HTTP/1 has one timer for both). A connection that sends nothing is closed after it. Keep it above the idle timeout of the proxy in front (60 s for AWS load balancers and nginx): below it, the proxy reuses connections that SensApp just closed and answers some POSTs with a `502`. |
+| `SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS` | `300` | Time the requests in flight have to finish after SIGTERM or Ctrl+C before they are cut. A second signal cuts them at once. See [Shutdown](#shutdown). |
 | `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS` | `3600` | Same as above for `POST /api/v1/admin/vacuum` only, which scans every value table and is expected to be slow on a large database. |
 | `SENSAPP_HTTP_MAX_QUERY_SAMPLES` | `100000` | Most samples a read may return: one series (`GET /series/{uuid}`), the series of a selector in total (simple PromQL, Prometheus remote read) and the buckets of a cross-series aggregation. A read over it gets a `400` instead of a truncated answer. The samples are held in memory while the response is built: raise it on a machine with memory to spare, lower it to try the limit. See [HTTP limits](HTTP_LIMITS.md). |
 | `SENSAPP_HTTP_MAX_CONCURRENT_WRITES` | `16` | Write requests (`/publish`, InfluxDB write, Prometheus remote write, admin) handled at the same time. See [Backpressure](#backpressure). `0` disables the limit. |
@@ -131,20 +133,19 @@ The writes (`/publish`, the InfluxDB write and the Prometheus remote write) answ
 | `200` (`/publish`) or `204` | Everything was stored. | |
 | `400` | The payload can never be stored: it cannot be read (CSV rows of different lengths, text that is not UTF-8, line protocol, Snappy or protobuf that cannot be decoded, no rows), or it holds what SensApp refuses (a NUL character in a name, unit, label or value, a vertical tab or a separator 0x1C to 0x1F in a name, unit or label, a time outside years 1 to 9999, values of two types for one series, a series without `__name__`). Nothing was stored. | No |
 | `401`, `403` | No valid token, or a token without the write scope or the sensor. | No |
-| `408` | The body did not arrive within `SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS`. Nothing was stored. | Yes |
 | `409` | A sensor UUID is already used by another series. | No |
 | `413` | The body is larger than `SENSAPP_HTTP_BODY_LIMIT`. Send smaller requests. | No |
 | `500` | The storage failed on its own (a rejected statement, a bug). The write may be stored in part. | No |
-| `503` | Shed with `Retry-After` (nothing was stored), or the database is unavailable (may be stored in part). | Yes |
+| `503` | Shed with `Retry-After` (nothing was stored: the write slots are taken, or the body did not arrive within `SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS`), or the database is unavailable (may be stored in part). | Yes |
 | `504` | The write took longer than `SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS`. It may be stored in part. | Yes |
 
 Prometheus and Telegraf retry every `5xx`. This is why a payload that can never be stored is a `400`: answered with a `500`, it would be sent again forever and block its remote-write shard.
 
 ## Shutdown
 
-SensApp stops on SIGTERM (what `docker stop` and Kubernetes send) and on Ctrl+C (SIGINT). It takes no new connection, lets the requests in flight finish, and exits with code 0 once they are done. Each request is still bounded by its timeout, so the drain lasts at most `SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS` (300 s) for writes, or `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS` while a vacuum runs. An instance with nothing in flight stops at once.
+SensApp stops on SIGTERM (what `docker stop` and Kubernetes send) and on Ctrl+C (SIGINT). It takes no new connection, lets the requests in flight finish, and exits with code 0 once they are done. The drain lasts at most `SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS` (300 s, the write timeout): what is still in flight after that is cut, as is a client that stops reading its response, which no request timeout bounds. A second SIGTERM or Ctrl+C cuts it at once. An instance with nothing in flight stops at once. The handlers are installed first thing at startup, and a signal during a long migration stops SensApp instead of being ignored.
 
-Give the container a grace period that covers the write timeout, or a write can be cut in the middle: its batches already stored stay stored, and its retry stores them again (see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts)). The Helm chart sets `terminationGracePeriodSeconds: 330`. `docker stop` waits only 10 s by default: use `docker stop --time 330`, or `stop_grace_period: 330s` in Docker Compose.
+Give the container a grace period that covers the write timeout, or a write can be cut in the middle: its batches already stored stay stored, and its retry stores them again (see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts)). The Helm chart sets `terminationGracePeriodSeconds: 330` and a `preStop` sleep of 5 s, since SensApp closes its listener on the signal, possibly before Kubernetes removes the pod from the Service endpoints: without the sleep, new connections are refused for a moment at each rollout. `docker stop` waits only 10 s by default: use `docker stop --time 330`, or `stop_grace_period: 330s` in Docker Compose.
 
 `/health/ready` does not change during the drain: SensApp stops accepting connections when the signal arrives, so no probe would see it, and Kubernetes takes a terminating pod out of its Service by itself.
 

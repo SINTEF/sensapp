@@ -42,6 +42,19 @@ pub struct SensAppConfig {
     #[config(env = "SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS", default = 30)]
     pub http_body_read_timeout_seconds: u64,
 
+    /// Time a client has to send the headers of a request, which is also the time a connection may
+    /// stay idle between two requests (HTTP/1 only). Keep it above the idle timeout of the proxy
+    /// in front (60 s for AWS load balancers and nginx), or the proxy reuses connections that
+    /// SensApp just closed. A connection that sends nothing is closed after it too.
+    #[config(env = "SENSAPP_HTTP_HEADER_READ_TIMEOUT_SECONDS", default = 75)]
+    pub http_header_read_timeout_seconds: u64,
+
+    /// Time the requests in flight have to finish after SIGTERM or Ctrl+C, in seconds, before they
+    /// are cut. A second signal cuts them at once. Keep it under the grace period of the
+    /// container (330 s in the Helm chart).
+    #[config(env = "SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS", default = 300)]
+    pub http_shutdown_grace_seconds: u64,
+
     /// Longest a PostgreSQL or TimescaleDB statement may run before the database cancels it, in
     /// seconds, 0 for no limit. A request that times out does not cancel its statement: without it,
     /// a few slow statements would hold every connection of the pool. A little more than
@@ -168,6 +181,14 @@ impl SensAppConfig {
             (
                 "SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS",
                 self.http_body_read_timeout_seconds,
+            ),
+            (
+                "SENSAPP_HTTP_HEADER_READ_TIMEOUT_SECONDS",
+                self.http_header_read_timeout_seconds,
+            ),
+            (
+                "SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS",
+                self.http_shutdown_grace_seconds,
             ),
         ] {
             if seconds == 0 {
@@ -296,7 +317,7 @@ mod tests {
     #[test]
     fn values_that_would_fail_later_are_refused_at_startup() {
         type MakeInvalid = fn(&mut SensAppConfig);
-        let invalid: [(&str, MakeInvalid); 10] = [
+        let invalid: [(&str, MakeInvalid); 12] = [
             ("server timeout 0", |c| c.http_server_timeout_seconds = 0),
             ("write timeout 0", |c| c.http_write_timeout_seconds = 0),
             ("maintenance timeout 0", |c| {
@@ -305,6 +326,10 @@ mod tests {
             ("body read timeout 0", |c| {
                 c.http_body_read_timeout_seconds = 0
             }),
+            ("header read timeout 0", |c| {
+                c.http_header_read_timeout_seconds = 0
+            }),
+            ("shutdown grace 0", |c| c.http_shutdown_grace_seconds = 0),
             ("query samples 0", |c| c.http_max_query_samples = 0),
             ("query samples max", |c| {
                 c.http_max_query_samples = usize::MAX

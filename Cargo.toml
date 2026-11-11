@@ -56,6 +56,7 @@ tokio = { version = "1.48", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = "0.7"
 tower = { version = "0.5", features = ["full"] }
+hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "service", "tokio"] }
 tower-http = { version = "0.7", features = ["full"] }
 tracing = "0.1"

@@ -4044,6 +4044,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hifitime",
  "hybridmap",
+ "hyper",
  "hyper-util",
  "influxdb-line-protocol",
  "jsonwebtoken",

@@ -1030,11 +1030,12 @@ async fn a_cancelled_request_is_not_in_flight_anymore() -> Result<()> {
     Ok(())
 }
 
-/// A write whose body arrives too slowly is answered with a 408 and gives its write slot back,
-/// instead of holding it for the whole write timeout.
+/// A write whose body arrives too slowly is answered with a 503 and a `Retry-After` (Prometheus
+/// and Telegraf retry that, and drop a 408) and gives its write slot back, instead of holding it
+/// for the whole write timeout.
 #[tokio::test]
 #[serial]
-async fn a_slow_body_is_a_408_that_frees_the_write_slot() -> Result<()> {
+async fn a_slow_body_is_a_503_that_frees_the_write_slot() -> Result<()> {
     let settings = RouterSettings {
         max_concurrent_writes: 1,
         write_timeout: Duration::from_secs(5),
@@ -1061,8 +1062,12 @@ async fn a_slow_body_is_a_408_that_frees_the_write_slot() -> Result<()> {
         .header("content-type", "text/plain")
         .body(Body::from_stream(body))?;
     let started = std::time::Instant::now();
-    let (status, _, _) = send(&router, request).await;
-    assert_eq!(status, StatusCode::REQUEST_TIMEOUT);
+    let (status, headers, _) = send(&router, request).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        headers.contains_key("retry-after"),
+        "a retry-after tells the client that nothing was processed"
+    );
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "{:?}",

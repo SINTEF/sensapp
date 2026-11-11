@@ -116,6 +116,12 @@ extraEnvFrom: []
 # so a rollout does not cut writes in the middle. A pod with nothing in flight stops at once.
 terminationGracePeriodSeconds: 330
 
+# SensApp closes its listener when the signal arrives, before Kubernetes may have removed the pod from
+# the endpoints of the Service: connections sent to it meanwhile are refused. This sleep (Kubernetes
+# 1.30 or later, no shell needed in the image) keeps the pod serving until they stop. It counts in the
+# grace period above, with SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS (300 s). 0 disables it.
+preStopSleepSeconds: 5
+
 livenessProbe:
   httpGet:
     path: /health/live

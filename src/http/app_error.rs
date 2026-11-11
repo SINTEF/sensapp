@@ -188,14 +188,21 @@ impl From<anyhow::Error> for AppError {
 
 /// Run CPU work (decompressing, parsing a large body) on the blocking threads, so that the async
 /// workers keep serving the other requests. A panic is a 500.
+///
+/// The write slot of the request moves into the closure: the blocking thread cannot be cancelled
+/// and goes on when the client disconnects, so the slot is only released when the work ends.
 pub async fn run_blocking<T, F>(work: F) -> Result<T, AppError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, AppError> + Send + 'static,
 {
-    tokio::task::spawn_blocking(work)
-        .await
-        .map_err(AppError::internal_server_error)?
+    let permit = super::backpressure::current_write_permit();
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await
+    .map_err(AppError::internal_server_error)?
 }
 
 impl AppError {

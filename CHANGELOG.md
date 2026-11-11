@@ -7,6 +7,11 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 
 ### Breaking
 
+- **SensApp serves HTTP/1.1 only**, no HTTP/2 over cleartext, and a client has `SENSAPP_HTTP_HEADER_READ_TIMEOUT_SECONDS`
+  (75 s by default, 30 s before) to send its headers or to send its next request on an idle connection. A
+  connection that sends nothing is now closed too. The slow body of a write is a `503` with `Retry-After` instead
+  of a `408`, which Prometheus does not retry.
+
 - **ClickHouse and BigQuery key a series by the keyed BLAKE3 hash of its UUID**, keyed by
   `SENSAPP_SENSOR_SALT`, instead of the XOR of its two
   halves, which gave structured UUIDs chosen by SenML and Arrow writers the same key: `(a, b)` and `(b, a)`, and
@@ -91,7 +96,7 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 - A token with a sensor allow list deletes nothing it cannot read the name of: a delete of a series whose read
   failed went through.
 - `/health/ready` answers a fixed text instead of the database error, which it gave anyone; the error is logged.
-- A client has 30 s to send the headers of a request, and an instance holds at most 4,096 connections: idle
+- A client has 75 s to send the headers of a request, and an instance holds at most 4,096 connections: idle
   connections could hold every file descriptor.
 - InfluxDB writes read every member of a gzip body (a body of two concatenated gzip streams lost the
   second), and the parsing of InfluxDB, CSV, Arrow and Prometheus bodies no longer blocks the async runtime.

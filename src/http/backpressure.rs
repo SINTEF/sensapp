@@ -6,12 +6,23 @@ use prometheus_client::metrics::counter::Counter;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
 
 /// Smallest and largest `Retry-After` (seconds) the server will ever suggest.
 const MIN_RETRY_AFTER_SECONDS: u64 = 1;
 const MAX_RETRY_AFTER_SECONDS: u64 = 30;
+
+tokio::task_local! {
+    /// The write slot of the request being handled
+    static WRITE_PERMIT: Arc<OwnedSemaphorePermit>;
+}
+
+/// The write slot of the current request, to move into work that outlives it: blocking work
+/// cannot be cancelled, so the slot must stay taken until it ends.
+pub fn current_write_permit() -> Option<Arc<OwnedSemaphorePermit>> {
+    WRITE_PERMIT.try_with(Arc::clone).ok()
+}
 
 /// Bounds the number of write requests handled at the same time, and keeps a moving average of
 /// how long an accepted write holds its slot. That average is the best available estimate of
@@ -86,7 +97,7 @@ pub async fn limit_concurrent_writes(
     request: Request,
     next: Next,
 ) -> Response {
-    let Ok(_permit) = limiter.slots.clone().try_acquire_owned() else {
+    let Ok(permit) = limiter.slots.clone().try_acquire_owned() else {
         limiter.shed.inc();
         let mut response = (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -99,9 +110,12 @@ pub async fn limit_concurrent_writes(
         );
         return response;
     };
-    // The permit is held until the response is built, then released on drop.
+    // The permit is held until the response is built, then released on drop, unless blocking work
+    // of the request still runs (`run_blocking` keeps a copy).
     let started = Instant::now();
-    let response = next.run(request).await;
+    let response = WRITE_PERMIT
+        .scope(Arc::new(permit), next.run(request))
+        .await;
     limiter.record_write(started.elapsed());
     response
 }
@@ -246,5 +260,41 @@ mod tests {
         for handle in handles {
             assert_eq!(handle.await.unwrap().status(), StatusCode::OK);
         }
+    }
+
+    /// `spawn_blocking` work cannot be cancelled: a client that sends a body and disconnects used
+    /// to give its slot back while its parse still ran, so the slots no longer bounded the work.
+    #[tokio::test]
+    async fn the_write_slot_is_held_until_the_blocking_work_ends() {
+        let limiter = WriteLimiter::new(1);
+        let app = Router::new()
+            .route(
+                "/write",
+                post(|| async {
+                    crate::http::app_error::run_blocking(|| {
+                        std::thread::sleep(Duration::from_millis(500));
+                        Ok("parsed")
+                    })
+                    .await
+                    .unwrap()
+                }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                limiter.clone(),
+                limit_concurrent_writes,
+            ));
+        // The client gives up while the parse runs
+        let first = tokio::spawn(write(app.clone()));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        first.abort();
+        let _ = first.await;
+
+        assert_eq!(
+            write(app.clone()).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the parse of the dropped request still runs"
+        );
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert_eq!(write(app).await.status(), StatusCode::OK);
     }
 }
