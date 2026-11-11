@@ -104,7 +104,9 @@ fn one_series(labels: &[(&str, &str)]) -> Vec<u8> {
                 value: 1.5,
                 timestamp: 1_700_000_000_000,
             }],
+            ..Default::default()
         }],
+        ..Default::default()
     };
     snappy(&request.encode_to_vec())
 }

@@ -994,7 +994,9 @@ mod rrdcached_tests {
                         timestamp: time * 1000,
                     })
                     .collect(),
+                ..Default::default()
             }],
+            ..Default::default()
         };
         let body = snap::raw::Encoder::new().compress_vec(&write.encode_to_vec())?;
         let request = Request::builder()

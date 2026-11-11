@@ -2,7 +2,6 @@ use crate::config;
 
 use super::{SensorType, sensapp_vec::SensAppLabels, unit::Unit};
 use anyhow::Error;
-use cached::macros::cached;
 use once_cell::sync::OnceCell;
 use smallvec::SmallVec;
 use std::fmt;
@@ -155,12 +154,6 @@ fn compute_uuid_buffer(
     Ok(buffer)
 }
 
-#[cached(
-    sync_writes = "default",
-    max_size = 1024,
-    key = "Vec<u8>",
-    convert = { uuid_buffer.clone() }
-)]
 fn uuid_v8_blake3(name: &str, uuid_buffer: Vec<u8>) -> Result<Uuid, Error> {
     // Using a UUID v5 (SHA1) or v3 (MD5) is too easy to implement.
     // It's friday, let's take terrible decisions and use Blake3 instead.

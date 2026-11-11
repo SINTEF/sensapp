@@ -186,6 +186,18 @@ impl From<anyhow::Error> for AppError {
     }
 }
 
+/// Run CPU work (decompressing, parsing a large body) on the blocking threads, so that the async
+/// workers keep serving the other requests. A panic is a 500.
+pub async fn run_blocking<T, F>(work: F) -> Result<T, AppError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, AppError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(AppError::internal_server_error)?
+}
+
 impl AppError {
     pub fn bad_request(err: impl Into<anyhow::Error>) -> Self {
         Self::BadRequest(err.into())

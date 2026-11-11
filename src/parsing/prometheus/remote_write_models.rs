@@ -15,6 +15,10 @@
 pub struct WriteRequest {
     #[prost(message, repeated, tag = "1")]
     pub timeseries: Vec<TimeSeries>,
+    /// Metric metadata (type, help, unit), which SensApp does not store. Kept undecoded, to be
+    /// counted.
+    #[prost(bytes = "vec", repeated, tag = "3")]
+    pub metadata: Vec<Vec<u8>>,
 }
 
 #[derive(prost::Message, Clone)]
@@ -23,6 +27,12 @@ pub struct TimeSeries {
     pub labels: Vec<Label>,
     #[prost(message, repeated, tag = "2")]
     pub samples: Vec<Sample>,
+    /// Exemplars, which SensApp does not store. Kept undecoded, to be counted.
+    #[prost(bytes = "vec", repeated, tag = "3")]
+    pub exemplars: Vec<Vec<u8>>,
+    /// Native histograms, which SensApp does not store. Kept undecoded, to be counted.
+    #[prost(bytes = "vec", repeated, tag = "4")]
+    pub histograms: Vec<Vec<u8>>,
 }
 
 #[derive(prost::Message, Clone)]

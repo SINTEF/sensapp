@@ -262,7 +262,9 @@ async fn remote_write_drops_nan_samples() -> Result<()> {
                     timestamp: 1_700_000_030_000,
                 },
             ],
+            ..Default::default()
         }],
+        ..Default::default()
     };
     let response = app
         .clone()

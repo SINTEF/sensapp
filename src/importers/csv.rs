@@ -5,7 +5,7 @@ use crate::{
     },
     importers::IngestionStats,
     infer::{
-        columns::{InferedColumn, infer_column},
+        columns::{InferedColumn, infer_typed_column},
         datagrid::StringDataGrid,
         datetime_guesser::likely_datetime_column,
         parsing::InferedValue,
@@ -70,9 +70,12 @@ pub type ParsedCsv = HashMap<String, (Arc<Sensor>, TypedSamples)>;
 
 /// Parse CSV data grid into sensors and their samples
 /// Errors here come from the payload.
+///
+/// The cells are moved, never copied: out of the rows into the columns, then out of the columns
+/// into the samples. A column keeps its text only when it is read as text.
 pub fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<ParsedCsv> {
-    let column_names = &data_grid.column_names;
-    let rows = &data_grid.rows;
+    let StringDataGrid { column_names, rows } = data_grid;
+    let column_names = &column_names;
 
     if rows.is_empty() {
         return Err(anyhow!("CSV contains no data rows"));
@@ -84,33 +87,11 @@ pub fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<ParsedCsv> {
         ));
     }
 
-    // Convert rows to columns for type inference
-    let mut columns = vec![Vec::new(); column_names.len()];
-    for row in rows {
-        for (col_idx, value) in row.iter().enumerate() {
-            if col_idx < columns.len() {
-                columns[col_idx].push(value.clone());
-            }
-        }
-    }
-
-    // Infer column types
-    let inferred_columns: Vec<InferedColumn> = columns
-        .iter()
-        .map(|col| infer_column(col.clone(), true, false))
-        .collect();
-
-    // Try to identify datetime column
-    let datetime_column = likely_datetime_column(column_names, &inferred_columns);
-
     // Find sensor name and value columns
     let sensor_name_idx =
         find_column_index(column_names, &["sensor_name", "metric", "name", "sensor"]);
     let value_idx = find_column_index(column_names, &["value", "reading", "measurement"]);
     let unit_idx = find_column_index(column_names, &["unit", "units"]);
-    let datetime_idx = datetime_column
-        .as_ref()
-        .and_then(|name| column_names.iter().position(|col| col == name));
 
     // Wide format: each column is a series named after its header, so a header given twice would
     // put two columns, possibly of two types, in one series
@@ -121,6 +102,42 @@ pub fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<ParsedCsv> {
             return Err(anyhow!("The column '{duplicate}' is given twice"));
         }
     }
+
+    // Rows to columns, for type inference
+    let row_count = rows.len();
+    let mut cells: Vec<Vec<String>> = (0..column_names.len())
+        .map(|_| Vec::with_capacity(row_count))
+        .collect();
+    for row in rows {
+        for (column, value) in cells.iter_mut().zip(row) {
+            column.push(value);
+        }
+    }
+
+    // Infer column types. The text of a typed column is kept when it is read as text: the sensor
+    // names and units, and the times of a value column.
+    let mut inferred_columns: Vec<InferedColumn> = Vec::with_capacity(cells.len());
+    let mut texts: Vec<Option<Vec<String>>> = Vec::with_capacity(cells.len());
+    for (col_idx, column) in cells.into_iter().enumerate() {
+        match infer_typed_column(&column, true, false) {
+            None => {
+                inferred_columns.push(InferedColumn::String(column));
+                texts.push(None);
+            }
+            Some(typed) => {
+                let read_as_text = (long && [sensor_name_idx, unit_idx].contains(&Some(col_idx)))
+                    || matches!(typed, InferedColumn::DateTime(_));
+                inferred_columns.push(typed);
+                texts.push(read_as_text.then_some(column));
+            }
+        }
+    }
+
+    // Try to identify datetime column
+    let datetime_column = likely_datetime_column(column_names, &inferred_columns);
+    let datetime_idx = datetime_column
+        .as_ref()
+        .and_then(|name| column_names.iter().position(|col| col == name));
 
     let Some(datetime_idx) = datetime_idx else {
         return Err(anyhow!(
@@ -133,23 +150,30 @@ pub fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<ParsedCsv> {
     let mut sensors_data: SensorDataMap = HashMap::new();
 
     // Process each row
-    for (row_idx, row) in rows.iter().enumerate() {
-        let datetime = times[row_idx];
-
+    for (row_idx, &datetime) in times.iter().enumerate() {
         if let (Some(sensor_name_idx), Some(value_idx)) = (sensor_name_idx, value_idx) {
             // Long format: one row per sample
-            let sensor_name = row[sensor_name_idx].clone();
+            let value = take_value(
+                &mut inferred_columns[value_idx],
+                &mut texts[value_idx],
+                row_idx,
+            )?;
+            let sensor_name = cell_text(
+                &inferred_columns[sensor_name_idx],
+                &texts[sensor_name_idx],
+                row_idx,
+            )?;
             if sensor_name.trim().is_empty() {
                 return Err(anyhow!("Empty sensor name found in row {}", row_idx + 1));
             }
-
-            let value =
-                parse_value_from_inferred(&inferred_columns[value_idx], row, value_idx, row_idx)?;
-            let unit_name = unit_idx
-                .map(|idx| row[idx].clone())
-                .filter(|s| !s.is_empty());
-
-            let unit = unit_name.map(|name| Unit::new(name, None));
+            // The unit is read only for a new series
+            let unit = || -> Result<Option<Unit>> {
+                let Some(unit_idx) = unit_idx else {
+                    return Ok(None);
+                };
+                let unit_name = cell_text(&inferred_columns[unit_idx], &texts[unit_idx], row_idx)?;
+                Ok((!unit_name.is_empty()).then(|| Unit::new(unit_name.to_string(), None)))
+            };
             series_entry(&mut sensors_data, sensor_name, &value, unit)?.push((datetime, value));
         } else {
             // Wide format: each column (except datetime) is a sensor
@@ -159,13 +183,14 @@ pub fn parse_csv_data_grid(data_grid: StringDataGrid) -> Result<ParsedCsv> {
                 }
 
                 let value =
-                    parse_value_from_inferred(&inferred_columns[col_idx], row, col_idx, row_idx)?;
-                let sensor_name = col_name.clone();
-
-                series_entry(&mut sensors_data, sensor_name, &value, None)?.push((datetime, value));
+                    take_value(&mut inferred_columns[col_idx], &mut texts[col_idx], row_idx)?;
+                series_entry(&mut sensors_data, col_name, &value, || Ok(None))?
+                    .push((datetime, value));
             }
         }
     }
+    drop(inferred_columns);
+    drop(texts);
 
     // Convert to final format
     if sensors_data.is_empty() {
@@ -255,58 +280,56 @@ fn column_times(column: &InferedColumn, name: &str) -> Result<Vec<SensAppDateTim
     }
 }
 
-/// The value of a cell. Times in a value column are text: they are kept as written.
-fn parse_value_from_inferred(
-    column: &InferedColumn,
-    row: &[String],
-    col_idx: usize,
+/// The value of a cell, moved out of its column: each cell is read once. Times in a value column
+/// are text: they are kept as written.
+fn take_value(
+    column: &mut InferedColumn,
+    text: &mut Option<Vec<String>>,
     row_idx: usize,
 ) -> Result<InferedValue> {
-    match column {
+    let out_of_bounds = || anyhow!("Row index {} out of bounds", row_idx);
+    Ok(match column {
         InferedColumn::Integer(values) => {
-            if row_idx < values.len() {
-                Ok(InferedValue::Integer(values[row_idx]))
-            } else {
-                Err(anyhow!("Row index {} out of bounds", row_idx))
-            }
+            InferedValue::Integer(*values.get(row_idx).ok_or_else(out_of_bounds)?)
         }
         InferedColumn::Float(values) => {
-            if row_idx < values.len() {
-                Ok(InferedValue::Float(values[row_idx]))
-            } else {
-                Err(anyhow!("Row index {} out of bounds", row_idx))
-            }
-        }
-        InferedColumn::String(values) => {
-            if row_idx < values.len() {
-                Ok(InferedValue::String(values[row_idx].clone()))
-            } else {
-                Err(anyhow!("Row index {} out of bounds", row_idx))
-            }
-        }
-        InferedColumn::Boolean(values) => {
-            if row_idx < values.len() {
-                Ok(InferedValue::Boolean(values[row_idx]))
-            } else {
-                Err(anyhow!("Row index {} out of bounds", row_idx))
-            }
-        }
-        InferedColumn::DateTime(_) => Ok(InferedValue::String(row[col_idx].clone())),
-        InferedColumn::Json(values) => {
-            if row_idx < values.len() {
-                Ok(InferedValue::Json(values[row_idx].clone()))
-            } else {
-                Err(anyhow!("Row index {} out of bounds", row_idx))
-            }
+            InferedValue::Float(*values.get(row_idx).ok_or_else(out_of_bounds)?)
         }
         InferedColumn::Numeric(values) => {
-            if row_idx < values.len() {
-                Ok(InferedValue::Numeric(values[row_idx]))
-            } else {
-                Err(anyhow!("Row index {} out of bounds", row_idx))
-            }
+            InferedValue::Numeric(*values.get(row_idx).ok_or_else(out_of_bounds)?)
         }
-    }
+        InferedColumn::Boolean(values) => {
+            InferedValue::Boolean(*values.get(row_idx).ok_or_else(out_of_bounds)?)
+        }
+        InferedColumn::Json(values) => {
+            InferedValue::Json(values.get(row_idx).ok_or_else(out_of_bounds)?.clone())
+        }
+        InferedColumn::String(values) => InferedValue::String(std::mem::take(
+            values.get_mut(row_idx).ok_or_else(out_of_bounds)?,
+        )),
+        InferedColumn::DateTime(_) => InferedValue::String(std::mem::take(
+            text.as_mut()
+                .and_then(|text| text.get_mut(row_idx))
+                .ok_or_else(out_of_bounds)?,
+        )),
+    })
+}
+
+/// The text of a cell of a column read as text.
+fn cell_text<'a>(
+    column: &'a InferedColumn,
+    text: &'a Option<Vec<String>>,
+    row_idx: usize,
+) -> Result<&'a str> {
+    let cells = match (text, column) {
+        (Some(text), _) => text,
+        (None, InferedColumn::String(values)) => values,
+        (None, _) => return Err(anyhow!("The column of row {} has no text", row_idx + 1)),
+    };
+    cells
+        .get(row_idx)
+        .map(String::as_str)
+        .ok_or_else(|| anyhow!("Row index {} out of bounds", row_idx))
 }
 
 fn inferred_value_to_sensor_type(value: &InferedValue) -> SensorType {
@@ -321,23 +344,23 @@ fn inferred_value_to_sensor_type(value: &InferedValue) -> SensorType {
     }
 }
 
-/// The samples of the series `name`, created with the type of `value` when it is new. A name the
-/// series identity refuses (a control character) is an error of the payload.
+/// The samples of the series `name`, created with the type of `value` and the unit of `unit` when
+/// it is new. A name the series identity refuses (a control character) is an error of the payload.
 fn series_entry<'a>(
     sensors_data: &'a mut SensorDataMap,
-    name: String,
+    name: &str,
     value: &InferedValue,
-    unit: Option<Unit>,
+    unit: impl FnOnce() -> Result<Option<Unit>>,
 ) -> Result<&'a mut Vec<(SensAppDateTime, InferedValue)>> {
-    let entry = match sensors_data.entry(name) {
-        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-        std::collections::hash_map::Entry::Vacant(entry) => {
-            let sensor_type = inferred_value_to_sensor_type(value);
-            let sensor = Sensor::new_without_uuid(entry.key().clone(), sensor_type, unit, None)?;
-            entry.insert((Arc::new(sensor), Vec::new()))
-        }
-    };
-    Ok(&mut entry.1)
+    if !sensors_data.contains_key(name) {
+        let sensor_type = inferred_value_to_sensor_type(value);
+        let sensor = Sensor::new_without_uuid(name.to_string(), sensor_type, unit()?, None)?;
+        sensors_data.insert(name.to_string(), (Arc::new(sensor), Vec::new()));
+    }
+    let (_, samples) = sensors_data
+        .get_mut(name)
+        .expect("the series was inserted above");
+    Ok(samples)
 }
 
 fn convert_samples_to_typed_samples(

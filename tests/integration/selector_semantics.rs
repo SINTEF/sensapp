@@ -224,7 +224,9 @@ async fn remote_write_then_read_keeps_one_metric_name() -> Result<()> {
                 value: 0.5,
                 timestamp: 1_700_000_000_000,
             }],
+            ..Default::default()
         }],
+        ..Default::default()
     };
     let request = Request::post("/api/v1/prometheus_remote_write")
         .header("content-type", "application/x-protobuf")

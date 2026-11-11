@@ -13,12 +13,17 @@ message WriteRequest {
 
   // Prometheus uses this field to send metadata, but this is
   // omitted from v1 of the spec as it is experimental.
-  reserved  3;
+  // SensApp does not store it: it reads the field as bytes, only to count it.
+  repeated bytes metadata = 3;
 }
 
 message TimeSeries {
   repeated Label labels   = 1;
   repeated Sample samples = 2;
+  // Exemplars and native histograms, which SensApp does not store: read as bytes, only to
+  // count them.
+  repeated bytes exemplars  = 3;
+  repeated bytes histograms = 4;
 }
 
 message Label {

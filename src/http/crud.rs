@@ -895,19 +895,8 @@ pub async fn get_series_data(
             })?
             .to_string();
 
-        let start_time = match query.start.as_ref() {
-            Some(start_str) => Some(parse_datetime_string(start_str).map_err(|e| {
-                AppError::bad_request(anyhow::anyhow!("Invalid start datetime: {}", e))
-            })?),
-            None => None,
-        };
-
-        let end_time = match query.end.as_ref() {
-            Some(end_str) => Some(parse_datetime_string(end_str).map_err(|e| {
-                AppError::bad_request(anyhow::anyhow!("Invalid end datetime: {}", e))
-            })?),
-            None => None,
-        };
+        let (start_time, end_time) =
+            parse_optional_time_bounds(query.start.as_ref(), query.end.as_ref())?;
 
         let step_ms = match query.step.as_deref() {
             Some(step) => Some(promql_duration::parse_duration_millis(step).map_err(|e| {

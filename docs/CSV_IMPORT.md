@@ -67,3 +67,12 @@ write (see [DATAMODEL.md](DATAMODEL.md)).
 Each value column gets one type from all its cells: integer, float, boolean, JSON or string (one string cell
 makes the column a string series). A column of times that is not the time axis is a string series, with its
 cells as written.
+
+The type is part of the identity of a series (see [DATAMODEL.md](DATAMODEL.md)): a column of integers in one upload
+and of decimals in the next makes two series of the same name, and one empty cell makes a third, of strings.
+
+## Export
+
+A selector query (`/api/v1/query?…&format=csv`) answers in the long layout: `timestamp,sensor_id,sensor_name,value,type`,
+then a column for each label key, sorted. A label named like one of the first five columns, `type` for instance, is in a
+column `label_type`. A cell with a comma, a quote, a line feed or a carriage return is quoted.

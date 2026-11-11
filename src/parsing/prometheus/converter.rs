@@ -25,7 +25,11 @@ pub fn sensor_data_to_timeseries(sensor_data: &SensorData) -> Option<TimeSeries>
     // Build labels from sensor name and labels
     let labels = build_prometheus_labels(&sensor_data.sensor);
 
-    Some(TimeSeries { labels, samples })
+    Some(TimeSeries {
+        labels,
+        samples,
+        ..Default::default()
+    })
 }
 
 /// Builds Prometheus labels from a SensApp Sensor.

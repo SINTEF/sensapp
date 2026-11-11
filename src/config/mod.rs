@@ -291,21 +291,38 @@ mod tests {
         });
     }
 
+    /// Checked on a loaded configuration and not through the environment: an invalid variable would
+    /// make the other tests that load the configuration fail while it is set.
     #[test]
     fn values_that_would_fail_later_are_refused_at_startup() {
-        for (name, value) in [
-            ("SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS", "0"),
-            ("SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS", "0"),
-            ("SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS", "0"),
-            ("SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS", "0"),
-            ("SENSAPP_HTTP_MAX_QUERY_SAMPLES", "0"),
-            ("SENSAPP_HTTP_MAX_QUERY_SAMPLES", "18446744073709551615"),
-            ("SENSAPP_TOKEN_MAX_DURATION_SECONDS", "0"),
-            ("SENSAPP_TOKEN_MAX_DURATION_SECONDS", "18446744073709551615"),
-        ] {
-            temp_env::with_var(name, Some(value), || {
-                assert!(SensAppConfig::load().is_err(), "{name}={value}");
-            });
+        type MakeInvalid = fn(&mut SensAppConfig);
+        let invalid: [(&str, MakeInvalid); 10] = [
+            ("server timeout 0", |c| c.http_server_timeout_seconds = 0),
+            ("write timeout 0", |c| c.http_write_timeout_seconds = 0),
+            ("maintenance timeout 0", |c| {
+                c.http_maintenance_timeout_seconds = 0
+            }),
+            ("body read timeout 0", |c| {
+                c.http_body_read_timeout_seconds = 0
+            }),
+            ("query samples 0", |c| c.http_max_query_samples = 0),
+            ("query samples max", |c| {
+                c.http_max_query_samples = usize::MAX
+            }),
+            ("token duration 0", |c| c.token_max_duration_seconds = 0),
+            ("token duration max", |c| {
+                c.token_max_duration_seconds = u64::MAX
+            }),
+            ("body limit 0", |c| c.http_body_limit = "0".to_string()),
+            ("body limit 3GiB", |c| {
+                c.http_body_limit = "3GiB".to_string()
+            }),
+        ];
+        assert!(SensAppConfig::load().unwrap().validate().is_ok());
+        for (case, make_invalid) in invalid {
+            let mut config = SensAppConfig::load().unwrap();
+            make_invalid(&mut config);
+            assert!(config.validate().is_err(), "{case}");
         }
     }
 

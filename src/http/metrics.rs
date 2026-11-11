@@ -64,6 +64,11 @@ struct DataVolumeLabels {
     operation: String,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct DroppedPartLabels {
+    part: String,
+}
+
 pub struct HttpMetrics {
     registry: Registry,
     http_requests_total: Family<HttpRequestLabels, Counter>,
@@ -72,6 +77,7 @@ pub struct HttpMetrics {
     operation_duration_seconds: Family<OperationDurationLabels, Histogram>,
     samples_processed_total: Family<DataVolumeLabels, Counter>,
     series_processed_total: Family<DataVolumeLabels, Counter>,
+    remote_write_dropped_total: Family<DroppedPartLabels, Counter>,
     http_requests_in_flight: Gauge,
     writes_shed_total: Counter,
     uptime_seconds: Gauge,
@@ -145,6 +151,13 @@ impl HttpMetrics {
             series_processed_total.clone(),
         );
 
+        let remote_write_dropped_total = Family::<DroppedPartLabels, Counter>::default();
+        registry.register(
+            "sensapp_prometheus_remote_write_dropped",
+            "Exemplars, native histograms and metadata received by the Prometheus remote write, which SensApp does not store",
+            remote_write_dropped_total.clone(),
+        );
+
         let http_requests_in_flight = Gauge::default();
         registry.register(
             "sensapp_http_requests_in_flight",
@@ -181,6 +194,7 @@ impl HttpMetrics {
             operation_duration_seconds,
             samples_processed_total,
             series_processed_total,
+            remote_write_dropped_total,
             http_requests_in_flight,
             writes_shed_total,
             uptime_seconds,
@@ -268,6 +282,22 @@ impl HttpMetrics {
                 operation: operation.to_string(),
             })
             .inc_by(series);
+    }
+
+    /// Counts the parts of a Prometheus remote write that are not stored: `exemplar`,
+    /// `histogram` or `metadata`.
+    pub fn observe_remote_write_dropped(&self, part: &str, count: usize) {
+        let Ok(count) = u64::try_from(count) else {
+            return;
+        };
+        if count == 0 {
+            return;
+        }
+        self.remote_write_dropped_total
+            .get_or_create(&DroppedPartLabels {
+                part: part.to_string(),
+            })
+            .inc_by(count);
     }
 
     pub fn increment_in_flight(&self) {

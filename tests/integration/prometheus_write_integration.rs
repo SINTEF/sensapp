@@ -44,7 +44,10 @@ fn create_test_app(storage: Arc<dyn sensapp::storage::StorageInstance>) -> Route
 
 /// Build a Prometheus remote write request body (snappy-compressed protobuf)
 fn build_write_request(timeseries: Vec<TimeSeries>) -> Result<Vec<u8>> {
-    let request = WriteRequest { timeseries };
+    let request = WriteRequest {
+        timeseries,
+        ..Default::default()
+    };
     let encoded = request.encode_to_vec();
     let compressed = snap::raw::Encoder::new().compress_vec(&encoded)?;
     Ok(compressed)
@@ -98,6 +101,7 @@ async fn test_prometheus_write_basic() -> Result<()> {
                 timestamp: 1704067320000,
             },
         ],
+        ..Default::default()
     };
 
     let body = build_write_request(vec![ts])?;
@@ -140,6 +144,7 @@ async fn test_prometheus_write_multiple_series() -> Result<()> {
             value: 1.0,
             timestamp: 1704067200000,
         }],
+        ..Default::default()
     };
 
     let ts2 = TimeSeries {
@@ -151,6 +156,7 @@ async fn test_prometheus_write_multiple_series() -> Result<()> {
             value: 42.5,
             timestamp: 1704067200000,
         }],
+        ..Default::default()
     };
 
     let body = build_write_request(vec![ts1, ts2])?;
@@ -200,6 +206,7 @@ async fn test_prometheus_write_missing_name_label() -> Result<()> {
             value: 42.0,
             timestamp: 1704067200000,
         }],
+        ..Default::default()
     };
 
     let body = build_write_request(vec![ts])?;
@@ -306,6 +313,7 @@ async fn test_prometheus_write_preserves_labels() -> Result<()> {
             value: 1234.0,
             timestamp: 1704067200000,
         }],
+        ..Default::default()
     };
 
     let body = build_write_request(vec![ts])?;
@@ -343,5 +351,64 @@ async fn test_prometheus_write_preserves_labels() -> Result<()> {
         .map(|(_, v)| v.as_str());
     assert_eq!(status_value, Some("200"));
 
+    Ok(())
+}
+
+/// Exemplars, native histograms and metadata are not stored: the write succeeds, and a metric
+/// counts what was dropped, a request of metadata only included.
+#[tokio::test]
+#[serial]
+async fn test_prometheus_write_counts_what_it_drops() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let metrics = Arc::new(HttpMetrics::new());
+    let state = HttpServerState {
+        name: Arc::new("SensApp Test".to_string()),
+        storage: test_db.storage(),
+        metrics: metrics.clone(),
+        influxdb_with_numeric: false,
+        max_query_samples: sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
+        auth: None,
+    };
+    let app = Router::new()
+        .route("/api/v1/prometheus_remote_write", post(publish_prometheus))
+        .with_state(state);
+
+    let with_extras = WriteRequest {
+        timeseries: vec![TimeSeries {
+            labels: vec![Label {
+                name: "__name__".to_string(),
+                value: "with_exemplars".to_string(),
+            }],
+            samples: vec![PromSample {
+                value: 1.0,
+                timestamp: 1704067200000,
+            }],
+            // Empty messages: the content is not read
+            exemplars: vec![vec![], vec![]],
+            histograms: vec![vec![]],
+        }],
+        metadata: vec![vec![]],
+    };
+    let metadata_only = WriteRequest {
+        metadata: vec![vec![]],
+        ..Default::default()
+    };
+    for request in [with_extras, metadata_only] {
+        let body = snap::raw::Encoder::new().compress_vec(&request.encode_to_vec())?;
+        assert_eq!(
+            send_write_request(&app, body).await?,
+            StatusCode::NO_CONTENT
+        );
+    }
+
+    let rendered = metrics.render(true)?;
+    for line in [
+        "sensapp_prometheus_remote_write_dropped_total{part=\"exemplar\"} 2",
+        "sensapp_prometheus_remote_write_dropped_total{part=\"histogram\"} 1",
+        "sensapp_prometheus_remote_write_dropped_total{part=\"metadata\"} 2",
+    ] {
+        assert!(rendered.contains(line), "{line} missing from:\n{rendered}");
+    }
     Ok(())
 }

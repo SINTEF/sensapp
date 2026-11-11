@@ -1,7 +1,21 @@
 use crate::datamodel::{SensAppDateTime, SensorData, TypedSamples};
 use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose};
-use std::collections::{BTreeSet, HashMap};
+use std::borrow::Cow;
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+/// The fixed columns of the multi-series CSV, before the label columns.
+const MULTI_COLUMNS: [&str; 5] = ["timestamp", "sensor_id", "sensor_name", "value", "type"];
+
+/// A CSV field: quoted when it holds a separator, a quote or a line break, a lone carriage return
+/// included.
+fn csv_field(value: &str) -> Cow<'_, str> {
+    if value.contains([',', '"', '\n', '\r']) {
+        Cow::Owned(format!("\"{}\"", value.replace('"', "\"\"")))
+    } else {
+        Cow::Borrowed(value)
+    }
+}
 
 /// Helper function to format datetime to RFC3339/ISO 8601
 fn datetime_to_rfc3339(datetime: &SensAppDateTime) -> String {
@@ -51,14 +65,7 @@ impl CsvConverter {
                 csv_output.push_str("timestamp,value\n");
                 for sample in samples.iter() {
                     // Escape quotes and wrap in quotes if needed
-                    let escaped_value = if sample.value.contains(',')
-                        || sample.value.contains('"')
-                        || sample.value.contains('\n')
-                    {
-                        format!("\"{}\"", sample.value.replace('"', "\"\""))
-                    } else {
-                        sample.value.clone()
-                    };
+                    let escaped_value = csv_field(&sample.value);
                     csv_output.push_str(&format!(
                         "{},{}\n",
                         datetime_to_rfc3339(&sample.datetime),
@@ -118,10 +125,11 @@ impl CsvConverter {
     }
 
     /// Convert multiple SensorData to CSV format (long format with sensor_name column)
-    /// Columns: timestamp,sensor_name,value,type[,label1,label2,...]
+    /// Columns: timestamp,sensor_id,sensor_name,value,type[,label1,label2,...]
     /// This format is more robust for sparse/misaligned data from multiple sensors.
     /// Label columns are added at the end, sorted alphabetically by key.
     /// If a sensor doesn't have a particular label, the column value is empty.
+    /// A label named like a fixed column, `type` for instance, is in a column `label_type`.
     pub fn to_csv_multi(sensor_data_list: &[SensorData]) -> Result<String> {
         let mut csv_output = String::new();
 
@@ -136,11 +144,18 @@ impl CsvConverter {
         // Convert to Vec for indexed access
         let label_keys: Vec<&str> = all_label_keys.into_iter().collect();
 
-        // Write header
-        csv_output.push_str("timestamp,sensor_id,sensor_name,value,type");
+        // Write header. A label named after a column already written, a fixed column or a renamed
+        // label, is prefixed with `label_` until its name is free.
+        csv_output.push_str(&MULTI_COLUMNS.join(","));
+        let mut columns: HashSet<String> = MULTI_COLUMNS.iter().map(|c| c.to_string()).collect();
         for key in &label_keys {
+            let mut column = key.to_string();
+            while columns.contains(&column) {
+                column = format!("label_{column}");
+            }
             csv_output.push(',');
-            csv_output.push_str(key);
+            csv_output.push_str(&csv_field(&column));
+            columns.insert(column);
         }
         csv_output.push('\n');
 
@@ -180,13 +195,7 @@ impl CsvConverter {
         labels_map: &HashMap<&str, &str>,
     ) -> Result<()> {
         // Escape sensor name if needed
-        let escaped_name =
-            if sensor_name.contains(',') || sensor_name.contains('"') || sensor_name.contains('\n')
-            {
-                format!("\"{}\"", sensor_name.replace('"', "\"\""))
-            } else {
-                sensor_name.to_string()
-            };
+        let escaped_name = csv_field(sensor_name);
 
         // Pre-compute the label values suffix for this sensor (same for all samples)
         let label_suffix = Self::build_label_suffix(label_keys, labels_map);
@@ -230,14 +239,7 @@ impl CsvConverter {
             }
             TypedSamples::String(samples) => {
                 for sample in samples.iter() {
-                    let escaped_value = if sample.value.contains(',')
-                        || sample.value.contains('"')
-                        || sample.value.contains('\n')
-                    {
-                        format!("\"{}\"", sample.value.replace('"', "\"\""))
-                    } else {
-                        sample.value.clone()
-                    };
+                    let escaped_value = csv_field(&sample.value);
                     csv_output.push_str(&format!(
                         "{},{},{},{},string{}\n",
                         datetime_to_rfc3339(&sample.datetime),
@@ -317,12 +319,7 @@ impl CsvConverter {
         for key in label_keys {
             suffix.push(',');
             if let Some(value) = labels_map.get(key) {
-                // Escape value if needed
-                if value.contains(',') || value.contains('"') || value.contains('\n') {
-                    suffix.push_str(&format!("\"{}\"", value.replace('"', "\"\"")));
-                } else {
-                    suffix.push_str(value);
-                }
+                suffix.push_str(&csv_field(value));
             }
             // If no value, just leave it empty (the comma is already added)
         }
@@ -683,6 +680,68 @@ mod tests {
         // Values with special characters should be properly escaped
         assert!(csv_output.contains("\"value, with comma\""));
         assert!(csv_output.contains("\"contains \"\"quotes\"\" here\""));
+    }
+
+    /// Reads a CSV back: its header and its records.
+    async fn read_back(csv: &str) -> (Vec<String>, Vec<Vec<String>>) {
+        use futures::StreamExt;
+        let mut reader = csv_async::AsyncReaderBuilder::new().create_reader(csv.as_bytes());
+        let header = reader
+            .headers()
+            .await
+            .unwrap()
+            .iter()
+            .map(str::to_string)
+            .collect();
+        let records = reader
+            .records()
+            .map(|record| record.unwrap().iter().map(str::to_string).collect())
+            .collect()
+            .await;
+        (header, records)
+    }
+
+    /// A label key is a column name like the others: it is quoted when it needs to be, and a label
+    /// named after a fixed column gets its own column. A lone carriage return is quoted.
+    #[tokio::test]
+    async fn test_multi_sensor_csv_reads_back_with_any_label_and_value() {
+        use crate::datamodel::sensapp_vec::SensAppLabels;
+        use smallvec::smallvec as labels_smallvec;
+
+        let mut labels: SensAppLabels = labels_smallvec![];
+        labels.push(("type".to_string(), "room".to_string()));
+        labels.push(("a,b".to_string(), "c".to_string()));
+        let sensor = Sensor {
+            uuid: Uuid::new_v4(),
+            name: "note".to_string(),
+            sensor_type: SensorType::String,
+            unit: None,
+            labels,
+        };
+        let samples = TypedSamples::String(smallvec![Sample {
+            datetime: SensAppDateTime::from_unix_seconds(1609459200.0),
+            value: "line\rbreak".to_string(),
+        }]);
+        let csv = CsvConverter::to_csv_multi(&[SensorData::new(sensor, samples)]).unwrap();
+
+        let (header, records) = read_back(&csv).await;
+        assert_eq!(
+            header,
+            [
+                "timestamp",
+                "sensor_id",
+                "sensor_name",
+                "value",
+                "type",
+                "a,b",
+                "label_type"
+            ]
+        );
+        assert_eq!(records.len(), 1, "{csv:?}");
+        assert_eq!(records[0][3], "line\rbreak");
+        assert_eq!(records[0][4], "string");
+        assert_eq!(records[0][5], "c");
+        assert_eq!(records[0][6], "room");
     }
 
     #[test]

@@ -30,6 +30,22 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
   connection string): the series could not take a sample before it any more. `/metrics` answers `501` on
   RRDCached instead of an empty list.
 
+- **An open server (`SENSAPP_AUTH_DISABLED`) refuses browser requests from other origins** (`Origin` that
+  is not the `Host`), and on a loopback address the `Host` names that are not loopback ones, with `403`. A web
+  page could write to it, or run the vacuum, in the name of a visitor. `curl` and the SDKs are not affected.
+- SensApp refuses to start with a timeout of `0`, a body limit of `0` or over 2 GiB (it was 128 GiB),
+  `SENSAPP_HTTP_MAX_QUERY_SAMPLES` of `0` or over 1,000,000,000, a token duration of `0` or over ten years, or
+  two JWT secrets with the same key id.
+- An admin token that lists sensors is refused, and `generate-token` does not make one: admin is for every
+  sensor.
+- The Helm chart refuses to render SQLite or DuckDB with more than one replica or with autoscaling, and no
+  longer sets a 30 s timeout over SensApp's 120 s.
+- Arrow exports write their timestamps as `Timestamp(Microsecond, "UTC")` instead of without a timezone.
+- The CSV export of a selector query puts a label named like a fixed column (`type`, `value`, …) in a column
+  `label_<name>` instead of a second column of that name.
+- The Prometheus remote write models keep the exemplars, histograms and metadata as bytes: code that builds a
+  `WriteRequest` or a `TimeSeries` needs `..Default::default()`.
+
 ### Changed and fixed
 
 - Prometheus remote read: the buckets of a `*_over_time` hint start with the range of their own selector,
@@ -63,6 +79,22 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
   rows), the health check waits 3 s at most, and the `metric` filter of `/series` is the whole UUID.
 - BigQuery: a write is a success only when BigQuery confirmed every request it was cut into, availability is
   one statement instead of reading every sample, and `/metrics` lists the label keys. Not run live yet.
+- A token with a sensor allow list deletes nothing it cannot read the name of: a delete of a series whose read
+  failed went through.
+- `/health/ready` answers a fixed text instead of the database error, which it gave anyone; the error is logged.
+- A client has 30 s to send the headers of a request, and an instance holds at most 4,096 connections: idle
+  connections could hold every file descriptor.
+- InfluxDB writes read every member of a gzip body (a body of two concatenated gzip streams lost the
+  second), and the parsing of InfluxDB, CSV, Arrow and Prometheus bodies no longer blocks the async runtime.
+- The `sensapp_series_processed_total` of InfluxDB writes counts each series once, not once per sample.
+- A CSV upload moves its cells instead of copying them: a 4.5 MB file peaked at 63 to 69 MB over the body,
+  down from 97 to 105 MB. The UUIDs of sensors are no longer cached, which spent memory to save little.
+- The CSV export of a selector query quotes the label names and a lone carriage return.
+- `GET /series/{uuid}` refuses a `start` after the `end` with `400`, like the other reads.
+- `sensapp_prometheus_remote_write_dropped_total{part}` counts the exemplars, native histograms and metadata
+  that the remote write drops.
+- Sentry is no longer in debug mode, `docker compose` creates the `sensapp-test` database, and
+  `settings.toml` tells how authentication works.
 
 ## 0.4.2
 

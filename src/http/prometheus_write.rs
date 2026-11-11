@@ -19,6 +19,13 @@ use std::time::Instant;
 use tokio_util::bytes::Bytes;
 use tracing::{debug, info};
 
+/// The parts of a remote write request that SensApp does not store.
+struct DroppedParts {
+    exemplars: usize,
+    histograms: usize,
+    metadata: usize,
+}
+
 /// Validates required Prometheus Remote Write API headers.
 ///
 /// Prometheus sends data with specific headers:
@@ -128,12 +135,30 @@ pub async fn publish_prometheus(
         verify_headers(&headers)?;
 
         // A request that cannot be read is a 400: Prometheus drops it instead of sending it again
-        let write_request = parse_remote_write_request(&bytes).map_err(|error| {
-            AppError::bad_request(anyhow::anyhow!("Failed to parse write request: {error}"))
-        })?;
+        let write_request = super::app_error::run_blocking(move || {
+            parse_remote_write_request(&bytes).map_err(|error| {
+                AppError::bad_request(anyhow::anyhow!("Failed to parse write request: {error}"))
+            })
+        })
+        .await?;
+
+        // Exemplars, native histograms and metadata are not stored, only counted
+        let dropped = DroppedParts {
+            exemplars: write_request
+                .timeseries
+                .iter()
+                .map(|serie| serie.exemplars.len())
+                .sum(),
+            histograms: write_request
+                .timeseries
+                .iter()
+                .map(|serie| serie.histograms.len())
+                .sum(),
+            metadata: write_request.metadata.len(),
+        };
 
         if write_request.timeseries.is_empty() {
-            return Ok::<_, AppError>((StatusCode::NO_CONTENT, 0usize, 0usize));
+            return Ok::<_, AppError>((StatusCode::NO_CONTENT, 0usize, 0usize, dropped));
         }
 
         debug!("Processing {} timeseries", write_request.timeseries.len());
@@ -206,7 +231,7 @@ pub async fn publish_prometheus(
             }
         }
 
-        Ok((StatusCode::NO_CONTENT, series, sample_count))
+        Ok((StatusCode::NO_CONTENT, series, sample_count, dropped))
     }
     .await;
 
@@ -216,10 +241,13 @@ pub async fn publish_prometheus(
         started.elapsed(),
         result.is_ok(),
     );
-    if let Ok((_, series, samples)) = &result {
+    if let Ok((_, series, samples, dropped)) = &result {
         metrics.observe_series("write", "prometheus_remote_write", *series);
         metrics.observe_samples("write", "prometheus_remote_write", *samples);
+        metrics.observe_remote_write_dropped("exemplar", dropped.exemplars);
+        metrics.observe_remote_write_dropped("histogram", dropped.histograms);
+        metrics.observe_remote_write_dropped("metadata", dropped.metadata);
     }
 
-    result.map(|(status, _, _)| status)
+    result.map(|(status, _, _, _)| status)
 }

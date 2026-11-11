@@ -34,13 +34,15 @@ The Helm chart sets variables through `env:` in `values.yaml` (see the [chart RE
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SENSAPP_HTTP_BODY_LIMIT` | `64MiB` | Largest accepted request body, also after gzip or Snappy decompression. Over the limit gives `413`. Accepts units such as `512KiB`, `64MiB`, `1GiB`, up to 128 GiB. |
+| `SENSAPP_HTTP_BODY_LIMIT` | `64MiB` | Largest accepted request body, also after gzip or Snappy decompression. Over the limit gives `413`. Accepts units such as `512KiB`, `64MiB`, `1GiB`, up to 2 GiB. |
 | `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS` | `120` | Time a request may take before it is answered with `504 Gateway Timeout`. Applies to everything except the writes and the vacuum. |
 | `SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS` | `300` | Same as above for the writes (`/publish`, InfluxDB write, Prometheus remote write). Their work grows with the body, see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts). |
 | `SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS` | `30` | Time a client has to send the body of a write or of a Prometheus remote read. Over it gives `408 Request Timeout` and frees the write slot. See [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts). |
 | `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS` | `3600` | Same as above for `POST /api/v1/admin/vacuum` only, which scans every value table and is expected to be slow on a large database. |
 | `SENSAPP_HTTP_MAX_QUERY_SAMPLES` | `100000` | Most samples a read may return: one series (`GET /series/{uuid}`), the series of a selector in total (simple PromQL, Prometheus remote read) and the buckets of a cross-series aggregation. A read over it gets a `400` instead of a truncated answer. The samples are held in memory while the response is built: raise it on a machine with memory to spare, lower it to try the limit. See [HTTP limits](HTTP_LIMITS.md). |
 | `SENSAPP_HTTP_MAX_CONCURRENT_WRITES` | `16` | Write requests (`/publish`, InfluxDB write, Prometheus remote write, admin) handled at the same time. See [Backpressure](#backpressure). `0` disables the limit. |
+
+SensApp checks these settings when it starts and refuses to start with a timeout of `0`, a body limit of `0` or over 2 GiB, or `SENSAPP_HTTP_MAX_QUERY_SAMPLES` of `0` or over 1,000,000,000. A `0` would make every request fail, and the large values would let one request hold more memory than a machine has.
 
 Details on what the limits protect against are in [HTTP_LIMITS.md](HTTP_LIMITS.md).
 
@@ -58,9 +60,9 @@ See [FRONTEND.md](FRONTEND.md).
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SENSAPP_JWT_SECRET` | unset | Secret that signs and verifies the JWTs (at least 32 characters, `sensapp generate-secret` makes one). When unset, SensApp does not run open: on a loopback address it makes a secret for the run and prints an admin token, on any other address (the container image) it refuses to start, unless `SENSAPP_AUTH_DISABLED` is true. See [JWT_AUTH.md](JWT_AUTH.md). |
-| `SENSAPP_AUTH_DISABLED` | `false` | Run with every endpoint open: the explicit opt-out for demos, tests, and networks that authenticate in front of SensApp. Ignored when `SENSAPP_JWT_SECRET` is set. |
+| `SENSAPP_AUTH_DISABLED` | `false` | Run with every endpoint open: the explicit opt-out for demos, tests, and networks that authenticate in front of SensApp. An open server refuses browser requests from other origins, and on a loopback address the names that are not loopback ones, see [JWT_AUTH.md](JWT_AUTH.md#an-open-server). Ignored when `SENSAPP_JWT_SECRET` is set. |
 | `SENSAPP_JWT_PREVIOUS_SECRETS` | unset | Comma-separated secrets that still verify tokens but never sign them: the way to rotate the secret, or revoke the tokens of one. See [JWT_AUTH.md](JWT_AUTH.md#rotating-the-secret-and-revoking-tokens). |
-| `SENSAPP_TOKEN_MAX_DURATION_SECONDS` | `31536000` | Longest validity of a token made with `POST /api/v1/admin/tokens` (a year). The command line is not capped by it. |
+| `SENSAPP_TOKEN_MAX_DURATION_SECONDS` | `31536000` | Longest validity of a token made with `POST /api/v1/admin/tokens` (a year). It must be between 1 second and ten years, or SensApp refuses to start. The command line is not capped by it, only by ten years. |
 
 ### Data
 

@@ -151,6 +151,32 @@ mod query_tests {
         Ok(())
     }
 
+    /// A window that ends before it starts is refused, like on the other read endpoints.
+    #[tokio::test]
+    #[serial]
+    async fn test_series_data_refuses_a_window_ending_before_it_starts() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let (csv_data, sensor_name) = fixtures::temperature_sensor_csv_with_name();
+        app.post_csv("/sensors/publish", &csv_data).await?;
+        let sensor = DbHelpers::get_sensor_by_name(&storage, &sensor_name)
+            .await?
+            .expect("Temperature sensor should exist");
+
+        let response = app
+            .get(&format!(
+                "/series/{}?start=2024-01-01T00:03:00Z&end=2024-01-01T00:01:00Z",
+                sensor.uuid
+            ))
+            .await?;
+        response.assert_status(StatusCode::BAD_REQUEST);
+
+        Ok(())
+    }
+
     #[tokio::test]
     #[serial]
     async fn test_series_availability_endpoint_reports_presence_and_coverage() -> Result<()> {

@@ -13,6 +13,9 @@ use arrow_ipc::writer::{IpcWriteOptions, StreamWriter};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// The timezone of the timestamps: they are Unix microseconds, in UTC.
+const UTC: &str = "UTC";
+
 pub struct ArrowConverter;
 
 impl ArrowConverter {
@@ -37,7 +40,8 @@ impl ArrowConverter {
         let present_types = PresentTypes::from_sensor_data_list(sensor_data_list);
         let total_samples: usize = sensor_data_list.iter().map(|sd| sd.samples.len()).sum();
 
-        let mut timestamp_builder = TimestampMicrosecondBuilder::with_capacity(total_samples);
+        let mut timestamp_builder =
+            TimestampMicrosecondBuilder::with_capacity(total_samples).with_timezone(UTC);
         let mut sensor_id_builder = StringDictionaryBuilder::<Int32Type>::new();
         let mut sensor_name_builder = StringDictionaryBuilder::<Int32Type>::new();
         let mut sensor_type_builder = StringDictionaryBuilder::<Int32Type>::new();
@@ -68,7 +72,7 @@ impl ArrowConverter {
         let mut fields = vec![
             Field::new(
                 "timestamp",
-                DataType::Timestamp(TimeUnit::Microsecond, None),
+                DataType::Timestamp(TimeUnit::Microsecond, Some(UTC.into())),
                 false,
             ),
             Field::new("sensor_id", sensor_id_array.data_type().clone(), false),
@@ -212,7 +216,7 @@ impl ArrowConverter {
     fn convert_sensor_data_to_arrow(
         sensor_data: &SensorData,
     ) -> Result<(Arc<Schema>, Vec<ArrayRef>)> {
-        let mut timestamp_builder = TimestampMicrosecondBuilder::new();
+        let mut timestamp_builder = TimestampMicrosecondBuilder::new().with_timezone(UTC);
         let (value_field, value_column): (Field, ArrayRef) = match &sensor_data.samples {
             TypedSamples::Integer(samples) => {
                 let mut builder = Int64Builder::new();
@@ -334,7 +338,7 @@ impl ArrowConverter {
             vec![
                 Field::new(
                     "timestamp",
-                    DataType::Timestamp(TimeUnit::Microsecond, None),
+                    DataType::Timestamp(TimeUnit::Microsecond, Some(UTC.into())),
                     false,
                 ),
                 value_field,
@@ -1108,7 +1112,13 @@ mod tests {
         }
     }
 
+    /// The timestamps of a batch, after checking that they are in UTC.
     fn timestamps_of(batch: &RecordBatch) -> Vec<i64> {
+        let field = batch.schema().field_with_name("timestamp").unwrap().clone();
+        assert_eq!(
+            field.data_type(),
+            &DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
+        );
         let column = batch
             .column_by_name("timestamp")
             .expect("timestamp column")

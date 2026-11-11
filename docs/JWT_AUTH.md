@@ -28,6 +28,15 @@ export SENSAPP_JWT_SECRET=$(sensapp generate-secret)
 export SENSAPP_AUTH_DISABLED=true
 ```
 
+### An open server
+
+Without authentication, any web page that a visitor of SensApp opens could act on it in their name: a `text/plain` POST to `/publish`, or a POST without body to the vacuum, needs no preflight. A page whose domain is made to resolve to `127.0.0.1` (DNS rebinding) is even same-origin with a SensApp on the visitor's machine. So an open server answers `403` to:
+
+- a request whose `Origin` is not the `Host` it was sent to. Browsers send `Origin` with every cross-origin request; `curl` and the SDKs send none, and are not affected.
+- on a loopback address, a request whose `Host` is not a loopback name (`localhost`, a name under `.localhost`, `127.x.x.x`, `[::1]`).
+
+A network that authenticates in front of SensApp should still pass the `Host` the client used, which proxies do by default.
+
 The secret must be at least **32 characters**. `sensapp generate-secret` prints a random one of 48 characters (288 bits). Keep it private: anyone with the secret can make any token. In `settings.toml` it is `jwt_secret`, but an environment variable or a Secret is a better place than a file.
 
 ## Making tokens
@@ -191,6 +200,8 @@ SensApp keeps no list of tokens, so a token cannot be revoked one by one: it wor
 2. Put it in `SENSAPP_JWT_SECRET`, and move the old one to `SENSAPP_JWT_PREVIOUS_SECRETS` (comma-separated, several are allowed). Restart the instances. New tokens are signed with the new secret; the tokens of the old one still verify.
 3. Once those tokens have expired or the clients got new ones, remove the old secret from `SENSAPP_JWT_PREVIOUS_SECRETS`.
 
+The `kid` of a token is a hash of the secret that signed it. SensApp refuses to start when two of its secrets have the same `kid`, the same secret given twice for instance, as it could not tell which one verifies a token.
+
 To **revoke at once** (a leaked token, a lost admin token), do step 2 and leave the old secret out: every token it signed is refused. That includes the ones of the clients you trust, which need new tokens. The `kid` of a token tells which secret signed it, and a token whose `kid` is unknown is refused. Short durations are the other defence: prefer a day to a year, and an hour for an admin.
 
 Listing and revoking single tokens is a possible future feature (`ideas/token-registry-and-revocation.md`).
@@ -219,6 +230,8 @@ The OpenAPI document (`/docs`) declares the bearer token as a security scheme an
 - A write is checked against the name it gives. A write that also gives a UUID (SenML `bn`, Arrow `sensapp.sensor.uuid` or `sensor_id`) must give the stored name and type of that series, or the request is refused with 409, so a token cannot reach another series by naming its UUID ([DATAMODEL.md](DATAMODEL.md)). A write that gives only the UUID is checked against the UUID text, which an allow list does not hold unless it was put there.
 - With authentication enabled, `/prometheus/metrics?include_latest_samples=true` requires a read token and applies its sensor allow list. Plain `/prometheus/metrics` stays public for service monitoring.
 - Sensor-scoped tokens cannot run the database-wide `/api/v1/admin/vacuum` operation.
+- An admin token is for every sensor. `sensapp generate-token` refuses `--scope admin` with sensors, and a token that has both is refused (`401`): SensApp never makes one.
+- A token with a sensor allow list deletes only the series it can see. A series that SensApp cannot read the name of, to check it against the list, is not deleted.
 - The `delete` and `admin` scopes are never implied by `read write`. `delete` only allows deleting, not reading. With a sensor allow list, series the token cannot access are reported as not found. See [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md).
 
 ## Web UI
