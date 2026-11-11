@@ -161,8 +161,8 @@ impl TypedSamples {
                     if !value.is_finite() {
                         return Err(format!("{value} is not a number"));
                     }
-                    Decimal::from_str(&format!("{value}"))
-                        .or_else(|_| Decimal::from_scientific(&format!("{value:e}")))
+                    // `from_str` would round what is past the 28 decimals of a `Decimal`
+                    Decimal::from_str_exact(&format!("{value}"))
                         .map_err(|_| format!("{value} does not fit a decimal"))
                 })?)
             }
@@ -685,7 +685,20 @@ mod conversion_tests {
             floats(&[0.1, 1.5e-3, 2.0]).convert_to(SensorType::Numeric),
             Ok(numerics(&["0.1", "0.0015", "2"]))
         );
-        for bad in [f64::NAN, f64::INFINITY, 1e300] {
+        // 28 decimals fit
+        assert_eq!(
+            floats(&[1e-28]).convert_to(SensorType::Numeric),
+            Ok(numerics(&["0.0000000000000000000000000001"]))
+        );
+        // Past the 28 decimals of a `Decimal` a value would be rounded, to 0 for the first two
+        for bad in [
+            f64::NAN,
+            f64::INFINITY,
+            1e300,
+            1e-30,
+            5e-324,
+            1.2345678901234568e-15,
+        ] {
             assert!(
                 floats(&[bad]).convert_to(SensorType::Numeric).is_err(),
                 "{bad}"

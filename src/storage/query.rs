@@ -143,7 +143,7 @@ pub fn anchor_regex(pattern: &str) -> String {
 /// - what the engines read differently: a `[` within a class (nested for the `regex` crate, a
 ///   literal for PostgreSQL and RE2, so the class ends elsewhere), the set operations `&&`, `--`
 ///   and `~~`, a negated POSIX class, a repetition bound above 255 (PostgreSQL's limit), and a
-///   repetition of a repetition or of an assertion (`a**`, `^*`);
+///   repetition of a repetition or of an assertion (`a**`, `^*`, `\A*`);
 /// - groups other than `(...)` and `(?:...)`, and flags other than a leading `(?i)` or `(?s)`:
 ///   PostgreSQL has no named groups and no flags within the pattern, and `(?m)`, `(?x)`,
 ///   `(?q)` mean other things there.
@@ -231,6 +231,8 @@ pub fn validate_regex(pattern: &str) -> anyhow::Result<()> {
                 let Some(escaped) = chars.next() else { break };
                 if escaped.is_ascii_alphanumeric() {
                     match escaped {
+                        // An assertion like `^`: PostgreSQL refuses its repetition
+                        'A' if !in_class => previous = Previous::Assertion,
                         'd' | 'D' | 's' | 'S' | 'w' | 'W' | 'A' | 'n' | 't' | 'r' | 'f' | 'v'
                         | 'a' => {}
                         _ => {
@@ -493,6 +495,7 @@ mod tests {
             "a{255}",
             "a{1,255}",
             "a*?",
+            r"\Aa*",
             "(a*)*",
             "[a-z0-9_.-]",
             "[a&b]",
@@ -548,6 +551,8 @@ mod tests {
             "a*{2}",
             "^*",
             "$+",
+            r"\A*a",
+            r"\A{2}a",
             // RE2 has no \u, and a negated POSIX class does not exist in PostgreSQL
             r"\u00e9",
             r"\U000000e9",

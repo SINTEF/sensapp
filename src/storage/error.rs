@@ -34,7 +34,8 @@ pub enum StorageError {
     MetricNotFound { metric_name: String },
 
     /// A write names a sensor UUID that is stored, or given in the same batch, with another type.
-    /// The message does not tell the stored type: the writer may not be allowed to see the series.
+    /// The message does not tell the stored type. `SensorTypeConversion` does: a restricted token
+    /// is checked before the storage, so a writer that gets here may write to the series.
     #[error("Sensor {uuid} exists with another type than {sensor_type}")]
     SensorIdentityMismatch {
         uuid: Uuid,
