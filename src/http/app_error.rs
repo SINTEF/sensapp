@@ -158,6 +158,12 @@ impl From<anyhow::Error> for AppError {
         if err.is::<crate::http::authorized_storage::SensorAccessDenied>() {
             return Self::Forbidden(err.to_string());
         }
+        if err
+            .chain()
+            .any(|cause| cause.is::<crate::datamodel::sensor::DuplicateLabelName>())
+        {
+            return Self::BadRequest(err);
+        }
         // Errors of the ClickHouse client travel inside `anyhow` through `?`: classify them here
         // so that an outage is a 503 and not an anonymous 500.
         #[cfg(feature = "clickhouse")]

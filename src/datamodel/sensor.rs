@@ -188,6 +188,20 @@ fn uuid_v8_blake3(name: &str, uuid_buffer: Vec<u8>) -> Result<Uuid, Error> {
     Ok(uuid::Builder::from_custom_bytes(uuid_bytes).into_uuid())
 }
 
+/// A label name given twice to one series, a client error.
+#[derive(Debug, thiserror::Error)]
+#[error("The label name '{0}' is given more than once")]
+pub struct DuplicateLabelName(pub String);
+
+/// Refuses a label name given twice: the labels are part of the identity of a series, and a
+/// backend would keep either value or fail the write. Expects the labels sorted by name.
+fn check_label_names(sorted_labels: &SensAppLabels) -> Result<(), DuplicateLabelName> {
+    match sorted_labels.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+        Some(pair) => Err(DuplicateLabelName(pair[0].0.clone())),
+        None => Ok(()),
+    }
+}
+
 impl Sensor {
     pub fn new(
         uuid: Uuid,
@@ -223,6 +237,7 @@ impl Sensor {
             None => None,
             Some(mut labels) => {
                 sort_labels(&mut labels);
+                check_label_names(&labels)?;
                 Some(labels)
             }
         };
@@ -245,6 +260,21 @@ mod tests {
     use crate::config::load_configuration;
 
     use super::*;
+
+    #[test]
+    fn test_a_label_name_given_twice_is_refused() {
+        _ = crate::config::load_configuration_for_tests();
+        let labels: SensAppLabels = smallvec::smallvec![
+            ("host".to_string(), "b".to_string()),
+            ("region".to_string(), "x".to_string()),
+            ("host".to_string(), "a".to_string()),
+        ];
+        let error =
+            Sensor::new_without_uuid("cpu".to_string(), SensorType::Float, None, Some(labels))
+                .unwrap_err();
+        assert!(error.is::<DuplicateLabelName>(), "{error}");
+        assert!(error.to_string().contains("'host'"), "{error}");
+    }
 
     #[test]
     fn test_sort_labels() {

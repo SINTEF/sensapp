@@ -333,3 +333,27 @@ async fn test_influxdb_gzip_compression() -> Result<()> {
 
     Ok(())
 }
+
+/// A tag written twice is refused: DuckDB failed the write (500) on its label key, and the other
+/// backends kept one of the two values.
+#[tokio::test]
+#[serial]
+async fn a_tag_written_twice_is_refused() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let app = TestApp::new(storage.clone()).await;
+
+    let influx_data = "twice,host=a,host=b value=1 1704067200000000000";
+    let response = app
+        .post_influxdb("/api/v2/write?bucket=test&org=sensapp", influx_data)
+        .await?;
+
+    response.assert_status(StatusCode::BAD_REQUEST);
+    assert!(
+        DbHelpers::get_sensor_by_name(&storage, "twice value")
+            .await?
+            .is_none()
+    );
+    Ok(())
+}

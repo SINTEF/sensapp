@@ -888,9 +888,12 @@ pub async fn get_series_data(
             None => ExportFormat::Senml,
         };
 
-        let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
-            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
-        })?;
+        // Storage gets the canonical spelling: an upper-case or hyphen-less UUID is the same series
+        let series_uuid = uuid::Uuid::from_str(&series_uuid)
+            .map_err(|_| {
+                AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+            })?
+            .to_string();
 
         let start_time = match query.start.as_ref() {
             Some(start_str) => Some(parse_datetime_string(start_str).map_err(|e| {
@@ -1101,9 +1104,12 @@ pub async fn get_series_last_sample(
     let started = Instant::now();
 
     let result = async move {
-        let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
-            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
-        })?;
+        // Storage gets the canonical spelling: an upper-case or hyphen-less UUID is the same series
+        let series_uuid = uuid::Uuid::from_str(&series_uuid)
+            .map_err(|_| {
+                AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+            })?
+            .to_string();
 
         let (start_time, end_time) =
             parse_optional_time_bounds(query.start.as_ref(), query.end.as_ref())?;
@@ -1344,9 +1350,12 @@ pub async fn get_series_availability(
     let started = Instant::now();
 
     let result = async move {
-        let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
-            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
-        })?;
+        // Storage gets the canonical spelling: an upper-case or hyphen-less UUID is the same series
+        let series_uuid = uuid::Uuid::from_str(&series_uuid)
+            .map_err(|_| {
+                AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+            })?
+            .to_string();
 
         let (start_time, end_time) =
             parse_optional_time_bounds(Some(&query.start), Some(&query.end))?;

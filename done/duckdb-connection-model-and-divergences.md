@@ -50,3 +50,42 @@ and DELETE on every backend; duplicate label names are a 400; default limit appl
 ## Done when
 
 The tests pass, and the write and read numbers before and after the connection change are noted here.
+
+## Outcome (11 November 2026)
+
+1. **Fixed.** Writes go through one connection behind a mutex. Reads, and the health check, take a
+   connection from a small pool of `try_clone()` connections of the same database (16 kept idle). Every
+   DuckDB call runs in `spawn_blocking`, the migration, the vacuum and the test cleanup included. A publish
+   whose request is dropped while it waits for the writer (a timeout, a client gone) is skipped when its
+   turn comes, instead of committing after the client got its error. The health check has a 5 s timeout.
+   Unit tests: `reads_and_the_health_check_do_not_wait_for_the_writer`, and
+   `a_write_abandoned_while_it_waits_is_not_committed`, which fails with the check disabled.
+   Measured on a release build, file database, with a temporary harness (not kept):
+
+   | | before | after |
+   |---|---|---|
+   | reads while 16 writers publish, p50 / max | 31 ms / 47 ms | 2.7 ms / 15 ms |
+   | writes of 2000 samples in 3 s | 1450 | 1441 |
+   | health check while the vacuum deduplicates 1 M rows | 50 ms | 0.24 ms |
+
+   DuckDB deduplicates 1 M rows in about 50 ms, so the wait behind a vacuum was short anyway; the reads
+   queued behind the writes were the larger cost.
+2. **Reproduced and fixed, on more than DuckDB**: an upper-case or hyphen-less UUID was a 404 on reads on
+   SQLite and DuckDB, while the delete parsed it. The HTTP read handlers now pass the canonical UUID to
+   storage, as the deletes did. DuckDB compares `uuid = CAST(? AS UUID)`, and answers "not found" to a text
+   that is not a UUID. The same test found that availability without a step **panicked** on DuckDB (an
+   untyped `NULL` column); it is `CAST(NULL AS BIGINT)` now. Generic test
+   `identity_over_http::a_series_answers_to_every_spelling_of_its_uuid`.
+3. **Reproduced and fixed**: `cpu,host=a,host=b` answered 500 on DuckDB and 204 on SQLite (one of the two
+   values kept). `Sensor::new_without_uuid` refuses a label name given twice (`DuplicateLabelName`, a
+   400). The paths with an explicit UUID read their labels from a JSON object, so they cannot have one
+   twice. Generic test `influxdb_integration::a_tag_written_twice_is_refused`, and a unit test. A unit
+   missing from the re-read is now an error instead of a series without its unit.
+4. **Fixed**: a `schema_version` table and a list of steps; the first step is the existing schema, which
+   is idempotent, so databases made before take it without change. Unit test `each_migration_runs_once`.
+5. **Fixed**: `query_sensor_data` without a limit applies `DEFAULT_QUERY_LIMIT` (10 million, so no test:
+   tests stay small). `list_metrics` and the tie-break were done in the SQLite divergences task. The value
+   tables are not sorted: DuckDB's zone maps already skip by time, and nothing measured needs it.
+
+Suites run: DuckDB, SQLite and PostgreSQL in full; ClickHouse and TimescaleDB targeted
+(`identity_over_http`, `influxdb_integration`); `cargo clippy` and `cargo clippy --all-features --tests`.

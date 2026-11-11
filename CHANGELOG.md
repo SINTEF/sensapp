@@ -24,6 +24,8 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 - The Arrow export of Numeric values lowers the scale of its `Decimal128` below 18 when a value needs more
   than 20 digits before the point. A value with more than 18 digits after the point is rounded, where it was
   written off by a power of ten, and a large value wrapped.
+- A label name given twice to one series (`cpu,host=a,host=b`) is refused with `400`. DuckDB answered `500`
+  and the other backends kept one of the two values.
 
 ### Changed and fixed
 
@@ -49,6 +51,11 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
   comma, and on DuckDB and ClickHouse, which listed none. DuckDB groups metrics by name and type, not unit.
 - First, last and raw reads of samples with equal timestamps follow the order of the writes on SQLite and
   DuckDB, where they picked any of them.
+- DuckDB: reads and the health check use connections of their own and no longer wait for a write (reads
+  under 16 writers from 31 ms to 2.7 ms at the median), a write whose request timed out while it waited is
+  not committed, the schema has a version, and a read without a limit is capped like on the other backends.
+- A series read with an upper-case or hyphen-less UUID is found (`404` on SQLite and DuckDB), and the
+  availability of a series without a step no longer fails on DuckDB.
 
 ## 0.4.2
 

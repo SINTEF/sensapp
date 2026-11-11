@@ -245,3 +245,67 @@ async fn an_integer_senml_export_imported_again_goes_to_its_series() -> Result<(
     assert_eq!(sample_count(&storage, sensor.uuid).await?, 2);
     Ok(())
 }
+
+fn read_and_delete_token() -> String {
+    AuthConfig::from_secret(SECRET)
+        .expect("secret")
+        .issue_token("test", "read delete", 3600, None)
+        .expect("token")
+        .token
+}
+
+async fn send(app: &Router, method: &str, uri: &str) -> StatusCode {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(
+                    "authorization",
+                    format!("Bearer {}", read_and_delete_token()),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+/// A UUID written in upper case or without hyphens is the same series: the reads compared the
+/// text (404 on SQLite and DuckDB) while the delete parsed it. Availability without a step also
+/// panicked on DuckDB.
+#[tokio::test]
+#[serial]
+async fn a_series_answers_to_every_spelling_of_its_uuid() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if !applies_to(&test_db) {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let app = app(storage.clone());
+    let pressure = stored_pressure(&storage).await?;
+    let upper = pressure.sensor.uuid.to_string().to_uppercase();
+    let simple = pressure.sensor.uuid.simple().to_string();
+
+    for uuid in [&upper, &simple] {
+        for path in [
+            "",
+            "/last",
+            "/availability?start=2023-11-14T00:00:00Z&end=2023-11-16T00:00:00Z",
+        ] {
+            let uri = format!("/series/{uuid}{path}");
+            assert_eq!(send(&app, "GET", &uri).await, StatusCode::OK, "GET {uri}");
+        }
+    }
+    assert_eq!(
+        send(&app, "DELETE", &format!("/series/{upper}")).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        send(&app, "GET", &format!("/series/{simple}")).await,
+        StatusCode::NOT_FOUND
+    );
+    Ok(())
+}

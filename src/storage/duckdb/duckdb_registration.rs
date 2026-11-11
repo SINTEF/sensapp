@@ -74,10 +74,17 @@ pub fn register_sensors(
             appender.add_column(column)?;
         }
         for sensor in &missing {
-            let unit_id: Option<i64> = sensor
-                .unit
-                .as_ref()
-                .and_then(|unit| unit_ids.get(&unit.name).copied());
+            let unit_id: Option<i64> = match &sensor.unit {
+                None => None,
+                Some(unit) => match unit_ids.get(&unit.name) {
+                    Some(id) => Some(*id),
+                    None => bail!(
+                        "the unit {} of sensor {} was not registered",
+                        unit.name,
+                        sensor.uuid
+                    ),
+                },
+            };
             appender.append_row(params![
                 sensor.uuid.to_string(),
                 sensor.name,
@@ -273,7 +280,9 @@ mod tests {
 
     fn connection() -> Connection {
         let connection = Connection::open_in_memory().unwrap();
-        connection.execute_batch(super::super::INIT_SQL).unwrap();
+        connection
+            .execute_batch(super::super::MIGRATIONS[0].1)
+            .unwrap();
         connection
     }
 
