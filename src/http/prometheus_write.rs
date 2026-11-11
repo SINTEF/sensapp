@@ -24,6 +24,8 @@ struct DroppedParts {
     exemplars: usize,
     histograms: usize,
     metadata: usize,
+    /// NaN samples (stale markers, or the result of a rule)
+    nan_samples: usize,
 }
 
 /// Validates required Prometheus Remote Write API headers.
@@ -143,7 +145,7 @@ pub async fn publish_prometheus(
         .await?;
 
         // Exemplars, native histograms and metadata are not stored, only counted
-        let dropped = DroppedParts {
+        let mut dropped = DroppedParts {
             exemplars: write_request
                 .timeseries
                 .iter()
@@ -155,6 +157,7 @@ pub async fn publish_prometheus(
                 .map(|serie| serie.histograms.len())
                 .sum(),
             metadata: write_request.metadata.len(),
+            nan_samples: 0,
         };
 
         if write_request.timeseries.is_empty() {
@@ -198,6 +201,7 @@ pub async fn publish_prometheus(
 
             // NaN is not stored: Prometheus writes a NaN stale marker when a series disappears,
             // and a rule can compute NaN. A 400 would make Prometheus drop the whole request
+            let received = time_serie.samples.len();
             let samples = TypedSamples::Float(
                 time_serie
                     .samples
@@ -209,6 +213,7 @@ pub async fn publish_prometheus(
                     })
                     .collect(),
             );
+            dropped.nan_samples += received - samples.len();
             if samples.is_empty() {
                 // Only stale markers: nothing to store, not even the series
                 continue;
@@ -247,6 +252,7 @@ pub async fn publish_prometheus(
         metrics.observe_remote_write_dropped("exemplar", dropped.exemplars);
         metrics.observe_remote_write_dropped("histogram", dropped.histograms);
         metrics.observe_remote_write_dropped("metadata", dropped.metadata);
+        metrics.observe_remote_write_dropped("nan", dropped.nan_samples);
     }
 
     result.map(|(status, _, _, _)| status)

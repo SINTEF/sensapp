@@ -45,6 +45,16 @@ fn holds_a_nan(samples: &TypedSamples) -> bool {
     }
 }
 
+/// Whether a coordinate is infinite: a place cannot be at infinity, where a Float may be.
+fn holds_an_infinite_coordinate(samples: &TypedSamples) -> bool {
+    match samples {
+        TypedSamples::Location(samples) => samples
+            .iter()
+            .any(|sample| sample.value.x().is_infinite() || sample.value.y().is_infinite()),
+        _ => false,
+    }
+}
+
 /// A batch builder is used to build a batch from a stream of samples.
 pub struct BatchBuilder {
     batch_size: usize,
@@ -87,6 +97,13 @@ impl BatchBuilder {
         if holds_a_nan(&samples) {
             return Err(StorageError::InvalidDataFormat {
                 message: "a value is NaN, which is not a number to store".to_string(),
+                sensor_context: sensor.name.clone(),
+            }
+            .into());
+        }
+        if holds_an_infinite_coordinate(&samples) {
+            return Err(StorageError::InvalidDataFormat {
+                message: "a coordinate is infinite".to_string(),
                 sensor_context: sensor.name.clone(),
             }
             .into());

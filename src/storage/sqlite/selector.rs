@@ -270,7 +270,10 @@ impl SqliteStorage {
 
         Ok(match kind {
             AggregatedKind::Integer => fetch!(i64, Integer, |value| Ok(value)),
-            AggregatedKind::Float => fetch!(f64, Float, |value| Ok(value)),
+            // A sum or an average of +Inf and -Inf is NaN, which SQLite turns into NULL
+            AggregatedKind::Float => {
+                fetch!(Option<f64>, Float, |value| Ok(value.unwrap_or(f64::NAN)))
+            }
             AggregatedKind::Numeric => fetch!(String, Numeric, |value| {
                 rust_decimal::Decimal::from_str_exact(&value)
                     .context("Failed to parse aggregated SQLite numeric value")

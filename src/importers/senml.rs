@@ -70,7 +70,11 @@ impl SenMLImporter {
             let series = &mut all_series[position];
             Self::read_extensions(series, raw)?;
 
-            if VALUE_FIELDS.iter().any(|field| raw.get(field).is_some()) {
+            // A JSON null is no value: the parser would read it as 0
+            if VALUE_FIELDS
+                .iter()
+                .any(|field| raw.get(field).is_some_and(|value| !value.is_null()))
+            {
                 series.records.push((record, raw));
             } else if record.sum.is_some() {
                 bail!(
@@ -297,6 +301,24 @@ mod tests {
     fn import(json_str: &str) -> Vec<(String, SensorData)> {
         _ = crate::config::load_configuration();
         SenMLImporter::from_senml_json(json_str).unwrap()
+    }
+
+    #[test]
+    fn test_a_null_value_is_no_sample() {
+        _ = crate::config::load_configuration_for_tests();
+        // Earlier SensApp exports wrote `null` for NaN and the infinities; the parser reads a
+        // null as the value 0
+        for field in ["v", "vs", "vb", "vd"] {
+            let json = format!(
+                r#"[{{"n":"gap","{field}":null,"t":1700000000}},{{"n":"gap","v":1.5,"t":1700000001}}]"#
+            );
+            let imported = SenMLImporter::from_senml_json(&json).unwrap();
+            assert_eq!(imported[0].1.samples.len(), 1, "{field}");
+        }
+        // Only nulls: nothing to store
+        let imported =
+            SenMLImporter::from_senml_json(r#"[{"n":"gap","v":null,"t":1700000000}]"#).unwrap();
+        assert!(imported.is_empty());
     }
 
     #[test]

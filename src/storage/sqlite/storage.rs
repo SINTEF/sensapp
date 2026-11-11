@@ -1579,7 +1579,8 @@ impl SqliteStorage {
                 #[derive(sqlx::FromRow)]
                 struct Row {
                     timestamp_us: i64,
-                    value: f64,
+                    // NULL when the sum or the average of +Inf and -Inf is NaN, which SQLite cannot hold
+                    value: Option<f64>,
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -1601,7 +1602,7 @@ impl SqliteStorage {
                 for row in rows {
                     samples.push(Sample {
                         datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
-                        value: row.value,
+                        value: row.value.unwrap_or(f64::NAN),
                     });
                 }
                 Ok(TypedSamples::Float(samples))

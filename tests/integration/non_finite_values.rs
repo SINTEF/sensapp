@@ -156,8 +156,15 @@ async fn infinities_are_stored_and_exported_as_text() -> Result<()> {
         "{simplified}"
     );
 
-    // The extremes of a window are the infinities, on every backend
-    for (aggregation, expected) in [("min", "-Inf"), ("max", "+Inf"), ("count", "4")] {
+    // The extremes of a window are the infinities, and a sum or an average of both is NaN, on every
+    // backend (SQLite returned 0: it turns the NaN into NULL, which was read as 0.0)
+    for (aggregation, expected) in [
+        ("min", "-Inf"),
+        ("max", "+Inf"),
+        ("count", "4"),
+        ("sum", "NaN"),
+        ("avg", "NaN"),
+    ] {
         let (status, body) = get(
             &app,
             &format!("/series/{uuid}?format=jsonl&step=1h&aggregation={aggregation}"),
@@ -187,6 +194,16 @@ async fn nan_is_refused() -> Result<()> {
                 vec![Sample {
                     datetime: hifitime::Epoch::from_unix_seconds(T0),
                     value: f64::NAN,
+                }]
+                .into(),
+            ),
+        ),
+        (
+            "infinite_location",
+            TypedSamples::Location(
+                vec![Sample {
+                    datetime: hifitime::Epoch::from_unix_seconds(T0),
+                    value: geo::Point::new(f64::INFINITY, 10.0),
                 }]
                 .into(),
             ),
@@ -295,5 +312,79 @@ async fn remote_write_drops_nan_samples() -> Result<()> {
         .await?;
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].samples.len(), 1, "{:?}", found[0].samples);
+    Ok(())
+}
+
+/// A CSV with gaps stays numeric: the gaps are skipped, the answer says how many, and a counter
+/// counts them. SenML and InfluxDB keep refusing a NaN (`nan_is_refused`), since neither format can
+/// carry one.
+#[tokio::test]
+#[serial]
+async fn csv_gaps_are_skipped_and_reported() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if test_db.db_type == DatabaseType::RRDcached {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let metrics = Arc::new(HttpMetrics::new());
+    let state = HttpServerState {
+        name: Arc::new("SensApp Test".to_string()),
+        storage: storage.clone(),
+        metrics: metrics.clone(),
+        influxdb_with_numeric: false,
+        max_query_samples: sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
+        auth: None,
+    };
+    let settings = RouterSettings {
+        max_body_bytes: 1024 * 1024,
+        request_timeout: Duration::from_secs(30),
+        write_timeout: Duration::from_secs(30),
+        maintenance_timeout: Duration::from_secs(30),
+        max_concurrent_writes: 4,
+        body_read_timeout: Duration::from_secs(30),
+        ui_dir: None,
+    };
+    let app = build_router(state, &settings);
+    let name = format!("gappy_{}", Uuid::new_v4().simple());
+    let csv = format!(
+        "datetime,{name}\n2024-06-01T00:00:00Z,1.5\n2024-06-01T00:00:01Z,\n\
+         2024-06-01T00:00:02Z,NaN\n2024-06-01T00:00:03Z,NA\n2024-06-01T00:00:04Z,inf\n"
+    );
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/publish")
+                .header("content-type", "text/csv")
+                .body(Body::from(csv))?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["x-sensapp-skipped-samples"],
+        "3",
+        "{:?}",
+        response.headers()
+    );
+
+    let listed = storage.list_series(Some(&name), None, None).await?;
+    assert_eq!(listed.series.len(), 1);
+    let data = storage
+        .query_sensor_data(&listed.series[0].uuid.to_string(), None, None, None)
+        .await?
+        .expect("the series");
+    let TypedSamples::Float(samples) = &data.samples else {
+        panic!("not Float: {:?}", data.samples);
+    };
+    let values: Vec<f64> = samples.iter().map(|sample| sample.value).collect();
+    assert_eq!(values, [1.5, f64::INFINITY]);
+
+    let rendered = metrics.render(true)?;
+    assert!(
+        rendered.contains(
+            "sensapp_samples_processed_total{kind=\"skipped\",operation=\"native_publish\"} 3"
+        ),
+        "{rendered}"
+    );
     Ok(())
 }

@@ -127,6 +127,12 @@ impl SenMLConverter {
             }
         };
 
+        // Nothing left to write (a Float series of infinities, which SenML cannot carry): a base
+        // record alone would be read as the value 0
+        if samples_iter.is_empty() {
+            return Ok(json!([]));
+        }
+
         // Create base record with sensor metadata
         let mut base_record = Map::new();
         base_record.insert("bn".to_string(), json!(sensor_data.sensor.uuid.to_string()));
@@ -377,6 +383,31 @@ mod tests {
     use crate::datamodel::{Sample, SensAppDateTime, Sensor, SensorData, SensorType, TypedSamples};
     use smallvec::smallvec;
     use uuid::Uuid;
+
+    /// SenML has no infinity, so the export leaves them out; a series of nothing else has no
+    /// record at all, where a base record alone would be read as the value 0.
+    #[test]
+    fn a_float_series_of_infinities_has_no_record() {
+        let samples = TypedSamples::Float(smallvec![
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1_700_000_000.0),
+                value: f64::INFINITY,
+            },
+            Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1_700_000_001.0),
+                value: f64::NEG_INFINITY,
+            },
+        ]);
+        let sensor = Sensor::new(
+            Uuid::new_v4(),
+            "levels".to_string(),
+            SensorType::Float,
+            None,
+            None,
+        );
+        let exported = SenMLConverter::to_senml_json(&SensorData::new(sensor, samples)).unwrap();
+        assert_eq!(exported, json!([]));
+    }
 
     #[test]
     fn test_integer_samples_to_senml() {

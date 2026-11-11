@@ -29,22 +29,30 @@ use uuid::Uuid;
 /// Read an Arrow IPC payload and convert it to sensors and samples.
 ///
 /// Every error returned here is caused by the payload itself.
+///
+/// The second part of the answer is the number of rows that held no reading (a null or a NaN) and
+/// were skipped.
 pub fn parse_arrow_sensors(
     buffer: &[u8],
     max_decompressed_bytes: usize,
-) -> Result<Vec<SensorDataMap>> {
-    parse_arrow_file(buffer, max_decompressed_bytes)?
-        .iter()
-        .map(convert_record_batch_to_sensors)
-        .collect()
+) -> Result<(Vec<SensorDataMap>, usize)> {
+    let mut maps = Vec::new();
+    let mut skipped = 0;
+    for batch in parse_arrow_file(buffer, max_decompressed_bytes)? {
+        let (map, batch_skipped) = convert_record_batch_to_sensors(&batch)?;
+        maps.push(map);
+        skipped += batch_skipped;
+    }
+    Ok((maps, skipped))
 }
 
 /// Publish parsed Arrow sensors to storage
 pub async fn publish_arrow_sensors(
     sensor_data_maps: Vec<SensorDataMap>,
+    skipped: usize,
     storage: Arc<dyn StorageInstance>,
 ) -> Result<IngestionStats> {
-    let mut stats = IngestionStats::default();
+    let mut stats = IngestionStats::default().with_skipped(skipped);
     let mut batch_builder = BatchBuilder::new()?;
 
     for sensor_data_map in sensor_data_maps {
@@ -233,7 +241,8 @@ fn declared_decompressed_size(message: Message<'_>, body: &[u8]) -> Result<u64> 
 }
 
 /// Convert Arrow RecordBatch to SensApp sensors and samples
-fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap> {
+/// The series of a batch, and the number of rows skipped for holding no reading.
+fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<(SensorDataMap, usize)> {
     let schema = batch.schema();
 
     if batch.num_rows() == 0 {
@@ -271,8 +280,10 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
     let sensor_id = extract_sensor_id(batch, sensor_id_idx)?;
     let sensor_name = extract_sensor_name(batch, sensor_name_idx)?;
 
-    // A null value is no sample
+    // A null value or a NaN is no sample
+    let rows = batch.num_rows();
     let batch = &filter_record_batch(batch, &present_values(batch.column(value_idx))?)?;
+    let skipped = rows - batch.num_rows();
     let timestamp_data = batch
         .column(timestamp_idx)
         .as_any()
@@ -343,7 +354,7 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
     if let Some(&first) = timestamps.first() {
         result.insert(sensor_name, (sensor, vec![(first, typed_samples)]));
     }
-    Ok(result)
+    Ok((result, skipped))
 }
 
 /// Convert Arrow array to TypedSamples
@@ -581,15 +592,30 @@ fn one_sensor(batch: &RecordBatch, idx: usize, name: &str) -> Result<String> {
     }
 }
 
-/// The rows that hold a value. A null value, or a location with a null coordinate, is no sample.
+/// The rows that hold a value. A null value, a NaN (pandas, polars and numpy write a gap that
+/// way), or a location with a null or NaN coordinate, is no sample.
 fn present_values(array: &ArrayRef) -> Result<BooleanArray> {
     let mut present = is_not_null(array)?;
+    if let Some(floats) = array.as_any().downcast_ref::<Float64Array>() {
+        present = and(&present, &is_not_nan(floats))?;
+    }
     if let Some(location) = array.as_any().downcast_ref::<StructArray>() {
         for coordinate in location.columns() {
             present = and(&present, &is_not_null(coordinate)?)?;
+            if let Some(floats) = coordinate.as_any().downcast_ref::<Float64Array>() {
+                present = and(&present, &is_not_nan(floats))?;
+            }
         }
     }
     Ok(present)
+}
+
+/// Whether each value is not NaN. A null slot is `true` here: `is_not_null` handles it.
+fn is_not_nan(values: &Float64Array) -> BooleanArray {
+    values
+        .iter()
+        .map(|value| Some(value.is_none_or(|value| !value.is_nan())))
+        .collect()
 }
 
 /// The text samples of a series declared as JSON, parsed.
@@ -720,7 +746,7 @@ mod tests {
     async fn test_convert_record_batch_to_sensors() {
         let arrow_data = create_test_arrow_stream_data();
         let batches = parse_arrow_file(&arrow_data, 1024 * 1024).unwrap();
-        let sensor_map = convert_record_batch_to_sensors(&batches[0]).unwrap();
+        let (sensor_map, _) = convert_record_batch_to_sensors(&batches[0]).unwrap();
 
         assert_eq!(sensor_map.len(), 1);
 
@@ -787,7 +813,7 @@ mod tests {
 
     fn sensor_of(batch: &RecordBatch) -> Result<Arc<Sensor>> {
         _ = crate::config::load_configuration();
-        let map = convert_record_batch_to_sensors(batch)?;
+        let (map, _) = convert_record_batch_to_sensors(batch)?;
         Ok(map.into_values().next().unwrap().0)
     }
 
@@ -949,7 +975,7 @@ mod tests {
             let exported = SensorData::new(sensor, samples(datetime));
             let batch = ArrowConverter::to_record_batch(&exported).unwrap();
 
-            let map = convert_record_batch_to_sensors(&batch)
+            let (map, _) = convert_record_batch_to_sensors(&batch)
                 .unwrap_or_else(|error| panic!("{sensor_type:?}: {error}"));
             let (imported, entries) = map.into_values().next().unwrap();
             assert_eq!(imported.sensor_type, sensor_type);
@@ -1039,7 +1065,7 @@ mod tests {
     /// The samples of the only series of a batch.
     fn samples_of(batch: &RecordBatch) -> Result<Vec<TypedSamples>> {
         _ = crate::config::load_configuration();
-        let map = convert_record_batch_to_sensors(batch)?;
+        let (map, _) = convert_record_batch_to_sensors(batch)?;
         Ok(map
             .into_values()
             .flat_map(|(_, entries)| entries.into_iter().map(|(_, samples)| samples))
@@ -1112,6 +1138,32 @@ mod tests {
     }
 
     /// A null timestamp became 1970-01-01.
+    /// A NaN is the gap marker of pandas, polars and numpy: it is no sample, like a null, and the
+    /// rows skipped are counted.
+    #[test]
+    fn test_nan_values_are_skipped_and_counted() {
+        _ = crate::config::load_configuration_for_tests();
+        let batch = batch_of(
+            vec![Some(T0), Some(T0 + 1), Some(T0 + 2), Some(T0 + 3)],
+            Arc::new(Float64Array::from(vec![
+                Some(1.5),
+                Some(f64::NAN),
+                None,
+                Some(f64::INFINITY),
+            ])),
+            names(vec![Some("gaps"); 4]),
+        );
+        let (map, skipped) = convert_record_batch_to_sensors(&batch).unwrap();
+        assert_eq!(skipped, 2);
+        let (_, entries) = map.into_values().next().unwrap();
+        let TypedSamples::Float(samples) = &entries[0].1 else {
+            panic!("not Float");
+        };
+        let values: Vec<f64> = samples.iter().map(|sample| sample.value).collect();
+        // The infinity is a value
+        assert_eq!(values, [1.5, f64::INFINITY]);
+    }
+
     #[test]
     fn test_a_null_timestamp_is_refused() {
         let values: ArrayRef = Arc::new(Float64Array::from(vec![1.5, 2.5]));

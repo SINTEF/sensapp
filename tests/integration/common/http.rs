@@ -319,14 +319,15 @@ async fn test_publish_handler(
             )
         })?;
 
-        let sensor_data_maps = parse_arrow_sensors(&body_bytes, 64 * 1024 * 1024).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("Invalid Arrow format: {}", e),
-            )
-        })?;
+        let (sensor_data_maps, skipped) = parse_arrow_sensors(&body_bytes, 64 * 1024 * 1024)
+            .map_err(|e| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("Invalid Arrow format: {}", e),
+                )
+            })?;
 
-        publish_arrow_sensors(sensor_data_maps, state.storage.clone())
+        publish_arrow_sensors(sensor_data_maps, skipped, state.storage.clone())
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

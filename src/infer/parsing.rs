@@ -30,12 +30,32 @@ pub fn parse_integer(data: &str) -> IResult<&str, InferedValue> {
     map(i64, InferedValue::Integer).parse(data)
 }
 
+/// `inf` or `infinity` in any case, with an optional sign. `nom` reads them without a sign only.
+fn parse_infinity(data: &str) -> Option<(&str, f64)> {
+    let (sign, body) = match data.as_bytes().first() {
+        Some(b'-') => (-1.0, &data[1..]),
+        Some(b'+') => (1.0, &data[1..]),
+        _ => (1.0, data),
+    };
+    ["infinity", "inf"].iter().find_map(|word| {
+        let start = body.get(..word.len())?;
+        start
+            .eq_ignore_ascii_case(word)
+            .then(|| (&body[word.len()..], sign * f64::INFINITY))
+    })
+}
+
 pub fn parse_float(data: &str) -> IResult<&str, InferedValue> {
     // We use the "double" parser from nom, that returns a f64.
     // The parser named "float" from nom returns a f32.
-    // However, we reject special values like inf and NaN to treat them as strings
+    // `inf`, `+inf`, `-inf` and `Infinity` are infinities, which are values. NaN is a gap, not a
+    // number: the CSV importer reads it as a missing value (see `is_missing_marker`) and it is
+    // otherwise text.
+    if let Some((rest, value)) = parse_infinity(data) {
+        return Ok((rest, InferedValue::Float(value)));
+    }
     let (rest, value) = double(data)?;
-    if value.is_infinite() || value.is_nan() {
+    if value.is_nan() {
         Err(Err::Error(nom::error::Error::new(
             data,
             nom::error::ErrorKind::Float,
@@ -216,6 +236,25 @@ mod tests {
                 nom::error::ErrorKind::Digit
             )))
         );
+    }
+
+    #[test]
+    fn infinities_are_floats_and_nan_is_not() {
+        for (text, expected) in [
+            ("inf", f64::INFINITY),
+            ("+inf", f64::INFINITY),
+            ("-inf", f64::NEG_INFINITY),
+            ("Infinity", f64::INFINITY),
+            ("-INFINITY", f64::NEG_INFINITY),
+        ] {
+            assert_eq!(
+                parse_float(text),
+                Ok(("", InferedValue::Float(expected))),
+                "{text}"
+            );
+        }
+        assert!(parse_float("NaN").is_err());
+        assert!(parse_float("nan").is_err());
     }
 
     #[test]

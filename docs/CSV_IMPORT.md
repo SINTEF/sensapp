@@ -22,6 +22,14 @@ header row, comma separated. A CSV that cannot be read answers `400` with the re
 
 Both need a time column. Without one the CSV is refused: rows are never numbered as times.
 
+## Missing values
+
+In a column that is otherwise numeric, an empty cell, `NaN`, `nan`, `null`, `NA` and `N/A` (any case) mean
+"no reading": the row is skipped for that column, the column stays numeric, and the answer of `POST /publish`
+says how many cells were skipped in the header `X-SensApp-Skipped-Samples`. `inf`, `+inf`, `-inf` and
+`Infinity` are infinities, which are stored. In a column that is not numeric the same words are text, as
+before. A missing time is refused, with the row. See [DATAMODEL.md](DATAMODEL.md#non-finite-floats).
+
 ## The time column
 
 Each column gets a score from its name and its values, and the best one above a threshold is the time axis:

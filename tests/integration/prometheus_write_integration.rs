@@ -354,7 +354,7 @@ async fn test_prometheus_write_preserves_labels() -> Result<()> {
     Ok(())
 }
 
-/// Exemplars, native histograms and metadata are not stored: the write succeeds, and a metric
+/// Exemplars, native histograms, metadata and NaN samples are not stored: the write succeeds, and a metric
 /// counts what was dropped, a request of metadata only included.
 #[tokio::test]
 #[serial]
@@ -380,10 +380,17 @@ async fn test_prometheus_write_counts_what_it_drops() -> Result<()> {
                 name: "__name__".to_string(),
                 value: "with_exemplars".to_string(),
             }],
-            samples: vec![PromSample {
-                value: 1.0,
-                timestamp: 1704067200000,
-            }],
+            samples: vec![
+                PromSample {
+                    value: 1.0,
+                    timestamp: 1704067200000,
+                },
+                // A stale marker
+                PromSample {
+                    value: f64::NAN,
+                    timestamp: 1704067201000,
+                },
+            ],
             // Empty messages: the content is not read
             exemplars: vec![vec![], vec![]],
             histograms: vec![vec![]],
@@ -407,6 +414,7 @@ async fn test_prometheus_write_counts_what_it_drops() -> Result<()> {
         "sensapp_prometheus_remote_write_dropped_total{part=\"exemplar\"} 2",
         "sensapp_prometheus_remote_write_dropped_total{part=\"histogram\"} 1",
         "sensapp_prometheus_remote_write_dropped_total{part=\"metadata\"} 2",
+        "sensapp_prometheus_remote_write_dropped_total{part=\"nan\"} 1",
     ] {
         assert!(rendered.contains(line), "{line} missing from:\n{rendered}");
     }

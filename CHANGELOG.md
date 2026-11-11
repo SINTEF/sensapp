@@ -7,6 +7,14 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 
 ### Breaking
 
+- **NaN is a gap in Arrow and CSV, not a `400`.** A NaN or a null in an Arrow value column, and in a numeric CSV
+  column an empty cell, `NaN`, `null`, `NA` or `N/A`, is skipped instead of refusing the request or turning the
+  CSV column into text. `POST /publish` answers with `X-SensApp-Skipped-Samples` and counts them in
+  `sensapp_samples_processed_total{kind="skipped"}`; Prometheus remote write counts its NaN in
+  `sensapp_prometheus_remote_write_dropped_total{part="nan"}`. SenML and InfluxDB still refuse a NaN. CSV `inf`,
+  `-inf` and `Infinity` are infinities, an infinite coordinate is a `400`, and a SenML `"v": null` is no value
+  instead of `0`. SQLite's `sum` and `avg` of `+Inf` and `-Inf` is NaN, as on the other backends (it was `0`).
+
 - **A restricted token is authorized by UUID, and a write to an existing UUID with another name appends.** The
   `sensors` claim holds names and UUIDs. A write passes when its UUID is listed, or its name is listed and its UUID
   is the one derived from its name, type, unit and labels: a listed name can no longer be claimed for the UUID of

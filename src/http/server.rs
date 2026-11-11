@@ -555,7 +555,12 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
         description = "Sensor data in SenML JSON, CSV, or Apache Arrow format"
     ),
     responses(
-        (status = 200, description = "Data ingested successfully", body = String),
+        (
+            status = 200,
+            description = "Data ingested successfully. `X-SensApp-Skipped-Samples` is the number of cells that held no reading (a null, a NaN, an empty or `NA` CSV cell) and were skipped, 0 when none",
+            body = String,
+            headers(("X-SensApp-Skipped-Samples" = u64, description = "Cells that held no reading and were skipped"))
+        ),
         (status = 400, description = "Bad Request - invalid data format", body = AppError),
         (status = 500, description = "Internal Server Error", body = AppError),
         (
@@ -571,7 +576,7 @@ async fn publish_sensors_data(
     access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     headers: HeaderMap,
     body: axum::body::Body,
-) -> Result<String, AppError> {
+) -> Result<([(&'static str, String); 1], String), AppError> {
     let state = state.with_access(access.map(|extension| extension.0));
     let metrics = state.metrics.clone();
     let started = Instant::now();
@@ -604,11 +609,19 @@ async fn publish_sensors_data(
     if let Ok(stats) = &result {
         metrics.observe_series("write", "native_publish", stats.series);
         metrics.observe_samples("write", "native_publish", stats.samples);
+        // Not silent: a client that sends a gap is told, and the counter shows it
+        metrics.observe_samples("skipped", "native_publish", stats.skipped);
     }
 
-    result?;
-    Ok("ok".to_string())
+    let stats = result?;
+    Ok((
+        [(SKIPPED_SAMPLES_HEADER, stats.skipped.to_string())],
+        "ok".to_string(),
+    ))
 }
+
+/// The number of cells of a write that held no reading and were skipped.
+pub const SKIPPED_SAMPLES_HEADER: &str = "x-sensapp-skipped-samples";
 
 /// Handle JSON data ingestion (SenML format)
 async fn publish_json_format(
@@ -638,13 +651,13 @@ async fn publish_arrow_format(
     let max_decompressed_bytes = crate::config::get()?.parse_http_body_limit()?;
 
     // Errors from parsing are caused by the payload
-    let sensor_data_maps = super::app_error::run_blocking(move || {
+    let (sensor_data_maps, skipped) = super::app_error::run_blocking(move || {
         crate::importers::arrow::parse_arrow_sensors(&body_bytes, max_decompressed_bytes)
             .map_err(AppError::bad_request)
     })
     .await?;
 
-    crate::importers::arrow::publish_arrow_sensors(sensor_data_maps, storage)
+    crate::importers::arrow::publish_arrow_sensors(sensor_data_maps, skipped, storage)
         .await
         .map_err(AppError::internal_server_error)
 }
@@ -669,11 +682,11 @@ async fn publish_csv_format(
         .await
         .map_err(AppError::bad_request)?;
     // Errors from parsing are caused by the payload
-    let parsed = super::app_error::run_blocking(move || {
+    let (parsed, skipped) = super::app_error::run_blocking(move || {
         parse_csv_data_grid(data_grid).map_err(AppError::bad_request)
     })
     .await?;
-    publish_parsed_csv(parsed, storage)
+    publish_parsed_csv(parsed, skipped, storage)
         .await
         .map_err(AppError::internal_server_error)
 }

@@ -922,7 +922,17 @@
                 }
               }
             },
-            "description": "Data ingested successfully"
+            "description": "Data ingested successfully. `X-SensApp-Skipped-Samples` is the number of cells that held no reading (a null, a NaN, an empty or `NA` CSV cell) and were skipped, 0 when none",
+            "headers": {
+              "X-SensApp-Skipped-Samples": {
+                "description": "Cells that held no reading and were skipped",
+                "schema": {
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "400": {
             "content": {

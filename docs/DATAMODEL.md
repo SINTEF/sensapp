@@ -227,13 +227,25 @@ at least 9, so that every value fits.
 - **The infinities are values.** `+Inf` and `-Inf` are stored and read back on every backend (RRDcached
   aside, which stores consolidated rows). They are the extremes of `min` and `max`. `simplify` keeps
   them as they are, and simplifies the other samples.
-- **NaN is no value.** A write that holds a NaN float or coordinate is refused with `400`: SQLite cannot
-  store it, and the backends order it differently in `min` and `max`. Prometheus remote write is the
-  exception. Prometheus writes a NaN *stale marker* when a series disappears, and a rule can compute NaN.
-  A `400` would make Prometheus drop the whole request, so the remote write drops its NaN samples instead.
+- **NaN is no value, and is never stored**: SQLite cannot store it, and the backends order it differently
+  in `min` and `max`. What a write does with one depends on the format, because NaN is the usual
+  missing-value marker in some and a mistake in others:
+  - **Arrow and CSV: a gap.** A NaN, a null, and in a CSV an empty cell, `NaN`, `null`, `NA` or `N/A`
+    (any case) in an otherwise numeric column, are no sample: skipped, and counted. The column stays
+    numeric. The answer of `POST /publish` has the header `X-SensApp-Skipped-Samples` (0 when none) and
+    `sensapp_samples_processed_total{kind="skipped",operation="native_publish"}` counts them. A location
+    with a NaN coordinate is skipped too. `inf`, `+inf`, `-inf` and `Infinity` are infinities.
+  - **SenML and InfluxDB line protocol: a `400`.** JSON has no NaN and line protocol does not accept one, so
+    a NaN there is a client error. A SenML `"v": null` (earlier SensApp exports wrote it for NaN and the
+    infinities) is no value, not `0`.
+  - **Prometheus remote write: dropped.** Prometheus writes a NaN *stale marker* when a series
+    disappears, and a rule can compute NaN. A `400` would make Prometheus drop the whole request.
+    `sensapp_prometheus_remote_write_dropped_total{part="nan"}` counts them.
+  - **An infinite coordinate** of a location is a `400` on every format: a place cannot be at infinity.
+  - A `sum` or an `avg` of `+Inf` and `-Inf` is NaN on every backend (JSON writes it `"NaN"`).
 - **In JSON**, which has no NaN and no infinity, the JSON Lines export and `/series/{uuid}/last` write
   them as the texts of Prometheus: `"+Inf"`, `"-Inf"`, and `"NaN"` (the average of `+Inf` and `-Inf`). The
-  SenML export leaves those samples out: SenML has no way to write them. CSV writes `inf`, `-inf` and
+  SenML export leaves those samples out: SenML has no way to write them, and a series of nothing else has no record. CSV writes `inf`, `-inf` and
   `NaN`, and Arrow writes them as floats.
 
 ## String Deduplication using Dictionaries

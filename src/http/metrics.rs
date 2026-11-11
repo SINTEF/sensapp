@@ -285,7 +285,7 @@ impl HttpMetrics {
     }
 
     /// Counts the parts of a Prometheus remote write that are not stored: `exemplar`,
-    /// `histogram` or `metadata`.
+    /// `histogram`, `metadata` or `nan` (a NaN sample).
     pub fn observe_remote_write_dropped(&self, part: &str, count: usize) {
         let Ok(count) = u64::try_from(count) else {
             return;
