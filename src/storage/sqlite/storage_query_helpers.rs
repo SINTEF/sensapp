@@ -43,6 +43,7 @@ pub(super) fn sqlite_first_last_query(
         WITH bucketed AS (
             SELECT
                 timestamp_us,
+                rowid AS row_id,
                 {value_expression} AS value,
                 (timestamp_us - (((timestamp_us - ?5) % ?4) + ?4) % ?4) AS bucket_us
             FROM {table_name}
@@ -55,7 +56,7 @@ pub(super) fn sqlite_first_last_query(
                 bucket_us,
                 timestamp_us AS sample_us,
                 value,
-                ROW_NUMBER() OVER (PARTITION BY bucket_us ORDER BY timestamp_us {direction}) AS row_num
+                ROW_NUMBER() OVER (PARTITION BY bucket_us ORDER BY timestamp_us {direction}, row_id {direction}) AS row_num
             FROM bucketed
         )
         SELECT {stamp} AS timestamp_us, value

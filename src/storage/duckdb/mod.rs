@@ -366,10 +366,14 @@ impl StorageInstance for DuckDBStorage {
             let connection = connection.blocking_lock();
             let mut statement = connection.prepare(
                 r#"
-                SELECT s.name, s.type, u.name, u.description, COUNT(*)
+                SELECT s.name, s.type, MIN(u.name), MIN(u.description),
+                       COUNT(DISTINCT s.sensor_id),
+                       list(DISTINCT lnd.name ORDER BY lnd.name) FILTER (WHERE lnd.name IS NOT NULL)
                 FROM sensors s
                 LEFT JOIN units u ON s.unit = u.id
-                GROUP BY s.name, s.type, u.name, u.description
+                LEFT JOIN labels l ON l.sensor_id = s.sensor_id
+                LEFT JOIN labels_name_dictionary lnd ON l.name = lnd.id
+                GROUP BY s.name, s.type
                 ORDER BY s.name ASC
                 "#,
             )?;
@@ -383,6 +387,16 @@ impl StorageInstance for DuckDBStorage {
                 let unit_name: Option<String> = row.get(2)?;
                 let unit_description: Option<String> = row.get(3)?;
                 let series_count: i64 = row.get(4)?;
+                let label_keys: Vec<String> = match row.get::<_, duckdb::types::Value>(5)? {
+                    duckdb::types::Value::List(keys) => keys
+                        .into_iter()
+                        .filter_map(|key| match key {
+                            duckdb::types::Value::Text(key) => Some(key),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
 
                 let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
                     anyhow::Error::from(StorageError::invalid_data_format(
@@ -400,7 +414,7 @@ impl StorageInstance for DuckDBStorage {
                     sensor_type,
                     unit,
                     series_count,
-                    Vec::new(),
+                    label_keys,
                 ));
             }
 
@@ -497,7 +511,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -521,7 +535,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -546,7 +560,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -600,7 +614,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -624,7 +638,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -649,7 +663,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -674,7 +688,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -1201,6 +1215,7 @@ fn duckdb_first_last_query(
             SELECT
                 time_bucket(INTERVAL '{step_ms} milliseconds', timestamp_us, make_timestamp(?4)) AS bucket_ts,
                 timestamp_us,
+                rowid AS row_id,
                 {value_expression} AS value
             FROM {table_name}
             WHERE sensor_id = ?1
@@ -1212,7 +1227,7 @@ fn duckdb_first_last_query(
                 bucket_ts,
                 timestamp_us AS sample_ts,
                 value,
-                ROW_NUMBER() OVER (PARTITION BY bucket_ts ORDER BY timestamp_us {direction}) AS row_num
+                ROW_NUMBER() OVER (PARTITION BY bucket_ts ORDER BY timestamp_us {direction}, row_id {direction}) AS row_num
             FROM bucketed
         )
         SELECT epoch_us({stamp}) AS timestamp_us, value

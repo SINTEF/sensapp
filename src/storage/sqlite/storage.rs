@@ -34,7 +34,13 @@ use uuid::Uuid;
 // SQLite implementation
 #[derive(Debug)]
 pub struct SqliteStorage {
+    /// The reads
     pub(super) pool: SqlitePool,
+    /// The writes, one connection: SQLite has one writer at a time, so the writers of this
+    /// process wait for their turn in the pool, in order, instead of holding a connection of the
+    /// readers while they wait for the lock (`busy_timeout`). Under 16 writers, a read took 43 ms
+    /// instead of under 1 ms. An in-memory database is one connection's, so it shares `pool`.
+    write_pool: SqlitePool,
     /// Drop the samples that are stored already when writing, see `sqlite_publishers`
     deduplicate_on_ingest: AtomicBool,
 }
@@ -57,12 +63,24 @@ impl SqliteStorage {
             // This registers a regexp() function so we can use `col REGEXP 'pattern'` in SQL
             .with_regexp();
 
-        let pool = sqlx::SqlitePool::connect_with(connect_options)
+        let in_memory =
+            connection_string.contains(":memory:") || connection_string.contains("mode=memory");
+        let pool = sqlx::SqlitePool::connect_with(connect_options.clone())
             .await
             .context("Failed to create sqlite pool")?;
+        let write_pool = if in_memory {
+            pool.clone()
+        } else {
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(connect_options)
+                .await
+                .context("Failed to create the sqlite write pool")?
+        };
 
         Ok(Self {
             pool,
+            write_pool,
             deduplicate_on_ingest: AtomicBool::new(false),
         })
     }
@@ -73,7 +91,7 @@ impl StorageInstance for SqliteStorage {
     async fn create_or_migrate(&self) -> Result<()> {
         // Implement schema creation or migration logic here
         sqlx::migrate!("src/storage/sqlite/migrations")
-            .run(&self.pool)
+            .run(&self.write_pool)
             .await
             .context("Failed to migrate database")?;
 
@@ -84,7 +102,7 @@ impl StorageInstance for SqliteStorage {
         // for each other (the busy timeout). A deferred transaction reads first, and when another
         // writer commits in between, its first write fails at once with "database is locked",
         // whatever the busy timeout.
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.write_pool.begin_with("BEGIN IMMEDIATE").await?;
 
         // The sensors and the strings of the whole batch are registered first, with a few
         // statements, see `sqlite_utilities`.
@@ -123,7 +141,7 @@ impl StorageInstance for SqliteStorage {
     async fn vacuum(&self) -> Result<()> {
         // Vacuum the SQLite database to reclaim space and optimize performance
         sqlx::query("VACUUM")
-            .execute(&self.pool)
+            .execute(&self.write_pool)
             .await
             .context("Failed to vacuum database")?;
         Ok(())
@@ -135,20 +153,30 @@ impl StorageInstance for SqliteStorage {
     }
 
     async fn deduplicate_samples(&self) -> Result<u64> {
-        // One statement per table. The first row written (the smallest rowid) of each group of
-        // equal samples is kept. The table names and the columns come from static lists.
+        // One statement per series, each its own transaction: one statement per table held the
+        // write lock for 0.9 s per million rows, and the writes of other processes fail after
+        // the 5 s of `busy_timeout`. The first row written (the smallest rowid) of each group
+        // of equal samples is kept. The table names and the columns come from static lists.
         let mut removed = 0;
         for table in VALUE_TABLES {
             let columns = crate::storage::common::duplicate_key_columns(table, "timestamp_us");
+            let sensor_ids: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT DISTINCT sensor_id FROM {table}"
+            )))
+            .fetch_all(&self.pool)
+            .await?;
             let sql = format!(
-                "DELETE FROM {table} WHERE rowid NOT IN \
-                   (SELECT MIN(rowid) FROM {table} GROUP BY {columns})"
+                "DELETE FROM {table} WHERE sensor_id = ?1 AND rowid NOT IN \
+                   (SELECT MIN(rowid) FROM {table} WHERE sensor_id = ?1 GROUP BY {columns})"
             );
-            removed += sqlx::query(sqlx::AssertSqlSafe(sql))
-                .execute(&self.pool)
-                .await
-                .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
-                .rows_affected();
+            for sensor_id in sensor_ids {
+                removed += sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                    .bind(sensor_id)
+                    .execute(&self.write_pool)
+                    .await
+                    .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
+                    .rows_affected();
+            }
         }
         Ok(removed)
     }
@@ -159,7 +187,7 @@ impl StorageInstance for SqliteStorage {
         // BEGIN IMMEDIATE takes the write lock up front, so that a concurrent delete waits
         // (up to busy_timeout) instead of failing at once with SQLITE_BUSY_SNAPSHOT: a deferred
         // transaction that reads first cannot be upgraded to a write after another commit.
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.write_pool.begin_with("BEGIN IMMEDIATE").await?;
 
         let sensor_id: Option<i64> =
             sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = ?")
@@ -219,7 +247,7 @@ impl StorageInstance for SqliteStorage {
         .bind(sensor_id)
         .bind(datetime_to_micros(&start_time))
         .bind(datetime_to_micros(&end_time))
-        .execute(&self.pool)
+        .execute(&self.write_pool)
         .await?;
 
         Ok(Some(result.rows_affected()))
@@ -426,16 +454,12 @@ impl StorageInstance for SqliteStorage {
             // Handle series_count - it's already an i64
             let series_count = metrics_row.series_count;
 
-            // Handle label_keys - SQLite uses GROUP_CONCAT which returns a string
-            let label_keys = metrics_row
-                .label_keys
-                .map(|keys| {
-                    keys.as_str()
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .collect()
-                })
-                .unwrap_or_default();
+            // A JSON array, as a label name may hold a comma
+            let label_keys = match metrics_row.label_keys {
+                Some(keys) => serde_json::from_str(&keys)
+                    .context("Failed to parse the label keys of a metric")?,
+                None => Vec::new(),
+            };
 
             let metric = Metric::new(metric_name, sensor_type, unit, series_count, label_keys);
 
@@ -610,7 +634,7 @@ impl StorageInstance for SqliteStorage {
             if let Some((sensor_id, mut sensor)) = self.get_sensor_metadata(sensor_uuid).await? {
                 let start_time_us = options.start_time.as_ref().map(datetime_to_micros);
                 let end_time_us = options.end_time.as_ref().map(datetime_to_micros);
-                let step_us = step_ms * 1000;
+                let step_us = step_ms.checked_mul(1000).context("step is too large")?;
                 let origin_us = start_time_us.unwrap_or(0);
 
                 let samples = match sensor.sensor_type {
@@ -936,7 +960,7 @@ impl StorageInstance for SqliteStorage {
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {
         // Use a transaction to ensure atomicity
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write_pool.begin().await?;
 
         // Step 1: Delete all value tables (they reference sensors but nothing references them)
         sqlx::query("DELETE FROM blob_values")
@@ -1290,7 +1314,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1677,7 +1701,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1719,7 +1743,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1803,7 +1827,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1845,7 +1869,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1886,7 +1910,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1928,7 +1952,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )

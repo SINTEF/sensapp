@@ -896,23 +896,42 @@ impl StorageInstance for ClickHouseStorage {
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {
         let query = r#"
             SELECT
-                name,
-                type,
-                count(*) AS sensor_count
-            FROM sensors FINAL
-            GROUP BY name, type
-            ORDER BY name ASC
+                s.name AS name,
+                s.type AS type,
+                count(DISTINCT s.sensor_id) AS sensor_count,
+                arraySort(groupUniqArrayArray(k.keys)) AS label_keys
+            FROM sensors AS s FINAL
+            LEFT JOIN (
+                SELECT sensor_id, groupUniqArray(name) AS keys FROM labels GROUP BY sensor_id
+            ) AS k ON k.sensor_id = s.sensor_id
+            GROUP BY s.name, s.type
+            ORDER BY s.name ASC
         "#;
+
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct MetricRow {
+            name: String,
+            #[serde(rename = "type")]
+            type_str: String,
+            sensor_count: u64,
+            label_keys: Vec<String>,
+        }
 
         let mut cursor = self
             .client
             .query(query)
-            .fetch::<(String, String, u64)>()
+            .fetch::<MetricRow>()
             .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         let mut metrics = Vec::new();
 
-        while let Some((name, type_str, sensor_count)) = cursor.next().await? {
+        while let Some(MetricRow {
+            name,
+            type_str,
+            sensor_count,
+            label_keys,
+        }) = cursor.next().await?
+        {
             let sensor_type = SensorType::from_str(&type_str).map_err(|e| {
                 StorageError::invalid_data_format(
                     &format!("Failed to parse sensor type '{}': {}", type_str, e),
@@ -926,7 +945,7 @@ impl StorageInstance for ClickHouseStorage {
                 sensor_type,
                 None, // unit - we'll need to query this separately if needed
                 sensor_count as i64,
-                vec![], // label_keys - empty for now
+                label_keys,
             );
 
             metrics.push(metric);

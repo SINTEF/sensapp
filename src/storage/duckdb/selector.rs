@@ -182,7 +182,7 @@ fn read_numeric(
          WHERE sensor_id IN ({ids})
            AND (?1 IS NULL OR timestamp_us >= make_timestamp(?1))
            AND (?2 IS NULL OR timestamp_us <= make_timestamp(?2))
-         ORDER BY sensor_id, timestamp_us ASC LIMIT ?3"
+         ORDER BY sensor_id, timestamp_us ASC, rowid ASC LIMIT ?3"
     );
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let mut statement = connection.prepare(&sql)?;

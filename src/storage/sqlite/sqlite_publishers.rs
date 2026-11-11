@@ -72,7 +72,7 @@ pub async fn publish_integer_values(
             "sensor_id, timestamp_us, value",
             deduplicate,
         );
-        transaction.execute(query.build()).await?;
+        transaction.execute(query.build().persistent(false)).await?;
     }
     Ok(())
 }
@@ -102,7 +102,7 @@ pub async fn publish_numeric_values(
             "sensor_id, timestamp_us, value",
             deduplicate,
         );
-        transaction.execute(query.build()).await?;
+        transaction.execute(query.build().persistent(false)).await?;
     }
     Ok(())
 }
@@ -131,7 +131,7 @@ pub async fn publish_float_values(
             "sensor_id, timestamp_us, value",
             deduplicate,
         );
-        transaction.execute(query.build()).await?;
+        transaction.execute(query.build().persistent(false)).await?;
     }
     Ok(())
 }
@@ -169,7 +169,7 @@ pub async fn publish_string_values(
             "sensor_id, timestamp_us, value",
             deduplicate,
         );
-        transaction.execute(query.build()).await?;
+        transaction.execute(query.build().persistent(false)).await?;
     }
     Ok(())
 }
@@ -197,7 +197,7 @@ pub async fn publish_boolean_values(
             "sensor_id, timestamp_us, value",
             deduplicate,
         );
-        transaction.execute(query.build()).await?;
+        transaction.execute(query.build().persistent(false)).await?;
     }
     Ok(())
 }
@@ -226,7 +226,7 @@ pub async fn publish_location_values(
             "sensor_id, timestamp_us, latitude, longitude",
             deduplicate,
         );
-        transaction.execute(query.build()).await?;
+        transaction.execute(query.build().persistent(false)).await?;
     }
     Ok(())
 }
@@ -250,7 +250,7 @@ pub async fn publish_blob_values(
             "sensor_id, timestamp_us, value",
             deduplicate,
         );
-        transaction.execute(query.build()).await?;
+        transaction.execute(query.build().persistent(false)).await?;
     }
     Ok(())
 }
@@ -275,7 +275,7 @@ pub async fn publish_json_values(
             "sensor_id, timestamp_us, value",
             deduplicate,
         );
-        transaction.execute(query.build()).await?;
+        transaction.execute(query.build().persistent(false)).await?;
     }
     Ok(())
 }

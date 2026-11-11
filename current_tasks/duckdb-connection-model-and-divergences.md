@@ -25,6 +25,8 @@ run.
 5. **Smaller divergences**: `query_sensor_data` with `limit = None` is unlimited (`mod.rs:489`) where SQLite
    and PostgreSQL cap at `DEFAULT_QUERY_LIMIT`; `list_metrics` returns empty label keys and groups by unit
    (`mod.rs:367-404`); value tables have no ordering by `(sensor_id, timestamp_us)`.
+   *Update 11 November 2026: `list_metrics` was aligned with SQLite in the SQLite divergences task (label
+   keys, grouped by name and type), and first and last on equal timestamps keep the write order (`rowid`).*
 
 ## Suggested solution
 

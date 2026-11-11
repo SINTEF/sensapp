@@ -219,3 +219,69 @@ async fn buckets_before_1970_start_at_or_before_their_samples() -> Result<()> {
     assert_eq!(buckets(&bulk[0].samples), expected);
     Ok(())
 }
+
+/// Two samples of a series at the same timestamp (written twice, deduplication off): `first`
+/// keeps the one written first, `last` and `latest` the one written last, on the single series
+/// read and on the bulk read alike. Only SQLite and DuckDB keep the order of the writes; the
+/// other backends keep either sample.
+#[tokio::test]
+#[serial]
+async fn equal_timestamps_follow_the_order_of_the_writes() -> Result<()> {
+    use crate::common::DatabaseType;
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if !matches!(test_db.db_type, DatabaseType::SQLite | DatabaseType::DuckDB) {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let sample = |seconds: f64, value: f64| {
+        TypedSamples::Float(
+            vec![Sample {
+                datetime: at(seconds),
+                value,
+            }]
+            .into(),
+        )
+    };
+    let (sensor, matchers) =
+        publish_run(&storage, "xs_ties", SensorType::Float, sample(10.0, 1.0)).await?;
+    for value in [2.0, 3.0] {
+        let mut batch_builder = BatchBuilder::new()?;
+        batch_builder
+            .add(sensor.clone(), sample(10.0, value))
+            .await?;
+        batch_builder.send_what_is_left(storage.clone()).await?;
+    }
+
+    for (aggregation, expected) in [
+        (Aggregation::First, 1.0),
+        (Aggregation::Last, 3.0),
+        (Aggregation::Latest, 3.0),
+    ] {
+        let options = SensorDataQueryOptions {
+            aggregation: Some(aggregation),
+            ..sum_by(60_000, Some(at(0.0)))
+        };
+        let value = |samples: &TypedSamples| {
+            let TypedSamples::Float(samples) = samples else {
+                panic!("expected floats");
+            };
+            samples.iter().map(|s| s.value).collect::<Vec<_>>()
+        };
+        let data = storage
+            .query_sensor_data_advanced(&sensor.uuid.to_string(), &options)
+            .await?
+            .expect("the series");
+        assert_eq!(value(&data.samples), vec![expected], "{aggregation:?}");
+        let bulk = storage
+            .query_selector_aggregated(&matchers, &options, 256, 1_000)
+            .await?
+            .expect("within limits");
+        assert_eq!(
+            value(&bulk[0].samples),
+            vec![expected],
+            "{aggregation:?} bulk"
+        );
+    }
+    Ok(())
+}

@@ -40,6 +40,15 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 - Prometheus remote read: the series are sorted by label set, a series that fails to encode fails the
   request instead of missing from it, hints out of range get the raw samples instead of overflowing, and
   nothing is printed on stdout (the library denies `print_stdout`).
+- SQLite: writers queue on a write pool of one connection instead of holding the read connections (reads
+  under 16 writers from 43 ms to 0.2 ms at the median), the vacuum deduplicates one series at a time (a
+  concurrent write waited 0.94 s, now 8 ms), labels and sensor names are indexed, a selector matching more
+  than 32,766 series no longer fails on the SQL variable limit, and multi-row inserts are not cached (143 MB
+  of memory after 300 writes of varied sizes, now 19 MB).
+- `/metrics` lists the label keys of a metric on SQLite without splitting a name that holds a
+  comma, and on DuckDB and ClickHouse, which listed none. DuckDB groups metrics by name and type, not unit.
+- First, last and raw reads of samples with equal timestamps follow the order of the writes on SQLite and
+  DuckDB, where they picked any of them.
 
 ## 0.4.2
 

@@ -19,6 +19,11 @@ run against BigQuery or rrdcached. Items marked (suspected) depend on service be
    UUIDs ever share an id, the one found is non-deterministic. Covered by the UUID check in
    `clickhouse-numeric-and-uuid-identity.md`.
 
+11. **`list_metrics` returns no label keys** (`src/storage/bigquery/mod.rs:341-380`, `Vec::new()`), and
+    groups by unit. Added 11 November 2026: the generic test `a_label_name_with_a_comma_is_one_label_key`
+    (SQLite divergences task) expects the keys, and SQLite, PostgreSQL, DuckDB and ClickHouse return them.
+    Aggregate the label names per metric (`ARRAY_AGG(DISTINCT ... IGNORE NULLS ORDER BY ...)`).
+
 ## RRDCached
 
 4. **A far-future `end` produces an unbounded FETCH** (`src/storage/rrdcached/mod.rs:388-400`): `end` is

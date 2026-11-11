@@ -199,27 +199,20 @@ impl SqliteStorage {
             label_value: String,
         }
 
-        // Build dynamic IN clause for sensor IDs
-        let placeholders: Vec<String> = (1..=sensor_ids.len()).map(|i| format!("?{}", i)).collect();
-        let labels_sql = format!(
+        // The ids are one JSON array: no limit on the number of bound variables
+        let labels_rows = sqlx::query_as::<_, LabelRow>(
             r#"
             SELECT l.sensor_id, lnd.name as label_name, ldd.description as label_value
             FROM labels l
             JOIN labels_name_dictionary lnd ON l.name = lnd.id
             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-            WHERE l.sensor_id IN ({})
+            WHERE l.sensor_id IN (SELECT value FROM json_each(?1))
             ORDER BY l.sensor_id
             "#,
-            placeholders.join(", ")
-        );
-
-        let mut labels_query =
-            sqlx::query_as::<_, LabelRow>(sqlx::AssertSqlSafe(labels_sql.as_str()));
-        for sensor_id in &sensor_ids {
-            labels_query = labels_query.bind(sensor_id);
-        }
-
-        let labels_rows = labels_query.fetch_all(&self.pool).await?;
+        )
+        .bind(serde_json::to_string(&sensor_ids)?)
+        .fetch_all(&self.pool)
+        .await?;
 
         // Group labels by sensor_id
         let mut labels_map: std::collections::HashMap<i64, SensAppLabels> =

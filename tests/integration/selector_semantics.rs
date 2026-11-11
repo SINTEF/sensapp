@@ -279,3 +279,51 @@ async fn remote_write_then_read_keeps_one_metric_name() -> Result<()> {
     );
     Ok(())
 }
+
+/// A label name may hold a comma: it is one label key in the list of metrics. SQLite joined the
+/// keys with commas and split them again.
+#[tokio::test]
+#[serial]
+async fn a_label_name_with_a_comma_is_one_label_key() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if test_db.db_type == DatabaseType::RRDcached {
+        // RRDcached lists no metrics
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let labels: SensAppLabels = [("a,b", "1"), ("c", "2")]
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect();
+    let sensor = Arc::new(Sensor::new_without_uuid(
+        "comma_keys".to_string(),
+        SensorType::Float,
+        None,
+        Some(labels),
+    )?);
+    let mut batch = BatchBuilder::new()?;
+    batch
+        .add(
+            sensor,
+            TypedSamples::Float(
+                vec![Sample {
+                    datetime: hifitime::Epoch::from_unix_seconds(1_704_067_200.0),
+                    value: 1.0,
+                }]
+                .into(),
+            ),
+        )
+        .await?;
+    batch.send_what_is_left(storage.clone()).await?;
+
+    let metrics = storage.list_metrics().await?;
+    let metric = metrics
+        .iter()
+        .find(|metric| metric.name == "comma_keys")
+        .expect("the metric is listed");
+    let mut keys = metric.label_keys.clone();
+    keys.sort();
+    assert_eq!(keys, vec!["a,b", "c"]);
+    Ok(())
+}

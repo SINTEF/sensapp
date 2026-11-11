@@ -10,6 +10,12 @@ pub const MAX_STEP_MS: i64 = (crate::datamodel::sensapp_datetime::LATEST_UNIX_US
     / 1000
     + 1;
 
+/// How the samples of a bucket are reduced to one value.
+///
+/// `First`, `Last` and `Latest` among samples of a series at the same timestamp (written twice,
+/// without deduplication): SQLite and DuckDB keep the order of the writes, the first one written
+/// for `First` and the last one for `Last` and `Latest`. The other backends keep either of them.
+/// Deduplicating at ingestion or with the vacuum leaves one sample per timestamp and value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Aggregation {
     Avg,
