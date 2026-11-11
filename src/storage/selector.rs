@@ -92,7 +92,7 @@ pub async fn query_selector_aggregated_sequential<S: StorageInstance + ?Sized>(
     let mut result = Vec::with_capacity(discovered.len());
     for found in discovered {
         let mut options = options.clone();
-        options.limit = Some(remaining + 1);
+        options.limit = Some(remaining.saturating_add(1));
         let data = storage
             .query_sensor_data_advanced(&found.sensor.uuid.to_string(), &options)
             .await?;

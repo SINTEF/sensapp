@@ -64,9 +64,7 @@ async fn async_main() -> Result<()> {
     let _sentry = config.sentry_dsn.as_ref().map(|dsn| {
         sentry::init((
             dsn.clone(),
-            sentry::ClientOptions::new()
-                .maybe_release(sentry::release_name!())
-                .debug(true),
+            sentry::ClientOptions::new().maybe_release(sentry::release_name!()),
         ))
     });
 

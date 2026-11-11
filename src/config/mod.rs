@@ -5,7 +5,12 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-const MAX_HTTP_BODY_LIMIT_BYTES: u64 = 128 * 1024 * 1024 * 1024;
+/// A request body is buffered whole, and `SENSAPP_HTTP_MAX_CONCURRENT_WRITES` of them at once.
+const MAX_HTTP_BODY_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// Far above what a request can hold in memory: the limit is a guard, not a tuning knob.
+const MAX_QUERY_SAMPLES: usize = 1_000_000_000;
+/// The longest validity the command line gives too.
+const MAX_TOKEN_DURATION_SECONDS: u64 = 10 * 365 * 24 * 3600;
 
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
@@ -140,8 +145,47 @@ impl SensAppConfig {
             std::env::var("SENSAPP_SETTINGS_FILE").unwrap_or_else(|_| "settings.toml".to_string());
 
         let c = SensAppConfig::builder().env().file(settings_file).load()?;
-
+        c.validate()?;
         Ok(c)
+    }
+
+    /// Refuse at startup the values that would fail later: a timeout of 0 answers every request
+    /// with a 504, and a limit of `usize::MAX` overflows when one more sample is asked for.
+    fn validate(&self) -> Result<(), Error> {
+        for (name, seconds) in [
+            (
+                "SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS",
+                self.http_server_timeout_seconds,
+            ),
+            (
+                "SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS",
+                self.http_write_timeout_seconds,
+            ),
+            (
+                "SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS",
+                self.http_maintenance_timeout_seconds,
+            ),
+            (
+                "SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS",
+                self.http_body_read_timeout_seconds,
+            ),
+        ] {
+            if seconds == 0 {
+                anyhow::bail!("{name} must be at least 1 second");
+            }
+        }
+        if !(1..=MAX_QUERY_SAMPLES).contains(&self.http_max_query_samples) {
+            anyhow::bail!(
+                "SENSAPP_HTTP_MAX_QUERY_SAMPLES must be between 1 and {MAX_QUERY_SAMPLES}"
+            );
+        }
+        if !(1..=MAX_TOKEN_DURATION_SECONDS).contains(&self.token_max_duration_seconds) {
+            anyhow::bail!(
+                "SENSAPP_TOKEN_MAX_DURATION_SECONDS must be between 1 and {MAX_TOKEN_DURATION_SECONDS} (10 years)"
+            );
+        }
+        self.parse_http_body_limit()?;
+        Ok(())
     }
 
     /// The secrets of `SENSAPP_JWT_PREVIOUS_SECRETS`, one per comma-separated item.
@@ -158,8 +202,10 @@ impl SensAppConfig {
 
     pub fn parse_http_body_limit(&self) -> Result<usize, Error> {
         let size = byte_unit::Byte::parse_str(self.http_body_limit.clone(), true)?.as_u64();
-        if size > MAX_HTTP_BODY_LIMIT_BYTES {
-            anyhow::bail!("Body size is too big: > 128GB");
+        if size == 0 || size > MAX_HTTP_BODY_LIMIT_BYTES {
+            anyhow::bail!(
+                "SENSAPP_HTTP_BODY_LIMIT must be between 1 byte and 2 GiB: a body is held in memory whole"
+            );
         }
         Ok(size as usize)
     }
@@ -246,6 +292,24 @@ mod tests {
     }
 
     #[test]
+    fn values_that_would_fail_later_are_refused_at_startup() {
+        for (name, value) in [
+            ("SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS", "0"),
+            ("SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS", "0"),
+            ("SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS", "0"),
+            ("SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS", "0"),
+            ("SENSAPP_HTTP_MAX_QUERY_SAMPLES", "0"),
+            ("SENSAPP_HTTP_MAX_QUERY_SAMPLES", "18446744073709551615"),
+            ("SENSAPP_TOKEN_MAX_DURATION_SECONDS", "0"),
+            ("SENSAPP_TOKEN_MAX_DURATION_SECONDS", "18446744073709551615"),
+        ] {
+            temp_env::with_var(name, Some(value), || {
+                assert!(SensAppConfig::load().is_err(), "{name}={value}");
+            });
+        }
+    }
+
+    #[test]
     fn test_previous_jwt_secrets() {
         temp_env::with_var("SENSAPP_JWT_PREVIOUS_SECRETS", None::<&str>, || {
             assert!(
@@ -292,15 +356,11 @@ mod tests {
             assert_eq!(config.parse_http_body_limit().unwrap(), 1500000000);
         });
 
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("1tb"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert!(config.parse_http_body_limit().is_err());
-        });
-
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("-5mb"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert!(config.parse_http_body_limit().is_err());
-        });
+        for refused in ["1tb", "3GiB", "0", "-5mb"] {
+            temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some(refused), || {
+                assert!(SensAppConfig::load().is_err(), "{refused}");
+            });
+        }
     }
 
     #[test]
