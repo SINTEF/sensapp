@@ -1012,8 +1012,13 @@ mod tests {
 
         assert_eq!(convert(1234, 10, 2).unwrap(), Decimal::new(1234, 2));
         assert_eq!(convert(12, 10, -2).unwrap(), Decimal::new(1200, 0));
-        // 1.5 with 30 digits after the point: more than the 28 `Decimal` keeps
-        assert!(convert(15 * 10_i128.pow(29), 38, 30).is_err());
+        // 1.5 with 30 digits after the point is 1.5 once its zeros are removed
+        assert_eq!(
+            convert(15 * 10_i128.pow(29), 38, 30).unwrap(),
+            Decimal::new(15, 1)
+        );
+        // 30 significant digits after the point: more than the 28 `Decimal` keeps
+        assert!(convert(10_i128.pow(30) + 1, 38, 30).is_err());
         // More than 96 bits
         assert!(convert(1 << 100, 38, 2).is_err());
         // 1 × 10^38: more than 96 bits once multiplied
