@@ -12,8 +12,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use uuid::Uuid;
 
-/// The sensors of a batch, one per UUID, in UUID order. A UUID given twice with another name or
-/// type is refused: its samples would be written under one identity whatever the other says.
+/// The sensors of a batch, one per UUID, in UUID order. A UUID given twice with another type is
+/// refused: its samples would be written under one type whatever the other says. The name is not
+/// compared: the first one is the one a new series gets, and an existing series keeps its own.
 pub fn unique_sensors<'a>(
     sensors: &[&'a Sensor],
 ) -> std::result::Result<BTreeMap<Uuid, &'a Sensor>, StorageError> {
@@ -24,9 +25,7 @@ pub fn unique_sensors<'a>(
                 unique.insert(sensor.uuid, sensor);
             }
             Some(first) => {
-                let same_name =
-                    names_match(sensor, &first.name) || names_match(first, &sensor.name);
-                if !same_name || first.sensor_type != sensor.sensor_type {
+                if first.sensor_type != sensor.sensor_type {
                     return Err(identity_mismatch(sensor));
                 }
             }
@@ -35,36 +34,25 @@ pub fn unique_sensors<'a>(
     Ok(unique)
 }
 
-/// Refuse a write that names a stored sensor UUID with another name or type than the stored ones.
-///
-/// The name is what the token allow lists check, and the type chooses the table the samples go
-/// to: both must be those of the stored sensor. A write that gives no name, only the UUID, appends
-/// to the stored series whatever its name (the allow lists then check the UUID, which they do not
-/// list unless an administrator put it there). The unit and the labels are not compared, see
-/// `docs/DATAMODEL.md`.
+/// Refuse a write that names a stored sensor UUID with another type than the stored one: the type
+/// chooses the table the samples go to, and samples of another type would land in a table no read
+/// of the series looks at. The name is not compared (who may write to which series is decided by
+/// the allow list of the token, see `AccessContext::can_write`): a write to an existing UUID
+/// appends, and the stored name, unit and labels stay, see `docs/DATAMODEL.md`.
 pub fn check_sensor_identity(
     sensor: &Sensor,
-    stored_name: &str,
     stored_type: &str,
 ) -> std::result::Result<(), StorageError> {
-    let same_type = stored_type.parse::<SensorType>() == Ok(sensor.sensor_type);
-    if names_match(sensor, stored_name) && same_type {
+    if stored_type.parse::<SensorType>() == Ok(sensor.sensor_type) {
         Ok(())
     } else {
         Err(identity_mismatch(sensor))
     }
 }
 
-/// Whether the name of `sensor` is `name`, or is no name at all: the importers use the UUID as the
-/// name of a series given by its UUID only (SenML without `_name`, Arrow with only `sensor_id`).
-fn names_match(sensor: &Sensor, name: &str) -> bool {
-    sensor.name == name || sensor.name == sensor.uuid.to_string()
-}
-
 fn identity_mismatch(sensor: &Sensor) -> StorageError {
     StorageError::SensorIdentityMismatch {
         uuid: sensor.uuid,
-        name: sensor.name.clone(),
         sensor_type: sensor.sensor_type.to_string(),
     }
 }

@@ -124,7 +124,6 @@ async fn existing_sensors(
         sensor_id: u64,
         #[serde(with = "clickhouse::serde::uuid")]
         uuid: Uuid,
-        name: String,
         r#type: String,
     }
     let ids: Vec<u64> = sensors.keys().copied().collect();
@@ -132,7 +131,7 @@ async fn existing_sensors(
     for chunk in ids.chunks(ID_LOOKUP_CHUNK) {
         let mut cursor = client
             .query(
-                "SELECT sensor_id, uuid, name, type FROM sensors \
+                "SELECT sensor_id, uuid, type FROM sensors \
                  WHERE sensor_id IN {ids:Array(UInt64)}",
             )
             .param("ids", chunk)
@@ -143,7 +142,7 @@ async fn existing_sensors(
             if stored.uuid != sensor.uuid {
                 return Err(StorageError::SensorKeyCollision { uuid: sensor.uuid }.into());
             }
-            check_sensor_identity(sensor, &stored.name, &stored.r#type)?;
+            check_sensor_identity(sensor, &stored.r#type)?;
             existing.insert(stored.sensor_id);
         }
     }

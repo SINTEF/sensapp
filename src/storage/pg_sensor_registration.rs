@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use uuid::Uuid;
 
 /// The sensor ids of the given sensors, creating the ones that do not exist. A sensor that exists
-/// must have the stored name and type, see `check_sensor_identity`.
+/// must have the stored type, see `check_sensor_identity`.
 ///
 /// Concurrent writers registering the same new sensor are safe: every insert is
 /// `ON CONFLICT DO NOTHING`, and the ids are read again afterwards. Values are sorted before they
@@ -160,21 +160,21 @@ pub async fn register_sensors(
 #[error("sensor {0} was deleted while it was written to")]
 pub struct SensorDeletedDuringWrite(pub Uuid);
 
-/// The ids of the stored sensors among `uuids`, after checking that each has the name and the type
-/// of the sensor of the batch (`sensors`) with its UUID.
+/// The ids of the stored sensors among `uuids`, after checking that each has the type of the
+/// sensor of the batch (`sensors`) with its UUID.
 async fn fetch_sensor_ids(
     connection: &mut PgConnection,
     sensors: &BTreeMap<Uuid, &Sensor>,
     uuids: Vec<Uuid>,
 ) -> Result<HashMap<Uuid, i64>> {
-    let rows: Vec<(Uuid, i64, String, String)> =
-        sqlx::query_as("SELECT uuid, sensor_id, name, type FROM sensors WHERE uuid = ANY($1)")
+    let rows: Vec<(Uuid, i64, String)> =
+        sqlx::query_as("SELECT uuid, sensor_id, type FROM sensors WHERE uuid = ANY($1)")
             .bind(&uuids)
             .fetch_all(connection)
             .await?;
     let mut ids = HashMap::with_capacity(rows.len());
-    for (uuid, sensor_id, name, sensor_type) in rows {
-        check_sensor_identity(sensors[&uuid], &name, &sensor_type)?;
+    for (uuid, sensor_id, sensor_type) in rows {
+        check_sensor_identity(sensors[&uuid], &sensor_type)?;
         ids.insert(uuid, sensor_id);
     }
     Ok(ids)

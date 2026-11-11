@@ -96,13 +96,12 @@ impl RegisteredIds {
     }
 }
 
-/// The name and the type of a sensor, hashed, for `RegisteredIds`.
+/// The UUID and the type of a sensor, hashed, for `RegisteredIds`.
 fn identity_fingerprint(sensor: &Sensor) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     // Another UUID may have the same `sensor_id`
     sensor.uuid.hash(&mut hasher);
-    sensor.name.hash(&mut hasher);
     sensor.sensor_type.to_string().hash(&mut hasher);
     hasher.finish()
 }

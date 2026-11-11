@@ -22,7 +22,7 @@ use uuid::Uuid;
 const LOOKUP_CHUNK: usize = 500;
 
 /// The sensor ids of the given sensors, creating the ones that do not exist. A sensor that exists
-/// must have the stored name and type, see `check_sensor_identity`.
+/// must have the stored type, see `check_sensor_identity`.
 ///
 /// The labels of an existing sensor are left as they are: they are written when the sensor is
 /// created.
@@ -139,7 +139,7 @@ fn existing_sensor_ids(
     for chunk in uuids.chunks(LOOKUP_CHUNK) {
         let placeholders = vec!["?"; chunk.len()].join(", ");
         let sql = format!(
-            "SELECT CAST(uuid AS VARCHAR), sensor_id, name, type FROM sensors \
+            "SELECT CAST(uuid AS VARCHAR), sensor_id, type FROM sensors \
              WHERE uuid IN ({placeholders})"
         );
         let mut statement = connection.prepare(&sql)?;
@@ -148,13 +148,12 @@ fn existing_sensor_ids(
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
             ))
         })?;
         for row in rows {
-            let (uuid, sensor_id, name, sensor_type) = row?;
+            let (uuid, sensor_id, sensor_type) = row?;
             let uuid = Uuid::parse_str(&uuid)?;
-            check_sensor_identity(sensors[&uuid], &name, &sensor_type)?;
+            check_sensor_identity(sensors[&uuid], &sensor_type)?;
             ids.insert(uuid, sensor_id);
         }
     }

@@ -226,13 +226,19 @@ impl SenMLImporter {
         // export goes back to the original series. Any other name derives a reproducible
         // UUID, so publishing the same sensor again appends to the same series.
         let sensor = match canonical_uuid(&series.name) {
-            Some(uuid) => Sensor::new(
-                uuid,
-                series.display_name.unwrap_or_else(|| series.name.clone()),
-                sensor_type,
-                unit,
-                series.labels,
-            ),
+            Some(uuid) => {
+                let sensor = Sensor::new(
+                    uuid,
+                    series.display_name.unwrap_or_else(|| series.name.clone()),
+                    sensor_type,
+                    unit,
+                    series.labels,
+                );
+                // `Sensor::new` checks nothing: a NUL in the name, the unit or a label would reach
+                // the database as an error of the database
+                sensor.validate()?;
+                sensor
+            }
             None => {
                 Sensor::new_without_uuid(series.name.clone(), sensor_type, unit, series.labels)?
             }

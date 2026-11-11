@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use uuid::Uuid;
 
 /// The sensor ids of the given sensors, creating the ones that do not exist with their unit and
-/// labels. A sensor that exists must have the stored name and type, see `check_sensor_identity`.
+/// labels. A sensor that exists must have the stored type, see `check_sensor_identity`.
 pub async fn register_sensors(
     transaction: &mut Transaction<'_, Sqlite>,
     sensors: &[&Sensor],
@@ -24,9 +24,9 @@ pub async fn register_sensors(
     let unique = unique_sensors(sensors)?;
     let uuids: Vec<String> = unique.keys().map(Uuid::to_string).collect();
     let mut ids = HashMap::with_capacity(unique.len());
-    for (uuid, sensor_id, name, sensor_type) in fetch_sensors(transaction, &uuids).await? {
+    for (uuid, sensor_id, sensor_type) in fetch_sensors(transaction, &uuids).await? {
         let sensor = unique[&uuid];
-        check_sensor_identity(sensor, &name, &sensor_type)?;
+        check_sensor_identity(sensor, &sensor_type)?;
         ids.insert(uuid, sensor_id);
     }
     let missing: Vec<&Sensor> = unique
@@ -120,18 +120,16 @@ pub async fn register_sensors(
 async fn fetch_sensors(
     transaction: &mut Transaction<'_, Sqlite>,
     uuids: &[String],
-) -> Result<Vec<(Uuid, i64, String, String)>> {
-    let rows: Vec<(String, i64, String, String)> = sqlx::query_as(
-        "SELECT uuid, sensor_id, name, type FROM sensors \
+) -> Result<Vec<(Uuid, i64, String)>> {
+    let rows: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT uuid, sensor_id, type FROM sensors \
          WHERE uuid IN (SELECT value FROM json_each(?1))",
     )
     .bind(serde_json::to_string(uuids)?)
     .fetch_all(&mut **transaction)
     .await?;
     rows.into_iter()
-        .map(|(uuid, sensor_id, name, sensor_type)| {
-            Ok((Uuid::parse_str(&uuid)?, sensor_id, name, sensor_type))
-        })
+        .map(|(uuid, sensor_id, sensor_type)| Ok((Uuid::parse_str(&uuid)?, sensor_id, sensor_type)))
         .collect()
 }
 

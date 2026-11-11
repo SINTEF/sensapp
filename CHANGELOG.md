@@ -6,6 +6,13 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 ## Unreleased
 
 ### Breaking
+
+- **A restricted token is authorized by UUID, and a write to an existing UUID with another name appends.** The
+  `sensors` claim holds names and UUIDs. A write passes when its UUID is listed, or its name is listed and its UUID
+  is the one derived from its name, type, unit and labels: a listed name can no longer be claimed for the UUID of
+  another series (`403`), and a series created with a UUID of its own needs that UUID in the list. The `409` for
+  another **name** is gone (the type keeps it): the stored name, unit and labels stay. A NUL or a separator byte in
+  the name, unit or label of a series with a UUID of its own is a `400`.
 - **PostgreSQL and TimescaleDB: no rolling restart from 0.4.2.** The new migrations drop the unique constraints
   that a 0.4.2 binary writes with (`ON CONFLICT (value)`): its writes of String samples and of new sensors fail
   with `42P10` until it is replaced, and it cannot start on a migrated database. Stop every old instance, then

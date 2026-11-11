@@ -220,6 +220,25 @@ impl Sensor {
         }
     }
 
+    /// The UUID that `new_without_uuid` gives to a sensor with this name, type, unit and labels.
+    /// It is a keyed hash that includes the name, so a name cannot be claimed for a UUID that was
+    /// not derived from it. Fails on what `new_without_uuid` refuses: a NUL or a separator byte in
+    /// the name, the unit or a label, and a label name given twice.
+    pub fn derived_uuid(&self) -> Result<Uuid, Error> {
+        let mut labels = self.labels.clone();
+        sort_labels(&mut labels);
+        check_label_names(&labels)?;
+        let labels = (!labels.is_empty()).then_some(labels);
+        let buffer = compute_uuid_buffer(&self.name, &self.sensor_type, &self.unit, &labels)?;
+        uuid_v8_blake3(&self.name, buffer)
+    }
+
+    /// Refuse a sensor that `new_without_uuid` would: `Sensor::new` takes whatever it is given, and
+    /// a name, a unit or a label with a NUL would reach the database.
+    pub fn validate(&self) -> Result<(), Error> {
+        self.derived_uuid().map(|_| ())
+    }
+
     pub fn new_without_uuid(
         name: String,
         sensor_type: SensorType,

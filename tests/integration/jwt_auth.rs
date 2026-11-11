@@ -1232,3 +1232,143 @@ async fn sensor_scoped_delete_token_only_deletes_its_sensors() {
     assert_eq!(stored_sample_count(&storage, temperature).await, 0);
     assert_eq!(stored_sample_count(&storage, humidity).await, 3);
 }
+
+async fn post_senml(app: &Router, token: &str, body: String) -> StatusCode {
+    app.clone()
+        .oneshot(
+            Request::post("/publish")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+async fn get_status(app: &Router, token: &str, path: String) -> StatusCode {
+    app.clone()
+        .oneshot(
+            Request::get(path)
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+/// A write is authorized by what it names, with no look at the storage: a listed UUID, or a listed
+/// name with the UUID derived from it. A name cannot be claimed for the UUID of another series.
+#[tokio::test]
+#[serial]
+async fn a_restricted_token_writes_by_derived_uuid_or_by_listed_uuid() {
+    sensapp::config::load_configuration_for_tests().unwrap();
+    let db = TestDb::new().await.expect("test db");
+    let storage = db.storage();
+    let app = build_test_router(
+        storage.clone(),
+        Some(AuthConfig::from_secret(TEST_SECRET).unwrap()),
+    );
+
+    // Another series, written by whoever may write it
+    let pressure = format!("pressure_{}", uuid::Uuid::new_v4());
+    publish_senml_data(
+        &format!(r#"[{{"n":"{pressure}","v":1.0,"t":1700000000}}]"#),
+        storage.clone(),
+    )
+    .await
+    .unwrap();
+    let pressure_uuid = storage
+        .list_series(Some(&pressure), None, None)
+        .await
+        .unwrap()
+        .series[0]
+        .uuid;
+    let samples_of_pressure = || async {
+        storage
+            .query_sensor_data(&pressure_uuid.to_string(), None, None, None)
+            .await
+            .unwrap()
+            .unwrap()
+            .samples
+            .len()
+    };
+
+    // By name: a write that names no UUID has the one derived from its name
+    let temperature = format!("temperature_{}", uuid::Uuid::new_v4());
+    let by_name = sensor_token("read write", &[&temperature]);
+    let write =
+        |name: &str, value: f64| format!(r#"[{{"n":"{name}","v":{value},"t":1700000100}}]"#);
+    assert_eq!(
+        post_senml(&app, &by_name, write(&temperature, 21.5)).await,
+        StatusCode::OK
+    );
+    // The listed name on the UUID of another series is refused, and nothing is appended
+    let claimed =
+        format!(r#"[{{"n":"{pressure_uuid}","_name":"{temperature}","v":2.0,"t":1700000200}}]"#);
+    assert_eq!(
+        post_senml(&app, &by_name, claimed.clone()).await,
+        StatusCode::FORBIDDEN
+    );
+    // A UUID alone is not listed either
+    let by_uuid_alone = format!(r#"[{{"n":"{pressure_uuid}","v":2.0,"t":1700000200}}]"#);
+    assert_eq!(
+        post_senml(&app, &by_name, by_uuid_alone.clone()).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(samples_of_pressure().await, 1);
+    // The token that names no pressure does not read it either
+    assert_eq!(
+        get_status(&app, &by_name, format!("/series/{pressure_uuid}")).await,
+        StatusCode::NOT_FOUND
+    );
+
+    // By UUID: the canonical form in the list, whatever name the write gives
+    let by_uuid = sensor_token("read write delete", &[&pressure_uuid.to_string()]);
+    assert_eq!(
+        post_senml(&app, &by_uuid, claimed).await,
+        StatusCode::OK,
+        "a listed UUID"
+    );
+    assert_eq!(samples_of_pressure().await, 2);
+    assert_eq!(
+        get_status(&app, &by_uuid, format!("/series/{pressure_uuid}")).await,
+        StatusCode::OK,
+        "a UUID entry reads its series"
+    );
+    // ... and does not write by name what it does not list
+    assert_eq!(
+        post_senml(&app, &by_uuid, write(&temperature, 1.0)).await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+/// `Sensor::new` checks nothing: a NUL in the name of a series with a UUID of its own must be a
+/// payload error, not an error of the database.
+#[tokio::test]
+#[serial]
+async fn a_nul_in_the_name_of_a_series_with_a_uuid_is_a_400() {
+    sensapp::config::load_configuration_for_tests().unwrap();
+    let db = TestDb::new().await.expect("test db");
+    let app = build_test_router(
+        db.storage(),
+        Some(AuthConfig::from_secret(TEST_SECRET).unwrap()),
+    );
+    let token = read_write_token();
+    let uuid = uuid::Uuid::new_v4();
+    for fields in [
+        r#""_name":"bad\u0000name""#,
+        r#""bu":"bad\u0000unit""#,
+        r#""_labels":{"room":"bad\u0000label"}"#,
+    ] {
+        let body = format!(r#"[{{"n":"{uuid}",{fields},"v":1.0,"t":1700000000}}]"#);
+        assert_eq!(
+            post_senml(&app, &token, body).await,
+            StatusCode::BAD_REQUEST,
+            "{fields}"
+        );
+    }
+}

@@ -26,6 +26,8 @@ impl AuthorizedStorage {
         Self { inner, access }
     }
 
+    /// Whether the token sees the metric with this name. A UUID entry of the allow list names one
+    /// series and does not show in the list of metrics, which has names only.
     fn allows(&self, name: &str) -> bool {
         self.access.can_access_sensor(name)
     }
@@ -66,7 +68,7 @@ impl AuthorizedStorage {
             .inner
             .query_sensor_data(sensor_uuid, Some(instant), Some(instant), Some(1))
             .await?;
-        Ok(sensor_data.is_some_and(|data| self.allows(&data.sensor.name)))
+        Ok(sensor_data.is_some_and(|data| self.access.can_access(&data.sensor)))
     }
 }
 
@@ -80,7 +82,7 @@ impl StorageInstance for AuthorizedStorage {
         if let Some(sensor) = batch
             .sensors
             .iter()
-            .find(|item| !self.allows(&item.sensor.name))
+            .find(|item| !self.access.can_write(&item.sensor))
         {
             return Err(SensorAccessDenied(sensor.sensor.name.clone()).into());
         }
@@ -122,7 +124,9 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .list_series(metric_filter, limit, bookmark)
             .await?;
-        result.series.retain(|sensor| self.allows(&sensor.name));
+        result
+            .series
+            .retain(|sensor| self.access.can_access(sensor));
         Ok(result)
     }
 
@@ -143,7 +147,7 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .query_sensor_data(sensor_uuid, start_time, end_time, limit)
             .await?
-            .filter(|data| self.allows(&data.sensor.name)))
+            .filter(|data| self.access.can_access(&data.sensor)))
     }
 
     async fn query_sensor_data_advanced(
@@ -155,7 +159,7 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .query_sensor_data_advanced(sensor_uuid, options)
             .await?
-            .filter(|data| self.allows(&data.sensor.name)))
+            .filter(|data| self.access.can_access(&data.sensor)))
     }
 
     async fn query_sensor_data_latest(
@@ -168,7 +172,7 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .query_sensor_data_latest(sensor_uuid, start_time, end_time)
             .await?
-            .filter(|data| self.allows(&data.sensor.name)))
+            .filter(|data| self.access.can_access(&data.sensor)))
     }
 
     async fn query_sensor_data_availability(
@@ -182,7 +186,7 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .query_sensor_data_availability(sensor_uuid, start_time, end_time, step_ms)
             .await?
-            .filter(|summary| self.allows(&summary.sensor.name)))
+            .filter(|summary| self.access.can_access(&summary.sensor)))
     }
 
     async fn query_sensors_by_labels(
@@ -197,7 +201,7 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .query_sensors_by_labels(matchers, start_time, end_time, limit, numeric_only)
             .await?;
-        result.retain(|data| self.allows(&data.sensor.name));
+        result.retain(|data| self.access.can_access(&data.sensor));
         Ok(result)
     }
 

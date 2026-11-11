@@ -33,14 +33,10 @@ pub enum StorageError {
     #[error("Metric not found: {metric_name}")]
     MetricNotFound { metric_name: String },
 
-    /// A write names a sensor UUID that is stored, or given in the same batch, with another name
-    /// or type. The message does not tell the stored name: the writer may not be allowed to see it.
-    #[error("Sensor {uuid} exists with another name or type than '{name}' ({sensor_type})")]
-    SensorIdentityMismatch {
-        uuid: Uuid,
-        name: String,
-        sensor_type: String,
-    },
+    /// A write names a sensor UUID that is stored, or given in the same batch, with another type.
+    /// The message does not tell the stored type: the writer may not be allowed to see the series.
+    #[error("Sensor {uuid} exists with another type than {sensor_type}")]
+    SensorIdentityMismatch { uuid: Uuid, sensor_type: String },
 
     /// A new sensor UUID whose 64-bit storage key (ClickHouse, BigQuery) is the key of another
     /// stored sensor, or of another sensor of the same batch. Such a sensor cannot be stored.

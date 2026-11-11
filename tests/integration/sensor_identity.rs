@@ -1,8 +1,8 @@
-//! A write that names an existing sensor UUID must name the stored sensor: same name, same type.
-//! Otherwise a token allowed to write `temperature` could append to `pressure` by sending the
-//! UUID of `pressure` with the name `temperature`, and samples of the wrong type would go to a
-//! table no read looks at. The unit and the labels are not compared: an import may leave them
-//! out, and the stored ones stay. These tests run on the backend selected by `TEST_DATABASE_URL`.
+//! A write that names an existing sensor UUID must give the stored type: samples of another type
+//! would go to a table no read of the series looks at. The name, the unit and the labels are not
+//! compared: the write appends and the stored ones stay (who may write to which series is decided by
+//! the allow list of the token, see `jwt_auth`). These tests run on the backend selected by
+//! `TEST_DATABASE_URL`.
 
 use crate::common::{DatabaseType, TestDb};
 use anyhow::Result;
@@ -96,7 +96,8 @@ fn stored_sensor(prefix: &str) -> Result<Arc<Sensor>> {
 
 #[tokio::test]
 #[serial]
-async fn a_write_under_an_existing_uuid_with_another_name_is_refused() -> Result<()> {
+async fn a_write_under_an_existing_uuid_with_another_name_appends_and_the_stored_name_stays()
+-> Result<()> {
     ensure_config();
     let test_db = TestDb::new().await?;
     if !applies_to(&test_db) {
@@ -113,11 +114,15 @@ async fn a_write_under_an_existing_uuid_with_another_name_is_refused() -> Result
         None,
         None,
     ));
-    assert_identity_mismatch(
-        publish(&storage, &[(renamed, 1)]).await,
-        "another name under the same UUID",
-    );
-    assert_unchanged(&storage, &stored).await
+    publish(&storage, &[(renamed, 1)]).await?;
+
+    let data = storage
+        .query_sensor_data(&stored.uuid.to_string(), None, None, None)
+        .await?
+        .expect("the series exists");
+    assert_eq!(data.sensor.name, stored.name, "the stored name stays");
+    assert_eq!(data.samples.len(), 2);
+    Ok(())
 }
 
 #[tokio::test]
@@ -146,7 +151,8 @@ async fn a_write_under_an_existing_uuid_with_another_type_is_refused() -> Result
     assert_unchanged(&storage, &stored).await
 }
 
-/// Two series of one batch with the same new UUID and different names: nothing is stored.
+/// Two series of one batch with the same new UUID and different types: nothing is stored. With
+/// different names and one type the series is created under the first name.
 #[tokio::test]
 #[serial]
 async fn one_batch_cannot_give_two_identities_to_a_new_uuid() -> Result<()> {
@@ -182,6 +188,36 @@ async fn one_batch_cannot_give_two_identities_to_a_new_uuid() -> Result<()> {
             .is_none(),
         "the series must not be created"
     );
+    Ok(())
+}
+
+/// Two names for one new UUID in a batch, one type: the series is created, under the first name.
+#[tokio::test]
+#[serial]
+async fn one_batch_with_two_names_for_a_new_uuid_creates_it_under_the_first() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if !applies_to(&test_db) {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let uuid = Uuid::new_v4();
+    let sensor = |name: &str| {
+        Arc::new(Sensor::new(
+            uuid,
+            format!("{name}_{uuid}"),
+            SensorType::Float,
+            None,
+            None,
+        ))
+    };
+    publish(&storage, &[(sensor("first"), 0), (sensor("second"), 1)]).await?;
+    let data = storage
+        .query_sensor_data(&uuid.to_string(), None, None, None)
+        .await?
+        .expect("the series exists");
+    assert_eq!(data.sensor.name, format!("first_{uuid}"));
+    assert_eq!(data.samples.len(), 2);
     Ok(())
 }
 

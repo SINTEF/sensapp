@@ -165,7 +165,8 @@ async fn a_restricted_token_cannot_write_to_another_series_by_its_uuid() -> Resu
     let arrow = ArrowConverter::to_arrow_stream(&borrowed)?;
     for (content_type, body) in [(SENML, senml), (ARROW, arrow)] {
         let (status, message) = post(&app, &restricted, content_type, body).await;
-        assert_eq!(status, StatusCode::CONFLICT, "{content_type}: {message}");
+        // Refused by the token, before the storage: the UUID is not derived from the name
+        assert_eq!(status, StatusCode::FORBIDDEN, "{content_type}: {message}");
         assert!(
             !message.contains(&pressure.sensor.name),
             "the answer must not tell the stored name: {message}"

@@ -244,19 +244,18 @@ impl BigQueryStorage {
                     Ok((
                         super::client::required(row.get_i64(0), "sensor_id")?,
                         super::client::required(row.get_string(1), "uuid")?,
-                        super::client::required(row.get_string(2), "name")?,
-                        super::client::required(row.get_string(3), "type")?,
+                        super::client::required(row.get_string(2), "type")?,
                     ))
                 },
             )
             .await?;
         let mut existing = Vec::with_capacity(stored.len());
-        for (id, uuid, name, sensor_type) in stored {
+        for (id, uuid, sensor_type) in stored {
             if let Some(sensor) = sensors.get(&id) {
                 if uuid != sensor.uuid.to_string() {
                     return Err(StorageError::SensorKeyCollision { uuid: sensor.uuid }.into());
                 }
-                check_sensor_identity(sensor, &name, &sensor_type)?;
+                check_sensor_identity(sensor, &sensor_type)?;
                 existing.push(id);
             }
         }

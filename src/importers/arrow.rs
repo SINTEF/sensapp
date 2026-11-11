@@ -320,7 +320,11 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
     let sensor = match (sensor_id, sensor_name) {
         (Some(uuid), name) => {
             let name = name.unwrap_or_else(|| uuid.to_string());
-            Sensor::new(uuid, name, sensor_type, unit, Some(labels))
+            let sensor = Sensor::new(uuid, name, sensor_type, unit, Some(labels));
+            // `Sensor::new` checks nothing: a NUL in the name, the unit or a label would reach
+            // the database as an error of the database
+            sensor.validate()?;
+            sensor
         }
         (None, Some(name)) => Sensor::new_without_uuid(name, sensor_type, unit, Some(labels))?,
         (None, None) => {

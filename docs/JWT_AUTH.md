@@ -81,8 +81,8 @@ The token is printed to stdout. In a container: `docker exec <container> sensapp
 |------|-------------|---------|
 | `--scope` | Comma-separated `read`, `write`, `delete`, `admin`, or `readwrite` (shorthand for `read,write`) | `read write` |
 | `--duration` | Token validity in seconds, at most ten years | `3600` (1 hour) |
-| `--sensors` | Comma-separated sensor name allow list | all sensors |
-| `--sensor` | One sensor name, as it is (a comma is part of the name); repeat it for several. Can be mixed with `--sensors` | all sensors |
+| `--sensors` | Comma-separated allow list of sensor names and UUIDs | all sensors |
+| `--sensor` | One sensor name or UUID, as it is (a comma is part of the name); repeat it for several. Can be mixed with `--sensors` | all sensors |
 
 ### With an admin token
 
@@ -189,7 +189,7 @@ Tokens use the HS256 (HMAC-SHA256) algorithm with the following claims, and a `k
 | `nbf` | No | Not-before time. If present, the token is rejected before this time |
 | `jti` | No | Unique id of the token, in the logs of its requests. Every token SensApp makes has one |
 | `scope` | No | Space-separated among `"read"`, `"write"`, `"delete"` and `"admin"`. Defaults to `"read write"` |
-| `sensors` | No | Array of allowed sensor names. If absent, all sensors are accessible |
+| `sensors` | No | Array of allowed sensor names and UUIDs. If absent, all sensors are accessible |
 
 A token made by hand (with a JWT library) needs `iss` and `aud` set to `sensapp`; without a `kid` it is checked against the current secret.
 
@@ -234,7 +234,8 @@ The OpenAPI document (`/docs`) declares the bearer token as a security scheme an
 - Run SensApp behind TLS when it is reachable over a network: a token is a bearer credential.
 - The sensor allow list uses exact string matching on sensor names, spaces and commas included: the names are kept exactly as given. The JSON array of the endpoint and `--sensor` can hold a name with a comma, `--sensors` splits on commas.
 - When present, the sensor allow list applies to all API reads and writes, including Prometheus and InfluxDB compatibility endpoints. Catalog and selector results omit other sensors; direct series requests for another sensor return 404, and writes to another sensor return 403.
-- A write is checked against the name it gives. A write that also gives a UUID (SenML `bn`, Arrow `sensapp.sensor.uuid` or `sensor_id`) must give the stored name and type of that series, or the request is refused with 409, so a token cannot reach another series by naming its UUID ([DATAMODEL.md](DATAMODEL.md)). A write that gives only the UUID is checked against the UUID text, which an allow list does not hold unless it was put there.
+- **The allow list holds names and UUIDs** (the canonical hyphenated form, in lower case: `3f2a…-…`). A series is read, listed and deleted when its name or its UUID is listed. **A write is checked on what it names, without looking at the storage**: a sensor passes when its UUID is listed, or when its name is listed **and** its UUID is the one SensApp derives from its name, type, unit and labels (what every importer gives a series that names no UUID: SenML, Arrow, CSV, InfluxDB and Prometheus without a UUID). That UUID is a keyed hash that includes the name, so a listed name cannot be claimed for the UUID of another series: a write that names another series by its UUID, whatever name it gives, is a `403` unless that UUID is listed. A series that a client created with a UUID of its own (SenML `bn`, Arrow `sensapp.sensor.uuid` or `sensor_id`) is writable by a restricted token only when its UUID is listed, even if its name is. A write to an existing UUID appends to that series, and the stored name stays; the type must be the stored one, or the request is refused with `409` ([DATAMODEL.md](DATAMODEL.md)).
+- A UUID entry reads its series by `/series/{uuid}`, the lists and the series reads, and `/api/v1/query` of the name. In selector reads (`/series?selector=`, Prometheus remote read, `/prometheus/metrics`) the listed names are matched as the name of the series: a UUID entry only matches a series that is named by its own UUID, as the importers do when they are given no name.
 - With authentication enabled, `/prometheus/metrics?include_latest_samples=true` requires a read token and applies its sensor allow list. Plain `/prometheus/metrics` stays public for service monitoring.
 - Sensor-scoped tokens cannot run the database-wide `/api/v1/admin/vacuum` operation.
 - An admin token is for every sensor. `sensapp generate-token` refuses `--scope admin` with sensors, and a token that has both is refused (`401`): SensApp never makes one.

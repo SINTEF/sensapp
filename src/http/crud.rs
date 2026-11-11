@@ -613,7 +613,7 @@ async fn list_filtered_series(
             .series
             .into_iter()
             .filter(|sensor| {
-                access.is_none_or(|access| access.can_access_sensor(&sensor.name))
+                access.is_none_or(|access| access.can_access(sensor))
                     && filter.is_none_or(|filter| filter.matches(sensor))
             })
             .collect();
