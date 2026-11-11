@@ -138,9 +138,12 @@ pub fn anchor_regex(pattern: &str) -> String {
 ///
 /// - what is not RE2: unbalanced groups, back-references, lookarounds;
 /// - the escapes PostgreSQL reads otherwise: `\b` is a backspace there, `\B` a backslash, `\x`
-///   takes any number of hex digits, `\p{..}`, `\z`, `\Q` and `\<` do not exist. Allowed are
-///   `\d \D \s \S \w \W \A \n \t \r \f \v \a`, `\u` and `\U` with their exact
-///   number of digits, and the escaped punctuation;
+///   takes any number of hex digits, `\p{..}`, `\z`, `\Q` and `\<` do not exist, and RE2 has no
+///   `\u`. Allowed are `\d \D \s \S \w \W \A \n \t \r \f \v \a` and the escaped punctuation;
+/// - what the engines read differently: a `[` within a class (nested for the `regex` crate, a
+///   literal for PostgreSQL and RE2, so the class ends elsewhere), the set operations `&&`, `--`
+///   and `~~`, a negated POSIX class, a repetition bound above 255 (PostgreSQL's limit), and a
+///   repetition of a repetition or of an assertion (`a**`, `^*`);
 /// - groups other than `(...)` and `(?:...)`, and flags other than a leading `(?i)` or `(?s)`:
 ///   PostgreSQL has no named groups and no flags within the pattern, and `(?m)`, `(?x)`,
 ///   `(?q)` mean other things there.
@@ -161,17 +164,75 @@ pub fn validate_regex(pattern: &str) -> anyhow::Result<()> {
         return Err(refuse("only the flags (?i) and (?s) are supported"));
     }
 
+    // What the last token was, to refuse a repetition of a repetition or of an assertion
+    #[derive(PartialEq)]
+    enum Previous {
+        Other,
+        Quantifier,
+        Assertion,
+    }
+    let mut previous = Previous::Other;
     let mut chars = body.chars().peekable();
     let mut in_class = false;
     while let Some(c) = chars.next() {
+        let was = std::mem::replace(&mut previous, Previous::Other);
         match c {
+            '*' | '+' | '?' if !in_class => {
+                if was == Previous::Assertion || (was == Previous::Quantifier && c != '?') {
+                    return Err(refuse(
+                        "a repetition of a repetition or of an assertion is not supported",
+                    ));
+                }
+                // A `?` after a quantifier makes it lazy
+                if was != Previous::Quantifier {
+                    previous = Previous::Quantifier;
+                }
+            }
+            '{' if !in_class => {
+                let mut lookahead = chars.clone();
+                let content: String = lookahead.by_ref().take_while(|&c| c != '}').collect();
+                let bounds: Vec<&str> = content.split(',').collect();
+                let is_repetition = !content.is_empty()
+                    && bounds.len() <= 2
+                    && bounds
+                        .iter()
+                        .all(|bound| bound.chars().all(|c| c.is_ascii_digit()))
+                    && !bounds[0].is_empty();
+                if is_repetition {
+                    // PostgreSQL stops at 255, RE2 at 1000
+                    if bounds
+                        .iter()
+                        .any(|bound| bound.parse::<u32>().map_or(!bound.is_empty(), |n| n > 255))
+                    {
+                        return Err(refuse("a repetition bound above 255 is not supported"));
+                    }
+                    if was != Previous::Other {
+                        return Err(refuse(
+                            "a repetition of a repetition or of an assertion is not supported",
+                        ));
+                    }
+                    chars = lookahead;
+                    previous = Previous::Quantifier;
+                }
+            }
+            '^' | '$' if !in_class => previous = Previous::Assertion,
+            '&' | '-' | '~' if in_class && chars.peek() == Some(&c) => {
+                return Err(refuse(
+                    "the set operations of a character class (&&, --, ~~) are not supported",
+                ));
+            }
+            // A `[` in a class is nested for the `regex` crate and a literal for PostgreSQL and
+            // RE2, which end the class at the first `]`: the anchors would not be where they seem.
+            // Only a POSIX class `[:alpha:]` may start there.
+            '[' if in_class && chars.peek() != Some(&':') => {
+                return Err(refuse("a character class within a character class"));
+            }
             '\\' => {
                 let Some(escaped) = chars.next() else { break };
                 if escaped.is_ascii_alphanumeric() {
                     match escaped {
                         'd' | 'D' | 's' | 'S' | 'w' | 'W' | 'A' | 'n' | 't' | 'r' | 'f' | 'v'
                         | 'a' => {}
-                        'u' | 'U' if chars.peek() != Some(&'{') => {}
                         _ => {
                             return Err(refuse(&format!(
                                 "\\{escaped} means another thing in PostgreSQL, or nothing"
@@ -194,6 +255,10 @@ pub fn validate_regex(pattern: &str) -> anyhow::Result<()> {
             }
             // A POSIX class within a class: `[[:digit:]]`
             '[' if chars.peek() == Some(&':') => {
+                // `[:^digit:]` does not exist in PostgreSQL
+                if chars.clone().nth(1) == Some('^') {
+                    return Err(refuse("a negated POSIX class is not supported"));
+                }
                 for inner in chars.by_ref() {
                     if inner == ']' {
                         break;
@@ -418,7 +483,6 @@ mod tests {
             "(?:a|b)c",
             r"\d+\.\d*",
             r"\w\s\S\W\D",
-            r"\u00e9",
             r"\.\*\(\)\[\]\{\}\|\\",
             "[[:digit:]]+",
             "[]a]",
@@ -426,6 +490,14 @@ mod tests {
             "[a-z(?]",
             r"[\d-]",
             "a{2,3}?",
+            "a{255}",
+            "a{1,255}",
+            "a*?",
+            "(a*)*",
+            "[a-z0-9_.-]",
+            "[a&b]",
+            "[a~b]",
+            "é",
         ] {
             assert!(
                 validate_regex(pattern).is_ok(),
@@ -457,6 +529,29 @@ mod tests {
             "(?P<n>a)",
             "(?<n>a)",
             r"\C",
+            // A `[` in a class: nested for the `regex` crate, a literal for PostgreSQL and RE2, so
+            // they disagree on where the class ends and the anchors move
+            "[a[b])|(c]]",
+            "[a[bc]]",
+            "[[a]b]",
+            // Set operations of a class
+            "[a&&b]",
+            "[a-z--aeiou]",
+            "[a~~b]",
+            // Repetition bounds: PostgreSQL stops at 255, RE2 at 1000
+            "a{256}",
+            "a{1,256}",
+            "a{1001}",
+            // A repetition of a repetition or of an assertion
+            "a**",
+            "a+*",
+            "a*{2}",
+            "^*",
+            "$+",
+            // RE2 has no \u, and a negated POSIX class does not exist in PostgreSQL
+            r"\u00e9",
+            r"\U000000e9",
+            "[[:^digit:]]",
         ] {
             assert!(validate_regex(pattern).is_err(), "{pattern}");
         }
