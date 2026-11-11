@@ -125,16 +125,20 @@ pub fn duplicate_key_columns(table: &str, time_column: &str) -> String {
 /// Convert a UUID to the 64-bit key of the series in the ClickHouse and BigQuery tables (BigQuery
 /// stores the same bits as a signed `INT64`).
 ///
-/// The ids are stored, so this function is part of the on-disk format and must never change:
-/// the XOR of the two big-endian 64-bit halves of the UUID. The UUIDs SensApp derives are hashes,
-/// so their keys are uniformly distributed, but SenML and Arrow writers choose theirs, and two
-/// chosen UUIDs can have the same key (`(a, b)` and `(b, a)`). The registration refuses a UUID whose
-/// key belongs to another one (`StorageError::SensorKeyCollision`), and the reads by UUID compare
-/// the stored UUID. Do not use `std`'s `DefaultHasher` here, its algorithm is explicitly allowed to
-/// change between Rust releases, which would orphan every stored sample.
+/// The ids are stored, so this function is part of the on-disk format and must never change: the
+/// first 8 bytes of the BLAKE3 hash of the 16 bytes of the UUID, read as a little-endian integer,
+/// like [`unit_name_to_id`]. A hash, and not a fold of the UUID, because SenML and Arrow writers
+/// choose their UUIDs, and a fold keeps their structure: the XOR of the two halves gave `(a, b)` and
+/// `(b, a)` the same key, and every UUID with equal halves the key `0`. Any 64-bit key can still
+/// collide, by chance at billions of series or on purpose in about 2^32 tries, so the registration
+/// refuses a UUID whose key belongs to another one (`StorageError::SensorKeyCollision`), and the
+/// reads by UUID compare the stored UUID. Do not use `std`'s `DefaultHasher` here, its algorithm is
+/// explicitly allowed to change between Rust releases, which would orphan every stored sample.
 pub fn uuid_to_sensor_id(uuid: &Uuid) -> u64 {
-    let value = uuid.as_u128();
-    ((value >> 64) as u64) ^ (value as u64)
+    let hash = blake3::hash(uuid.as_bytes());
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&hash.as_bytes()[..8]);
+    u64::from_le_bytes(bytes)
 }
 
 /// Id of a unit in the `units` table: the first 8 bytes of the BLAKE3 hash of its name,
@@ -913,18 +917,41 @@ mod tests {
         let id = |uuid: &str| uuid_to_sensor_id(&Uuid::parse_str(uuid).unwrap());
         assert_eq!(
             id("00000000-0000-4000-8000-000000000001"),
-            0x8000_0000_0000_4001
-        );
-        assert_eq!(id("00000000-0000-0000-0000-000000000000"), 0);
-        assert_eq!(id("ffffffff-ffff-ffff-ffff-ffffffffffff"), 0);
-        assert_eq!(
-            id("0123456789abcdeffedcba9876543210"),
-            0xffff_ffff_ffff_ffff
+            0x20f2_b792_5b72_2ee4
         );
         assert_eq!(
             id("9d87123d-9b47-466d-9eda-001c2ecf9c54"),
-            0x9d87_123d_9b47_466d ^ 0x9eda_001c_2ecf_9c54
+            0xd44d_b960_a3b6_fd37
         );
+        // The XOR of the halves gave these four the keys 0, 0, u64::MAX and u64::MAX
+        assert_eq!(
+            id("00000000-0000-0000-0000-000000000000"),
+            0x0b70_0423_f8df_72e5
+        );
+        assert_eq!(
+            id("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+            0x079b_f2bc_6505_87c3
+        );
+        assert_eq!(
+            id("0123456789abcdeffedcba9876543210"),
+            0x7b5d_9e94_189f_f3ee
+        );
+        assert_eq!(
+            id("fedcba98765432100123456789abcdef"),
+            0x7d78_4ddf_aa2f_9145
+        );
+    }
+
+    /// The pair of UUIDs that the key collision test of `tests/integration/sensor_identity.rs` uses:
+    /// two keys a brute-force search found equal. And the structures that collided under the XOR of
+    /// the halves no longer do.
+    #[test]
+    fn the_pinned_collision_collides_and_structures_do_not() {
+        let id = |high: u64, low: u64| uuid_to_sensor_id(&Uuid::from_u64_pair(high, low));
+        assert_eq!(id(0, 0xb91c_a660_43fd_e277), 0xb460_1f96_ba04_7f9a);
+        assert_eq!(id(0, 0x6cda_2dee_a474_0435), 0xb460_1f96_ba04_7f9a);
+        assert_ne!(id(1, 2), id(2, 1));
+        assert_ne!(id(3, 3), id(4, 4));
     }
 
     #[test]

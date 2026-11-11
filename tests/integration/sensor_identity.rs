@@ -263,10 +263,59 @@ async fn a_write_with_only_the_uuid_appends_to_the_stored_series() -> Result<()>
     Ok(())
 }
 
-/// ClickHouse and BigQuery key a series by a 64-bit fold of its UUID (the XOR of its halves), and
-/// SenML and Arrow writers choose their UUIDs: `(a, b)` and `(b, a)` have the same key. The second
-/// sensor was never registered, its samples went to the first series, and reads and deletes of
-/// its UUID acted on the first series. Backends keyed by the UUID store both.
+/// SenML and Arrow writers choose their UUIDs, often with a structure: two numbers in the two
+/// halves, or the same number twice. ClickHouse and BigQuery key a series by 64 bits of its UUID;
+/// with the XOR of the halves that was, `(a, b)` and `(b, a)` had the same key and every UUID with
+/// equal halves the key `0`, and the second one was refused. Every backend stores them all, against
+/// a stored sensor and within one batch.
+#[tokio::test]
+#[serial]
+async fn structured_uuids_are_separate_series() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if !applies_to(&test_db) {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let (a, b) = (fastrand::u64(..), fastrand::u64(..));
+    // The same name, so that only the UUID tells the sensors apart
+    let sensor = |high: u64, low: u64| {
+        Arc::new(Sensor::new(
+            Uuid::from_u64_pair(high, low),
+            "structured".to_string(),
+            SensorType::Float,
+            None,
+            None,
+        ))
+    };
+    let stored = sensor(a, b);
+    publish(&storage, &[(stored.clone(), 0)]).await?;
+    // Against a stored sensor
+    let swapped = sensor(b, a);
+    publish(&storage, &[(swapped.clone(), 1)]).await?;
+    // Within one batch
+    let (same, other_same) = (sensor(a, a), sensor(b, b));
+    publish(&storage, &[(same.clone(), 2), (other_same.clone(), 3)]).await?;
+
+    for (sensor, minutes) in [(stored, 0), (swapped, 1), (same, 2), (other_same, 3)] {
+        let data = storage
+            .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
+            .await?
+            .unwrap_or_else(|| panic!("{} should be stored", sensor.uuid));
+        assert_eq!(data.sensor.uuid, sensor.uuid);
+        let TypedSamples::Float(samples) = data.samples else {
+            panic!("a float series");
+        };
+        let times: Vec<_> = samples.iter().map(|sample| sample.datetime).collect();
+        assert_eq!(times, [at(minutes)], "{} reads its own sample", sensor.uuid);
+    }
+    Ok(())
+}
+
+/// Two UUIDs whose 64-bit keys are the same, found by a Pollard rho search over the UUIDs
+/// `(0, x)` (about 2^32 hashes). ClickHouse and BigQuery refuse the second one with a key
+/// collision, so that its samples never go to the series of the first, and reads and deletes of its
+/// UUID never act on it. Backends keyed by the UUID store both.
 #[tokio::test]
 #[serial]
 async fn two_uuids_with_the_same_storage_key_never_share_a_series() -> Result<()> {
@@ -276,22 +325,17 @@ async fn two_uuids_with_the_same_storage_key_never_share_a_series() -> Result<()
         return Ok(());
     }
     let storage = test_db.storage();
-    let (high, low) = (fastrand::u64(..), fastrand::u64(..));
-    // The same name, so that only the UUID tells the sensors apart
-    let sensor = |high: u64, low: u64, name: &str| {
+    let sensor = |low: u64| {
         Arc::new(Sensor::new(
-            Uuid::from_u64_pair(high, low),
-            format!("{name}_{}", high.min(low)),
+            Uuid::from_u64_pair(0, low),
+            "same_key".to_string(),
             SensorType::Float,
             None,
             None,
         ))
     };
-    let first = sensor(high, low, "fold");
-    let second = sensor(low, high, "fold");
-    let third = sensor(high ^ 1, low ^ 1, "fold_in_a_batch");
-    let fourth = sensor(low ^ 1, high ^ 1, "fold_in_a_batch");
-    publish(&storage, &[(first.clone(), 0)]).await?;
+    let first = sensor(COLLIDING_LOW_HALVES.0);
+    let second = sensor(COLLIDING_LOW_HALVES.1);
 
     let refused = |result: Result<()>| match result {
         Ok(()) => false,
@@ -313,33 +357,39 @@ async fn two_uuids_with_the_same_storage_key_never_share_a_series() -> Result<()
                 storage
                     .query_sensor_data(&sensor.uuid.to_string(), None, None, None)
                     .await?
-                    .map(|data| (data.sensor.name, data.samples.len())),
+                    .map(|data| (data.sensor.uuid, data.samples.len())),
             )
         }
     };
 
-    // Against a stored sensor
-    if refused(publish(&storage, &[(second.clone(), 1)]).await) {
-        assert_eq!(samples(second.clone()).await?, None);
-        assert!(!storage.delete_series(&second.uuid.to_string()).await?);
-    } else {
-        assert_eq!(
-            samples(second.clone()).await?,
-            Some((second.name.clone(), 1))
-        );
+    // Within one batch: both are refused, or both stored
+    let keyed_by_uuid =
+        !refused(publish(&storage, &[(first.clone(), 0), (second.clone(), 1)]).await);
+    assert_eq!(
+        keyed_by_uuid,
+        !matches!(
+            test_db.db_type,
+            DatabaseType::ClickHouse | DatabaseType::BigQuery
+        ),
+        "only ClickHouse and BigQuery key series by 64 bits"
+    );
+    if keyed_by_uuid {
+        assert_eq!(samples(first.clone()).await?, Some((first.uuid, 1)));
+        assert_eq!(samples(second.clone()).await?, Some((second.uuid, 1)));
+        return Ok(());
     }
-    assert_eq!(samples(first.clone()).await?, Some((first.name.clone(), 1)));
+    assert_eq!(samples(first.clone()).await?, None);
+    assert_eq!(samples(second.clone()).await?, None);
 
-    // Within one batch
-    if refused(publish(&storage, &[(third.clone(), 0), (fourth.clone(), 1)]).await) {
-        assert_eq!(samples(third).await?, None);
-        assert_eq!(samples(fourth).await?, None);
-    } else {
-        assert_eq!(samples(third.clone()).await?, Some((third.name.clone(), 1)));
-        assert_eq!(
-            samples(fourth.clone()).await?,
-            Some((fourth.name.clone(), 1))
-        );
-    }
+    // Against a stored sensor
+    publish(&storage, &[(first.clone(), 2)]).await?;
+    assert!(refused(publish(&storage, &[(second.clone(), 3)]).await));
+    assert_eq!(samples(second.clone()).await?, None);
+    assert!(!storage.delete_series(&second.uuid.to_string()).await?);
+    assert_eq!(samples(first.clone()).await?, Some((first.uuid, 1)));
     Ok(())
 }
+
+/// The low halves of the UUIDs `(0, x)` of [`two_uuids_with_the_same_storage_key_never_share_a_series`].
+/// Found in 2 minutes on 8 cores, after 7.3 billion hashes; both keys are `0xb460_1f96_ba04_7f9a`.
+const COLLIDING_LOW_HALVES: (u64, u64) = (0xb91c_a660_43fd_e277, 0x6cda_2dee_a474_0435);

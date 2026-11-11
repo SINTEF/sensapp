@@ -462,29 +462,20 @@ mod tests {
 
     #[test]
     fn sensor_ids_are_the_clickhouse_ids_as_signed_integers() {
-        let sensor = Sensor::new(
-            Uuid::parse_str("9d87123d-9b47-466d-9eda-001c2ecf9c54").unwrap(),
-            "s".to_string(),
-            SensorType::Float,
-            None,
-            None,
-        );
-        assert_eq!(
-            sensor_id(&sensor) as u64,
-            0x9d87_123d_9b47_466d ^ 0x9eda_001c_2ecf_9c54
-        );
-        let negative = Sensor::new(
-            Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
-            "s".to_string(),
-            SensorType::Float,
-            None,
-            None,
-        );
-        assert_eq!(
-            sensor_id(&negative),
-            i64::MIN + 0x4001,
-            "the top bit is the sign"
-        );
+        let sensor = |uuid: &str| {
+            Sensor::new(
+                Uuid::parse_str(uuid).unwrap(),
+                "s".to_string(),
+                SensorType::Float,
+                None,
+                None,
+            )
+        };
+        let positive = sensor("00000000-0000-4000-8000-000000000001");
+        assert_eq!(sensor_id(&positive), 0x20f2_b792_5b72_2ee4);
+        let negative = sensor("9d87123d-9b47-466d-9eda-001c2ecf9c54");
+        assert_eq!(sensor_id(&negative) as u64, 0xd44d_b960_a3b6_fd37);
+        assert!(sensor_id(&negative) < 0, "the top bit is the sign");
     }
 
     #[tokio::test]
