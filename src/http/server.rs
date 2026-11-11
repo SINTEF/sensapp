@@ -147,6 +147,16 @@ fn timeout_layer(duration: Duration) -> TimeoutLayer {
 /// The routes and the layers of the HTTP server, without a socket: the real thing, that the
 /// tests run as well.
 pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router {
+    build_router_guarded(state, settings, None)
+}
+
+/// [`build_router`], with the guard of an open server (`SENSAPP_AUTH_DISABLED`) inside the
+/// metrics and the trace layers: what it refuses is counted and logged with a request id.
+pub fn build_router_guarded(
+    state: HttpServerState,
+    settings: &RouterSettings,
+    guard: Option<super::open_server::OpenServerGuard>,
+) -> Router {
     let max_body_bytes = settings.max_body_bytes;
     let max_body_layer = axum::middleware::from_fn_with_state(
         BodyLimits {
@@ -299,13 +309,18 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
 
     // The writes and the maintenance have timeouts of their own, merged after the layer of the
     // other requests so that this one does not apply to them.
-    public_routes
+    let router = public_routes
         .merge(read_routes)
         .merge(delete_routes)
         .merge(admin_routes)
         .layer(timeout_layer(settings.request_timeout))
         .merge(write_routes)
-        .merge(maintenance_routes)
+        .merge(maintenance_routes);
+    let router = match guard {
+        Some(guard) => super::open_server::guard_open_server(router, guard),
+        None => router,
+    };
+    router
         // A panic in a handler is a logged 500 for that request only. Inside the metrics and the
         // trace layers, so that it is counted and logged with its request id.
         .layer(CatchPanicLayer::custom(panic_response))
@@ -325,13 +340,15 @@ pub async fn run_http_server(
     let config = config::get()?;
     let settings = RouterSettings::from_config(&config)?;
     let limits = super::serve::ServeLimits::from_config(&config);
-    let open = state.auth.is_none();
-    let app = build_router(state, &settings);
-    let app = if open {
-        super::open_server::guard_open_server(app, address.ip().is_loopback())
-    } else {
-        app
-    };
+    let guard = state.auth.is_none().then(|| {
+        let guard = super::open_server::OpenServerGuard::new(
+            &config.allowed_hosts(),
+            address.ip().is_loopback(),
+        );
+        guard.warn_about_rebinding();
+        guard
+    });
+    let app = build_router_guarded(state, &settings, guard);
 
     // Bind to the address with improved error handling
     let listener = match tokio::net::TcpListener::bind(address).await {

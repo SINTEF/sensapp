@@ -149,6 +149,12 @@ pub struct SensAppConfig {
     /// networks that authenticate in front of SensApp. Ignored when `SENSAPP_JWT_SECRET` is set.
     #[config(env = "SENSAPP_AUTH_DISABLED", default = false)]
     pub auth_disabled: bool,
+
+    /// The names (`host` or `host:port`, comma separated) that clients and the proxy in front use
+    /// to reach an open server (`SENSAPP_AUTH_DISABLED`). It then refuses any other `Host`, which
+    /// stops DNS rebinding on any address and serves a proxy that keeps its public `Host`.
+    #[config(env = "SENSAPP_ALLOWED_HOSTS")]
+    pub allowed_hosts: Option<String>,
 }
 
 impl SensAppConfig {
@@ -206,7 +212,27 @@ impl SensAppConfig {
             );
         }
         self.parse_http_body_limit()?;
+        for host in self.allowed_hosts() {
+            // A URL or a path would never match a `Host`, and every request would be refused
+            if host.contains("://") || host.contains('/') || host.contains(char::is_whitespace) {
+                anyhow::bail!(
+                    "SENSAPP_ALLOWED_HOSTS holds names like `sensapp.example.com` or `localhost:3000`, not `{host}`"
+                );
+            }
+        }
         Ok(())
+    }
+
+    /// The names of `SENSAPP_ALLOWED_HOSTS`, one per comma-separated item.
+    pub fn allowed_hosts(&self) -> Vec<String> {
+        self.allowed_hosts
+            .as_deref()
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|host| !host.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 
     /// The secrets of `SENSAPP_JWT_PREVIOUS_SECRETS`, one per comma-separated item.
@@ -317,7 +343,7 @@ mod tests {
     #[test]
     fn values_that_would_fail_later_are_refused_at_startup() {
         type MakeInvalid = fn(&mut SensAppConfig);
-        let invalid: [(&str, MakeInvalid); 12] = [
+        let invalid: [(&str, MakeInvalid); 14] = [
             ("server timeout 0", |c| c.http_server_timeout_seconds = 0),
             ("write timeout 0", |c| c.http_write_timeout_seconds = 0),
             ("maintenance timeout 0", |c| {
@@ -325,6 +351,12 @@ mod tests {
             }),
             ("body read timeout 0", |c| {
                 c.http_body_read_timeout_seconds = 0
+            }),
+            ("allowed host with a scheme", |c| {
+                c.allowed_hosts = Some("https://sensapp.example.com".to_string())
+            }),
+            ("allowed host with a path", |c| {
+                c.allowed_hosts = Some("sensapp.example.com/ui".to_string())
             }),
             ("header read timeout 0", |c| {
                 c.http_header_read_timeout_seconds = 0

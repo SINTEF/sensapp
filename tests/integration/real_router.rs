@@ -1078,3 +1078,53 @@ async fn a_slow_body_is_a_503_that_frees_the_write_slot() -> Result<()> {
     assert_eq!(status, StatusCode::NO_CONTENT);
     Ok(())
 }
+
+/// What the guard of an open server refuses is counted and logged like any request: the guard
+/// sits inside the metrics layer.
+#[tokio::test]
+#[serial]
+async fn a_refused_request_to_an_open_server_is_counted() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let state = HttpServerState {
+        name: Arc::new("SensApp Test".to_string()),
+        storage: test_db.storage(),
+        metrics: Arc::new(HttpMetrics::new()),
+        influxdb_with_numeric: false,
+        max_query_samples: sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
+        auth: None,
+    };
+    let guard = sensapp::http::open_server::OpenServerGuard::new(
+        &["sensapp.example.com".to_string()],
+        true,
+    );
+    let router = sensapp::http::server::build_router_guarded(state, &settings(), Some(guard));
+
+    let with_host = |host: &str| {
+        let mut request = write_request(None);
+        request
+            .headers_mut()
+            .insert("host", host.parse().expect("host"));
+        request
+    };
+    let (status, _, _) = send(&router, with_host("sensapp.example.com")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _, _) = send(&router, with_host("evil.example")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (_, _, metrics) = send(&router, {
+        let mut request = get_request("/prometheus/metrics");
+        request
+            .headers_mut()
+            .insert("host", "localhost:3000".parse().expect("host"));
+        request
+    })
+    .await;
+    assert!(
+        metrics.contains(
+            "sensapp_http_requests_total{method=\"POST\",path=\"/api/v2/write\",status=\"403\"} 1"
+        ),
+        "{metrics}"
+    );
+    Ok(())
+}

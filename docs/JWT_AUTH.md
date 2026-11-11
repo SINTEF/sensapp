@@ -35,7 +35,14 @@ Without authentication, any web page that a visitor of SensApp opens could act o
 - a request whose `Origin` is not the `Host` it was sent to. Browsers send `Origin` with every cross-origin request; `curl` and the SDKs send none, and are not affected.
 - on a loopback address, a request whose `Host` is not a loopback name (`localhost`, a name under `.localhost`, `127.x.x.x`, `[::1]`).
 
-A network that authenticates in front of SensApp should still pass the `Host` the client used, which proxies do by default.
+**Behind a proxy that authenticates**, name the public host in `SENSAPP_ALLOWED_HOSTS` (comma separated `host` or `host:port`, case does not matter):
+
+```bash
+export SENSAPP_AUTH_DISABLED=true
+export SENSAPP_ALLOWED_HOSTS=sensapp.example.com
+```
+
+With it, a `Host` must be one of the names (or a loopback name), and an `Origin` must be one of the names or the `Host` itself. This serves both kinds of proxy: one that keeps the `Host` of the client (Caddy, Traefik, ingress-nginx), and one that rewrites it (nginx `proxy_pass` without `proxy_set_header Host $host`): the browser's `Origin` is then the public name, which is in the list. And it stops DNS rebinding on any address, the `0.0.0.0` of the Docker image included. Without the setting, a proxy that keeps the `Host` gets a `403` on a loopback address, and DNS rebinding is not prevented on another one (SensApp logs a warning at startup). A request without a `Host` (HTTP/1.0) is refused once the setting is on; HTTP/2 requests are judged by their `:authority`. What the guard refuses is counted in `sensapp_http_requests_total` with its status `403`.
 
 The secret must be at least **32 characters**. `sensapp generate-secret` prints a random one of 48 characters (288 bits). Keep it private: anyone with the secret can make any token. In `settings.toml` it is `jwt_secret`, but an environment variable or a Secret is a better place than a file.
 

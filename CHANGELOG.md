@@ -7,6 +7,12 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 
 ### Breaking
 
+- **`SENSAPP_ALLOWED_HOSTS`** names the hosts of an open server (`SENSAPP_AUTH_DISABLED`). An open server behind
+  a proxy that keeps its public `Host` answered `403` to everything, and one that rewrites the `Host` refused the
+  writes of a browser; both work when the public name is listed. With it, DNS rebinding is refused on any
+  address, not only on a loopback bind, and a request without a `Host` is refused. What the guard refuses is now
+  counted and logged with a request id. Without the setting on a non-loopback address SensApp warns at startup.
+
 - **A PromQL query or selector is no longer limited in nesting** (it was 64 levels, counted by a text scan that a
   `#` comment containing a quote, or a chain of `^`, got around: the parser then overflowed its stack, which
   aborts the process). The parse runs on a thread whose stack fits the 4,096 bytes allowed. A `simplify` that
