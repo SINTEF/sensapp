@@ -339,15 +339,7 @@ impl StorageInstance for BigQueryStorage {
     }
 
     async fn list_metrics(&self) -> Result<Vec<Metric>> {
-        let sql = format!(
-            "SELECT s.name AS metric_name, s.type AS sensor_type, \
-             u.name AS unit_name, u.description AS unit_description, COUNT(*) AS series_count \
-             FROM {} s LEFT JOIN {} u ON s.unit = u.id \
-             GROUP BY s.name, s.type, u.name, u.description \
-             ORDER BY s.name, s.type, u.name",
-            self.dataset.sensors_set(),
-            self.dataset.units_set()
-        );
+        let sql = list_metrics_sql(&self.dataset);
         self.query_rows("list metrics", sql, Vec::new(), |row| {
             let name = required(row.get_string_by_name("metric_name"), "metric_name")?;
             let sensor_type = required(row.get_string_by_name("sensor_type"), "sensor_type")?;
@@ -368,12 +360,20 @@ impl StorageInstance for BigQueryStorage {
                 })
                 .transpose()?;
             let series_count = required(row.get_i64_by_name("series_count"), "series_count")?;
+            let label_keys = required(row.get_string_by_name("label_keys"), "label_keys")?;
+            let label_keys: Vec<String> = serde_json::from_str(&label_keys).map_err(|error| {
+                StorageError::invalid_data_format(
+                    &format!("Failed to read the label keys '{label_keys}': {error}"),
+                    None,
+                    Some(&name),
+                )
+            })?;
             Ok(Metric::new(
                 name,
                 sensor_type,
                 unit,
                 series_count,
-                Vec::new(),
+                label_keys,
             ))
         })
         .await
@@ -486,6 +486,27 @@ impl StorageInstance for BigQueryStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    async fn query_sensor_data_availability(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<Option<crate::storage::SensorAvailabilitySummary>> {
+        let Some((id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+        self.query_availability(
+            id,
+            sensor,
+            crate::storage::common::datetime_to_micros(&start_time),
+            crate::storage::common::datetime_to_micros(&end_time),
+            step_ms,
+        )
+        .await
+        .map(Some)
+    }
+
     async fn query_sensors_by_labels(
         &self,
         matchers: &[LabelMatcher],
@@ -592,9 +613,38 @@ impl StorageInstance for BigQueryStorage {
     }
 }
 
+/// The metrics, one per name and type as on the other backends, with their label keys as a JSON
+/// array: a key may hold any character, a comma too.
+fn list_metrics_sql(dataset: &Dataset) -> String {
+    format!(
+        "SELECT s.name AS metric_name, s.type AS sensor_type, \
+         MIN(u.name) AS unit_name, MIN(u.description) AS unit_description, \
+         COUNT(DISTINCT s.sensor_id) AS series_count, \
+         TO_JSON_STRING(IFNULL(ARRAY_AGG(DISTINCT l.name IGNORE NULLS ORDER BY l.name), [])) \
+         AS label_keys \
+         FROM {} s LEFT JOIN {} u ON s.unit = u.id LEFT JOIN {} l ON l.sensor_id = s.sensor_id \
+         GROUP BY s.name, s.type \
+         ORDER BY s.name, s.type",
+        dataset.sensors_set(),
+        dataset.units_set(),
+        dataset.table("labels")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metrics_list_their_label_keys_as_json() {
+        let sql = list_metrics_sql(&Dataset {
+            project_id: "p".to_string(),
+            dataset_id: "d".to_string(),
+        });
+        assert!(sql.contains("TO_JSON_STRING(IFNULL(ARRAY_AGG(DISTINCT l.name IGNORE NULLS"));
+        assert!(sql.contains("COUNT(DISTINCT s.sensor_id)"));
+        assert!(sql.contains("GROUP BY s.name, s.type "));
+    }
 
     #[test]
     fn registered_ids_expire_and_are_bounded() {

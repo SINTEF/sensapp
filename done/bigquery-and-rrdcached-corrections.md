@@ -55,3 +55,42 @@ for 4 (assert the FETCH range sent), 5, 7 and 8.
 ## Done when
 
 The tests pass, and `docs/BIGQUERY.md` and `docs/RRDCACHED.md` are updated where behaviour changed.
+
+## Outcome (11 November 2026)
+
+BigQuery was **not run live**: a run bills the company project and needs the user's credentials. The BigQuery
+changes have unit tests only, and the next live run should cover them (`list_metrics`, availability, writes).
+
+1. **Fixed**: `check_append_results` asks for one `AppendResult` per request. The number of requests is not
+   returned by the client, so it is bounded from below by the bytes sent (`bytes_sent / 10 MiB`, rounded up:
+   the client cuts at 9 MiB of rows and counts the stream name and the schema too). No answer, an answer
+   without a result, or fewer results than that bound is a failure. Unit test
+   `an_append_is_a_success_only_when_every_request_is_confirmed`. Whether the service ever does this is still
+   unknown.
+2. **Fixed**: availability is one statement (`COUNT(*)`, `MIN`, `MAX`, `COUNT(DISTINCT DIV(t - @start, @step))`)
+   instead of reading every sample. Unit test on the statement.
+3. **Nothing to do**: every read by UUID compares the UUID next to the id (`s.uuid = @uuid`), done in the
+   ClickHouse Numeric and UUID identity task.
+4. **Reproduced live**: `FETCH` of an existing file from an hour ago to a year ahead answered 3,153,967 lines on
+   the local daemon (rrdtool 1.9). The end of a read is now at most `future` seconds and one row after now. Unit
+   test `an_end_in_the_future_is_read_up_to_now`.
+5. **Fixed**: the `metric` filter of `list_series` is the whole UUID. Unit test
+   `the_series_filter_is_the_whole_name`.
+6. **Documented** in `docs/RRDCACHED.md`: the last row is stamped with the end of its interval, up to one row
+   after `end`. Clipping it would drop the samples of that interval that are in the window.
+7. **Fixed**: the health check waits 3 s at most, then answers unavailable. Unit test
+   `the_health_check_does_not_wait_for_a_stuck_request` (fails without the timeout: it waited the 15 s of the
+   stuck request).
+8. **Fixed**: a sample more than `future` seconds after now (connection parameter, default 600) refuses the
+   whole write with `400`. Unit test `a_sample_far_in_the_future_is_refused_and_nothing_is_written`.
+9. **Fixed**: `list_metrics` is `Unsupported` (`501`).
+10. **Fixed in the crate**, on the branch `batch-commands-before-batch` of `~/work/rrdcached-client` (commit
+    fdb2f40): every command string is built before `BATCH` is sent. Not released; SensApp keeps 0.4.0 until the
+    next release. Its unit tests pass, except `test_ping_unix`, which fails the same way without the change
+    (it needs a daemon on a Unix socket).
+11. **Fixed**: BigQuery `list_metrics` groups by name and type and returns the label keys as a JSON array
+    (`TO_JSON_STRING(ARRAY_AGG(DISTINCT ...))`). Unit test on the statement.
+
+Suites run: RRDCached unit tests (62) and live integration tests (27, the way CI runs them), BigQuery unit tests
+(36), `cargo clippy` and `cargo clippy --all-features --tests`. The other backends were not run: no shared code
+changed.

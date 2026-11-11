@@ -26,6 +26,9 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
   written off by a power of ten, and a large value wrapped.
 - A label name given twice to one series (`cpu,host=a,host=b`) is refused with `400`. DuckDB answered `500`
   and the other backends kept one of the two values.
+- RRDCached refuses a sample more than 10 minutes in the future with `400` (the `future` parameter of the
+  connection string): the series could not take a sample before it any more. `/metrics` answers `501` on
+  RRDCached instead of an empty list.
 
 ### Changed and fixed
 
@@ -56,6 +59,10 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
   not committed, the schema has a version, and a read without a limit is capped like on the other backends.
 - A series read with an upper-case or hyphen-less UUID is found (`404` on SQLite and DuckDB), and the
   availability of a series without a step no longer fails on DuckDB.
+- RRDCached: a read whose end is after now stops shortly after now (an end a year ahead read 3 million empty
+  rows), the health check waits 3 s at most, and the `metric` filter of `/series` is the whole UUID.
+- BigQuery: a write is a success only when BigQuery confirmed every request it was cut into, availability is
+  one statement instead of reading every sample, and `/metrics` lists the label keys. Not run live yet.
 
 ## 0.4.2
 

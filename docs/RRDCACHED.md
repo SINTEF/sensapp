@@ -42,6 +42,7 @@ The build must include the feature (`--features rrdcached`; the container image 
 |---|---|---|
 | `preset` | `hoarder` | The archives of the files that SensApp creates: `hoarder` or `munin`, see [Presets](#presets) |
 | `heartbeat` | `3600` | Seconds. A gap between two samples longer than this is unknown, see [Gaps](#gaps) |
+| `future` | `600` | Seconds. How far after now a sample may be, see [Time](#time) |
 
 Anything else is refused at startup, as is a daemon that cannot be reached. The parameters only apply to the files
 SensApp creates: an existing file keeps its own.
@@ -152,14 +153,20 @@ rrdtool tune /var/lib/rrdcached/db/<uuid>.rrd --heartbeat sensapp:3600
   has newer data, and two instances that write the same series at the same time can only both keep the samples that
   are in order.
 - Times before 1970 are not stored.
+- A sample more than `future` seconds (10 minutes by default) after now is **refused with `400`**, and nothing
+  of the request is stored: the series could not take any sample before it any more, and there is no delete.
+  A clock a little ahead is fine.
 - `NaN` never reaches RRDcached: a write that holds one is refused with `400`, and Prometheus remote write drops
   its NaN samples (the stale markers), see [DATAMODEL.md](DATAMODEL.md#non-finite-floats). A series that stops
   being written becomes unknown in RRDcached after its heartbeat anyway.
 
 ## How the data is read
 
-- A window is `[start, end]`. Without `end` it ends now. Without `start` it begins where the longest archive of the
-  preset begins, so a request without a window returns the consolidated history of the whole file.
+- A window is `[start, end]`. Without `end` it ends now, and an `end` after now ends `future` seconds and one row
+  after now. Without `start` it begins where the longest archive of the preset begins, so a request without a
+  window returns the consolidated history of the whole file.
+- The rows that meet the window are returned: the last one is stamped with the end of its interval, which can be
+  up to one row (10 seconds, or more in a coarse archive) after `end`.
 - RRDtool serves a window from **one archive: the finest that covers all of it**. A window of a few hours is
   served by the rows of 10 seconds, a window of a month by the rows of 10 minutes or an hour. The rows are not
   resampled: the time between two samples that you get back depends on the width of the window.
@@ -183,9 +190,11 @@ rrdtool tune /var/lib/rrdcached/db/<uuid>.rrd --heartbeat sensapp:3600
 - A request to the daemon that takes more than 15 seconds is abandoned and the connection is replaced. A request
   that is cancelled by the HTTP timeout does the same. A daemon that cannot be reached is a `503` (so Prometheus
   retries), a refusal of the daemon is a `500`.
-- `GET /health/ready` sends a `PING`: it does not write anything.
+- `GET /health/ready` sends a `PING`: it does not write anything. It waits 3 seconds at most for a request that
+  holds the connection, then answers that the daemon is unavailable.
 - `GET /series` has to list the files of the daemon, whose cost grows with the number of series (about 50 ms
-  with 6 000). Pages are in UUID order.
+  with 6 000). Pages are in UUID order, and the `metric` filter is the whole UUID.
+- `GET /metrics` answers `501 Not Implemented`: there are no names to list.
 - A selector that has the UUID of a series as its `__name__` is read directly. Anything else lists the files first.
 
 ## Performance

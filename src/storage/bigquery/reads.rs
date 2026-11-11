@@ -141,6 +141,22 @@ pub(super) fn window(
     conditions
 }
 
+/// The availability of a series in one statement. The window starts at `@start`, so the bucket
+/// index `DIV(t - @start, @step)` is never negative.
+pub(super) fn availability_sql(table: &str, with_step: bool) -> String {
+    let buckets = if with_step {
+        "COUNT(DISTINCT DIV(UNIX_MICROS(timestamp) - @start, @step))"
+    } else {
+        "CAST(NULL AS INT64)"
+    };
+    format!(
+        "SELECT COUNT(*) AS sample_count, UNIX_MICROS(MIN(timestamp)) AS first_us, \
+         UNIX_MICROS(MAX(timestamp)) AS last_us, {buckets} AS covered_buckets FROM {table} \
+         WHERE sensor_id = @id AND timestamp >= TIMESTAMP_MICROS(@start) \
+         AND timestamp <= TIMESTAMP_MICROS(@end)"
+    )
+}
+
 /// Where the tables are, and the statements that name them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dataset {
@@ -285,6 +301,51 @@ impl BigQueryStorage {
             }
         }
         Ok(labels)
+    }
+
+    /// The count, first and last samples of a series in `[start, end]`, and with a step the number of
+    /// buckets from `start` that hold a sample: one query instead of reading every sample.
+    pub(super) async fn query_availability(
+        &self,
+        id: i64,
+        sensor: Sensor,
+        start_us: i64,
+        end_us: i64,
+        step_ms: Option<i64>,
+    ) -> Result<crate::storage::SensorAvailabilitySummary> {
+        let mut params = vec![
+            int_param("id", id),
+            int_param("start", clamp_micros(start_us)),
+            int_param("end", clamp_micros(end_us)),
+        ];
+        if let Some(step_ms) = step_ms {
+            let step_us = step_ms
+                .checked_mul(1000)
+                .ok_or_else(|| anyhow::anyhow!("step is too large"))?;
+            params.push(int_param("step", step_us));
+        }
+        let sql = availability_sql(
+            &self.table(sample_table(sensor.sensor_type)),
+            step_ms.is_some(),
+        );
+        let rows = self
+            .query_rows("read availability", sql, params, |row| {
+                Ok((
+                    required(row.get_i64_by_name("sample_count"), "sample_count")?,
+                    row.get_i64_by_name("first_us")?,
+                    row.get_i64_by_name("last_us")?,
+                    row.get_i64_by_name("covered_buckets")?,
+                ))
+            })
+            .await?;
+        let (count, first_us, last_us, covered) = rows.into_iter().next().unwrap_or_default();
+        Ok(crate::storage::SensorAvailabilitySummary {
+            sensor,
+            sample_count: count.max(0) as usize,
+            first_sample_at: first_us.map(SensAppDateTime::from_unix_microseconds_i64),
+            last_sample_at: last_us.map(SensAppDateTime::from_unix_microseconds_i64),
+            covered_buckets: covered.map(|covered| covered.max(0) as usize),
+        })
     }
 
     /// A series by its UUID, with its id in the tables.
@@ -473,6 +534,15 @@ mod tests {
         let sql = window(Some(10), Some(20), &mut Vec::new());
         assert!(sql.contains("@start") && sql.contains("@end"));
         assert_eq!(window(None, None, &mut Vec::new()), "");
+    }
+
+    #[test]
+    fn availability_is_one_statement_with_parameters() {
+        let sql = availability_sql("`p.d.float_values`", true);
+        assert!(sql.contains("COUNT(DISTINCT DIV(UNIX_MICROS(timestamp) - @start, @step))"));
+        assert!(sql.contains("FROM `p.d.float_values`") && sql.contains("@end"));
+        let sql = availability_sql("`p.d.float_values`", false);
+        assert!(!sql.contains("@step") && sql.contains("CAST(NULL AS INT64) AS covered_buckets"));
     }
 
     #[test]

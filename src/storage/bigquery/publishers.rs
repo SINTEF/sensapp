@@ -12,7 +12,7 @@ use crate::storage::common::{
 use anyhow::Result;
 use futures::future::try_join_all;
 use gcp_bigquery_client::google::cloud::bigquery::storage::v1::append_rows_response::Response;
-use gcp_bigquery_client::storage::{StreamName, TableBatch, TableDescriptor};
+use gcp_bigquery_client::storage::{BatchAppendResult, StreamName, TableBatch, TableDescriptor};
 use prost::Message;
 use rust_decimal::{Decimal, RoundingStrategy};
 use std::collections::HashMap;
@@ -150,32 +150,7 @@ impl BigQueryStorage {
             .await
             .map_err(|error| map_error(&operation, error))?;
 
-        for result in results {
-            for response in result.responses {
-                let response = response.map_err(|status| {
-                    map_error(
-                        &operation,
-                        gcp_bigquery_client::error::BQError::from(status),
-                    )
-                })?;
-                if let Some(Response::Error(status)) = response.response {
-                    return Err(append_failure(&operation, status.code, &status.message));
-                }
-                if let Some(row_error) = response.row_errors.first() {
-                    return Err(StorageError::OperationFailed {
-                        operation: format!("BigQuery {operation}"),
-                        details: format!(
-                            "row {} rejected: {} ({} rows rejected in this append)",
-                            row_error.index,
-                            row_error.message,
-                            response.row_errors.len()
-                        ),
-                    }
-                    .into());
-                }
-            }
-        }
-        Ok(())
+        check_append_results(&operation, results)
     }
 
     /// Write the series that are not stored yet: their units, their labels, and last the sensors
@@ -328,6 +303,62 @@ impl BigQueryStorage {
 }
 
 /// An append rejected by the service: `code` is a `google.rpc.Code`.
+/// A write is a success when BigQuery confirmed every request it was cut into: one append result
+/// per request, and no error. An empty or short answer is not a confirmation. The bytes sent tell
+/// the least number of requests.
+fn check_append_results(operation: &str, results: Vec<BatchAppendResult>) -> Result<()> {
+    if results.is_empty() {
+        return Err(unconfirmed(operation, "no answer"));
+    }
+    for result in results {
+        let least_requests = result.bytes_sent.div_ceil(REQUEST_BYTES_BOUND).max(1);
+        let mut confirmed = 0;
+        for response in result.responses {
+            let response = response.map_err(|status| {
+                map_error(operation, gcp_bigquery_client::error::BQError::from(status))
+            })?;
+            if let Some(row_error) = response.row_errors.first() {
+                return Err(StorageError::OperationFailed {
+                    operation: format!("BigQuery {operation}"),
+                    details: format!(
+                        "row {} rejected: {} ({} rows rejected in this append)",
+                        row_error.index,
+                        row_error.message,
+                        response.row_errors.len()
+                    ),
+                }
+                .into());
+            }
+            match response.response {
+                Some(Response::AppendResult(_)) => confirmed += 1,
+                Some(Response::Error(status)) => {
+                    return Err(append_failure(operation, status.code, &status.message));
+                }
+                None => return Err(unconfirmed(operation, "an answer without a result")),
+            }
+        }
+        if confirmed < least_requests {
+            return Err(unconfirmed(
+                operation,
+                &format!("{confirmed} results for at least {least_requests} requests"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// More than one request holds: the client cuts the rows into requests of at most 9 MiB, and
+/// counts the stream name and the schema of each request too, which are far below 1 MiB.
+const REQUEST_BYTES_BOUND: usize = 10 * 1024 * 1024;
+
+fn unconfirmed(operation: &str, what: &str) -> anyhow::Error {
+    StorageError::OperationFailed {
+        operation: format!("BigQuery {operation}"),
+        details: format!("the write was not confirmed: {what}"),
+    }
+    .into()
+}
+
 fn append_failure(operation: &str, code: i32, message: &str) -> anyhow::Error {
     if grpc_code_is_transient(code) {
         StorageError::Unavailable(format!("{operation}: {message}")).into()
@@ -344,6 +375,55 @@ fn append_failure(operation: &str, code: i32, message: &str) -> anyhow::Error {
 mod tests {
     use super::*;
     use crate::datamodel::{Sample, SensAppDateTime, SensorType, batch::SingleSensorBatch};
+
+    // ---- confirmation of an append
+
+    use gcp_bigquery_client::google::cloud::bigquery::storage::v1::{
+        AppendRowsResponse, append_rows_response::AppendResult,
+    };
+
+    fn confirmed() -> AppendRowsResponse {
+        AppendRowsResponse {
+            response: Some(Response::AppendResult(AppendResult::default())),
+            ..AppendRowsResponse::default()
+        }
+    }
+
+    fn answer(responses: Vec<AppendRowsResponse>, bytes_sent: usize) -> Vec<BatchAppendResult> {
+        vec![BatchAppendResult::new(
+            0,
+            responses.into_iter().map(Ok).collect(),
+            bytes_sent,
+        )]
+    }
+
+    #[test]
+    fn an_append_is_a_success_only_when_every_request_is_confirmed() {
+        assert!(check_append_results("write", answer(vec![confirmed()], 100)).is_ok());
+        let two_requests = REQUEST_BYTES_BOUND + 1;
+        assert!(
+            check_append_results(
+                "write",
+                answer(vec![confirmed(), confirmed()], two_requests)
+            )
+            .is_ok()
+        );
+
+        let unconfirmed = [
+            Vec::new(),
+            answer(Vec::new(), 100),
+            answer(vec![AppendRowsResponse::default()], 100),
+            answer(vec![confirmed()], two_requests),
+        ];
+        for results in unconfirmed {
+            let error = check_append_results("write", results).unwrap_err();
+            assert!(
+                error.to_string().contains("not confirmed")
+                    || format!("{error:#}").contains("not confirmed"),
+                "{error:#}"
+            );
+        }
+    }
     use hifitime::Epoch;
     use smallvec::smallvec;
     use std::str::FromStr;

@@ -1133,7 +1133,11 @@ mod rrdcached_tests {
             error.downcast_ref::<StorageError>(),
             Some(StorageError::Unsupported(_))
         ));
-        assert!(storage.list_metrics().await?.is_empty());
+        let error = storage.list_metrics().await.unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<StorageError>(),
+            Some(StorageError::Unsupported(_))
+        ));
         Ok(())
     }
 
