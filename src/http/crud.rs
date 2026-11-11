@@ -226,7 +226,11 @@ fn convert_label_match_op(op: rusty_promql_parser::LabelMatchOp) -> MatcherType 
 ///
 /// An invalid regex, `offset` and `@` are refused: SensApp would otherwise ignore them.
 pub(crate) fn parse_selector_to_matchers(selector: &str) -> Result<Vec<LabelMatcher>, AppError> {
-    super::limits::check_promql_size(selector)?;
+    super::limits::check_promql_length(selector)?;
+    super::limits::on_promql_parser_stack(|| parse_selector(selector))
+}
+
+fn parse_selector(selector: &str) -> Result<Vec<LabelMatcher>, AppError> {
     // If the selector is just braces with labels, wrap it in a placeholder metric name
     let without_name = selector.trim().starts_with('{');
     let query_str = if without_name {
@@ -986,8 +990,13 @@ pub async fn get_series_data(
         )?;
 
         let series_data = match query_options.simplify {
+            // CPU-bound, and a request timeout cannot interrupt it: off the async workers
             Some(simplify_options) => {
-                crate::storage::common::simplify_sensor_data(series_data, simplify_options)?
+                crate::http::app_error::run_blocking(move || {
+                    crate::storage::common::simplify_sensor_data(series_data, simplify_options)
+                        .map_err(AppError::from)
+                })
+                .await?
             }
             None => series_data,
         };

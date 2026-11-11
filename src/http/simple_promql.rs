@@ -88,7 +88,7 @@ fn extract_matchers_from_vector_selector(
 
 /// Information extracted from a parsed PromQL query
 #[derive(Debug)]
-struct ParsedQuery {
+pub(crate) struct ParsedQuery {
     matchers: Vec<LabelMatcher>,
     start_time: Option<SensAppDateTime>,
     end_time: Option<SensAppDateTime>,
@@ -220,21 +220,23 @@ fn parse_expr(ast: Expr, query: &str) -> Result<ParsedQuery, AppError> {
 }
 
 /// Parse and validate a PromQL query, returning the extracted information
-fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
-    super::limits::check_promql_size(query)?;
-    let (rest, ast) = expr(query).map_err(|e| {
-        AppError::bad_request(anyhow::anyhow!("Failed to parse PromQL query: {:?}", e))
-    })?;
+pub(crate) fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
+    super::limits::check_promql_length(query)?;
+    super::limits::on_promql_parser_stack(|| {
+        let (rest, ast) = expr(query).map_err(|e| {
+            AppError::bad_request(anyhow::anyhow!("Failed to parse PromQL query: {:?}", e))
+        })?;
 
-    // Ensure the entire query was consumed
-    if !rest.trim().is_empty() {
-        return Err(AppError::bad_request(anyhow::anyhow!(
-            "Unexpected trailing content in query: '{}'",
-            rest
-        )));
-    }
+        // Ensure the entire query was consumed
+        if !rest.trim().is_empty() {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Unexpected trailing content in query: '{}'",
+                rest
+            )));
+        }
 
-    parse_expr(ast, query)
+        parse_expr(ast, query)
+    })
 }
 
 /// Simple PromQL query endpoint.

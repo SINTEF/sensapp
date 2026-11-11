@@ -7,6 +7,11 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 
 ### Breaking
 
+- **A PromQL query or selector is no longer limited in nesting** (it was 64 levels, counted by a text scan that a
+  `#` comment containing a quote, or a chain of `^`, got around: the parser then overflowed its stack, which
+  aborts the process). The parse runs on a thread whose stack fits the 4,096 bytes allowed. A `simplify` that
+  would cost more than 100 million distance evaluations (a tolerance near 0 on a large zigzag) is a `400`.
+
 - **SensApp serves HTTP/1.1 only**, no HTTP/2 over cleartext, and a client has `SENSAPP_HTTP_HEADER_READ_TIMEOUT_SECONDS`
   (75 s by default, 30 s before) to send its headers or to send its next request on an idle connection. A
   connection that sends nothing is now closed too. The slow body of a write is a `503` with `Retry-After` instead

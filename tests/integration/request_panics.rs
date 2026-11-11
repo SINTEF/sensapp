@@ -258,20 +258,25 @@ async fn a_senml_time_out_of_range_is_refused() -> Result<()> {
 
 /// The PromQL parser is a recursive descent with no depth limit. Measured on a 2 MiB thread (a
 /// Tokio worker) in a debug build: 150 nested parentheses or 700 unary minus signs overflow the
-/// stack, which aborts the process. Queries and selectors are now refused above 4 KiB or 64 levels.
+/// stack, which aborts the process. Queries and selectors are refused above 4 KiB, and the parse
+/// runs on a thread whose stack fits what 4 KiB can nest, a comment hiding a quote included.
 #[tokio::test]
 #[serial]
-async fn deeply_nested_or_long_queries_are_refused() -> Result<()> {
+async fn long_queries_are_refused_and_deep_ones_do_not_crash() -> Result<()> {
     ensure_config();
     let test_db = TestDb::new().await?;
     let app = app(test_db.storage());
-    let queries = [
+    let too_long = format!("x{}", " + x".repeat(1_250));
+    let deep = [
         format!("{}x{}", "(".repeat(300), ")".repeat(300)),
         format!("{}x", "-".repeat(1000)),
-        // Over 4 KiB (a URI is at most 64 KiB)
-        format!("x{}", " + x".repeat(1_250)),
+        format!("#\"\n{}", "(".repeat(4_000)),
+        format!("x{}", "^x".repeat(2_040)),
+        "-(".repeat(2_000),
     ];
-    for query in &queries {
+    for (query, refused_for_its_length) in
+        std::iter::once((&too_long, true)).chain(deep.iter().map(|query| (query, false)))
+    {
         let query = urlencoding::encode(query);
         for uri in [
             format!("/api/v1/query?query={query}"),
@@ -279,8 +284,16 @@ async fn deeply_nested_or_long_queries_are_refused() -> Result<()> {
             format!("/prometheus/metrics?include_latest_samples=true&selector={query}"),
         ] {
             let (status, body) = send(&app, Request::get(&uri).body(Body::empty()).unwrap()).await;
-            assert_eq!(status, StatusCode::BAD_REQUEST, "{}: {body}", &uri[..40]);
-            assert!(body.contains("PromQL"), "{body}");
+            // A parse error or a result, never a crash nor a 5xx
+            assert!(
+                status.is_client_error() || status.is_success(),
+                "{}: {status}",
+                &uri[..40]
+            );
+            if refused_for_its_length {
+                assert_eq!(status, StatusCode::BAD_REQUEST, "{}: {body}", &uri[..40]);
+                assert!(body.contains("PromQL"), "{body}");
+            }
         }
     }
     // A label value may hold any character

@@ -382,13 +382,47 @@ fn filter_samples_by_indices<V>(
     filtered
 }
 
+/// Most distances a simplification may evaluate. Douglas-Peucker is `n log n` on most series and
+/// `n^2` on the adversarial ones (a zigzag with decreasing amplitude and a tolerance near 0): 100,000
+/// points need 5 * 10^9 evaluations. This allows 100 times the `n log n` of the largest series a
+/// request can simplify (`SENSAPP_HTTP_MAX_QUERY_SAMPLES`, 100,000 by default), under a second in a
+/// release build.
+pub const MAX_SIMPLIFY_DISTANCE_EVALUATIONS: u64 = 100_000_000;
+
+/// The simplification would need more than [`MAX_SIMPLIFY_DISTANCE_EVALUATIONS`]: a client error.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "The tolerance is too small for this series: simplifying it would take more than \
+     {MAX_SIMPLIFY_DISTANCE_EVALUATIONS} distance evaluations. Raise the tolerance, or narrow \
+     the time range or add a step and an aggregation"
+)]
+pub struct SimplifyBudgetExceeded;
+
 /// The indices of the points that a Douglas-Peucker simplification keeps, in order. The same
 /// algorithm as `simplify-polyline` (squared distances, a radial distance pass first unless
 /// `high_quality`), but iterative: the recursive version went one level deeper per point on some
 /// series, and overflowed the stack of a Tokio worker, which aborts the process.
-fn simplify_indices(points: &[[f64; 2]], tolerance: f64, high_quality: bool) -> Vec<usize> {
+fn simplify_indices(
+    points: &[[f64; 2]],
+    tolerance: f64,
+    high_quality: bool,
+) -> Result<Vec<usize>, SimplifyBudgetExceeded> {
+    simplify_indices_within(
+        points,
+        tolerance,
+        high_quality,
+        MAX_SIMPLIFY_DISTANCE_EVALUATIONS,
+    )
+}
+
+fn simplify_indices_within(
+    points: &[[f64; 2]],
+    tolerance: f64,
+    high_quality: bool,
+    budget: u64,
+) -> Result<Vec<usize>, SimplifyBudgetExceeded> {
     if points.len() <= 2 {
-        return (0..points.len()).collect();
+        return Ok((0..points.len()).collect());
     }
     let tolerance = tolerance * tolerance;
     let sq_dist = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2);
@@ -434,7 +468,12 @@ fn simplify_indices(points: &[[f64; 2]], tolerance: f64, high_quality: bool) -> 
     keep[0] = true;
     keep[candidates.len() - 1] = true;
     let mut segments = vec![(0, candidates.len() - 1)];
+    let mut evaluations = 0_u64;
     while let Some((first, last)) = segments.pop() {
+        evaluations += (last - first - 1) as u64;
+        if evaluations > budget {
+            return Err(SimplifyBudgetExceeded);
+        }
         let mut max_sq_dist = tolerance;
         let mut max_index = 0;
         for i in first + 1..last {
@@ -458,11 +497,11 @@ fn simplify_indices(points: &[[f64; 2]], tolerance: f64, high_quality: bool) -> 
             }
         }
     }
-    candidates
+    Ok(candidates
         .into_iter()
         .zip(keep)
         .filter_map(|(index, kept)| kept.then_some(index))
-        .collect()
+        .collect())
 }
 
 /// The indices of the samples a simplification keeps. It runs over the finite values, scaled to
@@ -509,7 +548,7 @@ where
                 ]
             })
             .collect();
-        simplify_indices(&points, tolerance, high_quality)
+        simplify_indices(&points, tolerance, high_quality)?
             .into_iter()
             .map(|kept| finite[kept].0)
             .collect()
@@ -893,11 +932,45 @@ mod tests {
                 .map(|point| point.vec)
                 .collect();
             let kept: Vec<[f64; 2]> = simplify_indices(&points, tolerance, high_quality)
+                .unwrap()
                 .into_iter()
                 .map(|index| points[index])
                 .collect();
             assert_eq!(kept, expected, "round {round}");
         }
+    }
+
+    /// The zigzag of the test below at 100,000 points costs 5 * 10^9 distance evaluations (187 s in
+    /// a debug build, 0.6 s to run out of the budget in a release build, measured), and a request
+    /// timeout cannot interrupt CPU-bound code: the work has a budget, and a series over it is a
+    /// client error. A small budget shows it on 5,000 points.
+    #[test]
+    fn simplify_stops_a_series_that_costs_too_much() {
+        let points: Vec<[f64; 2]> = (0..5_000)
+            .map(|i| {
+                [
+                    i as f64,
+                    if i % 2 == 0 { 1.0 } else { -1.0 } * 0.99999_f64.powi(i),
+                ]
+            })
+            .collect();
+        // 5,000 points keep every point at n^2 / 2 = 12.5 million evaluations
+        assert_eq!(
+            simplify_indices_within(&points, 1e-12, true, 13_000_000)
+                .unwrap()
+                .len(),
+            5_000
+        );
+        assert!(simplify_indices_within(&points, 1e-12, true, 1_000_000).is_err());
+        // The budget has no effect on the series that cost n log n
+        let noisy: Vec<[f64; 2]> = (0..100_000).map(|i| [i as f64, fastrand::f64()]).collect();
+        assert!(simplify_indices(&noisy, 1e-9, true).is_ok());
+        // And the error is a client error
+        let error = anyhow::Error::from(SimplifyBudgetExceeded);
+        assert!(matches!(
+            crate::http::app_error::AppError::from(error),
+            crate::http::app_error::AppError::BadRequest(_)
+        ));
     }
 
     /// A series whose farthest point is always next to the start of the segment: the recursive

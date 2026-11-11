@@ -179,6 +179,10 @@ impl From<anyhow::Error> for AppError {
         }) {
             return Self::Storage(StorageError::Unavailable(format!("{err:#}")));
         }
+        // The client asked for a simplification that costs too much
+        if err.is::<crate::storage::common::SimplifyBudgetExceeded>() {
+            return Self::BadRequest(err);
+        }
         match err.downcast::<StorageError>() {
             Ok(storage_error) => Self::Storage(storage_error),
             Err(err) => Self::InternalServerError(err),
