@@ -56,7 +56,7 @@ Created by `src/storage/bigquery/migrations/init.sql`: `units`, `sensors`, `labe
 | **Matchers** | `=`, `!=`, `=~`, `!~` on names and labels, with RE2 (`REGEXP_CONTAINS`, anchored). As on ClickHouse, `!=` and `!~` also select the series that do not have the label |
 | **Reading a large result** | All the pages of the result are read (10 MB each), and a statement that outlasts its first answer is waited for (up to 5 minutes, then the request fails as unavailable) |
 | **Errors** | Overload, quota errors that say "retry" and network failures are `503`; a rejected statement or write is `500` |
-| **Confirmation of a write** | An append is cut into requests of at most 9 MiB. A write is a success only when BigQuery answered each request with a result: an empty or short answer is a `500`, not a success |
+| **Confirmation of a write** | An append is cut into requests of at most 9 MiB. A write is a success only when BigQuery answered with a result for at least as many requests as the bytes sent need (one per 10 MiB, since the client cuts at 9 MiB): an empty or short answer is a `500`, not a success. The count is a lower bound: 9.5 MiB of rows are two requests and the bound is one, so a missing answer for the last of them is not noticed |
 | **Not implemented** | Vacuum (nothing to do), removing duplicates, deduplication at ingestion |
 
 ## Setting up Google Cloud

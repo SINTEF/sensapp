@@ -9,10 +9,16 @@ use utoipa::ToSchema;
 
 /// PostgreSQL error codes of a database that cannot serve the request now but may later: the
 /// connection exception class (`08`), too many connections, and the shutdown family (admin
-/// shutdown, crash shutdown, cannot connect now). A statement timeout (`57014`) is not one of
+/// shutdown, crash shutdown, cannot connect now), and the locks: a lock timeout (`55P03`, a writer
+/// waited for the lock of a series being deleted) and a deadlock (`40P01`). The transaction was
+/// rolled back, and the same request can work later. A statement timeout (`57014`) is not one of
 /// them: the database is up, the query is slow, and retrying it only adds load.
 fn sqlstate_is_unavailable(code: &str) -> bool {
-    code.starts_with("08") || matches!(code, "53300" | "57P01" | "57P02" | "57P03")
+    code.starts_with("08")
+        || matches!(
+            code,
+            "53300" | "57P01" | "57P02" | "57P03" | "55P03" | "40P01"
+        )
 }
 
 /// Whether a SQLite error is `SQLITE_BUSY` or `SQLITE_LOCKED`: another connection holds the write
@@ -307,11 +313,14 @@ mod tests {
     fn test_sqlstates_of_an_unavailable_database() {
         for code in [
             "08000", "08006", "08001", "53300", "57P01", "57P02", "57P03",
+            // lock_not_available (the lock timeout) and deadlock_detected: a write that waited for
+            // a lock, or was chosen as the victim, can be sent again
+            "55P03", "40P01",
         ] {
             assert!(sqlstate_is_unavailable(code), "{code}");
         }
-        // A statement timeout (query canceled), a deadlock, a constraint, and the SQLite codes
-        for code in ["57014", "40P01", "23505", "42P01", "5", "14", ""] {
+        // A statement timeout (query canceled), a constraint, and the SQLite codes
+        for code in ["57014", "23505", "42P01", "5", "14", ""] {
             assert!(!sqlstate_is_unavailable(code), "{code}");
         }
     }

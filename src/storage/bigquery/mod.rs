@@ -180,6 +180,32 @@ impl BigQueryStorage {
         self.registered().remove(sensor_id);
     }
 
+    /// Refuse a dataset whose sensors were keyed another way, see `check_sensor_keys`. The keys are
+    /// stored as signed `INT64`: the same bits.
+    async fn check_stored_sensor_keys(&self) -> Result<()> {
+        let sql = format!(
+            "SELECT uuid, sensor_id FROM `{}.{}.sensors` LIMIT {}",
+            self.dataset.project_id,
+            self.dataset.dataset_id,
+            crate::storage::common::SENSOR_KEY_GUARD_ROWS
+        );
+        let keys = self
+            .query_rows(
+                "read the keys of the stored sensors",
+                sql,
+                Vec::new(),
+                |row| {
+                    let uuid = required(row.get_string(0), "uuid")?;
+                    let uuid = uuid::Uuid::parse_str(&uuid)
+                        .map_err(|e| anyhow::anyhow!("Invalid stored UUID '{uuid}': {e}"))?;
+                    let sensor_id = required(row.get_i64(1), "sensor_id")?;
+                    Ok((uuid, sensor_id as u64))
+                },
+            )
+            .await?;
+        crate::storage::common::check_stored_sensor_keys(&keys)
+    }
+
     async fn reject_legacy_schema(&self) -> Result<()> {
         let sql = format!(
             "SELECT table_name FROM `{}.{}.INFORMATION_SCHEMA.TABLES` \
@@ -236,6 +262,7 @@ impl StorageInstance for BigQueryStorage {
             &format!("{}.{}", dataset.project_id, dataset.dataset_id),
         );
         self.execute("create the tables", sql, Vec::new()).await?;
+        self.check_stored_sensor_keys().await?;
         Ok(())
     }
 

@@ -7,7 +7,7 @@ use super::pg_strings::ensure_string_ids;
 use super::{
     Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT,
     SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
-    common::{VALUE_TABLES, datetime_to_micros, is_deadlock, sensor_deleted_during_write},
+    common::{VALUE_TABLES, datetime_to_micros},
 };
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
@@ -24,9 +24,6 @@ use sqlx::{
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use uuid::Uuid;
-
-/// How many times a batch is written before its error is returned (see `publish`).
-const PUBLISH_ATTEMPTS: usize = 5;
 
 #[derive(Debug)]
 pub struct TimeScaleDBStorage {
@@ -422,6 +419,112 @@ impl TimeScaleDBStorage {
         }
     }
 
+    async fn query_sensor_data_latest_once(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<crate::storage::common::LatestRead> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(crate::storage::common::LatestRead::Nothing);
+        };
+
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+        let table_name = Self::sensor_table_name(sensor.sensor_type);
+
+        let Some(latest_timestamp_us) = self
+            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+            .await?
+        else {
+            return Ok(crate::storage::common::LatestRead::Nothing);
+        };
+
+        let samples = match sensor.sensor_type {
+            SensorType::Integer => {
+                self.query_integer_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Numeric => {
+                self.query_numeric_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Float => {
+                self.query_float_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::String => {
+                self.query_string_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Boolean => {
+                self.query_boolean_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Location => {
+                self.query_location_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Json => {
+                self.query_json_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Blob => {
+                self.query_blob_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+        };
+
+        // The samples of that time were deleted between the two statements
+        if samples.is_empty() {
+            return Ok(crate::storage::common::LatestRead::Raced);
+        }
+
+        Ok(crate::storage::common::LatestRead::Found(Box::new(
+            SensorData::new(sensor, samples),
+        )))
+    }
+
     async fn query_latest_timestamp_us(
         &self,
         table_name: &'static str,
@@ -622,7 +725,7 @@ pub(super) fn timescaledb_float_expression(aggregation: Aggregation) -> &'static
 /// [`numeric_aggregate_from_text`]: crate::storage::common::numeric_aggregate_from_text
 pub(super) fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
-        Aggregation::Avg => "SUM(value)::text || '/' || COUNT(*)",
+        Aggregation::Avg => "SUM(value)::text || '/' || COUNT(value)",
         Aggregation::Min => "MIN(value)::text",
         Aggregation::Max => "MAX(value)::text",
         Aggregation::Sum => "SUM(value)::text",
@@ -635,36 +738,14 @@ pub(super) fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'stat
 #[async_trait]
 impl StorageInstance for TimeScaleDBStorage {
     async fn create_or_migrate(&self) -> Result<()> {
-        sqlx::migrate!("src/storage/timescaledb/migrations")
-            .run(&self.pool)
-            .await
-            .context("Failed to migrate database")?;
-
-        Ok(())
+        crate::storage::pg_session::run_migrations(
+            &self.pool,
+            &sqlx::migrate!("src/storage/timescaledb/migrations"),
+        )
+        .await
     }
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
-        // Each attempt is one transaction that was rolled back whole when it failed, so trying
-        // again leaves nothing behind twice.
-        let mut attempt = 1;
-        loop {
-            match self.publish_once(&batch).await {
-                Err(error) if attempt < PUBLISH_ATTEMPTS && sensor_deleted_during_write(&error) => {
-                    // Another SensApp instance deleted a sensor between its registration and the
-                    // insert of its samples: the next attempt registers the sensors again.
-                }
-                Err(error) if attempt < PUBLISH_ATTEMPTS && is_deadlock(&error) => {
-                    // `register_sensors` locks the hypertables in alphabetical order, the inserts
-                    // meet them in the order of the code, so two writers can still wait for each
-                    // other (one holds `string_values` and creates a chunk of `boolean_values`,
-                    // the other the reverse). PostgreSQL aborts one of them, which is what this
-                    // is. A random pause keeps the writers from colliding again in step.
-                    tokio::time::sleep(std::time::Duration::from_millis(fastrand::u64(10..60)))
-                        .await;
-                }
-                result => return result,
-            }
-            attempt += 1;
-        }
+        crate::storage::common::retry_publish(|| self.publish_once(&batch)).await
     }
 
     async fn vacuum(&self) -> Result<()> {
@@ -1291,97 +1372,18 @@ impl StorageInstance for TimeScaleDBStorage {
         start_time: Option<SensAppDateTime>,
         end_time: Option<SensAppDateTime>,
     ) -> Result<Option<SensorData>> {
-        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
-            return Ok(None);
-        };
-
-        let start_time_us = start_time.as_ref().map(datetime_to_micros);
-        let end_time_us = end_time.as_ref().map(datetime_to_micros);
-        let table_name = Self::sensor_table_name(sensor.sensor_type);
-
-        let Some(latest_timestamp_us) = self
-            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
-            .await?
-        else {
-            return Ok(None);
-        };
-
-        let samples = match sensor.sensor_type {
-            SensorType::Integer => {
-                self.query_integer_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
+        // A delete between the two statements of a try is not a missing series: try again
+        for _ in 0..crate::storage::common::LATEST_ATTEMPTS {
+            match self
+                .query_sensor_data_latest_once(sensor_uuid, start_time, end_time)
                 .await?
+            {
+                crate::storage::common::LatestRead::Found(data) => return Ok(Some(*data)),
+                crate::storage::common::LatestRead::Nothing => return Ok(None),
+                crate::storage::common::LatestRead::Raced => {}
             }
-            SensorType::Numeric => {
-                self.query_numeric_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Float => {
-                self.query_float_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::String => {
-                self.query_string_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Boolean => {
-                self.query_boolean_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Location => {
-                self.query_location_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Json => {
-                self.query_json_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Blob => {
-                self.query_blob_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-        };
-
-        Ok(Some(SensorData::new(sensor, samples)))
+        }
+        Ok(None)
     }
 
     async fn query_sensor_data_availability(

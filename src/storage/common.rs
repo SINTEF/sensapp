@@ -103,6 +103,53 @@ pub fn is_deadlock(error: &anyhow::Error) -> bool {
     })
 }
 
+/// The outcome of one try to read the latest sample of a series. The newest time is read first and
+/// its samples second, as two statements: a delete of that time between them leaves nothing to
+/// return although older samples may remain, and the next try finds them.
+pub enum LatestRead {
+    Found(Box<SensorData>),
+    /// No such series, or nothing in the window
+    Nothing,
+    /// The samples of the newest time were deleted between the two statements
+    Raced,
+}
+
+/// Tries of a latest read, see [`LatestRead`].
+pub const LATEST_ATTEMPTS: usize = 5;
+
+/// How many times a batch is written before its error is returned (see [`retry_publish`]).
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+const PUBLISH_ATTEMPTS: usize = 5;
+
+/// Write a batch with `attempt`, again when it failed in a way that trying again fixes. Each
+/// attempt is one transaction that was rolled back whole when it failed, so trying again leaves
+/// nothing behind twice. The two PostgreSQL based backends share it:
+///
+/// - a sensor deleted between its registration and the insert of its samples (by another SensApp
+///   instance, say): the next attempt registers the sensors again.
+/// - a deadlock: `register_sensors` locks the hypertables in alphabetical order, the inserts meet
+///   them in the order of the code, and a delete locks the sensor row, so two writers can wait for
+///   each other. PostgreSQL aborts one of them, which is what this is. A random pause keeps the
+///   writers from colliding again in step.
+#[cfg(any(feature = "postgres", feature = "timescaledb"))]
+pub async fn retry_publish<F, Fut>(mut attempt: F) -> Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    let mut attempts = 1;
+    loop {
+        match attempt().await {
+            Err(error) if attempts < PUBLISH_ATTEMPTS && sensor_deleted_during_write(&error) => {}
+            Err(error) if attempts < PUBLISH_ATTEMPTS && is_deadlock(&error) => {
+                tokio::time::sleep(std::time::Duration::from_millis(fastrand::u64(10..60))).await;
+            }
+            result => return result,
+        }
+        attempts += 1;
+    }
+}
+
 /// Names of the per-type sample tables, shared by the SQL backends for bulk deletes.
 pub const VALUE_TABLES: [&str; 8] = [
     "blob_values",
@@ -167,6 +214,38 @@ pub fn uuid_to_sensor_id(uuid: &Uuid) -> Result<u64> {
         Ok::<_, anyhow::Error>(sensor_key_from_salt(&config::get()?.sensor_salt))
     })?;
     Ok(keyed_sensor_id(key, uuid))
+}
+
+/// How many stored sensors the startup guard of ClickHouse and BigQuery looks at.
+pub const SENSOR_KEY_GUARD_ROWS: usize = 10;
+
+/// Refuse a database whose sensors have keys that this binary would not give them: written before
+/// the key was a hash of the UUID (the XOR of its halves), or with another `SENSAPP_SENSOR_SALT`.
+/// Writing into it would register a second sensor for every stored UUID, and the reads by UUID would
+/// only find the new samples: nothing would fail, the series would be silently forked. `sensors` is
+/// the `(uuid, sensor_id)` of a few stored rows.
+pub fn check_sensor_keys(key: &[u8; 32], sensors: &[(Uuid, u64)]) -> Result<()> {
+    for (uuid, stored) in sensors {
+        let expected = keyed_sensor_id(key, uuid);
+        if *stored != expected {
+            anyhow::bail!(
+                "The sensors of this database have keys that this version of SensApp does not give \
+                 them: the sensor {uuid} is stored under {stored:#018x} and would be {expected:#018x}. \
+                 The database was written before the keys became a BLAKE3 hash of the UUID (empty it \
+                 and load the data again), or with another SENSAPP_SENSOR_SALT (set that one back: \
+                 the salt is part of the key). Starting would register every stored UUID a second time."
+            );
+        }
+    }
+    Ok(())
+}
+
+/// [`check_sensor_keys`] with the key of the configured salt.
+pub fn check_stored_sensor_keys(sensors: &[(Uuid, u64)]) -> Result<()> {
+    let key = SENSOR_KEY.get_or_try_init(|| {
+        Ok::<_, anyhow::Error>(sensor_key_from_salt(&config::get()?.sensor_salt))
+    })?;
+    check_sensor_keys(key, sensors)
 }
 
 /// Id of a unit in the `units` table: the first 8 bytes of the BLAKE3 hash of its name,
@@ -910,6 +989,86 @@ pub(crate) fn aggregate_numeric_samples(
 #[cfg(test)]
 mod tests {
 
+    #[cfg(any(feature = "postgres", feature = "timescaledb"))]
+    mod retries {
+        use super::super::*;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        /// What PostgreSQL reports for a deadlock
+        #[derive(Debug)]
+        struct FakeDatabaseError(&'static str);
+
+        impl std::fmt::Display for FakeDatabaseError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "fake database error {}", self.0)
+            }
+        }
+        impl std::error::Error for FakeDatabaseError {}
+        impl sqlx::error::DatabaseError for FakeDatabaseError {
+            fn message(&self) -> &str {
+                "fake"
+            }
+            fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+                Some(self.0.into())
+            }
+            fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+                self
+            }
+            fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+                self
+            }
+            fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+                self
+            }
+            fn kind(&self) -> sqlx::error::ErrorKind {
+                sqlx::error::ErrorKind::Other
+            }
+        }
+
+        fn failing(code: &'static str) -> anyhow::Error {
+            sqlx::Error::Database(Box::new(FakeDatabaseError(code))).into()
+        }
+
+        /// The attempts made until `errors` ran out, and the result.
+        async fn run(errors: Vec<anyhow::Error>) -> (usize, Result<()>) {
+            let calls = AtomicUsize::new(0);
+            let errors = std::sync::Mutex::new(errors.into_iter());
+            let result = retry_publish(|| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                let next = errors.lock().unwrap().next();
+                async move { next.map_or(Ok(()), Err) }
+            })
+            .await;
+            (calls.load(Ordering::Relaxed), result)
+        }
+
+        #[tokio::test]
+        async fn a_deadlock_and_a_deleted_sensor_are_tried_again() {
+            let deleted = || {
+                anyhow::Error::from(
+                    crate::storage::pg_sensor_registration::SensorDeletedDuringWrite(
+                        uuid::Uuid::nil(),
+                    ),
+                )
+            };
+            let (attempts, result) = run(vec![failing("40P01"), deleted(), failing("40P01")]).await;
+            assert_eq!(attempts, 4);
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn the_other_errors_and_a_persistent_deadlock_are_returned() {
+            // A lock timeout waited 60 s already: not tried again
+            let (attempts, result) = run(vec![failing("55P03")]).await;
+            assert_eq!(attempts, 1);
+            assert!(result.is_err());
+            // Five attempts at most
+            let (attempts, result) = run((0..9).map(|_| failing("40P01")).collect()).await;
+            assert_eq!(attempts, PUBLISH_ATTEMPTS);
+            assert!(is_deadlock(&result.unwrap_err()));
+        }
+    }
+
     /// The iterative simplification keeps the points that `simplify-polyline` keeps.
     #[test]
     fn simplify_keeps_the_points_of_the_recursive_version() {
@@ -1016,6 +1175,26 @@ mod tests {
     // changed: existing data would no longer be found. The key is the one of the default salt, `sensapp`.
     fn default_key() -> [u8; 32] {
         sensor_key_from_salt("sensapp")
+    }
+
+    #[test]
+    fn a_database_with_other_keys_is_refused_at_startup() {
+        let key = default_key();
+        let uuid = Uuid::from_u64_pair(0x0123_4567_89ab_cdef, 0xfedc_ba98_7654_3210);
+        let current = keyed_sensor_id(&key, &uuid);
+        assert!(check_sensor_keys(&key, &[]).is_ok(), "an empty database");
+        assert!(check_sensor_keys(&key, &[(uuid, current)]).is_ok());
+        // The key of the XOR of the halves, before the hash
+        let (high, low) = uuid.as_u64_pair();
+        let legacy = high ^ low;
+        let error = check_sensor_keys(&key, &[(uuid, current), (uuid, legacy)]).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains(&uuid.to_string()), "{message}");
+        assert!(message.contains("empty it"), "{message}");
+        assert!(message.contains("SENSAPP_SENSOR_SALT"), "{message}");
+        // Another salt gives other keys
+        let other = sensor_key_from_salt("another salt");
+        assert!(check_sensor_keys(&other, &[(uuid, current)]).is_err());
     }
 
     #[test]

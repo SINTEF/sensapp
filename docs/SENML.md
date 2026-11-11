@@ -44,5 +44,5 @@ An export imported again goes to the same series (by its UUID), with:
 | Integer, String, Boolean, JSON, Blob values | exactly |
 | Float values | exactly |
 | Numeric values | through a JSON number, a `f64`: about 15 significant digits |
-| Times | to the microsecond |
+| Times | to the microsecond, for `bt` from 2^28 s (1978) to 2106: a smaller `bt` is relative to now in SenML, and later times lose the microsecond in a `f64` |
 | Location | **no**: exported as two Float series, `<uuid>lat` and `<uuid>lon` |

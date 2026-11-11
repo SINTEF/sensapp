@@ -38,8 +38,8 @@ pub fn with_timeouts(options: PgConnectOptions, connection_string: &str) -> PgCo
     session_options(options, connection_string, statement, lock)
 }
 
-/// The connection options with a `statement_timeout` and a `lock_timeout`, in seconds (0 means
-/// none, as in PostgreSQL). A setting the connection string gives itself (in its `options`) is
+/// The connection options with a `statement_timeout` and a `lock_timeout`, in seconds (0 sends
+/// nothing: no limit, unless the server sets one). A setting the connection string gives itself (in its `options`) is
 /// kept.
 pub fn session_options(
     options: PgConnectOptions,
@@ -52,11 +52,49 @@ pub fn session_options(
         ("statement_timeout", statement_timeout_seconds),
         ("lock_timeout", lock_timeout_seconds),
     ] {
-        if !connection_string.contains(name) {
+        // 0 is no limit: the server's own setting stays, and with both at 0 no startup option is
+        // sent, which a PgBouncer that does not list `options` in `ignore_startup_parameters`
+        // refuses
+        if seconds > 0 && !connection_string.contains(name) {
             settings.push((name, format!("{seconds}s")));
         }
     }
-    options.options(settings)
+    if settings.is_empty() {
+        options
+    } else {
+        options.options(settings)
+    }
+}
+
+/// Apply the migrations on a connection of their own, out of the pool: the pool has the
+/// `statement_timeout` of the requests, and a migration that builds an index over a large table
+/// outlasts it, rolls back, and fails every start the same way. This connection has none, and the
+/// maintenance timeout as its `lock_timeout`. It is closed when the migrations are done.
+pub async fn run_migrations(pool: &PgPool, migrator: &sqlx::migrate::Migrator) -> Result<()> {
+    let (_, _, maintenance) = configured_timeouts();
+    let mut connection = pool
+        .acquire()
+        .await
+        .context("Failed to get a connection for the migrations")?
+        .detach();
+    // A number of seconds, from the configuration
+    for setting in [
+        "SET statement_timeout = 0".to_string(),
+        format!("SET lock_timeout = '{maintenance}s'"),
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(setting))
+            .execute(&mut connection)
+            .await
+            .context("Failed to set the timeouts of the migrations")?;
+    }
+    // `run` does not compile within an `async_trait` method ("Acquire is not general enough")
+    migrator
+        .run_direct(None, &mut connection, false)
+        .await
+        .context("Failed to migrate database")?;
+    // The connection is not the pool's anymore: close it instead of leaving it to the server
+    let _ = connection.close().await;
+    Ok(())
 }
 
 /// A connection for the maintenance, out of the pool: its statements may take up to the maintenance
@@ -85,6 +123,7 @@ pub async fn maintenance_connection(pool: &PgPool) -> Result<PgConnection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlSafeStr;
     use sqlx::postgres::PgPoolOptions;
     use std::str::FromStr;
     use std::time::{Duration, Instant};
@@ -171,5 +210,77 @@ mod tests {
 
     async fn pool_with_url(url: &str) -> PgPool {
         pool(url, DEFAULT_STATEMENT_TIMEOUT_SECONDS, 60).await
+    }
+
+    /// A migration that outlasts the statement timeout of the pool (the index builds of a large
+    /// database do) used to roll back, and every start failed the same way.
+    #[tokio::test]
+    async fn a_migration_longer_than_the_statement_timeout_succeeds() {
+        use sqlx::migrate::{Migration, MigrationType, Migrator};
+        let Some(url) = test_server().await else {
+            return;
+        };
+        // The migration table of this test is in a schema of its own
+        let schema = format!("migration_test_{}", uuid::Uuid::new_v4().simple());
+        let admin = pool(&url, 0, 0).await;
+        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+            .execute(&admin)
+            .await
+            .unwrap();
+        let options = PgConnectOptions::from_str(&url)
+            .unwrap()
+            .options([("search_path", schema.clone())]);
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect_with(session_options(options, &url, 1, 1))
+            .await
+            .unwrap();
+        let migrator = Migrator {
+            migrations: std::borrow::Cow::Owned(vec![Migration::new(
+                1,
+                "slow".into(),
+                MigrationType::Simple,
+                sqlx::AssertSqlSafe("SELECT pg_sleep(3)").into_sql_str(),
+                false,
+            )]),
+            ..Migrator::DEFAULT
+        };
+        // The pool refuses it
+        assert!(
+            sqlx::query("SELECT pg_sleep(3)")
+                .execute(&pool)
+                .await
+                .is_err()
+        );
+        run_migrations(&pool, &migrator).await.unwrap();
+        let applied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(applied, 1);
+        // The pool keeps its timeouts
+        assert_eq!(show(&pool, "statement_timeout").await, "1s");
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
+            .execute(&admin)
+            .await
+            .unwrap();
+    }
+
+    /// 0 sends nothing, for a PgBouncer that refuses startup parameters it does not know.
+    #[test]
+    fn zero_timeouts_send_no_startup_options() {
+        let url = "postgres://u:p@localhost/db";
+        let options = PgConnectOptions::from_str(url).unwrap();
+        let none = session_options(options.clone(), url, 0, 0);
+        assert!(format!("{none:?}").contains("options: None"), "{none:?}");
+        let both = session_options(options.clone(), url, 5, 7);
+        assert!(
+            format!("{both:?}").contains("statement_timeout=5s"),
+            "{both:?}"
+        );
+        let only_lock = session_options(options, url, 0, 7);
+        let only_lock = format!("{only_lock:?}");
+        assert!(!only_lock.contains("statement_timeout"), "{only_lock}");
+        assert!(only_lock.contains("lock_timeout=7s"), "{only_lock}");
     }
 }

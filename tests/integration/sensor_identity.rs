@@ -311,3 +311,57 @@ async fn structured_uuids_are_separate_series() -> Result<()> {
     }
     Ok(())
 }
+
+/// Two writers that register one new UUID at the same time, with two types: exactly one of them
+/// creates the series and the other is refused, whoever is first. Registration is where two
+/// instances meet, so the writers use one storage each way: a pool of one connection would
+/// serialise them and prove nothing (the suite runs with the default pool).
+#[tokio::test]
+#[serial]
+async fn two_writers_registering_one_uuid_with_two_types_cannot_both_succeed() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    // ClickHouse and BigQuery look the sensor up and then insert it, with nothing in between:
+    // both writers can win (measured on ClickHouse, round 0). See
+    // `ideas/clickhouse-concurrent-registration.md`.
+    if !applies_to(&test_db)
+        || matches!(
+            test_db.db_type,
+            DatabaseType::ClickHouse | DatabaseType::BigQuery
+        )
+    {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    for round in 0..10 {
+        let uuid = Uuid::new_v4();
+        let name = format!("identity_race_{uuid}");
+        let sensor =
+            |sensor_type| Arc::new(Sensor::new(uuid, name.clone(), sensor_type, None, None));
+        let writers = [SensorType::Float, SensorType::Integer].map(|sensor_type| {
+            let storage = storage.clone();
+            let sensor = sensor(sensor_type);
+            tokio::spawn(async move { publish(&storage, &[(sensor, round)]).await })
+        });
+        let mut succeeded = 0;
+        for writer in writers {
+            match writer.await? {
+                Ok(()) => succeeded += 1,
+                Err(error) => assert!(
+                    matches!(
+                        error.downcast_ref::<StorageError>(),
+                        Some(StorageError::SensorIdentityMismatch { .. })
+                    ),
+                    "round {round}: expected an identity mismatch, got {error:#}"
+                ),
+            }
+        }
+        assert_eq!(succeeded, 1, "round {round}");
+        let stored = storage
+            .query_sensor_data(&uuid.to_string(), None, None, None)
+            .await?
+            .expect("the series exists");
+        assert_eq!(stored.samples.len(), 1, "round {round}: one sample only");
+    }
+    Ok(())
+}

@@ -42,18 +42,22 @@ pub fn decimal_from_clickhouse_raw(raw: i128) -> Result<Decimal, StorageError> {
         mantissa /= 10;
         scale -= 1;
     }
-    while scale > 0 && Decimal::try_from_i128_with_scale(mantissa, scale).is_err() {
-        // Half away from zero
-        mantissa = (mantissa + mantissa.signum() * 5) / 10;
-        scale -= 1;
-    }
-    Decimal::try_from_i128_with_scale(mantissa, scale).map_err(|_| {
-        StorageError::InvalidDataFormat {
-            message: format!(
-                "the value {raw}e-{CLICKHOUSE_NUMERIC_SCALE} is outside the Numeric range"
-            ),
-            sensor_context: "numeric".to_string(),
+    // Drop as few digits as it takes to fit, rounding half away from zero once from the whole
+    // value: rounding a digit at a time rounds a rounded value again
+    let mut result = Decimal::try_from_i128_with_scale(mantissa, scale);
+    for dropped in 1..=scale {
+        if result.is_ok() {
+            break;
         }
+        let divisor = 10_i128.pow(dropped);
+        let rounded = (mantissa + mantissa.signum() * (divisor / 2)) / divisor;
+        result = Decimal::try_from_i128_with_scale(rounded, scale - dropped);
+    }
+    result.map_err(|_| StorageError::InvalidDataFormat {
+        message: format!(
+            "the value {raw}e-{CLICKHOUSE_NUMERIC_SCALE} is outside the Numeric range"
+        ),
+        sensor_context: "numeric".to_string(),
     })
 }
 
@@ -370,6 +374,26 @@ mod tests {
 
     /// `Decimal(38, 8)` holds every `Decimal` at scale 8 (96 bits × 10^8 is under 10^38): large
     /// values were stored divided by a power of ten, then refused.
+    /// An aggregate over the 96 bits of a `Decimal` loses its last digits once, rounded from the
+    /// whole value: digit by digit, `…49` became `…5` and then rounded up again.
+    #[test]
+    fn an_aggregate_over_96_bits_is_rounded_once() {
+        let max = Decimal::MAX.mantissa();
+        // `max` with two more digits that are 49: rounded to the two digits it must drop, it is
+        // `max` at scale 6. Two roundings of one digit each gave `max + 1`, which does not fit,
+        // and a third dropped a digit more.
+        let raw = max * 100 + 49;
+        let value = decimal_from_clickhouse_raw(raw).unwrap();
+        assert_eq!(value, Decimal::from_i128_with_scale(max, 6));
+        // Half away from zero, on both signs
+        let raw = max * 100 + 50;
+        assert!(decimal_from_clickhouse_raw(raw).is_ok());
+        assert_eq!(
+            decimal_from_clickhouse_raw(-(max * 100 + 49)).unwrap(),
+            Decimal::from_i128_with_scale(-max, 6)
+        );
+    }
+
     #[test]
     fn decimals_round_trip_through_clickhouse() {
         let round_trip = |value: Decimal| {

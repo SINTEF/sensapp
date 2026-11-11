@@ -229,6 +229,30 @@ impl ClickHouseStorage {
         Ok(())
     }
 
+    /// Refuse a database whose sensors were keyed another way, see `check_sensor_keys`.
+    async fn check_stored_sensor_keys(&self) -> Result<()> {
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct StoredKey {
+            #[serde(with = "clickhouse::serde::uuid")]
+            uuid: Uuid,
+            sensor_id: u64,
+        }
+        let rows: Vec<StoredKey> = self
+            .client
+            .query(&format!(
+                "SELECT uuid, sensor_id FROM sensors LIMIT {}",
+                crate::storage::common::SENSOR_KEY_GUARD_ROWS
+            ))
+            .fetch_all()
+            .await
+            .context("Failed to read the keys of the stored sensors")?;
+        let keys: Vec<(Uuid, u64)> = rows
+            .into_iter()
+            .map(|row| (row.uuid, row.sensor_id))
+            .collect();
+        crate::storage::common::check_stored_sensor_keys(&keys)
+    }
+
     async fn get_sensor_metadata(&self, sensor_uuid: &str) -> Result<Option<(u64, Sensor)>> {
         let uuid = Uuid::from_str(sensor_uuid).map_err(|e| {
             StorageError::invalid_data_format(
@@ -556,6 +580,7 @@ impl StorageInstance for ClickHouseStorage {
         self.run_migrations()
             .await
             .context("Failed to run ClickHouse migrations")?;
+        self.check_stored_sensor_keys().await?;
         Ok(())
     }
 
@@ -1176,24 +1201,30 @@ impl StorageInstance for ClickHouseStorage {
         let end_time_us = end_time.as_ref().map(datetime_to_micros);
         let table_name = Self::sensor_table_name(sensor.sensor_type);
 
-        let Some(latest_timestamp_us) = self
-            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
-            .await?
-        else {
-            return Ok(None);
-        };
+        // The newest time is read, then its samples: a delete of that time between the two
+        // statements leaves nothing, although older samples may remain. Try again.
+        for _ in 0..crate::storage::common::LATEST_ATTEMPTS {
+            let Some(latest_timestamp_us) = self
+                .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+                .await?
+            else {
+                return Ok(None);
+            };
 
-        let samples = self
-            .query_samples_by_type(
-                sensor_id,
-                &sensor.sensor_type,
-                Some(micros_to_datetime(latest_timestamp_us)),
-                Some(micros_to_datetime(latest_timestamp_us)),
-                1,
-            )
-            .await?;
-
-        Ok(Some(SensorData::new(sensor, samples)))
+            let samples = self
+                .query_samples_by_type(
+                    sensor_id,
+                    &sensor.sensor_type,
+                    Some(micros_to_datetime(latest_timestamp_us)),
+                    Some(micros_to_datetime(latest_timestamp_us)),
+                    1,
+                )
+                .await?;
+            if !samples.is_empty() {
+                return Ok(Some(SensorData::new(sensor, samples)));
+            }
+        }
+        Ok(None)
     }
 
     async fn query_sensor_data_availability(

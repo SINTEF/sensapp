@@ -6,29 +6,30 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 ## Unreleased
 
 ### Breaking
-
+- **PostgreSQL and TimescaleDB: no rolling restart from 0.4.2.** The new migrations drop the unique constraints
+  that a 0.4.2 binary writes with (`ON CONFLICT (value)`): its writes of String samples and of new sensors fail
+  with `42P10` until it is replaced, and it cannot start on a migrated database. Stop every old instance, then
+  start the new version. See [docs/UPGRADING.md](docs/UPGRADING.md). The migrations now run on a connection of
+  their own, without the statement timeout of the requests (they rolled back above 130 s on a large database).
 - **`SENSAPP_ALLOWED_HOSTS`** names the hosts of an open server (`SENSAPP_AUTH_DISABLED`). An open server behind
   a proxy that keeps its public `Host` answered `403` to everything, and one that rewrites the `Host` refused the
   writes of a browser; both work when the public name is listed. With it, DNS rebinding is refused on any
   address, not only on a loopback bind, and a request without a `Host` is refused. What the guard refuses is now
   counted and logged with a request id. Without the setting on a non-loopback address SensApp warns at startup.
-
 - **A PromQL query or selector is no longer limited in nesting** (it was 64 levels, counted by a text scan that a
   `#` comment containing a quote, or a chain of `^`, got around: the parser then overflowed its stack, which
   aborts the process). The parse runs on a thread whose stack fits the 4,096 bytes allowed. A `simplify` that
   would cost more than 100 million distance evaluations (a tolerance near 0 on a large zigzag) is a `400`.
-
 - **SensApp serves HTTP/1.1 only**, no HTTP/2 over cleartext, and a client has `SENSAPP_HTTP_HEADER_READ_TIMEOUT_SECONDS`
   (75 s by default, 30 s before) to send its headers or to send its next request on an idle connection. A
   connection that sends nothing is now closed too. The slow body of a write is a `503` with `Retry-After` instead
   of a `408`, which Prometheus does not retry.
-
 - **ClickHouse and BigQuery key a series by the keyed BLAKE3 hash of its UUID**, keyed by
   `SENSAPP_SENSOR_SALT`, instead of the XOR of its two
   halves, which gave structured UUIDs chosen by SenML and Arrow writers the same key: `(a, b)` and `(b, a)`, and
   every UUID with equal halves. Those were refused with `409`; they are now separate series. Every stored
   `sensor_id` changes, and there is no migration: **empty a ClickHouse or BigQuery database and load it again**.
-  The new version does not find the series of a database written before by their UUID. The salt is now
+  The new version refuses to start on a database written before (it reads ten stored sensors and compares their keys), instead of registering every stored UUID a second time. The salt is now
   part of the key: **changing `SENSAPP_SENSOR_SALT` orphans the series of a ClickHouse or BigQuery database**,
   explicit UUIDs included. Set your own salt before ingesting: with the public default, anyone can search
   for two UUIDs of the same key offline.
@@ -54,7 +55,6 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 - RRDCached refuses a sample more than 10 minutes in the future with `400` (the `future` parameter of the
   connection string): the series could not take a sample before it any more. `/metrics` answers `501` on
   RRDCached instead of an empty list.
-
 - **An open server (`SENSAPP_AUTH_DISABLED`) refuses browser requests from other origins** (`Origin` that
   is not the `Host`), and on a loopback address the `Host` names that are not loopback ones, with `403`. A web
   page could write to it, or run the vacuum, in the name of a visitor. `curl` and the SDKs are not affected.
@@ -72,6 +72,30 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
   `WriteRequest` or a `TimeSeries` needs `..Default::default()`.
 
 ### Changed and fixed
+
+- **CSV**: a time offset is subtracted (the stored instants change), a CSV without a time column is a `400`, the
+  epoch unit comes from the magnitude of the number, a date alone is a time, week and ordinal dates are no longer
+  times, and a wide CSV with a duplicate header is a `400`.
+- **Arrow**: a null timestamp is a `400`, null values are dropped, a `sensor_id` or `sensor_name` column that is
+  not constant is a `400`, a metadata type that differs from the column type is a `400`, and the decompressed size
+  of a body is limited (an LZ4 bomb used to allocate without bound).
+- **SenML**: a record that mixes types or only has a sum is a `400`, only the hyphenated form of a UUID is a UUID,
+  `_type` and `_labels` are read, and the export writes `bu`, `_type`, microsecond times and no record for an empty
+  series.
+- **Every write**: a time outside years 1 to 9999, a NUL and the separator bytes in a name, unit or label are a
+  `400`, `+json` is read as SenML, a remote write that cannot be parsed is a `400`, and a panic in a handler is a
+  `500` for that request instead of stopping the instance.
+- **Queries**: regex matchers are validated (a pattern a backend would read differently is a `400`) and anchored.
+- **PostgreSQL and TimescaleDB**: `SENSAPP_PG_STATEMENT_TIMEOUT_SECONDS` and `SENSAPP_PG_LOCK_TIMEOUT_SECONDS`,
+  dictionaries unique by `md5`, new migrations and indexes. See [docs/UPGRADING.md](docs/UPGRADING.md).
+
+- PostgreSQL and TimescaleDB: a write that waits for a lock longer than `SENSAPP_PG_LOCK_TIMEOUT_SECONDS`
+  (a series being deleted) or loses a deadlock is a `503`, which clients retry, instead of a `500`; PostgreSQL
+  retries a deadlock like TimescaleDB did (five attempts). With both timeouts at `0` no startup option is sent
+  (PgBouncer). The latest sample of a series is read again when a delete removed the samples of its time
+  between the two statements: it returned nothing, or no sample, while older ones remained (SQLite,
+  PostgreSQL, TimescaleDB, ClickHouse; DuckDB still does, see `ideas/`). The `make` test tasks of PostgreSQL
+  and TimescaleDB no longer cap the pool at one connection, which hid the races.
 
 - Prometheus remote read: the buckets of a `*_over_time` hint start with the range of their own selector,
   not with the earliest selector of the query (`max_over_time(x[2m]) > y` was off by one minute), and stop

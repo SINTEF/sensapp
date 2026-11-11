@@ -403,6 +403,60 @@ mod clickhouse_tests {
         Ok(())
     }
 
+    /// The key of a series changed from the XOR of the halves of its UUID to a hash. A database that
+    /// was not emptied would get a second `sensors` row for every stored UUID, and the reads would
+    /// only find the new samples: startup must refuse it.
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_refuses_a_database_with_the_old_sensor_keys() -> Result<()> {
+        ensure_config();
+        let connection_string = DatabaseType::ClickHouse.default_connection_string();
+        let mut url = url::Url::parse(&connection_string)?;
+        let admin = admin_client(&url);
+
+        admin
+            .query("DROP DATABASE IF EXISTS sensapp_old_keys_test")
+            .execute()
+            .await?;
+        admin
+            .query("CREATE DATABASE sensapp_old_keys_test")
+            .execute()
+            .await?;
+        url.set_path("/sensapp_old_keys_test");
+        let result = async {
+            let storage = sensapp::storage::storage_factory::create_storage_from_connection_string(
+                url.as_str(),
+            )
+            .await?;
+            storage.create_or_migrate().await?;
+            // The same again: an empty or a good database starts
+            storage.create_or_migrate().await?;
+            let uuid = Uuid::from_u64_pair(0x0123_4567_89ab_cdef, 0xfedc_ba98_7654_3210);
+            let legacy_key = 0x0123_4567_89ab_cdef_u64 ^ 0xfedc_ba98_7654_3210_u64;
+            admin
+                .query(
+                    "INSERT INTO sensapp_old_keys_test.sensors \
+                     (sensor_id, uuid, name, type, unit) VALUES (?, ?, 'old', 'Float', NULL)",
+                )
+                .bind(legacy_key)
+                .bind(uuid.to_string())
+                .execute()
+                .await?;
+            storage.create_or_migrate().await
+        }
+        .await;
+        admin
+            .query("DROP DATABASE IF EXISTS sensapp_old_keys_test")
+            .execute()
+            .await?;
+
+        let error = result.expect_err("a database with the old keys must be refused");
+        let message = format!("{error:#}");
+        assert!(message.contains("empty it"), "unexpected error: {message}");
+        assert!(message.contains("SENSAPP_SENSOR_SALT"), "{message}");
+        Ok(())
+    }
+
     /// Database names such as `sensapp-prod` need quoting, and credentials are percent-decoded.
     #[tokio::test]
     #[serial]

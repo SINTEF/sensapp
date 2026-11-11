@@ -74,8 +74,8 @@ and the message is not sent to the client. Test `real_router::a_panic_in_a_handl
 **Decision: the `exit(1)` hook is gone**, not kept for background tasks. A panic hook runs before the unwinding,
 so with `exit(1)` the layer never gets a turn. There is no long-lived background task in the production code:
 the `tokio::spawn` calls (PostgreSQL batch queries, ClickHouse publishers) are part of a request and awaited, so a
-panic there becomes a `JoinError` and an error answer. No lock can be poisoned: DuckDB uses a tokio mutex and the
-BigQuery cache recovers from poisoning. The default hook still prints the panic.
+panic there becomes a `JoinError` and an error answer. No lock stays poisoned: the DuckDB connections are behind a `std::sync::Mutex` whose
+poisoning is recovered (`lock()` in `duckdb/mod.rs`), as the BigQuery cache does. The default hook still prints the panic.
 
 ### Payload errors
 

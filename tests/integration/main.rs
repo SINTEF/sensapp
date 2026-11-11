@@ -24,6 +24,7 @@ mod identity_over_http;
 mod influxdb_integration;
 mod ingestion;
 mod jwt_auth;
+mod latest_under_delete;
 mod long_texts;
 mod non_finite_values;
 mod numeric_values;
