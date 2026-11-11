@@ -96,7 +96,7 @@ mod tests {
 
         for &input_ms in test_cases {
             let epoch = SensAppDateTime::from_unix_milliseconds_i64(input_ms);
-            let output_ms = epoch.to_unix_milliseconds().floor() as i64;
+            let output_ms = epoch.to_unix_milliseconds_i64();
             assert_eq!(
                 input_ms, output_ms,
                 "from_unix_milliseconds_i64 should roundtrip for {}",
@@ -107,21 +107,30 @@ mod tests {
 
     #[test]
     fn test_sensapp_datetime_to_offset_datetime() {
-        let hifitime_now = hifitime::Epoch::now().unwrap();
+        // Integer arithmetic on both sides: going through f64 seconds rounds the
+        // last microsecond differently from the integer conversion, which made
+        // a test of the current time fail now and then.
+        for microseconds in [
+            1_794_400_612_316_943_i64,
+            1_794_400_612_316_942,
+            0,
+            -1,
+            -1_500_000,
+        ] {
+            let datetime = SensAppDateTime::from_unix_microseconds_i64(microseconds);
+            let offset = sensapp_datetime_to_offset_datetime(&datetime).unwrap();
+            assert_eq!(
+                (offset.unix_timestamp_nanos() / 1_000) as i64,
+                microseconds,
+                "{microseconds} microseconds"
+            );
+        }
 
-        let offset_now = sensapp_datetime_to_offset_datetime(&hifitime_now).unwrap();
-
-        println!("hifitime_now: {:?}", hifitime_now);
-        println!("offset_now: {:?}", offset_now);
+        let now = hifitime::Epoch::now().unwrap();
+        let offset_now = sensapp_datetime_to_offset_datetime(&now).unwrap();
         assert_eq!(
-            hifitime_now.to_unix_seconds().floor() as i64,
-            offset_now.unix_timestamp(),
+            (offset_now.unix_timestamp_nanos() / 1_000) as i64,
+            now.to_unix_microseconds_i64()
         );
-
-        // The database path stores timestamps at microsecond precision.
-        let hifitime_subsec_microseconds = hifitime_now.to_unix(Unit::Microsecond).floor() as i64;
-        let offset_subsec_microseconds = (offset_now.unix_timestamp_nanos() / 1_000) as i64;
-
-        assert_eq!(hifitime_subsec_microseconds, offset_subsec_microseconds);
     }
 }
