@@ -932,6 +932,7 @@ mod rrdcached_tests {
                 write_timeout: Duration::from_secs(300),
                 maintenance_timeout: Duration::from_secs(3600),
                 max_concurrent_writes: 16,
+                body_read_timeout: Duration::from_secs(30),
                 ui_dir: None,
             },
         )
@@ -993,7 +994,9 @@ mod rrdcached_tests {
                         timestamp: time * 1000,
                     })
                     .collect(),
+                ..Default::default()
             }],
+            ..Default::default()
         };
         let body = snap::raw::Encoder::new().compress_vec(&write.encode_to_vec())?;
         let request = Request::builder()
@@ -1016,11 +1019,12 @@ mod rrdcached_tests {
             .body(Body::from(body))?;
         assert_eq!(send(&router, request).await.0, StatusCode::NO_CONTENT);
 
+        // `__name__` is the name of the series, and not one of its labels
         let uuid = SensorModel::new_without_uuid(
             name.clone(),
             SensorType::Float,
             None,
-            Some(vec![("__name__".to_string(), name)].into_iter().collect()),
+            Some(Vec::<(String, String)>::new().into_iter().collect()),
         )?
         .uuid;
         let (status, body) = send(
@@ -1131,7 +1135,11 @@ mod rrdcached_tests {
             error.downcast_ref::<StorageError>(),
             Some(StorageError::Unsupported(_))
         ));
-        assert!(storage.list_metrics().await?.is_empty());
+        let error = storage.list_metrics().await.unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<StorageError>(),
+            Some(StorageError::Unsupported(_))
+        ));
         Ok(())
     }
 

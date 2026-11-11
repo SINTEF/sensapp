@@ -403,6 +403,60 @@ mod clickhouse_tests {
         Ok(())
     }
 
+    /// The key of a series changed from the XOR of the halves of its UUID to a hash. A database that
+    /// was not emptied would get a second `sensors` row for every stored UUID, and the reads would
+    /// only find the new samples: startup must refuse it.
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_refuses_a_database_with_the_old_sensor_keys() -> Result<()> {
+        ensure_config();
+        let connection_string = DatabaseType::ClickHouse.default_connection_string();
+        let mut url = url::Url::parse(&connection_string)?;
+        let admin = admin_client(&url);
+
+        admin
+            .query("DROP DATABASE IF EXISTS sensapp_old_keys_test")
+            .execute()
+            .await?;
+        admin
+            .query("CREATE DATABASE sensapp_old_keys_test")
+            .execute()
+            .await?;
+        url.set_path("/sensapp_old_keys_test");
+        let result = async {
+            let storage = sensapp::storage::storage_factory::create_storage_from_connection_string(
+                url.as_str(),
+            )
+            .await?;
+            storage.create_or_migrate().await?;
+            // The same again: an empty or a good database starts
+            storage.create_or_migrate().await?;
+            let uuid = Uuid::from_u64_pair(0x0123_4567_89ab_cdef, 0xfedc_ba98_7654_3210);
+            let legacy_key = 0x0123_4567_89ab_cdef_u64 ^ 0xfedc_ba98_7654_3210_u64;
+            admin
+                .query(
+                    "INSERT INTO sensapp_old_keys_test.sensors \
+                     (sensor_id, uuid, name, type, unit) VALUES (?, ?, 'old', 'Float', NULL)",
+                )
+                .bind(legacy_key)
+                .bind(uuid.to_string())
+                .execute()
+                .await?;
+            storage.create_or_migrate().await
+        }
+        .await;
+        admin
+            .query("DROP DATABASE IF EXISTS sensapp_old_keys_test")
+            .execute()
+            .await?;
+
+        let error = result.expect_err("a database with the old keys must be refused");
+        let message = format!("{error:#}");
+        assert!(message.contains("empty it"), "unexpected error: {message}");
+        assert!(message.contains("SENSAPP_SENSOR_SALT"), "{message}");
+        Ok(())
+    }
+
     /// Database names such as `sensapp-prod` need quoting, and credentials are percent-decoded.
     #[tokio::test]
     #[serial]
@@ -470,6 +524,85 @@ mod clickhouse_tests {
             .fetch_one()
             .await?;
         assert_eq!(views, 0);
+        Ok(())
+    }
+
+    /// Publish Numeric `values`, one a second, and read their aggregate over one bucket: the
+    /// outer result is the publish, the inner one the read.
+    async fn numeric_aggregate(
+        storage: &Arc<dyn sensapp::storage::StorageInstance>,
+        values: &[rust_decimal::Decimal],
+        aggregation: sensapp::storage::Aggregation,
+    ) -> Result<Result<Option<sensapp::datamodel::SensorData>>> {
+        let sensor = Arc::new(Sensor::new_without_uuid(
+            format!("ch_numeric_{}", Uuid::new_v4().simple()),
+            SensorType::Numeric,
+            None,
+            None,
+        )?);
+        let samples = values
+            .iter()
+            .enumerate()
+            .map(|(i, &value)| Sample {
+                datetime: hifitime::Epoch::from_unix_seconds(1_704_067_200.0 + i as f64),
+                value,
+            })
+            .collect::<Vec<_>>();
+        let mut batch_builder = BatchBuilder::new()?;
+        batch_builder
+            .add(sensor.clone(), TypedSamples::Numeric(samples.into()))
+            .await?;
+        batch_builder.send_what_is_left(storage.clone()).await?;
+        let options = sensapp::storage::SensorDataQueryOptions {
+            start_time: None,
+            end_time: None,
+            limit: None,
+            step_ms: Some(3_600_000),
+            aggregation: Some(aggregation),
+            simplify: None,
+        };
+        Ok(storage
+            .query_sensor_data_advanced(&sensor.uuid.to_string(), &options)
+            .await)
+    }
+
+    /// The Numeric average went through `Float64` and lost the digits after the 16th.
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_numeric_average_is_exact() -> Result<()> {
+        use rust_decimal::Decimal;
+        ensure_config();
+        let test_db = TestDb::new_with_type(DatabaseType::ClickHouse).await?;
+        let storage = test_db.storage();
+        let values = [
+            Decimal::from_i128_with_scale(1_234_567_890_123_456_712_345_678, 8),
+            Decimal::from_i128_with_scale(1_234_567_890_123_456_712_345_680, 8),
+        ];
+        let data = numeric_aggregate(&storage, &values, sensapp::storage::Aggregation::Avg)
+            .await??
+            .expect("the series");
+        let TypedSamples::Numeric(samples) = data.samples else {
+            panic!("expected numerics");
+        };
+        assert_eq!(
+            samples[0].value,
+            Decimal::from_i128_with_scale(1_234_567_890_123_456_712_345_679, 8)
+        );
+        Ok(())
+    }
+
+    /// A sum of `Decimal(38, 8)` wraps past 38 digits: 30 times the largest `Decimal` came back
+    /// negative.
+    #[tokio::test]
+    #[serial]
+    async fn test_clickhouse_numeric_sum_past_38_digits_is_an_error() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new_with_type(DatabaseType::ClickHouse).await?;
+        let storage = test_db.storage();
+        let values = [rust_decimal::Decimal::MAX; 30];
+        let result =
+            numeric_aggregate(&storage, &values, sensapp::storage::Aggregation::Sum).await?;
+        assert!(result.is_err(), "expected an error, got {result:?}");
         Ok(())
     }
 }

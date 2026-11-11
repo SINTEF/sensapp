@@ -284,6 +284,7 @@ fn settings_default_to_the_hoarder_preset_and_an_hour_of_heartbeat() {
         Settings {
             preset: Preset::Hoarder,
             heartbeat_seconds: 3600,
+            future_seconds: 600,
         }
     );
 }
@@ -291,10 +292,11 @@ fn settings_default_to_the_hoarder_preset_and_an_hour_of_heartbeat() {
 #[test]
 fn settings_read_the_preset_and_the_heartbeat() {
     assert_eq!(
-        settings("rrdcached://localhost:42217?preset=munin&heartbeat=900").unwrap(),
+        settings("rrdcached://localhost:42217?preset=munin&heartbeat=900&future=60").unwrap(),
         Settings {
             preset: Preset::Munin,
             heartbeat_seconds: 900,
+            future_seconds: 60,
         }
     );
 }
@@ -307,6 +309,8 @@ fn settings_refuse_what_they_do_not_understand() {
         "rrdcached://localhost:42217?heartbeat=5",
         "rrdcached://localhost:42217?heartbeat=-1",
         "rrdcached://localhost:42217?hartbeat=900",
+        "rrdcached://localhost:42217?future=soon",
+        "rrdcached://localhost:42217?future=-1",
     ] {
         assert!(settings(connection).is_err(), "{connection}");
     }
@@ -1289,4 +1293,108 @@ async fn the_limit_of_an_aggregated_read_counts_the_buckets() {
         .unwrap();
     // Three buckets of 20 seconds, the first one is kept: not one raw row cut before aggregating
     assert_eq!(values(&data), vec![(100, 1.0)]);
+}
+
+// ---- review of November 2026
+
+#[tokio::test]
+async fn an_end_in_the_future_is_read_up_to_now() {
+    let f = fixture(Script::default());
+    let now = now_seconds();
+    f.storage
+        .query_sensor_data(
+            &id(1).to_string(),
+            at(now - 3600),
+            at(now + 365 * 86400),
+            None,
+        )
+        .await
+        .unwrap();
+    let (_, _, end) = f.script().fetches[0].clone();
+    assert!(
+        end <= now + DEFAULT_FUTURE_SECONDS + Preset::Hoarder.finest_step_seconds() + 2,
+        "the fetch ends {} s after now",
+        end - now
+    );
+}
+
+#[tokio::test]
+async fn the_series_filter_is_the_whole_name() {
+    let a = id(0xa).to_string();
+    let f = fixture(listing(&[&format!("{a}.rrd")]));
+    let listed = f
+        .storage
+        .list_series(Some(&a[..8]), None, None)
+        .await
+        .unwrap();
+    assert!(listed.series.is_empty(), "a part of the name matched");
+
+    let f = fixture(listing(&[&format!("{a}.rrd")]));
+    let listed = f.storage.list_series(Some(&a), None, None).await.unwrap();
+    assert_eq!(listed.series.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_health_check_does_not_wait_for_a_stuck_request() {
+    let f = fixture(Script {
+        files_exist: true,
+        hang_batch: true,
+        ..Script::default()
+    });
+    let storage = Arc::new(f.storage);
+    let writing = {
+        let storage = storage.clone();
+        tokio::spawn(async move {
+            storage
+                .publish(float_batch(&[(id(1), &[(1_000_000, 1.0)])]))
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    let started = tokio::time::Instant::now();
+    assert!(storage.health_check().await.is_err());
+    assert!(started.elapsed() < super::connection::OPERATION_TIMEOUT);
+    writing.abort();
+}
+
+#[tokio::test]
+async fn a_sample_far_in_the_future_is_refused_and_nothing_is_written() {
+    let f = fixture(Script {
+        files_exist: true,
+        ..Script::default()
+    });
+    let now = now_seconds();
+    let error = f
+        .storage
+        .publish(float_batch(&[
+            (id(1), &[(now - 10, 1.0)]),
+            (id(2), &[(now + 86400, 2.0)]),
+        ]))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            storage_error_of(&error),
+            StorageError::InvalidDataFormat { .. }
+        ),
+        "{error:#}"
+    );
+    assert!(f.script().batches.is_empty());
+
+    // A few seconds ahead is a clock that is a little off, and is stored
+    f.storage
+        .publish(float_batch(&[(id(1), &[(now + 5, 1.0)])]))
+        .await
+        .unwrap();
+    assert_eq!(f.script().batches.len(), 1);
+}
+
+#[tokio::test]
+async fn metrics_are_not_supported() {
+    let f = fixture(Script::default());
+    let error = f.storage.list_metrics().await.unwrap_err();
+    assert!(
+        matches!(storage_error_of(&error), StorageError::Unsupported(_)),
+        "{error:#}"
+    );
 }

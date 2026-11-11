@@ -25,6 +25,8 @@ The Helm chart sets variables through `env:` in `values.yaml` (see the [chart RE
 | --- | --- | --- |
 | `SENSAPP_STORAGE_CONNECTION_STRING` | `postgres://postgres:postgres@localhost:5432/sensapp` | Selects and configures the storage backend by URL scheme, see [Backends](#backends). Contains credentials: it is redacted from logs and errors, keep it in a secret. |
 | `SENSAPP_PG_POOL_MAX_CONNECTIONS` | `10` | Size of the connection pool for `postgres:` and `timescaledb:`. Invalid or `0` falls back to the default. Not part of the settings file: it can only be set as an environment variable. |
+| `SENSAPP_PG_STATEMENT_TIMEOUT_SECONDS` | `130` | Longest a statement may run on `postgres:` and `timescaledb:` before the database cancels it, `0` for no limit. A request that times out does not cancel its statement, so without this a few slow statements would keep every connection of the pool busy. A little more than `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS`. The vacuum and the deduplication run on a connection of their own, with `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS`. A `statement_timeout` given in the `options` of the connection string wins. The migrations do not use it (see [UPGRADING.md](UPGRADING.md)). With this and the lock timeout both at `0`, no startup option is sent (PgBouncer refuses the ones it does not know). |
+| `SENSAPP_PG_LOCK_TIMEOUT_SECONDS` | `60` | Longest a statement may wait for a lock, `0` for no limit. Same rule for the connection string. |
 | `SENSAPP_DEDUPLICATE_ON_INGEST` | `false` | Do not write the samples that are stored already (same series, same timestamp, same value), nor the repeated samples of a request. Costs a few milliseconds per write and has a PostgreSQL condition, see [Duplicate samples](DATA_LIFECYCLE.md#duplicate-samples). The server **refuses to start** on a backend that cannot do it: PostgreSQL, TimescaleDB, SQLite and DuckDB can, ClickHouse, BigQuery and RRDCached cannot. |
 | `SENSAPP_BATCH_SIZE` | `8192` | Number of samples collected before being sent to storage in one batch. Larger batches mean fewer round trips and more memory per request. |
 
@@ -32,12 +34,18 @@ The Helm chart sets variables through `env:` in `values.yaml` (see the [chart RE
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SENSAPP_HTTP_BODY_LIMIT` | `64MiB` | Largest accepted request body, also after gzip or Snappy decompression. Over the limit gives `413`. Accepts units such as `512KiB`, `64MiB`, `1GiB`, up to 128 GiB. |
+| `SENSAPP_HTTP_BODY_LIMIT` | `64MiB` | Largest accepted request body, also after gzip or Snappy decompression. Over the limit gives `413`. Accepts units such as `512KiB`, `64MiB`, `1GiB`, up to 2 GiB. |
 | `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS` | `120` | Time a request may take before it is answered with `504 Gateway Timeout`. Applies to everything except the writes and the vacuum. |
 | `SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS` | `300` | Same as above for the writes (`/publish`, InfluxDB write, Prometheus remote write). Their work grows with the body, see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts). |
+| `SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS` | `30` | Time a client has to send the body of a write or of a Prometheus remote read. Over it gives `503` with a `Retry-After` and frees the write slot. See [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts). |
+| `SENSAPP_HTTP_HEADER_READ_TIMEOUT_SECONDS` | `75` | Time a client has to send the headers of a request, and the time a connection may stay idle between two requests (HTTP/1 has one timer for both). A connection that sends nothing is closed after it. Keep it above the idle timeout of the proxy in front (60 s for AWS load balancers and nginx): below it, the proxy reuses connections that SensApp just closed and answers some POSTs with a `502`. |
+| `SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS` | `300` | Time the requests in flight have to finish after SIGTERM or Ctrl+C before they are cut. A second signal cuts them at once. See [Shutdown](#shutdown). |
+| `SENSAPP_ALLOWED_HOSTS` | *(unset)* | Only for `SENSAPP_AUTH_DISABLED`: the names (`host` or `host:port`, comma separated) clients and the proxy in front use. Any other `Host` gets a `403`, which stops DNS rebinding and serves a proxy that keeps its public `Host`. See [JWT_AUTH.md](JWT_AUTH.md#an-open-server). |
 | `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS` | `3600` | Same as above for `POST /api/v1/admin/vacuum` only, which scans every value table and is expected to be slow on a large database. |
 | `SENSAPP_HTTP_MAX_QUERY_SAMPLES` | `100000` | Most samples a read may return: one series (`GET /series/{uuid}`), the series of a selector in total (simple PromQL, Prometheus remote read) and the buckets of a cross-series aggregation. A read over it gets a `400` instead of a truncated answer. The samples are held in memory while the response is built: raise it on a machine with memory to spare, lower it to try the limit. See [HTTP limits](HTTP_LIMITS.md). |
 | `SENSAPP_HTTP_MAX_CONCURRENT_WRITES` | `16` | Write requests (`/publish`, InfluxDB write, Prometheus remote write, admin) handled at the same time. See [Backpressure](#backpressure). `0` disables the limit. |
+
+SensApp checks these settings when it starts and refuses to start with a timeout of `0`, a body limit of `0` or over 2 GiB, or `SENSAPP_HTTP_MAX_QUERY_SAMPLES` of `0` or over 1,000,000,000. A `0` would make every request fail, and the large values would let one request hold more memory than a machine has.
 
 Details on what the limits protect against are in [HTTP_LIMITS.md](HTTP_LIMITS.md).
 
@@ -55,15 +63,15 @@ See [FRONTEND.md](FRONTEND.md).
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SENSAPP_JWT_SECRET` | unset | Secret that signs and verifies the JWTs (at least 32 characters, `sensapp generate-secret` makes one). When unset, SensApp does not run open: on a loopback address it makes a secret for the run and prints an admin token, on any other address (the container image) it refuses to start, unless `SENSAPP_AUTH_DISABLED` is true. See [JWT_AUTH.md](JWT_AUTH.md). |
-| `SENSAPP_AUTH_DISABLED` | `false` | Run with every endpoint open: the explicit opt-out for demos, tests, and networks that authenticate in front of SensApp. Ignored when `SENSAPP_JWT_SECRET` is set. |
+| `SENSAPP_AUTH_DISABLED` | `false` | Run with every endpoint open: the explicit opt-out for demos, tests, and networks that authenticate in front of SensApp. An open server refuses browser requests from other origins, and on a loopback address the names that are not loopback ones, see [JWT_AUTH.md](JWT_AUTH.md#an-open-server). Ignored when `SENSAPP_JWT_SECRET` is set. |
 | `SENSAPP_JWT_PREVIOUS_SECRETS` | unset | Comma-separated secrets that still verify tokens but never sign them: the way to rotate the secret, or revoke the tokens of one. See [JWT_AUTH.md](JWT_AUTH.md#rotating-the-secret-and-revoking-tokens). |
-| `SENSAPP_TOKEN_MAX_DURATION_SECONDS` | `31536000` | Longest validity of a token made with `POST /api/v1/admin/tokens` (a year). The command line is not capped by it. |
+| `SENSAPP_TOKEN_MAX_DURATION_SECONDS` | `31536000` | Longest validity of a token made with `POST /api/v1/admin/tokens` (a year). It must be between 1 second and ten years, or SensApp refuses to start. The command line is not capped by it, only by ten years. |
 
 ### Data
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SENSAPP_SENSOR_SALT` | `sensapp` | Salt of the hash that turns a sensor's name, type, unit and labels into its UUID. **Changing it changes the UUID of every sensor**: existing data is no longer matched by new writes. Set it once per deployment, before ingesting. |
+| `SENSAPP_SENSOR_SALT` | `sensapp` | Salt of the hash that turns a sensor's name, type, unit and labels into its UUID. **Changing it changes the UUID of every sensor**: existing data is no longer matched by new writes. The same salt keys the 64-bit series id that ClickHouse and BigQuery derive from a UUID, explicit UUIDs included: changing it orphans the series stored there. The default is public: set your own, once per deployment, before ingesting. |
 | `SENSAPP_INFLUXDB_WITH_NUMERIC` | `false` | Store InfluxDB numbers as exact decimals instead of floats. Precise but slower. See [INFLUX_DB.md](INFLUX_DB.md). |
 
 ### Observability
@@ -88,7 +96,7 @@ The scheme of `SENSAPP_STORAGE_CONNECTION_STRING` picks the backend. A backend o
 | `timescaledb://user:pass@host:5432/db` | TimescaleDB | PostgreSQL with the TimescaleDB extension. |
 | `sqlite://path/to/sensapp.db` | SQLite | Single file, for small setups and tests. |
 | `duckdb://path/to/sensapp.db` | DuckDB | Experimental. |
-| `rrdcached://host:42217?preset=munin&heartbeat=3600`, `rrdcached+unix:///path/to.sock` | RRDCached | Experimental: numbers only, no names or labels. `preset` is `hoarder` (default) or `munin`, `heartbeat` is in seconds. See [RRDCACHED.md](RRDCACHED.md). |
+| `rrdcached://host:42217?preset=munin&heartbeat=3600`, `rrdcached+unix:///path/to.sock` | RRDCached | Experimental: numbers only, no names or labels. `preset` is `hoarder` (default) or `munin`, `heartbeat` and `future` are in seconds. See [RRDCACHED.md](RRDCACHED.md). |
 | `bigquery://key.json?project_id=P&dataset_id=D`, without `key.json` for the Application Default Credentials | BigQuery | Experimental, for research: every query is billed. Optional `location` and `max_bytes_billed`. See [BIGQUERY.md](BIGQUERY.md). |
 
 Backends create and migrate their own schema at startup. [BACKENDS.md](BACKENDS.md) says which ones are maintained and which are experimental, and what each is good for.
@@ -116,6 +124,31 @@ Backpressure only works if clients listen to it. The [Python SDK](PYTHON_SDK.md#
 - Bound the retrying: 2 to 5 attempts and a total time limit. After that, drop the request and report the failure (or, for a device, keep it in a bounded local buffer and drop the oldest data first). The server cannot do this for you: it keeps no state per client.
 - Retry at one layer only, not in the client library and again in a proxy or an agent: 3 layers × 3 retries is 27 attempts for one request.
 - Stop retrying when your own deadline has passed.
+
+### Status codes of the writes
+
+The writes (`/publish`, the InfluxDB write and the Prometheus remote write) answer:
+
+| Status | Meaning | Retry? |
+| --- | --- | --- |
+| `200` (`/publish`) or `204` | Everything was stored. | |
+| `400` | The payload can never be stored: it cannot be read (CSV rows of different lengths, text that is not UTF-8, line protocol, Snappy or protobuf that cannot be decoded, no rows), or it holds what SensApp refuses (a NUL character in a name, unit, label or value, a vertical tab or a separator 0x1C to 0x1F in a name, unit or label, a time outside years 1 to 9999, values of two types for one series, a series without `__name__`). Nothing was stored. | No |
+| `401`, `403` | No valid token, or a token without the write scope or the sensor. | No |
+| `409` | A sensor UUID is already used by another series. | No |
+| `413` | The body is larger than `SENSAPP_HTTP_BODY_LIMIT`. Send smaller requests. | No |
+| `500` | The storage failed on its own (a rejected statement, a bug). The write may be stored in part. | No |
+| `503` | Shed with `Retry-After` (nothing was stored: the write slots are taken, or the body did not arrive within `SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS`), or the database is unavailable, or a write waited longer than `SENSAPP_PG_LOCK_TIMEOUT_SECONDS` for the lock of a series being deleted, or lost a deadlock (may be stored in part). | Yes |
+| `504` | The write took longer than `SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS`. It may be stored in part. | Yes |
+
+Prometheus and Telegraf retry every `5xx`. This is why a payload that can never be stored is a `400`: answered with a `500`, it would be sent again forever and block its remote-write shard.
+
+## Shutdown
+
+SensApp stops on SIGTERM (what `docker stop` and Kubernetes send) and on Ctrl+C (SIGINT). It takes no new connection, lets the requests in flight finish, and exits with code 0 once they are done. The drain lasts at most `SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS` (300 s, the write timeout): what is still in flight after that is cut, as is a client that stops reading its response, which no request timeout bounds. A second SIGTERM or Ctrl+C cuts it at once. An instance with nothing in flight stops at once. The handlers are installed first thing at startup, and a signal during a long migration stops SensApp instead of being ignored.
+
+Give the container a grace period that covers the write timeout, or a write can be cut in the middle: its batches already stored stay stored, and its retry stores them again (see [HTTP_LIMITS.md](HTTP_LIMITS.md#timeouts)). The Helm chart sets `terminationGracePeriodSeconds: 330` and a `preStop` sleep of 5 s, since SensApp closes its listener on the signal, possibly before Kubernetes removes the pod from the Service endpoints: without the sleep, new connections are refused for a moment at each rollout. `docker stop` waits only 10 s by default: use `docker stop --time 330`, or `stop_grace_period: 330s` in Docker Compose.
+
+`/health/ready` does not change during the drain: SensApp stops accepting connections when the signal arrives, so no probe would see it, and Kubernetes takes a terminating pod out of its Service by itself.
 
 ## Request IDs
 

@@ -1,18 +1,67 @@
 use super::{
-    Sensor, TypedSamples,
+    Sensor, SensorType, TypedSamples,
     batch::{Batch, SingleSensorBatch},
 };
-use crate::{datamodel::SensAppVec, storage::StorageInstance};
+use crate::datamodel::sensapp_datetime::{EARLIEST_UNIX_US, LATEST_UNIX_US, SensAppDateTimeExt};
+use crate::{
+    datamodel::SensAppVec,
+    storage::{StorageError, StorageInstance},
+};
 use anyhow::Error;
 use hybridmap::HybridMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+/// Whether a string or JSON value holds U+0000. PostgreSQL refuses it in a text and in a `jsonb`,
+/// so it is refused on every backend, as a payload error.
+fn holds_a_nul(samples: &TypedSamples) -> bool {
+    fn json_holds_a_nul(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::String(text) => text.contains('\0'),
+            serde_json::Value::Array(values) => values.iter().any(json_holds_a_nul),
+            serde_json::Value::Object(map) => map
+                .iter()
+                .any(|(key, value)| key.contains('\0') || json_holds_a_nul(value)),
+            _ => false,
+        }
+    }
+    match samples {
+        TypedSamples::String(samples) => samples.iter().any(|sample| sample.value.contains('\0')),
+        TypedSamples::Json(samples) => samples.iter().any(|sample| json_holds_a_nul(&sample.value)),
+        _ => false,
+    }
+}
+
+/// Whether a float or a coordinate is NaN. NaN is no value: SQLite cannot store it, and the
+/// backends order it differently, so it is refused on every backend. The infinities are values.
+fn holds_a_nan(samples: &TypedSamples) -> bool {
+    match samples {
+        TypedSamples::Float(samples) => samples.iter().any(|sample| sample.value.is_nan()),
+        TypedSamples::Location(samples) => samples
+            .iter()
+            .any(|sample| sample.value.x().is_nan() || sample.value.y().is_nan()),
+        _ => false,
+    }
+}
+
+/// Whether a coordinate is infinite: a place cannot be at infinity, where a Float may be.
+fn holds_an_infinite_coordinate(samples: &TypedSamples) -> bool {
+    match samples {
+        TypedSamples::Location(samples) => samples
+            .iter()
+            .any(|sample| sample.value.x().is_infinite() || sample.value.y().is_infinite()),
+        _ => false,
+    }
+}
+
 /// A batch builder is used to build a batch from a stream of samples.
 pub struct BatchBuilder {
     batch_size: usize,
     single_sensor_batches: RwLock<HybridMap<Uuid, SingleSensorBatch>>,
+    /// The stored type of the sensors that a write found stored with another type than its
+    /// samples: the next batches are converted before they are sent
+    stored_types: std::collections::HashMap<Uuid, SensorType>,
 }
 
 impl BatchBuilder {
@@ -26,10 +75,43 @@ impl BatchBuilder {
         Ok(Self {
             batch_size,
             single_sensor_batches: RwLock::new(HybridMap::new()),
+            stored_types: std::collections::HashMap::new(),
         })
     }
 
+    /// Adds samples to the batch. A sample outside years 1 to 9999 is refused, see
+    /// [`EARLIEST_UNIX_US`].
     pub async fn add(&mut self, sensor: Arc<Sensor>, samples: TypedSamples) -> Result<(), Error> {
+        if let Some(datetime) = samples.datetimes().find(|datetime| {
+            !(EARLIEST_UNIX_US..=LATEST_UNIX_US).contains(&datetime.to_unix_microseconds_i64())
+        }) {
+            return Err(StorageError::InvalidDataFormat {
+                message: format!("the time {datetime} is outside years 1 to 9999"),
+                sensor_context: sensor.name.clone(),
+            }
+            .into());
+        }
+        if holds_a_nul(&samples) {
+            return Err(StorageError::InvalidDataFormat {
+                message: "a value holds a NUL character, which PostgreSQL cannot store".to_string(),
+                sensor_context: sensor.name.clone(),
+            }
+            .into());
+        }
+        if holds_a_nan(&samples) {
+            return Err(StorageError::InvalidDataFormat {
+                message: "a value is NaN, which is not a number to store".to_string(),
+                sensor_context: sensor.name.clone(),
+            }
+            .into());
+        }
+        if holds_an_infinite_coordinate(&samples) {
+            return Err(StorageError::InvalidDataFormat {
+                message: "a coordinate is infinite".to_string(),
+                sensor_context: sensor.name.clone(),
+            }
+            .into());
+        }
         let uuid = sensor.uuid;
         let mut write_guard = self.single_sensor_batches.write().await;
         let single_sensor_batches = &mut *write_guard;
@@ -158,10 +240,92 @@ impl BatchBuilder {
         let batches_iter = self.build_batches().await;
 
         for batch in batches_iter {
-            storage.publish(Arc::new(batch)).await?;
+            self.publish_converting(&storage, batch).await?;
         }
 
         Ok(())
+    }
+
+    /// Publish a batch. A sensor that is stored with another type than its samples (SenML only has
+    /// floating point numbers, and pandas turns an integer column with gaps into `float64`) takes
+    /// them converted to the stored type when every value converts exactly, and the write is
+    /// refused when one does not. The storage checks the type where it registers the sensor, in
+    /// the transaction of the write, so this holds across instances: the write is tried again with
+    /// the stored type it reported. Batches are stored one after the other, so a request that
+    /// holds a value that does not convert may have stored the batches before it.
+    async fn publish_converting(
+        &mut self,
+        storage: &Arc<dyn StorageInstance>,
+        batch: Batch,
+    ) -> Result<(), Error> {
+        let mut batch = self.convert_known(batch).await?;
+        // One conversion per sensor of the batch at most
+        for _ in 0..=batch.sensors.len() {
+            let shared = Arc::new(batch);
+            let error = match storage.publish(shared.clone()).await {
+                Ok(()) => return Ok(()),
+                Err(error) => error,
+            };
+            let Some(StorageError::SensorIdentityMismatch {
+                uuid,
+                stored_type: Some(stored_type),
+                ..
+            }) = error.downcast_ref::<StorageError>()
+            else {
+                return Err(error);
+            };
+            let (uuid, Ok(stored_type)) = (*uuid, stored_type.parse::<SensorType>()) else {
+                return Err(error);
+            };
+            // The storage let go of the batch when it failed
+            let Ok(owned) = Arc::try_unwrap(shared) else {
+                return Err(error);
+            };
+            self.stored_types.insert(uuid, stored_type);
+            batch = self.convert_known(owned).await?;
+        }
+        Err(anyhow::anyhow!(
+            "The types of the sensors of a batch kept changing"
+        ))
+    }
+
+    /// The batch with the samples of the sensors of `stored_types` converted to their stored type.
+    async fn convert_known(&self, batch: Batch) -> Result<Batch, Error> {
+        if self.stored_types.is_empty() {
+            return Ok(batch);
+        }
+        let mut converted = SensAppVec::new();
+        for single in batch.sensors {
+            let stored = self
+                .stored_types
+                .get(&single.sensor.uuid)
+                .copied()
+                .filter(|stored| *stored != single.sensor.sensor_type);
+            let Some(stored) = stored else {
+                converted.push(single);
+                continue;
+            };
+            let sensor = single.sensor;
+            let samples = single.samples.into_inner();
+            let samples =
+                samples
+                    .convert_to(stored)
+                    .map_err(|error| StorageError::SensorTypeConversion {
+                        uuid: sensor.uuid,
+                        sensor_type: sensor.sensor_type.to_string(),
+                        stored_type: stored.to_string(),
+                        reason: error.0,
+                    })?;
+            let sensor = Sensor {
+                uuid: sensor.uuid,
+                name: sensor.name.clone(),
+                sensor_type: stored,
+                unit: sensor.unit.clone(),
+                labels: sensor.labels.clone(),
+            };
+            converted.push(SingleSensorBatch::new(Arc::new(sensor), samples));
+        }
+        Ok(Batch::new(converted))
     }
 
     async fn send(&mut self, storage: Arc<dyn StorageInstance>, len: usize) -> Result<(), Error> {
@@ -174,7 +338,7 @@ impl BatchBuilder {
         }
 
         let batch = self.build_batch().await;
-        storage.publish(Arc::new(batch)).await?;
+        self.publish_converting(&storage, batch).await?;
 
         Ok(())
     }
@@ -214,6 +378,33 @@ mod tests {
         config::load_configuration,
         datamodel::{Sample, SensorType, sensapp_vec::SensAppLabels},
     };
+
+    /// Times outside years 1 to 9999 are refused as invalid data (a 400), the edges are kept.
+    #[tokio::test]
+    async fn test_times_outside_years_1_to_9999_are_refused() {
+        load_configuration().unwrap();
+        let at = |us: i64| {
+            TypedSamples::Float(smallvec::smallvec![Sample {
+                datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(us),
+                value: 1.0,
+            }])
+        };
+        let sensor = create_test_sensor(Uuid::new_v4());
+        let mut builder = BatchBuilder::new().unwrap();
+        for us in [EARLIEST_UNIX_US, LATEST_UNIX_US, 0] {
+            builder.add(sensor.clone(), at(us)).await.unwrap();
+        }
+        for us in [EARLIEST_UNIX_US - 1, LATEST_UNIX_US + 1, i64::MAX, i64::MIN] {
+            let error = builder.add(sensor.clone(), at(us)).await.unwrap_err();
+            assert!(
+                matches!(
+                    error.downcast_ref::<StorageError>(),
+                    Some(StorageError::InvalidDataFormat { .. })
+                ),
+                "{us}: {error}"
+            );
+        }
+    }
 
     // Utility function to create a test sensor
     fn create_test_sensor(uuid: Uuid) -> Arc<Sensor> {

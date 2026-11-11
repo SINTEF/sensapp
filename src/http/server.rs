@@ -26,7 +26,7 @@ use crate::http::metrics::__path_prometheus_metrics;
 use crate::http::prometheus_read::__path_prometheus_remote_read;
 use crate::http::prometheus_write::__path_publish_prometheus;
 use crate::http::simple_promql::__path_simple_promql_query;
-use crate::importers::csv::publish_csv_async;
+use crate::importers::csv::{parse_csv_data_grid, publish_parsed_csv, read_csv_data_grid};
 use crate::storage::StorageInstance;
 use anyhow::Result;
 use axum::Json;
@@ -51,6 +51,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
+use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::classify::ServerErrorsFailureClass;
 use tower_http::request_id::MakeRequestUuid;
 use tower_http::trace;
@@ -115,6 +116,9 @@ pub struct RouterSettings {
     pub maintenance_timeout: Duration,
     /// Write requests handled at the same time, 0 for no limit
     pub max_concurrent_writes: usize,
+    /// Time a client has to send a buffered request body (the writes and the remote read) before
+    /// it is answered with a 503 and a `Retry-After`, which frees its write slot
+    pub body_read_timeout: Duration,
     /// Directory of the built web UI to serve under `/ui/`, `None` to not serve it
     pub ui_dir: Option<PathBuf>,
 }
@@ -127,6 +131,7 @@ impl RouterSettings {
             write_timeout: Duration::from_secs(config.http_write_timeout_seconds),
             maintenance_timeout: Duration::from_secs(config.http_maintenance_timeout_seconds),
             max_concurrent_writes: config.http_max_concurrent_writes,
+            body_read_timeout: Duration::from_secs(config.http_body_read_timeout_seconds),
             ui_dir: ui_directory(config),
         })
     }
@@ -142,9 +147,24 @@ fn timeout_layer(duration: Duration) -> TimeoutLayer {
 /// The routes and the layers of the HTTP server, without a socket: the real thing, that the
 /// tests run as well.
 pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router {
+    build_router_guarded(state, settings, None)
+}
+
+/// [`build_router`], with the guard of an open server (`SENSAPP_AUTH_DISABLED`) inside the
+/// metrics and the trace layers: what it refuses is counted and logged with a request id.
+pub fn build_router_guarded(
+    state: HttpServerState,
+    settings: &RouterSettings,
+    guard: Option<super::open_server::OpenServerGuard>,
+) -> Router {
     let max_body_bytes = settings.max_body_bytes;
-    let max_body_layer =
-        axum::middleware::from_fn_with_state(max_body_bytes, enforce_request_body_limit);
+    let max_body_layer = axum::middleware::from_fn_with_state(
+        BodyLimits {
+            max_bytes: max_body_bytes,
+            read_timeout: settings.body_read_timeout,
+        },
+        enforce_request_body_limit,
+    );
     let bytes_body_layer = DefaultBodyLimit::max(max_body_bytes);
     let write_limiter = WriteLimiter::new(settings.max_concurrent_writes)
         .with_shed_counter(state.metrics.writes_shed_counter());
@@ -289,13 +309,21 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
 
     // The writes and the maintenance have timeouts of their own, merged after the layer of the
     // other requests so that this one does not apply to them.
-    public_routes
+    let router = public_routes
         .merge(read_routes)
         .merge(delete_routes)
         .merge(admin_routes)
         .layer(timeout_layer(settings.request_timeout))
         .merge(write_routes)
-        .merge(maintenance_routes)
+        .merge(maintenance_routes);
+    let router = match guard {
+        Some(guard) => super::open_server::guard_open_server(router, guard),
+        None => router,
+    };
+    router
+        // A panic in a handler is a logged 500 for that request only. Inside the metrics and the
+        // trace layers, so that it is counted and logged with its request id.
+        .layer(CatchPanicLayer::custom(panic_response))
         .layer(axum::middleware::from_fn_with_state(
             state.metrics.clone(),
             track_http_metrics,
@@ -304,9 +332,23 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
         .with_state(state)
 }
 
-pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
-    let settings = RouterSettings::from_config(&*config::get()?)?;
-    let app = build_router(state, &settings);
+pub async fn run_http_server(
+    state: HttpServerState,
+    address: SocketAddr,
+    signals: ShutdownSignals,
+) -> Result<()> {
+    let config = config::get()?;
+    let settings = RouterSettings::from_config(&config)?;
+    let limits = super::serve::ServeLimits::from_config(&config);
+    let guard = state.auth.is_none().then(|| {
+        let guard = super::open_server::OpenServerGuard::new(
+            &config.allowed_hosts(),
+            address.ip().is_loopback(),
+        );
+        guard.warn_about_rebinding();
+        guard
+    });
+    let app = build_router_guarded(state, &settings, guard);
 
     // Bind to the address with improved error handling
     let listener = match tokio::net::TcpListener::bind(address).await {
@@ -321,11 +363,38 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         }
     };
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    let first = signals.clone();
+    super::serve::serve(
+        listener,
+        app,
+        limits,
+        async move {
+            first.received(1).await;
+            tracing::info!(
+                "Shutting down: the requests in flight finish, no new connection is accepted"
+            );
+        },
+        async move { signals.received(2).await },
+    )
+    .await;
 
     Ok(())
+}
+
+/// The answer to a request whose handler panicked. The panic message was already printed by the
+/// panic hook; it is logged again here within the request span, and not sent to the client.
+fn panic_response(panic: Box<dyn std::any::Any + Send + 'static>) -> Response {
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or("unknown panic");
+    tracing::error!("Request handler panicked: {message}");
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({ "error": "Internal Server Error" })),
+    )
+        .into_response()
 }
 
 /// Log a 5xx response, at the level that fits it. The default logs every one of them as an
@@ -351,29 +420,107 @@ fn log_failed_response(
     }
 }
 
-async fn shutdown_signal() {
-    // Wait for the CTRL+C signal
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install shutdown CTRL+C signal handler");
+/// Counts the SIGTERM (what `docker stop` and Kubernetes send) and Ctrl+C (SIGINT) received.
+/// SensApp is PID 1 in its image, where an unhandled SIGTERM is ignored: installed first thing in
+/// `main`, so that even a long startup migration is not killed at the end of the grace period
+/// without a word. The first signal stops the server, which takes no new connection and lets the
+/// requests in flight finish (for `SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS` at most); a second one
+/// cuts them.
+#[derive(Clone, Debug)]
+pub struct ShutdownSignals {
+    received: tokio::sync::watch::Receiver<u32>,
 }
 
+impl ShutdownSignals {
+    /// Must run within the Tokio runtime.
+    pub fn install() -> Result<Self> {
+        let (sender, received) = tokio::sync::watch::channel(0_u32);
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut interrupt = signal(SignalKind::interrupt())?;
+            let mut terminate = signal(SignalKind::terminate())?;
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = interrupt.recv() => {}
+                        _ = terminate.recv() => {}
+                    }
+                    sender.send_modify(|count| *count += 1);
+                }
+            });
+        }
+        #[cfg(not(unix))]
+        tokio::spawn(async move {
+            while tokio::signal::ctrl_c().await.is_ok() {
+                sender.send_modify(|count| *count += 1);
+            }
+        });
+        Ok(Self { received })
+    }
+
+    /// Signals that will never come, for the tests.
+    pub fn never() -> Self {
+        let (sender, received) = tokio::sync::watch::channel(0_u32);
+        std::mem::forget(sender);
+        Self { received }
+    }
+
+    /// Completes once `count` signals were received.
+    pub async fn received(&self, count: u32) {
+        let mut received = self.received.clone();
+        let _ = received.wait_for(|received| *received >= count).await;
+        // The sender lives as long as the process
+        if *received.borrow() < count {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+/// The size and the time allowed to a request body that is read before its handler runs.
+#[derive(Clone, Copy, Debug)]
+struct BodyLimits {
+    max_bytes: usize,
+    read_timeout: Duration,
+}
+
+/// Read the whole body before the handler: 413 when it is too large, and 503 when the client takes
+/// longer than the read timeout to send it, which frees the write slot it holds.
 async fn enforce_request_body_limit(
-    State(max_bytes): State<usize>,
+    State(limits): State<BodyLimits>,
     request: Request,
     next: Next,
 ) -> Response {
     let (parts, body) = request.into_parts();
-    match axum::body::to_bytes(body, max_bytes).await {
-        Ok(bytes) => {
+    let max_bytes = limits.max_bytes;
+    match tokio::time::timeout(limits.read_timeout, axum::body::to_bytes(body, max_bytes)).await {
+        Ok(Ok(bytes)) => {
             next.run(Request::from_parts(parts, Body::from(bytes)))
                 .await
         }
-        Err(_) => (
+        Ok(Err(_)) => (
             StatusCode::PAYLOAD_TOO_LARGE,
             format!("Request body exceeds {max_bytes} bytes"),
         )
             .into_response(),
+        // A 503 with a `Retry-After`, not a 408: Prometheus does not retry a 4xx other than 429
+        // and drops the batch, and Telegraf and the other clients do the same. Nothing was read
+        // by the handler, so the request is safe to send again.
+        Err(_) => {
+            let mut response = (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!(
+                    "The request body was not received within {} seconds, retry later",
+                    limits.read_timeout.as_secs_f64()
+                ),
+            )
+                .into_response();
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from(fastrand::u64(1..=10)),
+            );
+            response
+        }
     }
 }
 
@@ -408,7 +555,12 @@ async fn frontpage(State(state): State<HttpServerState>) -> Result<Json<String>,
         description = "Sensor data in SenML JSON, CSV, or Apache Arrow format"
     ),
     responses(
-        (status = 200, description = "Data ingested successfully", body = String),
+        (
+            status = 200,
+            description = "Data ingested successfully. `X-SensApp-Skipped-Samples` is the number of cells that held no reading (a null, a NaN, an empty or `NA` CSV cell) and were skipped, 0 when none",
+            body = String,
+            headers(("X-SensApp-Skipped-Samples" = u64, description = "Cells that held no reading and were skipped"))
+        ),
         (status = 400, description = "Bad Request - invalid data format", body = AppError),
         (status = 500, description = "Internal Server Error", body = AppError),
         (
@@ -424,7 +576,7 @@ async fn publish_sensors_data(
     access: Option<axum::Extension<crate::http::auth::AccessContext>>,
     headers: HeaderMap,
     body: axum::body::Body,
-) -> Result<String, AppError> {
+) -> Result<([(&'static str, String); 1], String), AppError> {
     let state = state.with_access(access.map(|extension| extension.0));
     let metrics = state.metrics.clone();
     let started = Instant::now();
@@ -436,7 +588,8 @@ async fn publish_sensors_data(
             .unwrap_or("text/csv");
 
         match content_type {
-            ct if ct.contains("application/json") => {
+            // `application/senml+json` (RFC 8428) and the other `+json` media types too
+            ct if ct.contains("application/json") || ct.contains("+json") => {
                 publish_json_format(body, state.storage.clone()).await
             }
             ct if ct.contains("application/vnd.apache.arrow.stream")
@@ -456,11 +609,19 @@ async fn publish_sensors_data(
     if let Ok(stats) = &result {
         metrics.observe_series("write", "native_publish", stats.series);
         metrics.observe_samples("write", "native_publish", stats.samples);
+        // Not silent: a client that sends a gap is told, and the counter shows it
+        metrics.observe_samples("skipped", "native_publish", stats.skipped);
     }
 
-    result?;
-    Ok("ok".to_string())
+    let stats = result?;
+    Ok((
+        [(SKIPPED_SAMPLES_HEADER, stats.skipped.to_string())],
+        "ok".to_string(),
+    ))
 }
+
+/// The number of cells of a write that held no reading and were skipped.
+pub const SKIPPED_SAMPLES_HEADER: &str = "x-sensapp-skipped-samples";
 
 /// Handle JSON data ingestion (SenML format)
 async fn publish_json_format(
@@ -486,11 +647,17 @@ async fn publish_arrow_format(
         .await
         .map_err(|e| AppError::bad_request(anyhow::anyhow!("Failed to read Arrow body: {}", e)))?;
 
-    // Errors from parsing are caused by the payload
-    let sensor_data_maps =
-        crate::importers::arrow::parse_arrow_sensors(&body_bytes).map_err(AppError::bad_request)?;
+    // Compressed buffers may not expand past the body limit, as for gzip and snappy bodies
+    let max_decompressed_bytes = crate::config::get()?.parse_http_body_limit()?;
 
-    crate::importers::arrow::publish_arrow_sensors(sensor_data_maps, storage)
+    // Errors from parsing are caused by the payload
+    let (sensor_data_maps, skipped) = super::app_error::run_blocking(move || {
+        crate::importers::arrow::parse_arrow_sensors(&body_bytes, max_decompressed_bytes)
+            .map_err(AppError::bad_request)
+    })
+    .await?;
+
+    crate::importers::arrow::publish_arrow_sensors(sensor_data_maps, skipped, storage)
         .await
         .map_err(AppError::internal_server_error)
 }
@@ -509,7 +676,17 @@ async fn publish_csv_format(
         .delimiter(b',') // Use comma for standard CSV
         .create_reader(reader);
 
-    publish_csv_async(csv_reader, storage)
+    // The body is already in memory (`enforce_request_body_limit`): reading the records fails on
+    // the payload only, a row of another length or a text that is not UTF-8
+    let data_grid = read_csv_data_grid(csv_reader)
+        .await
+        .map_err(AppError::bad_request)?;
+    // Errors from parsing are caused by the payload
+    let (parsed, skipped) = super::app_error::run_blocking(move || {
+        parse_csv_data_grid(data_grid).map_err(AppError::bad_request)
+    })
+    .await?;
+    publish_parsed_csv(parsed, skipped, storage)
         .await
         .map_err(AppError::internal_server_error)
 }
@@ -949,7 +1126,10 @@ mod tests {
             "/publish",
             post(|body: Body| async move { axum::body::to_bytes(body, usize::MAX).await.unwrap() })
                 .layer(axum::middleware::from_fn_with_state(
-                    4usize,
+                    BodyLimits {
+                        max_bytes: 4,
+                        read_timeout: Duration::from_secs(30),
+                    },
                     enforce_request_body_limit,
                 )),
         );

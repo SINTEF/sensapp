@@ -9,10 +9,16 @@ use utoipa::ToSchema;
 
 /// PostgreSQL error codes of a database that cannot serve the request now but may later: the
 /// connection exception class (`08`), too many connections, and the shutdown family (admin
-/// shutdown, crash shutdown, cannot connect now). A statement timeout (`57014`) is not one of
+/// shutdown, crash shutdown, cannot connect now), and the locks: a lock timeout (`55P03`, a writer
+/// waited for the lock of a series being deleted) and a deadlock (`40P01`). The transaction was
+/// rolled back, and the same request can work later. A statement timeout (`57014`) is not one of
 /// them: the database is up, the query is slow, and retrying it only adds load.
 fn sqlstate_is_unavailable(code: &str) -> bool {
-    code.starts_with("08") || matches!(code, "53300" | "57P01" | "57P02" | "57P03")
+    code.starts_with("08")
+        || matches!(
+            code,
+            "53300" | "57P01" | "57P02" | "57P03" | "55P03" | "40P01"
+        )
 }
 
 /// Whether a SQLite error is `SQLITE_BUSY` or `SQLITE_LOCKED`: another connection holds the write
@@ -87,6 +93,11 @@ impl IntoResponse for AppError {
                 StorageError::SensorNotFound { .. } | StorageError::MetricNotFound { .. } => {
                     (StatusCode::NOT_FOUND, storage_error.to_string())
                 }
+                StorageError::SensorIdentityMismatch { .. }
+                | StorageError::SensorTypeConversion { .. }
+                | StorageError::SensorKeyCollision { .. } => {
+                    (StatusCode::CONFLICT, storage_error.to_string())
+                }
                 #[cfg(any(
                     feature = "postgres",
                     feature = "sqlite",
@@ -154,6 +165,12 @@ impl From<anyhow::Error> for AppError {
         if err.is::<crate::http::authorized_storage::SensorAccessDenied>() {
             return Self::Forbidden(err.to_string());
         }
+        if err
+            .chain()
+            .any(|cause| cause.is::<crate::datamodel::sensor::DuplicateLabelName>())
+        {
+            return Self::BadRequest(err);
+        }
         // Errors of the ClickHouse client travel inside `anyhow` through `?`: classify them here
         // so that an outage is a 503 and not an anonymous 500.
         #[cfg(feature = "clickhouse")]
@@ -169,11 +186,34 @@ impl From<anyhow::Error> for AppError {
         }) {
             return Self::Storage(StorageError::Unavailable(format!("{err:#}")));
         }
+        // The client asked for a simplification that costs too much
+        if err.is::<crate::storage::common::SimplifyBudgetExceeded>() {
+            return Self::BadRequest(err);
+        }
         match err.downcast::<StorageError>() {
             Ok(storage_error) => Self::Storage(storage_error),
             Err(err) => Self::InternalServerError(err),
         }
     }
+}
+
+/// Run CPU work (decompressing, parsing a large body) on the blocking threads, so that the async
+/// workers keep serving the other requests. A panic is a 500.
+///
+/// The write slot of the request moves into the closure: the blocking thread cannot be cancelled
+/// and goes on when the client disconnects, so the slot is only released when the work ends.
+pub async fn run_blocking<T, F>(work: F) -> Result<T, AppError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, AppError> + Send + 'static,
+{
+    let permit = super::backpressure::current_write_permit();
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await
+    .map_err(AppError::internal_server_error)?
 }
 
 impl AppError {
@@ -274,11 +314,14 @@ mod tests {
     fn test_sqlstates_of_an_unavailable_database() {
         for code in [
             "08000", "08006", "08001", "53300", "57P01", "57P02", "57P03",
+            // lock_not_available (the lock timeout) and deadlock_detected: a write that waited for
+            // a lock, or was chosen as the victim, can be sent again
+            "55P03", "40P01",
         ] {
             assert!(sqlstate_is_unavailable(code), "{code}");
         }
-        // A statement timeout (query canceled), a deadlock, a constraint, and the SQLite codes
-        for code in ["57014", "40P01", "23505", "42P01", "5", "14", ""] {
+        // A statement timeout (query canceled), a constraint, and the SQLite codes
+        for code in ["57014", "23505", "42P01", "5", "14", ""] {
             assert!(!sqlstate_is_unavailable(code), "{code}");
         }
     }

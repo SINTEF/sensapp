@@ -25,10 +25,6 @@ impl StreamWriter {
         // Skip empty responses - Prometheus expects no message when there's no data
         // Otherwise, the client will try to access ChunkedSeries[0] and panic
         if response.chunked_series.is_empty() {
-            println!(
-                "[DEBUG STREAM_WRITER] Skipping empty ChunkedReadResponse for query_index={} (no series)",
-                response.query_index
-            );
             debug!(
                 "Skipping empty ChunkedReadResponse for query_index={}",
                 response.query_index
@@ -39,10 +35,6 @@ impl StreamWriter {
         // Also skip responses where all series have no chunks
         let has_chunks = response.chunked_series.iter().any(|s| !s.chunks.is_empty());
         if !has_chunks {
-            println!(
-                "[DEBUG STREAM_WRITER] Skipping ChunkedReadResponse for query_index={} (series exist but no chunks)",
-                response.query_index
-            );
             debug!(
                 "Skipping ChunkedReadResponse with no chunks for query_index={}",
                 response.query_index
@@ -52,52 +44,6 @@ impl StreamWriter {
 
         // Encode the protobuf message
         let encoded = response.encode_to_vec();
-
-        println!(
-            "[DEBUG STREAM_WRITER] Writing ChunkedReadResponse: query_index={}, series_count={}, encoded_size={} bytes",
-            response.query_index,
-            response.chunked_series.len(),
-            encoded.len()
-        );
-        // Log details about each series
-        for (i, series) in response.chunked_series.iter().enumerate() {
-            println!(
-                "[DEBUG STREAM_WRITER]   Series {}: {} labels, {} chunks",
-                i,
-                series.labels.len(),
-                series.chunks.len()
-            );
-            println!(
-                "[DEBUG STREAM_WRITER]     Labels: {:?}",
-                series
-                    .labels
-                    .iter()
-                    .map(|l| format!("{}={}", l.name, l.value))
-                    .collect::<Vec<_>>()
-            );
-            for chunk in &series.chunks {
-                println!(
-                    "[DEBUG STREAM_WRITER]     Chunk: {}ms - {}ms, {} bytes data, type={}",
-                    chunk.min_time_ms,
-                    chunk.max_time_ms,
-                    chunk.data.len(),
-                    chunk.r#type
-                );
-                // Print first 32 bytes of chunk data in hex for debugging
-                let hex_preview: String = chunk
-                    .data
-                    .iter()
-                    .take(32)
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                println!(
-                    "[DEBUG STREAM_WRITER]     Chunk data (first 32 bytes): {}",
-                    hex_preview
-                );
-            }
-        }
-
         debug!(
             "Writing ChunkedReadResponse: query_index={}, series_count={}, encoded_size={}",
             response.query_index,
@@ -129,10 +75,6 @@ impl StreamWriter {
         responses: &[ChunkedReadResponse],
         writer: &mut W,
     ) -> Result<()> {
-        println!(
-            "[DEBUG STREAM_WRITER] write_responses called with {} responses",
-            responses.len()
-        );
         debug!("Writing {} ChunkedReadResponses to stream", responses.len());
 
         for response in responses {
@@ -210,12 +152,8 @@ mod tests {
 
     #[test]
     fn test_calculate_crc32() {
-        // Test with known data
-        let data = b"Hello, World!";
-        let crc = StreamWriter::calculate_crc32(data);
-        // The actual CRC32C value would need to be verified
-        // This just checks that we get a non-zero result
-        assert_ne!(crc, 0);
+        // The check value of CRC-32C (Castagnoli), which Prometheus uses for the frames
+        assert_eq!(StreamWriter::calculate_crc32(b"123456789"), 0xE306_9283);
     }
 
     #[test]

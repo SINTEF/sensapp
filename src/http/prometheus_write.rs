@@ -19,6 +19,15 @@ use std::time::Instant;
 use tokio_util::bytes::Bytes;
 use tracing::{debug, info};
 
+/// The parts of a remote write request that SensApp does not store.
+struct DroppedParts {
+    exemplars: usize,
+    histograms: usize,
+    metadata: usize,
+    /// NaN samples (stale markers, or the result of a rule)
+    nan_samples: usize,
+}
+
 /// Validates required Prometheus Remote Write API headers.
 ///
 /// Prometheus sends data with specific headers:
@@ -127,10 +136,32 @@ pub async fn publish_prometheus(
 
         verify_headers(&headers)?;
 
-        let write_request = parse_remote_write_request(&bytes)?;
+        // A request that cannot be read is a 400: Prometheus drops it instead of sending it again
+        let write_request = super::app_error::run_blocking(move || {
+            parse_remote_write_request(&bytes).map_err(|error| {
+                AppError::bad_request(anyhow::anyhow!("Failed to parse write request: {error}"))
+            })
+        })
+        .await?;
+
+        // Exemplars, native histograms and metadata are not stored, only counted
+        let mut dropped = DroppedParts {
+            exemplars: write_request
+                .timeseries
+                .iter()
+                .map(|serie| serie.exemplars.len())
+                .sum(),
+            histograms: write_request
+                .timeseries
+                .iter()
+                .map(|serie| serie.histograms.len())
+                .sum(),
+            metadata: write_request.metadata.len(),
+            nan_samples: 0,
+        };
 
         if write_request.timeseries.is_empty() {
-            return Ok::<_, AppError>((StatusCode::NO_CONTENT, 0usize, 0usize));
+            return Ok::<_, AppError>((StatusCode::NO_CONTENT, 0usize, 0usize, dropped));
         }
 
         debug!("Processing {} timeseries", write_request.timeseries.len());
@@ -144,9 +175,19 @@ pub async fn publish_prometheus(
             let mut unit: Option<Unit> = None;
             for label in time_serie.labels {
                 match label.name.as_str() {
+                    // The name of the sensor, and not one of its labels: the reads add it back
                     "__name__" => {
-                        name = Some(label.value.clone());
+                        // The last one silently winning would store another series than the
+                        // first, and other duplicate labels are refused
+                        if name.is_some() {
+                            return Err(AppError::bad_request(anyhow::anyhow!(
+                                "A time serie has its __name__ label more than once"
+                            )));
+                        }
+                        name = Some(label.value);
+                        continue;
                     }
+                    // The unit of the sensor, kept as a label too so the label set round trips
                     "unit" => {
                         unit = Some(Unit::new(label.value.clone(), None));
                     }
@@ -165,16 +206,25 @@ pub async fn publish_prometheus(
 
             let sensor = Sensor::new_without_uuid(name, SensorType::Float, unit, Some(labels))?;
 
+            // NaN is not stored: Prometheus writes a NaN stale marker when a series disappears,
+            // and a rule can compute NaN. A 400 would make Prometheus drop the whole request
+            let received = time_serie.samples.len();
             let samples = TypedSamples::Float(
                 time_serie
                     .samples
                     .into_iter()
+                    .filter(|sample| !sample.value.is_nan())
                     .map(|sample| Sample {
                         datetime: SensAppDateTime::from_unix_milliseconds_i64(sample.timestamp),
                         value: sample.value,
                     })
                     .collect(),
             );
+            dropped.nan_samples += received - samples.len();
+            if samples.is_empty() {
+                // Only stale markers: nothing to store, not even the series
+                continue;
+            }
 
             series += 1;
             sample_count += samples.len();
@@ -193,7 +243,7 @@ pub async fn publish_prometheus(
             }
         }
 
-        Ok((StatusCode::NO_CONTENT, series, sample_count))
+        Ok((StatusCode::NO_CONTENT, series, sample_count, dropped))
     }
     .await;
 
@@ -203,10 +253,14 @@ pub async fn publish_prometheus(
         started.elapsed(),
         result.is_ok(),
     );
-    if let Ok((_, series, samples)) = &result {
+    if let Ok((_, series, samples, dropped)) = &result {
         metrics.observe_series("write", "prometheus_remote_write", *series);
         metrics.observe_samples("write", "prometheus_remote_write", *samples);
+        metrics.observe_remote_write_dropped("exemplar", dropped.exemplars);
+        metrics.observe_remote_write_dropped("histogram", dropped.histograms);
+        metrics.observe_remote_write_dropped("metadata", dropped.metadata);
+        metrics.observe_remote_write_dropped("nan", dropped.nan_samples);
     }
 
-    result.map(|(status, _, _)| status)
+    result.map(|(status, _, _, _)| status)
 }

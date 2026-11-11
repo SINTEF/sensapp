@@ -20,7 +20,7 @@ pub enum SelectorLimitExceeded {
 pub type SelectorRead = std::result::Result<Vec<SensorData>, SelectorLimitExceeded>;
 
 /// Read the series matching `matchers` one after the other: the portable implementation, used
-/// by backends that have no cheaper way, and when a token only sees some of the sensors.
+/// by backends that have no cheaper way.
 ///
 /// The matching sensors are discovered first, then each series is read with what is left of the
 /// `max_samples` budget, which is exceeded as soon as one more sample than the budget is found.
@@ -92,7 +92,7 @@ pub async fn query_selector_aggregated_sequential<S: StorageInstance + ?Sized>(
     let mut result = Vec::with_capacity(discovered.len());
     for found in discovered {
         let mut options = options.clone();
-        options.limit = Some(remaining + 1);
+        options.limit = Some(remaining.saturating_add(1));
         let data = storage
             .query_sensor_data_advanced(&found.sensor.uuid.to_string(), &options)
             .await?;

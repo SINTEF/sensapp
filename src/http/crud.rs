@@ -87,6 +87,17 @@ pub(crate) mod promql_duration {
                 .ok_or_else(|| anyhow!("Duration '{}' is too large", input))?;
         }
 
+        // A step of zero has no buckets: Prometheus refuses it too
+        if total_ms == 0 {
+            return Err(anyhow!("Duration '{}' must be greater than zero", input));
+        }
+        if total_ms > crate::storage::data_query::MAX_STEP_MS {
+            return Err(anyhow!(
+                "Duration '{}' is longer than the years 1 to 9999 that can be stored",
+                input
+            ));
+        }
+
         Ok(total_ms)
     }
 }
@@ -211,10 +222,18 @@ fn convert_label_match_op(op: rusty_promql_parser::LabelMatchOp) -> MatcherType 
 /// Parse a PromQL selector string and extract label matchers.
 /// Accepts formats like:
 /// - `{env="prod"}` - label matchers only
-/// - `my_metric{env="prod"}` - metric name with labels (metric name is ignored for series filtering)
+/// - `my_metric{env="prod"}` - the metric name is a `__name__` matcher, as in Prometheus
+///
+/// An invalid regex, `offset` and `@` are refused: SensApp would otherwise ignore them.
 pub(crate) fn parse_selector_to_matchers(selector: &str) -> Result<Vec<LabelMatcher>, AppError> {
-    // If the selector is just braces with labels, wrap it in a dummy metric name
-    let query_str = if selector.trim().starts_with('{') {
+    super::limits::check_promql_length(selector)?;
+    super::limits::on_promql_parser_stack(|| parse_selector(selector))
+}
+
+fn parse_selector(selector: &str) -> Result<Vec<LabelMatcher>, AppError> {
+    // If the selector is just braces with labels, wrap it in a placeholder metric name
+    let without_name = selector.trim().starts_with('{');
+    let query_str = if without_name {
         format!("dummy{}", selector)
     } else {
         selector.to_string()
@@ -235,69 +254,79 @@ pub(crate) fn parse_selector_to_matchers(selector: &str) -> Result<Vec<LabelMatc
         )));
     }
 
-    // Extract matchers from the AST
-    match ast {
-        Expr::VectorSelector(vs) => {
-            let matchers: Vec<LabelMatcher> = vs
-                .matchers
-                .iter()
-                .map(|m| {
-                    LabelMatcher::new(
-                        m.name.clone(),
-                        m.value.clone(),
-                        convert_label_match_op(m.op),
-                    )
-                })
-                .collect();
-            Ok(matchers)
-        }
-        _ => Err(AppError::bad_request(anyhow::anyhow!(
+    let Expr::VectorSelector(vs) = ast else {
+        return Err(AppError::bad_request(anyhow::anyhow!(
             "Selector must be a simple label selector like '{{env=\"prod\"}}'"
-        ))),
+        )));
+    };
+    if vs.offset.is_some() || vs.at.is_some() {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "offset and @ are not supported in a selector"
+        )));
     }
+    let name = vs
+        .name
+        .filter(|_| !without_name)
+        .map(|name| LabelMatcher::eq("__name__", name));
+    name.into_iter()
+        .map(Ok)
+        .chain(vs.matchers.iter().map(|m| {
+            LabelMatcher::try_new(
+                m.name.clone(),
+                m.value.clone(),
+                convert_label_match_op(m.op),
+            )
+            .map_err(AppError::bad_request)
+        }))
+        .collect()
 }
 
-/// Check if a sensor matches a set of label matchers
-pub(crate) fn sensor_matches_matchers(
-    sensor: &crate::datamodel::Sensor,
-    matchers: &[LabelMatcher],
-) -> bool {
-    for matcher in matchers {
-        // Find the label value in the sensor
-        let label_value = sensor
-            .labels
-            .iter()
-            .find(|(k, _)| k == &matcher.name)
-            .map(|(_, v)| v.as_str());
+/// Label matchers applied to sensors in memory, with the meaning the storage backends give
+/// them: `__name__` is the sensor name, a regex matches the whole value, and a negative matcher
+/// matches a sensor that does not have the label. Each regex is compiled once.
+pub(crate) struct SensorFilter {
+    matchers: Vec<(LabelMatcher, Option<Regex>)>,
+}
 
-        let matches = match matcher.matcher_type {
-            MatcherType::Equal => label_value == Some(&matcher.value as &str),
-            MatcherType::NotEqual => label_value != Some(&matcher.value as &str),
-            MatcherType::RegexMatch => {
-                if let Some(value) = label_value {
-                    Regex::new(&matcher.value)
-                        .map(|re| re.is_match(value))
-                        .unwrap_or(false)
-                } else {
-                    false
-                }
-            }
-            MatcherType::RegexNotMatch => {
-                if let Some(value) = label_value {
-                    Regex::new(&matcher.value)
-                        .map(|re| !re.is_match(value))
-                        .unwrap_or(true)
-                } else {
-                    true // No label = doesn't match the regex
-                }
-            }
-        };
-
-        if !matches {
-            return false;
-        }
+impl SensorFilter {
+    pub(crate) fn new(matchers: Vec<LabelMatcher>) -> Result<Self, AppError> {
+        let matchers = matchers
+            .into_iter()
+            .map(|matcher| {
+                let regex = matcher
+                    .matcher_type
+                    .is_regex()
+                    // The value of a regex matcher is already anchored
+                    .then(|| Regex::new(&matcher.value).map_err(AppError::bad_request))
+                    .transpose()?;
+                Ok((matcher, regex))
+            })
+            .collect::<Result<_, AppError>>()?;
+        Ok(Self { matchers })
     }
-    true
+
+    pub(crate) fn matches(&self, sensor: &crate::datamodel::Sensor) -> bool {
+        self.matchers.iter().all(|(matcher, regex)| {
+            let value = if matcher.is_name_matcher() {
+                Some(sensor.name.as_str())
+            } else {
+                sensor
+                    .labels
+                    .iter()
+                    .find(|(name, _)| name == &matcher.name)
+                    .map(|(_, value)| value.as_str())
+            };
+            let found = match (regex, value) {
+                (_, None) => false,
+                (Some(regex), Some(value)) => regex.is_match(value),
+                (None, Some(value)) => value == matcher.value,
+            };
+            match matcher.matcher_type {
+                MatcherType::Equal | MatcherType::RegexMatch => found,
+                MatcherType::NotEqual | MatcherType::RegexNotMatch => !found,
+            }
+        })
+    }
 }
 
 fn sensor_type_name(sensor_type: SensorType) -> &'static str {
@@ -354,9 +383,12 @@ fn last_sample_json(samples: &crate::datamodel::TypedSamples) -> Option<(String,
                 json!(sample.value.to_string()),
             )
         }),
-        crate::datamodel::TypedSamples::Float(samples) => samples
-            .last()
-            .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),
+        crate::datamodel::TypedSamples::Float(samples) => samples.last().map(|sample| {
+            (
+                sample.datetime.to_rfc3339(),
+                crate::exporters::float_to_json(sample.value),
+            )
+        }),
         crate::datamodel::TypedSamples::String(samples) => samples
             .last()
             .map(|sample| (sample.datetime.to_rfc3339(), json!(sample.value))),
@@ -558,73 +590,47 @@ pub async fn list_metrics(
     result.map(|(catalog, _)| catalog)
 }
 
-/// Fill a page after applying catalog filters. Storage bookmarks point to raw
-/// series, so the bookmark must be taken from the last series returned here.
+/// Fill a page after applying catalog filters. Storage bookmarks point to raw series, so a page
+/// always ends where a storage page ends, and its bookmark is that storage page's own: a storage
+/// page that holds more matches than the page still lacks is read again, half as long.
 async fn list_filtered_series(
     storage: &dyn crate::storage::StorageInstance,
     metric: Option<&str>,
     limit: usize,
     bookmark: Option<&str>,
-    matchers: Option<&[LabelMatcher]>,
+    filter: Option<&SensorFilter>,
     access: Option<&crate::http::auth::AccessContext>,
 ) -> Result<crate::storage::ListSeriesResult, AppError> {
-    let scan_limit = limit.max(crate::storage::DEFAULT_LIST_SERIES_LIMIT);
     let mut cursor = bookmark.map(str::to_owned);
     let mut series = Vec::with_capacity(limit);
-    let mut boundary = None;
-
-    let has_more_matches = loop {
+    let mut scan = limit.max(crate::storage::DEFAULT_LIST_SERIES_LIMIT);
+    loop {
+        let missing = limit - series.len();
         let page = storage
-            .list_series(metric, Some(scan_limit), cursor.as_deref())
+            .list_series(metric, Some(scan.max(missing)), cursor.as_deref())
             .await?;
-        let page_len = page.series.len();
-        let page_bookmark = page.bookmark;
-        let mut boundary_position = None;
-        let mut has_next_match = false;
-
-        for (index, sensor) in page.series.into_iter().enumerate() {
-            if !access.is_none_or(|access| access.can_access_sensor(&sensor.name))
-                || !matchers.is_none_or(|matchers| sensor_matches_matchers(&sensor, matchers))
-            {
-                continue;
-            }
-
-            if series.len() < limit {
-                series.push(sensor);
-                if series.len() == limit {
-                    boundary_position = Some(index + 1);
-                }
-            } else {
-                has_next_match = true;
-                break;
-            }
+        let matches: Vec<_> = page
+            .series
+            .into_iter()
+            .filter(|sensor| {
+                access.is_none_or(|access| access.can_access(sensor))
+                    && filter.is_none_or(|filter| filter.matches(sensor))
+            })
+            .collect();
+        if matches.len() > missing {
+            // Never more than `missing` once `scan` is down to it
+            scan = (scan / 2).max(missing);
+            continue;
         }
-
-        if let Some(position) = boundary_position {
-            // Requery the prefix to obtain the storage cursor for the last
-            // returned match, even when it lies in the middle of this page.
-            boundary = if position == page_len {
-                page_bookmark.clone()
-            } else {
-                storage
-                    .list_series(metric, Some(position), cursor.as_deref())
-                    .await?
-                    .bookmark
-            };
+        series.extend(matches);
+        cursor = page.bookmark;
+        if series.len() == limit || cursor.is_none() {
+            break;
         }
-
-        if has_next_match {
-            break true;
-        }
-        match page_bookmark {
-            Some(next_cursor) => cursor = Some(next_cursor),
-            None => break false,
-        }
-    };
-
+    }
     Ok(crate::storage::ListSeriesResult {
         series,
-        bookmark: if has_more_matches { boundary } else { None },
+        bookmark: cursor,
     })
 }
 
@@ -658,18 +664,18 @@ pub async fn list_series(
     let result = async move {
         let limit = query.limit.map(|l| l.clamp(1, crate::storage::MAX_LIST_SERIES_LIMIT));
 
-        let label_matchers = match &query.selector {
-            Some(selector) => Some(parse_selector_to_matchers(selector)?),
+        let filter = match &query.selector {
+            Some(selector) => Some(SensorFilter::new(parse_selector_to_matchers(selector)?)?),
             None => None,
         };
 
-        let result = if label_matchers.is_some() || access.is_some() {
+        let result = if filter.is_some() || access.is_some() {
             list_filtered_series(
                 state.storage.as_ref(),
                 query.metric.as_deref(),
                 limit.unwrap_or(crate::storage::DEFAULT_LIST_SERIES_LIMIT),
                 query.bookmark.as_deref(),
-                label_matchers.as_deref(),
+                filter.as_ref(),
                 access.as_ref(),
             )
             .await?
@@ -886,23 +892,15 @@ pub async fn get_series_data(
             None => ExportFormat::Senml,
         };
 
-        let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
-            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
-        })?;
+        // Storage gets the canonical spelling: an upper-case or hyphen-less UUID is the same series
+        let series_uuid = uuid::Uuid::from_str(&series_uuid)
+            .map_err(|_| {
+                AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+            })?
+            .to_string();
 
-        let start_time = match query.start.as_ref() {
-            Some(start_str) => Some(parse_datetime_string(start_str).map_err(|e| {
-                AppError::bad_request(anyhow::anyhow!("Invalid start datetime: {}", e))
-            })?),
-            None => None,
-        };
-
-        let end_time = match query.end.as_ref() {
-            Some(end_str) => Some(parse_datetime_string(end_str).map_err(|e| {
-                AppError::bad_request(anyhow::anyhow!("Invalid end datetime: {}", e))
-            })?),
-            None => None,
-        };
+        let (start_time, end_time) =
+            parse_optional_time_bounds(query.start.as_ref(), query.end.as_ref())?;
 
         let step_ms = match query.step.as_deref() {
             Some(step) => Some(promql_duration::parse_duration_millis(step).map_err(|e| {
@@ -992,8 +990,13 @@ pub async fn get_series_data(
         )?;
 
         let series_data = match query_options.simplify {
+            // CPU-bound, and a request timeout cannot interrupt it: off the async workers
             Some(simplify_options) => {
-                crate::storage::common::simplify_sensor_data(series_data, simplify_options)?
+                crate::http::app_error::run_blocking(move || {
+                    crate::storage::common::simplify_sensor_data(series_data, simplify_options)
+                        .map_err(AppError::from)
+                })
+                .await?
             }
             None => series_data,
         };
@@ -1099,9 +1102,12 @@ pub async fn get_series_last_sample(
     let started = Instant::now();
 
     let result = async move {
-        let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
-            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
-        })?;
+        // Storage gets the canonical spelling: an upper-case or hyphen-less UUID is the same series
+        let series_uuid = uuid::Uuid::from_str(&series_uuid)
+            .map_err(|_| {
+                AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+            })?
+            .to_string();
 
         let (start_time, end_time) =
             parse_optional_time_bounds(query.start.as_ref(), query.end.as_ref())?;
@@ -1342,9 +1348,12 @@ pub async fn get_series_availability(
     let started = Instant::now();
 
     let result = async move {
-        let _parsed_uuid = uuid::Uuid::from_str(&series_uuid).map_err(|_| {
-            AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
-        })?;
+        // Storage gets the canonical spelling: an upper-case or hyphen-less UUID is the same series
+        let series_uuid = uuid::Uuid::from_str(&series_uuid)
+            .map_err(|_| {
+                AppError::bad_request(anyhow::anyhow!("Invalid UUID format: '{}'", series_uuid))
+            })?
+            .to_string();
 
         let (start_time, end_time) =
             parse_optional_time_bounds(Some(&query.start), Some(&query.end))?;
@@ -1378,7 +1387,10 @@ pub async fn get_series_availability(
 
                 let start_us = crate::storage::common::datetime_to_micros(&start_time);
                 let end_us = crate::storage::common::datetime_to_micros(&end_time);
-                let total = ((end_us - start_us).div_euclid(step_us) + 1).max(1) as usize;
+                let window_us = end_us.checked_sub(start_us).ok_or_else(|| {
+                    AppError::bad_request(anyhow::anyhow!("the time window is too large"))
+                })?;
+                let total = (window_us.div_euclid(step_us) + 1).max(1) as usize;
                 let covered = summary.covered_buckets.unwrap_or(0);
 
                 (
@@ -1567,6 +1579,8 @@ mod tests {
             250
         );
         assert!(promql_duration::parse_duration_millis("bad").is_err());
+        assert!(promql_duration::parse_duration_millis("0s").is_err());
+        assert!(promql_duration::parse_duration_millis("0h0m").is_err());
     }
 
     #[test]

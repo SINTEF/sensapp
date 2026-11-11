@@ -1,3 +1,9 @@
+{{- /* A SQLite or DuckDB file belongs to one process: several pods would each have their own
+       database on emptyDir, or corrupt a shared one */ -}}
+{{- $localFile := and (not .Values.storage.existingSecret) (or (hasPrefix "sqlite:" .Values.storage.connectionString) (hasPrefix "duckdb:" .Values.storage.connectionString)) -}}
+{{- if and $localFile (or .Values.autoscaling.enabled (gt (int .Values.replicaCount) 1)) -}}
+{{- fail "A SQLite or DuckDB database is a file of one pod: keep replicaCount at 1 and autoscaling off, or use PostgreSQL, TimescaleDB or ClickHouse" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,6 +34,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "sensapp.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -36,6 +43,12 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if .Values.preStopSleepSeconds }}
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.preStopSleepSeconds }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}

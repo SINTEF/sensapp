@@ -182,7 +182,7 @@ fn read_numeric(
          WHERE sensor_id IN ({ids})
            AND (?1 IS NULL OR timestamp_us >= make_timestamp(?1))
            AND (?2 IS NULL OR timestamp_us <= make_timestamp(?2))
-         ORDER BY sensor_id, timestamp_us ASC LIMIT ?3"
+         ORDER BY sensor_id, timestamp_us ASC, rowid ASC LIMIT ?3"
     );
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let mut statement = connection.prepare(&sql)?;
@@ -226,10 +226,10 @@ impl BulkSelectorBackend for DuckDBStorage {
         numeric_only: bool,
         limit: Option<usize>,
     ) -> Result<Vec<(i64, Sensor)>> {
-        let connection = std::sync::Arc::clone(&self.connection);
+        let connection = std::sync::Arc::clone(&self.readers);
         let matchers = matchers.to_vec();
         spawn_blocking(move || {
-            let connection = connection.blocking_lock();
+            let connection = connection.get()?;
             find_sensors(&connection, &matchers, numeric_only, limit)
         })
         .await?
@@ -243,10 +243,10 @@ impl BulkSelectorBackend for DuckDBStorage {
         end_us: Option<i64>,
         limit: usize,
     ) -> Result<HashMap<i64, TypedSamples>> {
-        let connection = std::sync::Arc::clone(&self.connection);
+        let connection = std::sync::Arc::clone(&self.readers);
         let sensor_ids = sensor_ids.to_vec();
         spawn_blocking(move || {
-            let connection = connection.blocking_lock();
+            let connection = connection.get()?;
             read_numeric(
                 &connection,
                 sensor_type,

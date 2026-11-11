@@ -79,7 +79,7 @@ impl JsonlConverter {
                         "sensor_uuid": sensor_data.sensor.uuid,
                         "sensor_name": sensor_data.sensor.name,
                         "timestamp": datetime_to_rfc3339(&sample.datetime),
-                        "value": sample.value,
+                        "value": super::float_to_json(sample.value),
                         "type": "float",
                         "labels": labels
                     });

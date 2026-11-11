@@ -14,7 +14,15 @@ pub enum InferedColumn {
     Json(Vec<Arc<serde_json::Value>>),
 }
 
+/// The type of a column of cells, and its values. A column with a cell of text, or with a mix
+/// of types that have no common type, is text.
 pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedColumn {
+    infer_typed_column(&column, trim, numeric).unwrap_or(InferedColumn::String(column))
+}
+
+/// The typed values of a column, or `None` when the column is text. The cells are borrowed, so
+/// the caller keeps them when it needs the text.
+pub fn infer_typed_column(column: &[String], trim: bool, numeric: bool) -> Option<InferedColumn> {
     // select the right infer method
     let infer_method = if trim {
         if numeric {
@@ -28,142 +36,122 @@ pub fn infer_column(column: Vec<String>, trim: bool, numeric: bool) -> InferedCo
         infer_type
     };
 
-    let infered_column = column
-        .iter()
-        .map(|value| infer_method(value))
-        .collect::<Vec<_>>();
-
     let mut has_integers = false;
     let mut has_numeric = false;
     let mut has_floats = false;
-    let mut has_string = false;
     let mut has_json = false;
     let mut has_boolean = false;
     let mut has_datetime = false;
 
-    for infered_value in infered_column.iter() {
-        match infered_value {
-            Ok((_, InferedValue::Integer(_))) => has_integers = true,
-            Ok((_, InferedValue::Numeric(_))) => has_numeric = true,
-            Ok((_, InferedValue::Float(_))) => has_floats = true,
-            Ok((_, InferedValue::String(_))) => has_string = true,
-            Ok((_, InferedValue::Json(_))) => has_json = true,
-            Ok((_, InferedValue::Boolean(_))) => has_boolean = true,
-            Ok((_, InferedValue::DateTime(_))) => has_datetime = true,
-            _ => panic!("Failed to infer column"),
+    let mut infered_column = Vec::with_capacity(column.len());
+    for value in column {
+        let infered_value = match infer_method(value) {
+            Ok((_, infered_value)) => infered_value,
+            Err(error) => panic!("Failed to infer column: {error}"),
+        };
+        match &infered_value {
+            InferedValue::Integer(_) => has_integers = true,
+            InferedValue::Numeric(_) => has_numeric = true,
+            InferedValue::Float(_) => has_floats = true,
+            // If we have at least a string, everything is a string
+            InferedValue::String(_) => return None,
+            InferedValue::Json(_) => has_json = true,
+            InferedValue::Boolean(_) => has_boolean = true,
+            InferedValue::DateTime(_) => has_datetime = true,
         }
-    }
-
-    // If we have at least a string, everything is a string
-    if has_string {
-        // We can return the column as is
-        return InferedColumn::String(column);
+        infered_column.push(infered_value);
     }
 
     if has_json {
-        return InferedColumn::Json(
+        return Some(InferedColumn::Json(
             infered_column
-                .iter()
+                .into_iter()
                 .map(|value| match value {
-                    Ok((_, InferedValue::Json(value))) => value.clone(),
+                    InferedValue::Json(value) => value,
                     // Convert the other types to JSON, to be nice
-                    Ok((_, InferedValue::Integer(value))) => {
-                        Arc::new(serde_json::Value::from(*value))
-                    }
-                    Ok((_, InferedValue::Float(value))) => {
-                        Arc::new(serde_json::Value::from(*value))
-                    }
-                    Ok((_, InferedValue::Boolean(value))) => {
-                        Arc::new(serde_json::Value::from(*value))
-                    }
-                    Ok((_, InferedValue::DateTime(value))) => {
+                    InferedValue::Integer(value) => Arc::new(serde_json::Value::from(value)),
+                    InferedValue::Float(value) => Arc::new(serde_json::Value::from(value)),
+                    InferedValue::Boolean(value) => Arc::new(serde_json::Value::from(value)),
+                    InferedValue::DateTime(value) => {
                         Arc::new(serde_json::Value::from(value.to_rfc3339()))
                     }
                     _ => unreachable!("We should have only JSON compatible types at this point"),
                 })
                 .collect::<Vec<_>>(),
-        );
+        ));
     }
 
     // If we have booleans
     if has_boolean {
         // If we don't have only booleans, we use string instead
         if has_integers || has_numeric || has_floats || has_datetime {
-            return InferedColumn::String(column);
+            return None;
         }
-        return InferedColumn::Boolean(
+        return Some(InferedColumn::Boolean(
             infered_column
-                .iter()
+                .into_iter()
                 .map(|value| match value {
-                    Ok((_, InferedValue::Boolean(value))) => *value,
+                    InferedValue::Boolean(value) => value,
                     _ => unreachable!("We should have only booleans at this point"),
                 })
                 .collect::<Vec<_>>(),
-        );
+        ));
     }
 
     // If we have datetimes
     if has_datetime {
         // If we don't have only datetimes, we use string instead
         if has_integers || has_numeric || has_floats {
-            return InferedColumn::String(column);
+            return None;
         }
-        return InferedColumn::DateTime(
+        return Some(InferedColumn::DateTime(
             infered_column
-                .iter()
+                .into_iter()
                 .map(|value| match value {
-                    Ok((_, InferedValue::DateTime(value))) => *value,
+                    InferedValue::DateTime(value) => value,
                     _ => unreachable!("We should have only datetimes at this point"),
                 })
                 .collect::<Vec<_>>(),
-        );
+        ));
     }
 
     // If we have numerics
     if has_numeric {
-        return InferedColumn::Numeric(
+        return Some(InferedColumn::Numeric(
             infered_column
-                .iter()
+                .into_iter()
                 .map(|value| match value {
-                    Ok((_, InferedValue::Numeric(value))) => *value,
+                    InferedValue::Numeric(value) => value,
                     _ => unreachable!("We should have only numerics"),
                 })
                 .collect::<Vec<_>>(),
-        );
+        ));
     }
 
     // If we have floats, integers are also floats
     if has_floats {
-        return InferedColumn::Float(
+        return Some(InferedColumn::Float(
             infered_column
-                .iter()
+                .into_iter()
                 .map(|value| match value {
-                    Ok((_, InferedValue::Float(value))) => *value,
-                    Ok((_, InferedValue::Integer(value))) => *value as f64,
+                    InferedValue::Float(value) => value,
+                    InferedValue::Integer(value) => value as f64,
                     _ => unreachable!("We should have only floats and integers at this point"),
                 })
                 .collect::<Vec<_>>(),
-        );
+        ));
     }
 
-    // If we have only integers
-    if has_integers {
-        return InferedColumn::Integer(
-            infered_column
-                .iter()
-                .map(|value| match value {
-                    Ok((_, InferedValue::Integer(value))) => *value,
-                    _ => unreachable!("We should have only integers at this point"),
-                })
-                .collect::<Vec<_>>(),
-        );
-    }
-
-    // If we reach this point, the column is supposdly empty
-    // Then we use Integer as a fallback
-    assert!(infered_column.is_empty());
-
-    InferedColumn::Integer(vec![])
+    // Only integers, or an empty column: Integer as a fallback
+    Some(InferedColumn::Integer(
+        infered_column
+            .into_iter()
+            .map(|value| match value {
+                InferedValue::Integer(value) => value,
+                _ => unreachable!("We should have only integers at this point"),
+            })
+            .collect::<Vec<_>>(),
+    ))
 }
 
 #[cfg(test)]
@@ -327,8 +315,8 @@ mod tests {
                 Arc::new(json!(42)),
                 Arc::new(json!(42.83)),
                 Arc::new(json!(true)),
-                // Date is converted to UTC
-                Arc::new(json!("1951-10-26T02:00:00+00:00")),
+                // Date is converted to UTC: 00:00 at +02:00 is 22:00 the day before
+                Arc::new(json!("1951-10-25T22:00:00+00:00")),
             ])
         );
     }
@@ -343,7 +331,7 @@ mod tests {
     fn test_datetime() {
         let column = vec![
             "2020-01-01T00:00:00Z".to_string(),
-            "1969-358T14:21:32.0933+05:35".to_string(),
+            "1969-12-24T14:21:32.0933+05:35".to_string(),
         ];
 
         let infered_column = infer_column(column, true, false);
@@ -351,7 +339,7 @@ mod tests {
             infered_column,
             InferedColumn::DateTime(vec![
                 hifitime::Epoch::from_gregorian_utc(2020, 1, 1, 0, 0, 0, 0),
-                hifitime::Epoch::from_gregorian_utc(1969, 12, 24, 19, 56, 32, 93000000)
+                hifitime::Epoch::from_gregorian_utc(1969, 12, 24, 8, 46, 32, 93_300_000)
             ])
         );
     }

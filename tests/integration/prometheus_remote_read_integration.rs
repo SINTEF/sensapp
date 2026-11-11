@@ -951,10 +951,11 @@ async fn test_remote_read_samples_with_avg_over_time_hints() -> Result<()> {
             name: "__name__".to_string(),
             value: "hinted_metric".to_string(),
         }],
+        // `avg_over_time(x[2s])` evaluated every 2 s from +2 s: Prometheus asks from +1 ms
         hints: Some(ReadHints {
             step_ms: 2000,
             func: "avg_over_time".to_string(),
-            start_ms: BASE_TS_MS,
+            start_ms: BASE_TS_MS + 1,
             end_ms: BASE_TS_MS + 5000,
             grouping: vec![],
             by: false,
@@ -969,13 +970,13 @@ async fn test_remote_read_samples_with_avg_over_time_hints() -> Result<()> {
 
     let response = parse_remote_read_response(&response_body)?;
     let timeseries = &response.results[0].timeseries[0];
-    assert_eq!(timeseries.samples.len(), 3);
-    assert_eq!(timeseries.samples[0].timestamp, BASE_TS_MS);
-    assert_eq!(timeseries.samples[1].timestamp, BASE_TS_MS + 2000);
-    assert_eq!(timeseries.samples[2].timestamp, BASE_TS_MS + 4000);
-    assert!((timeseries.samples[0].value - 1.5).abs() < f64::EPSILON);
-    assert!((timeseries.samples[1].value - 3.5).abs() < f64::EPSILON);
-    assert!((timeseries.samples[2].value - 5.0).abs() < f64::EPSILON);
+    let got: Vec<(i64, f64)> = timeseries
+        .samples
+        .iter()
+        .map(|s| (s.timestamp - BASE_TS_MS, s.value))
+        .collect();
+    // The windows (0 s, 2 s] and (2 s, 4 s]
+    assert_eq!(got, vec![(1, 2.5), (2001, 4.5)]);
 
     Ok(())
 }
@@ -1086,11 +1087,12 @@ async fn test_remote_read_sample_limit_is_configurable() -> Result<()> {
         );
     }
 
-    // Buckets of 10 s: 6 buckets for the 51 samples, which fit under the same limit
+    // `max_over_time(x[10s])` every 10 s from +10 s: 5 buckets for the 50 samples after the
+    // start, which fit under the same limit
     let hints = ReadHints {
         step_ms: 10_000,
         func: "max_over_time".to_string(),
-        start_ms: BASE_TS_MS,
+        start_ms: BASE_TS_MS + 1,
         end_ms: BASE_TS_MS + 50_000,
         grouping: vec![],
         by: false,
@@ -1100,7 +1102,7 @@ async fn test_remote_read_sample_limit_is_configurable() -> Result<()> {
     let (status, response_body) = send_remote_read_request(&app, body).await?;
     assert_eq!(status, StatusCode::OK);
     let response = parse_remote_read_response(&response_body)?;
-    assert_eq!(response.results[0].timeseries[0].samples.len(), 6);
+    assert_eq!(response.results[0].timeseries[0].samples.len(), 5);
 
     Ok(())
 }
@@ -1220,6 +1222,154 @@ async fn test_remote_read_plain_selector_hints_return_the_latest_sample_of_each_
         message.contains("could not be answered with one value per step"),
         "unexpected body: {message}"
     );
+
+    Ok(())
+}
+
+/// Hints that may come from a range query evaluated at half past the hour, or from a subquery
+/// evaluated on the hour (`max_over_time(x[3h:1h])`): the latest samples of both grids answer.
+#[tokio::test]
+#[serial]
+async fn test_remote_read_latest_samples_answer_the_grid_of_a_subquery_too() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    const MINUTE_MS: i64 = 60_000;
+    const HOUR_MS: i64 = 60 * MINUTE_MS;
+    let times: Vec<i64> = (0..=300)
+        .map(|minute| BASE_TS_MS + minute * MINUTE_MS)
+        .collect();
+    let values: Vec<f64> = (0..=300).map(|minute| minute as f64).collect();
+    publish_test_sensors(
+        &storage,
+        vec![(
+            create_sensor_with_labels("steady_metric", SensorType::Float, vec![]),
+            create_float_samples_at_times(&times, &values),
+        )],
+    )
+    .await?;
+
+    // Evaluations every hour from 1 h 30 to 4 h 30, and the 301 raw samples over the limit
+    let app = create_test_app_with_limit(storage, 50);
+    let (start_ms, end_ms) = (
+        BASE_TS_MS + 90 * MINUTE_MS - 5 * MINUTE_MS + 1,
+        BASE_TS_MS + 270 * MINUTE_MS,
+    );
+    let query = Query {
+        start_timestamp_ms: start_ms,
+        end_timestamp_ms: end_ms,
+        matchers: vec![PromLabelMatcher {
+            r#type: label_matcher::Type::Eq as i32,
+            name: "__name__".to_string(),
+            value: "steady_metric".to_string(),
+        }],
+        hints: Some(ReadHints {
+            step_ms: HOUR_MS,
+            func: String::new(),
+            start_ms,
+            end_ms,
+            grouping: vec![],
+            by: false,
+            range_ms: 0,
+        }),
+    };
+    let body = build_remote_read_request(vec![query], vec![])?;
+    let (status, response_body) = send_remote_read_request(&app, body).await?;
+    assert_eq!(status, StatusCode::OK);
+    let response = parse_remote_read_response(&response_body)?;
+    let minutes: Vec<i64> = response.results[0].timeseries[0]
+        .samples
+        .iter()
+        .map(|s| (s.timestamp - BASE_TS_MS) / MINUTE_MS)
+        .collect();
+    assert_eq!(minutes, vec![90, 120, 150, 180, 210, 240, 270]);
+
+    Ok(())
+}
+
+/// The series of a query are in the order of their label sets, which Prometheus merges in that
+/// order, whatever the order of the storage.
+#[tokio::test]
+#[serial]
+async fn test_remote_read_series_are_sorted_by_label_set() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+
+    let labels = |room: &str| vec![("room".to_string(), room.to_string())];
+    let sensors = [
+        ("order_b", vec![]),
+        ("order_a", labels("2")),
+        ("order_a", labels("1")),
+        // Uppercase sorts before `_`: `Zone` comes before `__name__`
+        ("order_a", vec![("Zone".to_string(), "x".to_string())]),
+    ];
+    publish_test_sensors(
+        &storage,
+        sensors
+            .into_iter()
+            .map(|(name, labels)| {
+                (
+                    create_sensor_with_labels(name, SensorType::Float, labels),
+                    create_float_samples_at_times(&[BASE_TS_MS], &[1.0]),
+                )
+            })
+            .collect(),
+    )
+    .await?;
+
+    let app = create_test_app(storage);
+    let query = || Query {
+        start_timestamp_ms: BASE_TS_MS - 1000,
+        end_timestamp_ms: BASE_TS_MS + 1000,
+        matchers: vec![PromLabelMatcher {
+            r#type: label_matcher::Type::Re as i32,
+            name: "__name__".to_string(),
+            value: "order_.*".to_string(),
+        }],
+        hints: None,
+    };
+    let expected = vec![
+        "Zone=x,__name__=order_a",
+        "__name__=order_a,room=1",
+        "__name__=order_a,room=2",
+        "__name__=order_b",
+    ];
+    let label_set = |labels: &[sensapp::parsing::prometheus::remote_write_models::Label]| {
+        labels
+            .iter()
+            .map(|l| format!("{}={}", l.name, l.value))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+
+    let body = build_remote_read_request(
+        vec![query()],
+        vec![read_request::ResponseType::Samples as i32],
+    )?;
+    let (status, response_body) = send_remote_read_request(&app, body).await?;
+    assert_eq!(status, StatusCode::OK);
+    let response = parse_remote_read_response(&response_body)?;
+    let got: Vec<String> = response.results[0]
+        .timeseries
+        .iter()
+        .map(|series| label_set(&series.labels))
+        .collect();
+    assert_eq!(got, expected, "SAMPLES");
+
+    let body = build_remote_read_request(
+        vec![query()],
+        vec![read_request::ResponseType::StreamedXorChunks as i32],
+    )?;
+    let (status, response_body) = send_remote_read_request(&app, body).await?;
+    assert_eq!(status, StatusCode::OK);
+    let got: Vec<String> = parse_streamed_chunked_response(&response_body)?
+        .iter()
+        .flat_map(|response| response.chunked_series.iter())
+        .map(|series| label_set(&series.labels))
+        .collect();
+    assert_eq!(got, expected, "STREAMED_XOR_CHUNKS");
 
     Ok(())
 }

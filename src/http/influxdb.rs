@@ -1,4 +1,7 @@
-use super::{app_error::AppError, state::HttpServerState};
+use super::{
+    app_error::{AppError, run_blocking},
+    state::HttpServerState,
+};
 use crate::datamodel::{
     SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
     sensapp_datetime::SensAppDateTimeExt, sensapp_vec::SensAppLabels,
@@ -9,7 +12,7 @@ use axum::{
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
 };
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use influxdb_line_protocol::{FieldValue, parse_lines};
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -42,7 +45,8 @@ fn bytes_to_string(
     match headers.get("content-encoding") {
         Some(value) => match value.to_str() {
             Ok("gzip") => {
-                let mut d = GzDecoder::new(&bytes[..]).take(max_bytes as u64 + 1);
+                // Every member: a body may be several gzip streams one after the other
+                let mut d = MultiGzDecoder::new(&bytes[..]).take(max_bytes as u64 + 1);
                 let mut s = String::new();
                 d.read_to_string(&mut s).map_err(AppError::bad_request)?;
                 if s.len() > max_bytes {
@@ -238,11 +242,13 @@ pub async fn publish_influxdb(
         };
 
         let max_bytes = crate::config::get()?.parse_http_body_limit()?;
-        let bytes_string = bytes_to_string(&headers, &bytes, max_bytes)?;
+        let bytes_string =
+            run_blocking(move || bytes_to_string(&headers, &bytes, max_bytes)).await?;
         let parser = parse_lines(&bytes_string);
 
         let mut batch_builder = BatchBuilder::new()?;
-        let mut series = 0usize;
+        // The series of the request, each counted once whatever its number of lines
+        let mut series = std::collections::HashSet::new();
         let mut samples = 0usize;
 
         for line in parser {
@@ -302,7 +308,7 @@ pub async fn publish_influxdb(
                         let name = compute_field_name(&url_encoded_field_name, &field_key);
                         let sensor =
                             Sensor::new_without_uuid(name, sensor_type, unit, tags.clone())?;
-                        series += 1;
+                        series.insert(sensor.uuid);
                         samples += value.len();
                         batch_builder.add(Arc::new(sensor), value).await?;
                     }
@@ -326,7 +332,7 @@ pub async fn publish_influxdb(
             }
         }
 
-        Ok::<_, AppError>((StatusCode::NO_CONTENT, series, samples))
+        Ok::<_, AppError>((StatusCode::NO_CONTENT, series.len(), samples))
     }
     .await;
 
@@ -396,6 +402,18 @@ mod tests {
         encoder.write_all(b"expanded beyond limit").unwrap();
         let bytes = Bytes::from(encoder.finish().unwrap());
         assert!(bytes_to_string(&headers, &bytes, 8).is_err());
+
+        // Two gzip members, as `cat a.gz b.gz` or a client that compresses in chunks makes
+        let mut headers = HeaderMap::new();
+        headers.insert("content-encoding", "gzip".parse().unwrap());
+        let mut members = Vec::new();
+        for line in ["a v=1 1\n", "b v=2 2\n"] {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(line.as_bytes()).unwrap();
+            members.extend(encoder.finish().unwrap());
+        }
+        let result = bytes_to_string(&headers, &Bytes::from(members), 64 * 1024 * 1024).unwrap();
+        assert_eq!(result, "a v=1 1\nb v=2 2\n");
 
         // Invalid UTF-8 bytes
         let headers = HeaderMap::new();

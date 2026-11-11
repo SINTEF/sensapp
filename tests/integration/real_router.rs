@@ -32,7 +32,8 @@ fn ensure_config() {
 const SECRET: &str = "test-secret-0123456789abcdef012345";
 
 /// A storage that makes every write, and the removal of duplicates, take `publish_delay` before
-/// it reaches the real one, or fail a write when `fail_publish` is set.
+/// it reaches the real one. When `fail_publish` is set, a write fails and listing the metrics
+/// panics.
 #[derive(Debug)]
 struct SlowStorage {
     inner: Arc<dyn StorageInstance>,
@@ -81,6 +82,9 @@ impl StorageInstance for SlowStorage {
         self.inner.list_series(metric_filter, limit, bookmark).await
     }
     async fn list_metrics(&self) -> Result<Vec<Metric>> {
+        if self.fail_publish {
+            panic!("the metrics are gone for a reason of their own");
+        }
         self.inner.list_metrics().await
     }
     async fn query_sensor_data(
@@ -122,6 +126,7 @@ fn settings() -> RouterSettings {
         write_timeout: Duration::from_secs(300),
         maintenance_timeout: Duration::from_secs(3600),
         max_concurrent_writes: 16,
+        body_read_timeout: Duration::from_secs(30),
         ui_dir: None,
     }
 }
@@ -477,6 +482,38 @@ async fn real_server_errors_are_still_logged_as_errors() -> Result<()> {
             .any(|line| line.contains(" ERROR ") && line.contains("failing-id-9")),
         "an error with the request id was expected: {lines:#?}"
     );
+    Ok(())
+}
+
+/// A panic in a handler is a 500 for that request, logged with its request id, and the instance
+/// keeps answering. The binary used to exit on any panic.
+#[tokio::test]
+#[serial]
+async fn a_panic_in_a_handler_is_a_500_and_the_server_keeps_answering() -> Result<()> {
+    let (_db, router) = router_with(Duration::ZERO, true, None, settings()).await?;
+    let (logs, _guard) = capture_logs();
+
+    let mut request = get_request("/metrics");
+    request
+        .headers_mut()
+        .insert("x-request-id", "panicking-id-7".parse()?);
+    let (status, headers, body) = send(&router, request).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(headers["x-request-id"], "panicking-id-7");
+    assert!(
+        !body.contains("reason of their own"),
+        "the panic message is not sent to the client: {body}"
+    );
+    let lines = logs.lines();
+    assert!(
+        lines.iter().any(|line| line.contains("panicked")
+            && line.contains("reason of their own")
+            && line.contains("panicking-id-7")),
+        "the panic is logged with the request id: {lines:#?}"
+    );
+
+    let (status, _, _) = send(&router, get_request("/health/live")).await;
+    assert_eq!(status, StatusCode::OK);
     Ok(())
 }
 
@@ -912,5 +949,182 @@ async fn creating_a_token_is_logged_without_the_token() -> Result<()> {
     for line in &lines {
         assert!(!line.contains(made), "{line}");
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The HTTP metrics stay bounded
+// ---------------------------------------------------------------------------
+
+/// The `path` and `method` values of `sensapp_http_requests_total`.
+async fn metric_labels(router: &Router) -> std::collections::BTreeSet<String> {
+    let (_, _, body) = send(router, get_request("/prometheus/metrics")).await;
+    body.lines()
+        .filter(|line| line.starts_with("sensapp_http_requests_total{"))
+        .filter_map(|line| line.split('{').nth(1)?.split('}').next())
+        .flat_map(|labels| labels.split(','))
+        .filter(|label| !label.starts_with("status="))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Paths without a route, and the paths of the UI, are counted under constants: each distinct path
+/// stayed in the metrics forever, so anyone could make them grow without a token.
+#[tokio::test]
+#[serial]
+async fn unmatched_paths_and_methods_do_not_grow_the_metrics() -> Result<()> {
+    let dist = std::env::temp_dir().join(format!("sensapp-ui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dist)?;
+    std::fs::write(dist.join("index.html"), "<html>SensApp UI</html>")?;
+    let settings = RouterSettings {
+        ui_dir: Some(dist.clone()),
+        ..settings()
+    };
+    let (_db, router) = router(Duration::ZERO, None, settings).await?;
+
+    let random = || uuid::Uuid::new_v4().simple().to_string();
+    for _ in 0..10 {
+        send(&router, get_request(&format!("/{}", random()))).await;
+        send(&router, get_request(&format!("/ui/{}", random()))).await;
+        let request = Request::builder()
+            .method(format!("M{}", &random()[..8]).as_str())
+            .uri("/health/live")
+            .body(Body::empty())?;
+        send(&router, request).await;
+    }
+    let labels = metric_labels(&router).await;
+    let expected: std::collections::BTreeSet<String> = [
+        r#"method="GET""#,
+        r#"method="OTHER""#,
+        r#"path="/health/live""#,
+        r#"path="/ui/*""#,
+        r#"path="unmatched""#,
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    assert_eq!(labels, expected);
+
+    std::fs::remove_dir_all(dist)?;
+    Ok(())
+}
+
+/// A request whose client goes away is no longer in flight.
+#[tokio::test]
+#[serial]
+async fn a_cancelled_request_is_not_in_flight_anymore() -> Result<()> {
+    let (_db, router) = router(Duration::from_secs(5), None, settings()).await?;
+    let write = start_slow_write(&router, None).await;
+    let in_flight = |body: &str| {
+        body.lines()
+            .find_map(|line| line.strip_prefix("sensapp_http_requests_in_flight "))
+            .map(str::to_string)
+    };
+    let (_, _, body) = send(&router, get_request("/prometheus/metrics")).await;
+    assert_eq!(in_flight(&body).as_deref(), Some("1"));
+
+    write.abort();
+    let _ = write.await;
+    let (_, _, body) = send(&router, get_request("/prometheus/metrics")).await;
+    assert_eq!(in_flight(&body).as_deref(), Some("0"));
+    Ok(())
+}
+
+/// A write whose body arrives too slowly is answered with a 503 and a `Retry-After` (Prometheus
+/// and Telegraf retry that, and drop a 408) and gives its write slot back, instead of holding it
+/// for the whole write timeout.
+#[tokio::test]
+#[serial]
+async fn a_slow_body_is_a_503_that_frees_the_write_slot() -> Result<()> {
+    let settings = RouterSettings {
+        max_concurrent_writes: 1,
+        write_timeout: Duration::from_secs(5),
+        body_read_timeout: Duration::from_millis(200),
+        ..settings()
+    };
+    let (_db, router) = router(Duration::ZERO, None, settings).await?;
+
+    // The first line arrives, and the rest never does
+    let body = futures::stream::unfold(0, |chunk| async move {
+        if chunk > 0 {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+        Some((
+            Ok::<_, std::io::Error>(axum::body::Bytes::from(
+                "real_router,k=v value=1.5 1700000000000000000\n",
+            )),
+            chunk + 1,
+        ))
+    });
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v2/write?bucket=b&org=o")
+        .header("content-type", "text/plain")
+        .body(Body::from_stream(body))?;
+    let started = std::time::Instant::now();
+    let (status, headers, _) = send(&router, request).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        headers.contains_key("retry-after"),
+        "a retry-after tells the client that nothing was processed"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+
+    let (status, _, _) = send(&router, write_request(None)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    Ok(())
+}
+
+/// What the guard of an open server refuses is counted and logged like any request: the guard
+/// sits inside the metrics layer.
+#[tokio::test]
+#[serial]
+async fn a_refused_request_to_an_open_server_is_counted() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let state = HttpServerState {
+        name: Arc::new("SensApp Test".to_string()),
+        storage: test_db.storage(),
+        metrics: Arc::new(HttpMetrics::new()),
+        influxdb_with_numeric: false,
+        max_query_samples: sensapp::http::limits::DEFAULT_MAX_QUERY_SAMPLES,
+        auth: None,
+    };
+    let guard = sensapp::http::open_server::OpenServerGuard::new(
+        &["sensapp.example.com".to_string()],
+        true,
+    );
+    let router = sensapp::http::server::build_router_guarded(state, &settings(), Some(guard));
+
+    let with_host = |host: &str| {
+        let mut request = write_request(None);
+        request
+            .headers_mut()
+            .insert("host", host.parse().expect("host"));
+        request
+    };
+    let (status, _, _) = send(&router, with_host("sensapp.example.com")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _, _) = send(&router, with_host("evil.example")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (_, _, metrics) = send(&router, {
+        let mut request = get_request("/prometheus/metrics");
+        request
+            .headers_mut()
+            .insert("host", "localhost:3000".parse().expect("host"));
+        request
+    })
+    .await;
+    assert!(
+        metrics.contains(
+            "sensapp_http_requests_total{method=\"POST\",path=\"/api/v2/write\",status=\"403\"} 1"
+        ),
+        "{metrics}"
+    );
     Ok(())
 }

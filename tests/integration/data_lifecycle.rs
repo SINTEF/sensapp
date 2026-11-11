@@ -360,6 +360,84 @@ async fn assert_concurrent_publish_and_delete_for_backend(db_type: DatabaseType)
 }
 
 /// The documented correction recipe: delete the bad range, then publish the fixed samples.
+/// One instance publishes to a series while another deletes that same series again and again,
+/// as several SensApp instances do. Neither fails. A sample whose publish returned before the
+/// last delete started is gone, one published after it returned is kept, and nothing is left
+/// behind: once the series is deleted, publishing it again gives only the new samples.
+async fn assert_publish_racing_delete_of_the_same_series_for_backend(
+    db_type: DatabaseType,
+) -> Result<()> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    const PUBLISHES: u32 = 30;
+
+    let Some(test_db) = open(&db_type).await? else {
+        return Ok(());
+    };
+    let storage = test_db.storage();
+    let series = sensor("lifecycle_race", SensorType::Float, "a");
+    publish(&storage, &series, float_samples(&[0])).await?;
+
+    // The minute of the publish in flight, and of the last one that returned
+    let started = Arc::new(AtomicU32::new(0));
+    let completed = Arc::new(AtomicU32::new(0));
+    let publisher = {
+        let (storage, series) = (storage.clone(), series.clone());
+        let (started, completed) = (started.clone(), completed.clone());
+        tokio::spawn(async move {
+            for minute in 1..=PUBLISHES {
+                started.store(minute, Ordering::SeqCst);
+                publish(&storage, &series, float_samples(&[minute])).await?;
+                completed.store(minute, Ordering::SeqCst);
+            }
+            anyhow::Ok(())
+        })
+    };
+    let deleter = {
+        let (storage, uuid) = (storage.clone(), series.uuid.to_string());
+        tokio::spawn(async move {
+            let mut deletes = 0;
+            loop {
+                let before = completed.load(Ordering::SeqCst);
+                storage.delete_series(&uuid).await?;
+                let after = started.load(Ordering::SeqCst);
+                deletes += 1;
+                // Let a publish return before the next delete, so that no publish meets two
+                let returned = completed.load(Ordering::SeqCst);
+                if returned == PUBLISHES {
+                    return anyhow::Ok((before, after, deletes));
+                }
+                while completed.load(Ordering::SeqCst) == returned {
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+            }
+        })
+    };
+    publisher.await??;
+    let (before, after, deletes) = deleter.await??;
+
+    let stored = stored_minutes(&storage, &series).await?;
+    assert!(
+        stored.iter().all(|minute| *minute > before),
+        "{db_type:?}: samples published before the last delete ({before}) are left: {stored:?} \
+         after {deletes} deletes"
+    );
+    let published_after: Vec<u32> = (after + 1..=PUBLISHES).collect();
+    assert!(
+        published_after.iter().all(|minute| stored.contains(minute)),
+        "{db_type:?}: samples published after the last delete ({after}) are lost: {stored:?}"
+    );
+
+    storage.delete_series(&series.uuid.to_string()).await?;
+    publish(&storage, &series, float_samples(&[1000])).await?;
+    assert_eq!(
+        stored_minutes(&storage, &series).await?,
+        vec![1000],
+        "{db_type:?}: samples were left without their series after {deletes} deletes"
+    );
+
+    Ok(())
+}
+
 async fn assert_correction_recipe_for_backend(db_type: DatabaseType) -> Result<()> {
     let Some(test_db) = open(&db_type).await? else {
         return Ok(());
@@ -482,6 +560,12 @@ macro_rules! backend_tests {
             #[serial]
             async fn concurrent_publish_and_delete() -> Result<()> {
                 assert_concurrent_publish_and_delete_for_backend($db_type).await
+            }
+
+            #[tokio::test]
+            #[serial]
+            async fn publish_racing_delete_of_the_same_series() -> Result<()> {
+                assert_publish_racing_delete_of_the_same_series_for_backend($db_type).await
             }
 
             #[tokio::test]

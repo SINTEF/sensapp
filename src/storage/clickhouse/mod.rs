@@ -79,10 +79,13 @@ impl ClickHouseStorage {
     /// The start of the bucket of a sample. Select it under another name than `timestamp_us`
     /// (`AS bucket_us`): ClickHouse resolves an alias in `WHERE`, so `timestamp_us >= ?` would test
     /// the bucket instead of the sample, and the samples outside of the window would be counted.
+    ///
+    /// The start is at or before the sample: `intDiv` truncates towards zero, which put a sample
+    /// before the origin (before 1970 without a start) in the next bucket.
     fn aggregated_bucket_expr(query: &AggregatedSamplesQuery) -> String {
         format!(
-            "{} + intDiv(timestamp_us - {}, {}) * {}",
-            query.origin_us, query.origin_us, query.step_us, query.step_us
+            "timestamp_us - positiveModulo(timestamp_us - {}, {})",
+            query.origin_us, query.step_us
         )
     }
 
@@ -226,6 +229,30 @@ impl ClickHouseStorage {
         Ok(())
     }
 
+    /// Refuse a database whose sensors were keyed another way, see `check_sensor_keys`.
+    async fn check_stored_sensor_keys(&self) -> Result<()> {
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct StoredKey {
+            #[serde(with = "clickhouse::serde::uuid")]
+            uuid: Uuid,
+            sensor_id: u64,
+        }
+        let rows: Vec<StoredKey> = self
+            .client
+            .query(&format!(
+                "SELECT uuid, sensor_id FROM sensors LIMIT {}",
+                crate::storage::common::SENSOR_KEY_GUARD_ROWS
+            ))
+            .fetch_all()
+            .await
+            .context("Failed to read the keys of the stored sensors")?;
+        let keys: Vec<(Uuid, u64)> = rows
+            .into_iter()
+            .map(|row| (row.uuid, row.sensor_id))
+            .collect();
+        crate::storage::common::check_stored_sensor_keys(&keys)
+    }
+
     async fn get_sensor_metadata(&self, sensor_uuid: &str) -> Result<Option<(u64, Sensor)>> {
         let uuid = Uuid::from_str(sensor_uuid).map_err(|e| {
             StorageError::invalid_data_format(
@@ -235,7 +262,7 @@ impl ClickHouseStorage {
             )
         })?;
 
-        let sensor_id = uuid_to_sensor_id(&uuid);
+        let sensor_id = uuid_to_sensor_id(&uuid)?;
 
         let sensor_query = r#"
             SELECT
@@ -267,7 +294,8 @@ impl ClickHouseStorage {
             .fetch::<SensorMetadataRow>()
             .map_err(|e| map_clickhouse_error(e, Some(uuid), None))?;
 
-        let Some(row) = sensor_cursor.next().await? else {
+        // Another UUID may have the same key: it is never stored, see `register_sensors`
+        let Some(row) = sensor_cursor.next().await?.filter(|row| row.uuid == uuid) else {
             return Ok(None);
         };
 
@@ -363,6 +391,56 @@ impl ClickHouseStorage {
         }
         Err(anyhow::anyhow!(
             "{table} still has rows matching `{condition}` after {MAX_ATTEMPTS} deletes"
+        ))
+    }
+
+    /// Deletes the samples of a sensor id that has no sensor row, until there are none or a
+    /// publish registers the sensor again (the samples are then those of the new series).
+    ///
+    /// A publish that found the sensor before a delete removed it writes its samples after: they
+    /// are left without a sensor row, and would come back with the series when it is published
+    /// again. A lost lightweight delete (see `delete_until_gone`) leaves samples too. The delete of
+    /// a series calls this at its end, and the delete of a series that does not exist as well, so
+    /// that a later delete removes what an earlier one left.
+    async fn delete_samples_without_sensor(&self, sensor_id: u64) -> Result<()> {
+        const MAX_ATTEMPTS: u32 = 5;
+        // One query for the 8 tables: the first row of each table that has samples of the id
+        let tables_with_samples = VALUE_TABLES
+            .iter()
+            .map(|table| format!("(SELECT '{table}' FROM {table} WHERE sensor_id = ? LIMIT 1)"))
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        for _ in 0..MAX_ATTEMPTS {
+            let sensors: u64 = self
+                .client
+                .query("SELECT count() FROM sensors WHERE sensor_id = ?")
+                .bind(sensor_id)
+                .fetch_one()
+                .await?;
+            if sensors > 0 {
+                return Ok(());
+            }
+            let mut query = self.client.query(&tables_with_samples);
+            for _ in VALUE_TABLES {
+                query = query.bind(sensor_id);
+            }
+            let tables: Vec<String> = query.fetch_all().await?;
+            if tables.is_empty() {
+                return Ok(());
+            }
+            for table in VALUE_TABLES {
+                if tables.iter().any(|name| name == table) {
+                    self.client
+                        .query(&format!("DELETE FROM {table} WHERE sensor_id = ?"))
+                        .bind(sensor_id)
+                        .execute()
+                        .await?;
+                }
+            }
+        }
+        Err(anyhow::anyhow!(
+            "samples of sensor id {sensor_id} are still left without their sensor after \
+             {MAX_ATTEMPTS} deletes"
         ))
     }
 
@@ -502,6 +580,7 @@ impl StorageInstance for ClickHouseStorage {
         self.run_migrations()
             .await
             .context("Failed to run ClickHouse migrations")?;
+        self.check_stored_sensor_keys().await?;
         Ok(())
     }
 
@@ -595,24 +674,28 @@ impl StorageInstance for ClickHouseStorage {
                 None,
             )
         })?;
-        let sensor_id = uuid_to_sensor_id(&uuid);
-
-        let existing: u64 = self
-            .client
-            .query("SELECT count() FROM sensors WHERE sensor_id = ?")
-            .bind(sensor_id)
-            .fetch_one()
-            .await
-            .context("Failed to look up sensor")?;
-        if existing == 0 {
+        let sensor_id = uuid_to_sensor_id(&uuid)?;
+        let Some((_, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            // A publish that overlapped an earlier delete may have left samples behind
+            self.delete_samples_without_sensor(sensor_id).await?;
             return Ok(false);
-        }
+        };
 
-        for table in VALUE_TABLES.into_iter().chain(["labels", "sensors"]) {
+        // ClickHouse has no transaction: the samples first, as no publish registers the sensor
+        // again while its row exists, then the labels and the sensor row
+        let table = Self::sensor_table_name(sensor.sensor_type);
+        self.client
+            .query(&format!("DELETE FROM {table} WHERE sensor_id = ?"))
+            .bind(sensor_id)
+            .execute()
+            .await
+            .with_context(|| format!("Failed to delete series rows from {table}"))?;
+        for table in ["labels", "sensors"] {
             self.delete_until_gone(table, "sensor_id = ?", |query| query.bind(sensor_id))
                 .await
                 .with_context(|| format!("Failed to delete series rows from {table}"))?;
         }
+        self.delete_samples_without_sensor(sensor_id).await?;
 
         Ok(true)
     }
@@ -838,23 +921,42 @@ impl StorageInstance for ClickHouseStorage {
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {
         let query = r#"
             SELECT
-                name,
-                type,
-                count(*) AS sensor_count
-            FROM sensors FINAL
-            GROUP BY name, type
-            ORDER BY name ASC
+                s.name AS name,
+                s.type AS type,
+                count(DISTINCT s.sensor_id) AS sensor_count,
+                arraySort(groupUniqArrayArray(k.keys)) AS label_keys
+            FROM sensors AS s FINAL
+            LEFT JOIN (
+                SELECT sensor_id, groupUniqArray(name) AS keys FROM labels GROUP BY sensor_id
+            ) AS k ON k.sensor_id = s.sensor_id
+            GROUP BY s.name, s.type
+            ORDER BY s.name ASC
         "#;
+
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct MetricRow {
+            name: String,
+            #[serde(rename = "type")]
+            type_str: String,
+            sensor_count: u64,
+            label_keys: Vec<String>,
+        }
 
         let mut cursor = self
             .client
             .query(query)
-            .fetch::<(String, String, u64)>()
+            .fetch::<MetricRow>()
             .map_err(|e| map_clickhouse_error(e, None, None))?;
 
         let mut metrics = Vec::new();
 
-        while let Some((name, type_str, sensor_count)) = cursor.next().await? {
+        while let Some(MetricRow {
+            name,
+            type_str,
+            sensor_count,
+            label_keys,
+        }) = cursor.next().await?
+        {
             let sensor_type = SensorType::from_str(&type_str).map_err(|e| {
                 StorageError::invalid_data_format(
                     &format!("Failed to parse sensor type '{}': {}", type_str, e),
@@ -868,7 +970,7 @@ impl StorageInstance for ClickHouseStorage {
                 sensor_type,
                 None, // unit - we'll need to query this separately if needed
                 sensor_count as i64,
-                vec![], // label_keys - empty for now
+                label_keys,
             );
 
             metrics.push(metric);
@@ -892,7 +994,7 @@ impl StorageInstance for ClickHouseStorage {
             )
         })?;
 
-        let sensor_id = uuid_to_sensor_id(&uuid);
+        let sensor_id = uuid_to_sensor_id(&uuid)?;
 
         // First, get sensor metadata
         let sensor_query = r#"
@@ -925,9 +1027,8 @@ impl StorageInstance for ClickHouseStorage {
             .fetch::<SensorMetadataRow>()
             .map_err(|e| map_clickhouse_error(e, Some(uuid), None))?;
 
-        let row = if let Some(row) = sensor_cursor.next().await? {
-            row
-        } else {
+        // Another UUID may have the same key: it is never stored, see `register_sensors`
+        let Some(row) = sensor_cursor.next().await?.filter(|row| row.uuid == uuid) else {
             return Ok(None);
         };
 
@@ -1008,7 +1109,7 @@ impl StorageInstance for ClickHouseStorage {
                     sensor_id,
                     start_time_us,
                     end_time_us,
-                    step_us: step_ms * 1000,
+                    step_us: step_ms.checked_mul(1000).context("step is too large")?,
                     origin_us: start_time_us.unwrap_or(0),
                     aggregation,
                     limit: options.limit,
@@ -1100,24 +1201,30 @@ impl StorageInstance for ClickHouseStorage {
         let end_time_us = end_time.as_ref().map(datetime_to_micros);
         let table_name = Self::sensor_table_name(sensor.sensor_type);
 
-        let Some(latest_timestamp_us) = self
-            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
-            .await?
-        else {
-            return Ok(None);
-        };
+        // The newest time is read, then its samples: a delete of that time between the two
+        // statements leaves nothing, although older samples may remain. Try again.
+        for _ in 0..crate::storage::common::LATEST_ATTEMPTS {
+            let Some(latest_timestamp_us) = self
+                .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+                .await?
+            else {
+                return Ok(None);
+            };
 
-        let samples = self
-            .query_samples_by_type(
-                sensor_id,
-                &sensor.sensor_type,
-                Some(micros_to_datetime(latest_timestamp_us)),
-                Some(micros_to_datetime(latest_timestamp_us)),
-                1,
-            )
-            .await?;
-
-        Ok(Some(SensorData::new(sensor, samples)))
+            let samples = self
+                .query_samples_by_type(
+                    sensor_id,
+                    &sensor.sensor_type,
+                    Some(micros_to_datetime(latest_timestamp_us)),
+                    Some(micros_to_datetime(latest_timestamp_us)),
+                    1,
+                )
+                .await?;
+            if !samples.is_empty() {
+                return Ok(Some(SensorData::new(sensor, samples)));
+            }
+        }
+        Ok(None)
     }
 
     async fn query_sensor_data_availability(
@@ -1274,7 +1381,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1303,7 +1414,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1333,7 +1448,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1375,7 +1494,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1405,7 +1528,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1447,7 +1574,11 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
                         value: row.value,
@@ -1477,10 +1608,14 @@ impl ClickHouseStorage {
                     .fetch::<Row>()
                     .map_err(|e| map_clickhouse_error(e, None, None))?;
                 let mut samples = smallvec::smallvec![];
-                while let Some(row) = rows_cursor.next().await? {
+                while let Some(row) = rows_cursor
+                    .next()
+                    .await
+                    .map_err(|e| map_clickhouse_error(e, None, None))?
+                {
                     samples.push(Sample {
                         datetime: micros_to_datetime(row.bucket_us),
-                        value: decimal_from_clickhouse_raw(row.value),
+                        value: decimal_from_clickhouse_raw(row.value)?,
                     });
                 }
                 Ok(TypedSamples::Numeric(samples))
@@ -1577,7 +1712,7 @@ impl ClickHouseStorage {
                     while let Some((timestamp_us, value_raw)) = result_cursor.next().await? {
                         samples.push(Sample {
                             datetime: micros_to_datetime(timestamp_us),
-                            value: decimal_from_clickhouse_raw(value_raw),
+                            value: decimal_from_clickhouse_raw(value_raw)?,
                         });
                     }
                 }
@@ -1769,11 +1904,15 @@ fn clickhouse_time_where(start_time_us: Option<i64>, end_time_us: Option<i64>) -
     conditions
 }
 
+/// The aggregate of the values of a bucket. Sums are computed on a wider type and cast back with
+/// `accurateCast`, which fails when the result does not fit: `sum` of `Int64` and of
+/// `Decimal(38, 8)` wraps silently. The Numeric average is the exact sum divided by the count,
+/// truncated to 8 decimals: `avg` of a decimal is a `Float64`.
 fn clickhouse_integer_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Min => "min(value)",
         Aggregation::Max => "max(value)",
-        Aggregation::Sum => "sum(value)",
+        Aggregation::Sum => "accurateCast(sum(toInt128(value)), 'Int64')",
         Aggregation::First => "argMin(value, timestamp_us)",
         Aggregation::Last | Aggregation::Latest => "argMax(value, timestamp_us)",
         Aggregation::Avg | Aggregation::Count => unreachable!("handled separately"),
@@ -1794,10 +1933,14 @@ fn clickhouse_float_expression(aggregation: Aggregation) -> &'static str {
 
 fn clickhouse_numeric_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
-        Aggregation::Avg => "toDecimal128(avg(value), 8)",
+        // The sum must fit in a `Decimal`, as on the other backends, where the average is the
+        // sum divided by the count
+        Aggregation::Avg => {
+            "accurateCast((sum(toDecimal256(value, 8)) + throwIf(abs(sum(toDecimal256(value, 8))) > toDecimal256('79228162514264337593543950335', 0), 'the sum of a bucket does not fit')) / count(), 'Decimal(38, 8)')"
+        }
         Aggregation::Min => "min(value)",
         Aggregation::Max => "max(value)",
-        Aggregation::Sum => "sum(value)",
+        Aggregation::Sum => "accurateCast(sum(toDecimal256(value, 8)), 'Decimal(38, 8)')",
         Aggregation::First => "argMin(value, timestamp_us)",
         Aggregation::Last | Aggregation::Latest => "argMax(value, timestamp_us)",
         Aggregation::Count => unreachable!("handled separately"),

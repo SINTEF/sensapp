@@ -5,7 +5,12 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-const MAX_HTTP_BODY_LIMIT_BYTES: u64 = 128 * 1024 * 1024 * 1024;
+/// A request body is buffered whole, and `SENSAPP_HTTP_MAX_CONCURRENT_WRITES` of them at once.
+const MAX_HTTP_BODY_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// Far above what a request can hold in memory: the limit is a guard, not a tuning knob.
+const MAX_QUERY_SAMPLES: usize = 1_000_000_000;
+/// The longest validity the command line gives too.
+const MAX_TOKEN_DURATION_SECONDS: u64 = 10 * 365 * 24 * 3600;
 
 #[derive(Debug, Config)]
 pub struct SensAppConfig {
@@ -29,6 +34,38 @@ pub struct SensAppConfig {
     /// protocol into TimescaleDB took about a minute in the slowest case we measured.
     #[config(env = "SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS", default = 300)]
     pub http_write_timeout_seconds: u64,
+
+    /// Time a client has to send the whole body of a write (`/publish`, InfluxDB and Prometheus
+    /// writes) or of a Prometheus remote read, answered with a 408 otherwise. A write holds one of
+    /// the `SENSAPP_HTTP_MAX_CONCURRENT_WRITES` slots while its body arrives, so a slow client
+    /// must not keep it for the whole write timeout.
+    #[config(env = "SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS", default = 30)]
+    pub http_body_read_timeout_seconds: u64,
+
+    /// Time a client has to send the headers of a request, which is also the time a connection may
+    /// stay idle between two requests (HTTP/1 only). Keep it above the idle timeout of the proxy
+    /// in front (60 s for AWS load balancers and nginx), or the proxy reuses connections that
+    /// SensApp just closed. A connection that sends nothing is closed after it too.
+    #[config(env = "SENSAPP_HTTP_HEADER_READ_TIMEOUT_SECONDS", default = 75)]
+    pub http_header_read_timeout_seconds: u64,
+
+    /// Time the requests in flight have to finish after SIGTERM or Ctrl+C, in seconds, before they
+    /// are cut. A second signal cuts them at once. Keep it under the grace period of the
+    /// container (330 s in the Helm chart).
+    #[config(env = "SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS", default = 300)]
+    pub http_shutdown_grace_seconds: u64,
+
+    /// Longest a PostgreSQL or TimescaleDB statement may run before the database cancels it, in
+    /// seconds, 0 for no limit. A request that times out does not cancel its statement: without it,
+    /// a few slow statements would hold every connection of the pool. A little more than
+    /// `SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS` by default. The vacuum has the maintenance timeout.
+    #[config(env = "SENSAPP_PG_STATEMENT_TIMEOUT_SECONDS", default = 130)]
+    pub pg_statement_timeout_seconds: u64,
+
+    /// Longest a PostgreSQL or TimescaleDB statement may wait for a lock, in seconds, 0 for no
+    /// limit.
+    #[config(env = "SENSAPP_PG_LOCK_TIMEOUT_SECONDS", default = 60)]
+    pub pg_lock_timeout_seconds: u64,
 
     /// Time the maintenance request (`POST /api/v1/admin/vacuum`) may take before it is answered
     /// with a 504. Removing duplicates scans every value table, so it is much longer than the
@@ -112,6 +149,12 @@ pub struct SensAppConfig {
     /// networks that authenticate in front of SensApp. Ignored when `SENSAPP_JWT_SECRET` is set.
     #[config(env = "SENSAPP_AUTH_DISABLED", default = false)]
     pub auth_disabled: bool,
+
+    /// The names (`host` or `host:port`, comma separated) that clients and the proxy in front use
+    /// to reach an open server (`SENSAPP_AUTH_DISABLED`). It then refuses any other `Host`, which
+    /// stops DNS rebinding on any address and serves a proxy that keeps its public `Host`.
+    #[config(env = "SENSAPP_ALLOWED_HOSTS")]
+    pub allowed_hosts: Option<String>,
 }
 
 impl SensAppConfig {
@@ -121,8 +164,75 @@ impl SensAppConfig {
             std::env::var("SENSAPP_SETTINGS_FILE").unwrap_or_else(|_| "settings.toml".to_string());
 
         let c = SensAppConfig::builder().env().file(settings_file).load()?;
-
+        c.validate()?;
         Ok(c)
+    }
+
+    /// Refuse at startup the values that would fail later: a timeout of 0 answers every request
+    /// with a 504, and a limit of `usize::MAX` overflows when one more sample is asked for.
+    fn validate(&self) -> Result<(), Error> {
+        for (name, seconds) in [
+            (
+                "SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS",
+                self.http_server_timeout_seconds,
+            ),
+            (
+                "SENSAPP_HTTP_WRITE_TIMEOUT_SECONDS",
+                self.http_write_timeout_seconds,
+            ),
+            (
+                "SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS",
+                self.http_maintenance_timeout_seconds,
+            ),
+            (
+                "SENSAPP_HTTP_BODY_READ_TIMEOUT_SECONDS",
+                self.http_body_read_timeout_seconds,
+            ),
+            (
+                "SENSAPP_HTTP_HEADER_READ_TIMEOUT_SECONDS",
+                self.http_header_read_timeout_seconds,
+            ),
+            (
+                "SENSAPP_HTTP_SHUTDOWN_GRACE_SECONDS",
+                self.http_shutdown_grace_seconds,
+            ),
+        ] {
+            if seconds == 0 {
+                anyhow::bail!("{name} must be at least 1 second");
+            }
+        }
+        if !(1..=MAX_QUERY_SAMPLES).contains(&self.http_max_query_samples) {
+            anyhow::bail!(
+                "SENSAPP_HTTP_MAX_QUERY_SAMPLES must be between 1 and {MAX_QUERY_SAMPLES}"
+            );
+        }
+        if !(1..=MAX_TOKEN_DURATION_SECONDS).contains(&self.token_max_duration_seconds) {
+            anyhow::bail!(
+                "SENSAPP_TOKEN_MAX_DURATION_SECONDS must be between 1 and {MAX_TOKEN_DURATION_SECONDS} (10 years)"
+            );
+        }
+        self.parse_http_body_limit()?;
+        for host in self.allowed_hosts() {
+            // A URL or a path would never match a `Host`, and every request would be refused
+            if host.contains("://") || host.contains('/') || host.contains(char::is_whitespace) {
+                anyhow::bail!(
+                    "SENSAPP_ALLOWED_HOSTS holds names like `sensapp.example.com` or `localhost:3000`, not `{host}`"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The names of `SENSAPP_ALLOWED_HOSTS`, one per comma-separated item.
+    pub fn allowed_hosts(&self) -> Vec<String> {
+        self.allowed_hosts
+            .as_deref()
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|host| !host.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 
     /// The secrets of `SENSAPP_JWT_PREVIOUS_SECRETS`, one per comma-separated item.
@@ -139,8 +249,10 @@ impl SensAppConfig {
 
     pub fn parse_http_body_limit(&self) -> Result<usize, Error> {
         let size = byte_unit::Byte::parse_str(self.http_body_limit.clone(), true)?.as_u64();
-        if size > MAX_HTTP_BODY_LIMIT_BYTES {
-            anyhow::bail!("Body size is too big: > 128GB");
+        if size == 0 || size > MAX_HTTP_BODY_LIMIT_BYTES {
+            anyhow::bail!(
+                "SENSAPP_HTTP_BODY_LIMIT must be between 1 byte and 2 GiB: a body is held in memory whole"
+            );
         }
         Ok(size as usize)
     }
@@ -226,6 +338,51 @@ mod tests {
         });
     }
 
+    /// Checked on a loaded configuration and not through the environment: an invalid variable would
+    /// make the other tests that load the configuration fail while it is set.
+    #[test]
+    fn values_that_would_fail_later_are_refused_at_startup() {
+        type MakeInvalid = fn(&mut SensAppConfig);
+        let invalid: [(&str, MakeInvalid); 14] = [
+            ("server timeout 0", |c| c.http_server_timeout_seconds = 0),
+            ("write timeout 0", |c| c.http_write_timeout_seconds = 0),
+            ("maintenance timeout 0", |c| {
+                c.http_maintenance_timeout_seconds = 0
+            }),
+            ("body read timeout 0", |c| {
+                c.http_body_read_timeout_seconds = 0
+            }),
+            ("allowed host with a scheme", |c| {
+                c.allowed_hosts = Some("https://sensapp.example.com".to_string())
+            }),
+            ("allowed host with a path", |c| {
+                c.allowed_hosts = Some("sensapp.example.com/ui".to_string())
+            }),
+            ("header read timeout 0", |c| {
+                c.http_header_read_timeout_seconds = 0
+            }),
+            ("shutdown grace 0", |c| c.http_shutdown_grace_seconds = 0),
+            ("query samples 0", |c| c.http_max_query_samples = 0),
+            ("query samples max", |c| {
+                c.http_max_query_samples = usize::MAX
+            }),
+            ("token duration 0", |c| c.token_max_duration_seconds = 0),
+            ("token duration max", |c| {
+                c.token_max_duration_seconds = u64::MAX
+            }),
+            ("body limit 0", |c| c.http_body_limit = "0".to_string()),
+            ("body limit 3GiB", |c| {
+                c.http_body_limit = "3GiB".to_string()
+            }),
+        ];
+        assert!(SensAppConfig::load().unwrap().validate().is_ok());
+        for (case, make_invalid) in invalid {
+            let mut config = SensAppConfig::load().unwrap();
+            make_invalid(&mut config);
+            assert!(config.validate().is_err(), "{case}");
+        }
+    }
+
     #[test]
     fn test_previous_jwt_secrets() {
         temp_env::with_var("SENSAPP_JWT_PREVIOUS_SECRETS", None::<&str>, || {
@@ -253,35 +410,20 @@ mod tests {
             assert_eq!(config.parse_http_body_limit().unwrap(), 12345);
         });
 
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("64m"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 64000000);
-        });
-
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("64mb"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 64000000);
-        });
-
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("64MiB"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 67108864);
-        });
-
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("1.5gb"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 1500000000);
-        });
-
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("1tb"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert!(config.parse_http_body_limit().is_err());
-        });
-
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("-5mb"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert!(config.parse_http_body_limit().is_err());
-        });
+        // The other sizes are set on a loaded configuration and not in the environment: a refused
+        // one would make the other tests that load the configuration fail while it is set
+        let limit = |value: &str| {
+            let mut config = SensAppConfig::load().unwrap();
+            config.http_body_limit = value.to_string();
+            config.parse_http_body_limit()
+        };
+        assert_eq!(limit("64m").unwrap(), 64000000);
+        assert_eq!(limit("64mb").unwrap(), 64000000);
+        assert_eq!(limit("64MiB").unwrap(), 67108864);
+        assert_eq!(limit("1.5gb").unwrap(), 1500000000);
+        for refused in ["1tb", "3GiB", "0", "-5mb"] {
+            assert!(limit(refused).is_err(), "{refused}");
+        }
     }
 
     #[test]

@@ -32,7 +32,7 @@ Created by `src/storage/bigquery/migrations/init.sql`: `units`, `sensors`, `labe
 (`integer_values`, `numeric_values`, `float_values`, `string_values`, `boolean_values`, `location_values`,
 `json_values`, `blob_values`). Sample tables are partitioned by month and clustered by `sensor_id`.
 
-- **Ids** are derived from the data, like ClickHouse's: the series id is the UUID folded to 64 bits, the unit id a
+- **Ids** are derived from the data, like ClickHouse's: the series id is 64 bits of the BLAKE3 hash of the UUID keyed by `SENSAPP_SENSOR_SALT`, the unit id a
   hash of its name (`storage::common`). BigQuery has no sequences and no unique keys, so this is what makes two
   writers that register the same series at once insert identical rows instead of two different ids. The reads
   collapse such rows.
@@ -56,6 +56,7 @@ Created by `src/storage/bigquery/migrations/init.sql`: `units`, `sensors`, `labe
 | **Matchers** | `=`, `!=`, `=~`, `!~` on names and labels, with RE2 (`REGEXP_CONTAINS`, anchored). As on ClickHouse, `!=` and `!~` also select the series that do not have the label |
 | **Reading a large result** | All the pages of the result are read (10 MB each), and a statement that outlasts its first answer is waited for (up to 5 minutes, then the request fails as unavailable) |
 | **Errors** | Overload, quota errors that say "retry" and network failures are `503`; a rejected statement or write is `500` |
+| **Confirmation of a write** | An append is cut into requests of at most 9 MiB. A write is a success only when BigQuery answered with a result for at least as many requests as the bytes sent need (one per 10 MiB, since the client cuts at 9 MiB): an empty or short answer is a `500`, not a success. The count is a lower bound: 9.5 MiB of rows are two requests and the bound is one, so a missing answer for the last of them is not noticed |
 | **Not implemented** | Vacuum (nothing to do), removing duplicates, deduplication at ingestion |
 
 ## Setting up Google Cloud

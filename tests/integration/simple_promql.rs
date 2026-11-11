@@ -367,7 +367,9 @@ async fn test_simple_promql_hyphenated_metric_name_via_name_matcher() -> Result<
 
     let request = Request::builder()
         .method("GET")
-        .uri("/api/v1/query?query=%7B__name__%3D%22demo-temperature%22%7D%5B5m%5D")
+        // The samples are 28 to 30 minutes old. A 5 minute window passed only because an empty
+        // series was exported as a SenML record without a value.
+        .uri("/api/v1/query?query=%7B__name__%3D%22demo-temperature%22%7D%5B1h%5D")
         .body(Body::empty())?;
 
     let response = app.oneshot(request).await?;

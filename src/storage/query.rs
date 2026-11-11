@@ -61,7 +61,7 @@ impl MatcherType {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run,standalone_crate
 /// use sensapp::storage::query::{LabelMatcher, MatcherType};
 ///
 /// // Match sensors with name "cpu_usage"
@@ -89,12 +89,8 @@ pub struct LabelMatcher {
     pub matcher_type: MatcherType,
 }
 
-/// The pattern of a regex matcher, anchored on both ends as Prometheus does: `^(?:pattern)$`.
-///
-/// Leading flag groups such as `(?i)` stay in front of the anchors: PostgreSQL only accepts
-/// embedded flags at the very start of a regular expression, and the others accept them there
-/// too.
-pub fn anchor_regex(pattern: &str) -> String {
+/// The leading flag groups of a pattern, such as `(?i)`, and the rest.
+fn split_leading_flags(pattern: &str) -> (&str, &str) {
     let mut flags_end = 0;
     let mut rest = pattern;
     while let Some(after) = rest.strip_prefix("(?") {
@@ -111,8 +107,179 @@ pub fn anchor_regex(pattern: &str) -> String {
             _ => break,
         }
     }
-    let (flags, body) = pattern.split_at(flags_end);
-    format!("{flags}^(?:{body})$")
+    pattern.split_at(flags_end)
+}
+
+/// The pattern of a regex matcher, anchored on both ends as Prometheus does: `(?s)^(?:pattern)$`.
+/// `(?s)` makes `.` match a newline too, as in Prometheus (which anchors with `^(?s:pattern)$`)
+/// and in PostgreSQL, where it is the default.
+///
+/// Leading flags such as `(?i)` are merged with it in front of the anchors: PostgreSQL only
+/// accepts one group of embedded flags, at the very start of a regular expression. Flags other
+/// than `i` and `s` are refused by [`validate_regex`]; without validation they are kept as they
+/// were written.
+pub fn anchor_regex(pattern: &str) -> String {
+    let (flags, body) = split_leading_flags(pattern);
+    let letters: String = flags
+        .chars()
+        .filter(|c| c.is_ascii_alphabetic() || *c == '-')
+        .collect();
+    if letters.chars().all(|c| c == 'i' || c == 's') {
+        let case_insensitive = if letters.contains('i') { "i" } else { "" };
+        format!("(?{case_insensitive}s)^(?:{body})$")
+    } else {
+        format!("{flags}^(?:{body})$")
+    }
+}
+
+/// Check that the pattern of a regex matcher is RE2, the dialect of Prometheus, and means the same
+/// on every backend: ClickHouse, DuckDB and BigQuery use RE2, SQLite and the in-memory matching use
+/// the `regex` crate (RE2 syntax), and PostgreSQL its own engine. So it refuses:
+///
+/// - what is not RE2: unbalanced groups, back-references, lookarounds;
+/// - the escapes PostgreSQL reads otherwise: `\b` is a backspace there, `\B` a backslash, `\x`
+///   takes any number of hex digits, `\p{..}`, `\z`, `\Q` and `\<` do not exist, and RE2 has no
+///   `\u`. Allowed are `\d \D \s \S \w \W \A \n \t \r \f \v \a` and the escaped punctuation;
+/// - what the engines read differently: a `[` within a class (nested for the `regex` crate, a
+///   literal for PostgreSQL and RE2, so the class ends elsewhere), the set operations `&&`, `--`
+///   and `~~`, a negated POSIX class, a repetition bound above 255 (PostgreSQL's limit), and a
+///   repetition of a repetition or of an assertion (`a**`, `^*`, `\A*`);
+/// - groups other than `(...)` and `(?:...)`, and flags other than a leading `(?i)` or `(?s)`:
+///   PostgreSQL has no named groups and no flags within the pattern, and `(?m)`, `(?x)`,
+///   `(?q)` mean other things there.
+pub fn validate_regex(pattern: &str) -> anyhow::Result<()> {
+    let refuse = |why: &str| anyhow::anyhow!("The regex {pattern:?} is not supported: {why}");
+    regex::Regex::new(pattern).map_err(|error| {
+        let first_line = error.to_string();
+        let first_line = first_line.lines().last().unwrap_or_default().to_string();
+        refuse(&format!("it is not RE2 ({})", first_line.trim()))
+    })?;
+
+    let (flags, body) = split_leading_flags(pattern);
+    if !flags
+        .chars()
+        .filter(|c| c.is_ascii_alphabetic() || *c == '-')
+        .all(|c| c == 'i' || c == 's')
+    {
+        return Err(refuse("only the flags (?i) and (?s) are supported"));
+    }
+
+    // What the last token was, to refuse a repetition of a repetition or of an assertion
+    #[derive(PartialEq)]
+    enum Previous {
+        Other,
+        Quantifier,
+        Assertion,
+    }
+    let mut previous = Previous::Other;
+    let mut chars = body.chars().peekable();
+    let mut in_class = false;
+    while let Some(c) = chars.next() {
+        let was = std::mem::replace(&mut previous, Previous::Other);
+        match c {
+            '*' | '+' | '?' if !in_class => {
+                if was == Previous::Assertion || (was == Previous::Quantifier && c != '?') {
+                    return Err(refuse(
+                        "a repetition of a repetition or of an assertion is not supported",
+                    ));
+                }
+                // A `?` after a quantifier makes it lazy
+                if was != Previous::Quantifier {
+                    previous = Previous::Quantifier;
+                }
+            }
+            '{' if !in_class => {
+                let mut lookahead = chars.clone();
+                let content: String = lookahead.by_ref().take_while(|&c| c != '}').collect();
+                let bounds: Vec<&str> = content.split(',').collect();
+                let is_repetition = !content.is_empty()
+                    && bounds.len() <= 2
+                    && bounds
+                        .iter()
+                        .all(|bound| bound.chars().all(|c| c.is_ascii_digit()))
+                    && !bounds[0].is_empty();
+                if is_repetition {
+                    // PostgreSQL stops at 255, RE2 at 1000
+                    if bounds
+                        .iter()
+                        .any(|bound| bound.parse::<u32>().map_or(!bound.is_empty(), |n| n > 255))
+                    {
+                        return Err(refuse("a repetition bound above 255 is not supported"));
+                    }
+                    if was != Previous::Other {
+                        return Err(refuse(
+                            "a repetition of a repetition or of an assertion is not supported",
+                        ));
+                    }
+                    chars = lookahead;
+                    previous = Previous::Quantifier;
+                }
+            }
+            '^' | '$' if !in_class => previous = Previous::Assertion,
+            '&' | '-' | '~' if in_class && chars.peek() == Some(&c) => {
+                return Err(refuse(
+                    "the set operations of a character class (&&, --, ~~) are not supported",
+                ));
+            }
+            // A `[` in a class is nested for the `regex` crate and a literal for PostgreSQL and
+            // RE2, which end the class at the first `]`: the anchors would not be where they seem.
+            // Only a POSIX class `[:alpha:]` may start there.
+            '[' if in_class && chars.peek() != Some(&':') => {
+                return Err(refuse("a character class within a character class"));
+            }
+            '\\' => {
+                let Some(escaped) = chars.next() else { break };
+                if escaped.is_ascii_alphanumeric() {
+                    match escaped {
+                        // An assertion like `^`: PostgreSQL refuses its repetition
+                        'A' if !in_class => previous = Previous::Assertion,
+                        'd' | 'D' | 's' | 'S' | 'w' | 'W' | 'A' | 'n' | 't' | 'r' | 'f' | 'v'
+                        | 'a' => {}
+                        _ => {
+                            return Err(refuse(&format!(
+                                "\\{escaped} means another thing in PostgreSQL, or nothing"
+                            )));
+                        }
+                    }
+                } else if escaped == '<' || escaped == '>' {
+                    return Err(refuse("word boundaries are not supported"));
+                }
+            }
+            '[' if !in_class => {
+                in_class = true;
+                // A `]` right after `[` or `[^` is a literal
+                if chars.peek() == Some(&'^') {
+                    chars.next();
+                }
+                if chars.peek() == Some(&']') {
+                    chars.next();
+                }
+            }
+            // A POSIX class within a class: `[[:digit:]]`
+            '[' if chars.peek() == Some(&':') => {
+                // `[:^digit:]` does not exist in PostgreSQL
+                if chars.clone().nth(1) == Some('^') {
+                    return Err(refuse("a negated POSIX class is not supported"));
+                }
+                for inner in chars.by_ref() {
+                    if inner == ']' {
+                        break;
+                    }
+                }
+            }
+            ']' if in_class => in_class = false,
+            '(' if !in_class && chars.peek() == Some(&'?') => {
+                chars.next();
+                if chars.next() != Some(':') {
+                    return Err(refuse(
+                        "only (...) and (?:...) groups, and leading (?i) or (?s) flags, are supported",
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 impl LabelMatcher {
@@ -134,6 +301,20 @@ impl LabelMatcher {
             value,
             matcher_type,
         }
+    }
+
+    /// Creates a matcher from a request: a regex that is not RE2, or that a backend would read
+    /// otherwise, is an error (see [`validate_regex`]).
+    pub fn try_new(
+        name: impl Into<String>,
+        value: impl Into<String>,
+        matcher_type: MatcherType,
+    ) -> anyhow::Result<Self> {
+        let value = value.into();
+        if matcher_type.is_regex() {
+            validate_regex(&value)?;
+        }
+        Ok(Self::new(name, value, matcher_type))
     }
 
     /// Creates an equality matcher (`=`).
@@ -183,9 +364,14 @@ impl std::fmt::Display for LabelMatcher {
     }
 }
 
-// Conversion from Prometheus LabelMatcher
-impl From<&crate::parsing::prometheus::remote_read_models::LabelMatcher> for LabelMatcher {
-    fn from(m: &crate::parsing::prometheus::remote_read_models::LabelMatcher) -> Self {
+// Conversion from Prometheus LabelMatcher. A type Prometheus does not have is an error, and not
+// read as `=`: a reader would get another answer than the one it asked for.
+impl TryFrom<&crate::parsing::prometheus::remote_read_models::LabelMatcher> for LabelMatcher {
+    type Error = anyhow::Error;
+
+    fn try_from(
+        m: &crate::parsing::prometheus::remote_read_models::LabelMatcher,
+    ) -> Result<Self, Self::Error> {
         use crate::parsing::prometheus::remote_read_models::label_matcher::Type;
 
         let matcher_type = match Type::try_from(m.r#type) {
@@ -193,11 +379,10 @@ impl From<&crate::parsing::prometheus::remote_read_models::LabelMatcher> for Lab
             Ok(Type::Neq) => MatcherType::NotEqual,
             Ok(Type::Re) => MatcherType::RegexMatch,
             Ok(Type::Nre) => MatcherType::RegexNotMatch,
-            // Default to Equal for unknown types (defensive)
-            Err(_) => MatcherType::Equal,
+            Err(_) => anyhow::bail!("Unknown label matcher type {}", m.r#type),
         };
 
-        Self::new(m.name.clone(), m.value.clone(), matcher_type)
+        Self::try_new(m.name.clone(), m.value.clone(), matcher_type)
     }
 }
 
@@ -254,35 +439,127 @@ mod tests {
         // The pattern shown is the one that is evaluated: anchored
         assert_eq!(
             LabelMatcher::regex("foo", "bar.*").to_string(),
-            "foo=~\"^(?:bar.*)$\""
+            "foo=~\"(?s)^(?:bar.*)$\""
         );
         assert_eq!(
             LabelMatcher::not_regex("foo", "bar.*").to_string(),
-            "foo!~\"^(?:bar.*)$\""
+            "foo!~\"(?s)^(?:bar.*)$\""
         );
     }
 
     #[test]
     fn regex_matchers_are_anchored_and_literals_are_not() {
-        assert_eq!(LabelMatcher::regex("a", "b").value, "^(?:b)$");
-        assert_eq!(LabelMatcher::not_regex("a", "b|c").value, "^(?:b|c)$");
+        assert_eq!(LabelMatcher::regex("a", "b").value, "(?s)^(?:b)$");
+        assert_eq!(LabelMatcher::not_regex("a", "b|c").value, "(?s)^(?:b|c)$");
         assert_eq!(LabelMatcher::eq("a", "b").value, "b");
         assert_eq!(LabelMatcher::neq("a", "b.*").value, "b.*");
-        assert_eq!(LabelMatcher::regex("a", "").value, "^(?:)$");
+        assert_eq!(LabelMatcher::regex("a", "").value, "(?s)^(?:)$");
     }
 
     #[test]
     fn leading_regex_flags_stay_in_front_of_the_anchors() {
-        assert_eq!(anchor_regex("(?i)abc"), "(?i)^(?:abc)$");
-        assert_eq!(anchor_regex("(?i)(?s)a.c"), "(?i)(?s)^(?:a.c)$");
+        assert_eq!(anchor_regex("(?i)abc"), "(?is)^(?:abc)$");
+        assert_eq!(anchor_regex("(?i)(?s)a.c"), "(?is)^(?:a.c)$");
+        assert_eq!(anchor_regex("(?si)a.c"), "(?is)^(?:a.c)$");
         assert_eq!(anchor_regex("(?-i)abc"), "(?-i)^(?:abc)$");
         // Groups that are not flags are part of the pattern
-        assert_eq!(anchor_regex("(?:ab)c"), "^(?:(?:ab)c)$");
-        assert_eq!(anchor_regex("(ab)c"), "^(?:(ab)c)$");
-        assert_eq!(anchor_regex("(?P<name>ab)"), "^(?:(?P<name>ab))$");
+        assert_eq!(anchor_regex("(?:ab)c"), "(?s)^(?:(?:ab)c)$");
+        assert_eq!(anchor_regex("(ab)c"), "(?s)^(?:(ab)c)$");
+        assert_eq!(anchor_regex("(?P<name>ab)"), "(?s)^(?:(?P<name>ab))$");
         // A flag group in the middle is left alone
-        assert_eq!(anchor_regex("a(?i)b"), "^(?:a(?i)b)$");
-        assert_eq!(anchor_regex("(?i"), "^(?:(?i)$");
+        assert_eq!(anchor_regex("a(?i)b"), "(?s)^(?:a(?i)b)$");
+        assert_eq!(anchor_regex("(?i"), "(?s)^(?:(?i)$");
+    }
+
+    #[test]
+    fn regexes_are_checked_for_re2_and_postgresql() {
+        for pattern in [
+            "",
+            "c7",
+            "c7.*",
+            "(?i)c7",
+            "(?s)a.b",
+            "(?is)a",
+            "eu|us",
+            "(a|b)c",
+            "(?:a|b)c",
+            r"\d+\.\d*",
+            r"\w\s\S\W\D",
+            r"\.\*\(\)\[\]\{\}\|\\",
+            "[[:digit:]]+",
+            "[]a]",
+            "[^]a]",
+            "[a-z(?]",
+            r"[\d-]",
+            "a{2,3}?",
+            "a{255}",
+            "a{1,255}",
+            "a*?",
+            r"\Aa*",
+            "(a*)*",
+            "[a-z0-9_.-]",
+            "[a&b]",
+            "[a~b]",
+            "é",
+        ] {
+            assert!(
+                validate_regex(pattern).is_ok(),
+                "{pattern}: {:?}",
+                validate_regex(pattern)
+            );
+        }
+        for pattern in [
+            "a)|(b",
+            "(a",
+            r"(a)\1",
+            "(?=a)",
+            "(?!a)",
+            r"\bx",
+            r"\Bx",
+            r"\p{L}",
+            r"\PL",
+            r"\x41",
+            r"\x{41}",
+            r"\u{e9}",
+            r"\z",
+            r"\Qa\E",
+            r"\<a",
+            "(?-i)a",
+            "(?m)a",
+            "(?x)a # c",
+            "(?U)a",
+            "a(?i)b",
+            "(?P<n>a)",
+            "(?<n>a)",
+            r"\C",
+            // A `[` in a class: nested for the `regex` crate, a literal for PostgreSQL and RE2, so
+            // they disagree on where the class ends and the anchors move
+            "[a[b])|(c]]",
+            "[a[bc]]",
+            "[[a]b]",
+            // Set operations of a class
+            "[a&&b]",
+            "[a-z--aeiou]",
+            "[a~~b]",
+            // Repetition bounds: PostgreSQL stops at 255, RE2 at 1000
+            "a{256}",
+            "a{1,256}",
+            "a{1001}",
+            // A repetition of a repetition or of an assertion
+            "a**",
+            "a+*",
+            "a*{2}",
+            "^*",
+            "$+",
+            r"\A*a",
+            r"\A{2}a",
+            // RE2 has no \u, and a negated POSIX class does not exist in PostgreSQL
+            r"\u00e9",
+            r"\U000000e9",
+            "[[:^digit:]]",
+        ] {
+            assert!(validate_regex(pattern).is_err(), "{pattern}");
+        }
     }
 
     #[test]
@@ -290,13 +567,14 @@ mod tests {
         use crate::parsing::prometheus::remote_read_models::{
             LabelMatcher as Remote, label_matcher::Type,
         };
-        let matcher = LabelMatcher::from(&Remote {
+        let matcher = LabelMatcher::try_from(&Remote {
             r#type: Type::Re as i32,
             name: "region".to_string(),
             value: "eu-.*".to_string(),
-        });
+        })
+        .unwrap();
         assert_eq!(matcher.matcher_type, MatcherType::RegexMatch);
-        assert_eq!(matcher.value, "^(?:eu-.*)$");
+        assert_eq!(matcher.value, "(?s)^(?:eu-.*)$");
     }
 
     #[test]
@@ -336,7 +614,7 @@ mod tests {
             name: "__name__".to_string(),
             value: "cpu_usage".to_string(),
         };
-        let matcher: LabelMatcher = (&prom_eq).into();
+        let matcher = LabelMatcher::try_from(&prom_eq).unwrap();
         assert_eq!(matcher.name, "__name__");
         assert_eq!(matcher.value, "cpu_usage");
         assert_eq!(matcher.matcher_type, MatcherType::Equal);
@@ -347,7 +625,7 @@ mod tests {
             name: "env".to_string(),
             value: "test".to_string(),
         };
-        let matcher: LabelMatcher = (&prom_neq).into();
+        let matcher = LabelMatcher::try_from(&prom_neq).unwrap();
         assert_eq!(matcher.matcher_type, MatcherType::NotEqual);
 
         // Test RE
@@ -356,7 +634,7 @@ mod tests {
             name: "instance".to_string(),
             value: "server-[0-9]+".to_string(),
         };
-        let matcher: LabelMatcher = (&prom_re).into();
+        let matcher = LabelMatcher::try_from(&prom_re).unwrap();
         assert_eq!(matcher.matcher_type, MatcherType::RegexMatch);
 
         // Test NRE
@@ -365,7 +643,7 @@ mod tests {
             name: "job".to_string(),
             value: "test.*".to_string(),
         };
-        let matcher: LabelMatcher = (&prom_nre).into();
+        let matcher = LabelMatcher::try_from(&prom_nre).unwrap();
         assert_eq!(matcher.matcher_type, MatcherType::RegexNotMatch);
     }
 
@@ -373,13 +651,13 @@ mod tests {
     fn test_from_prometheus_label_matcher_unknown_type() {
         use crate::parsing::prometheus::remote_read_models::LabelMatcher as PromLabelMatcher;
 
-        // Test unknown type defaults to Equal
+        // An unknown type is refused
         let prom_unknown = PromLabelMatcher {
             r#type: 999, // Invalid type
             name: "test".to_string(),
             value: "value".to_string(),
         };
-        let matcher: LabelMatcher = (&prom_unknown).into();
-        assert_eq!(matcher.matcher_type, MatcherType::Equal);
+        let error = LabelMatcher::try_from(&prom_unknown).unwrap_err();
+        assert!(error.to_string().contains("999"), "{error}");
     }
 }

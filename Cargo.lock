@@ -537,17 +537,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-lock"
-version = "3.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0876700b0d007ad25d5508865a4259c3af9af6d296bf663a0d586d0bc3369f6f"
-dependencies = [
- "event-listener",
- "event-listener-strategy",
- "pin-project-lite",
-]
-
-[[package]]
 name = "async-stream"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -891,41 +880,6 @@ checksum = "86566c496f2f47d9b8147a4c8b02ffdb69c919fe0c2b2e7195d22cbba0e635c9"
 dependencies = [
  "bytes",
 ]
-
-[[package]]
-name = "cached"
-version = "4.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48ba6df8863aa2bfacfae483d8dfefa52403115f559a46c4d84897bec8753d6a"
-dependencies = [
- "ahash",
- "async-lock",
- "cached_proc_macro",
- "cached_proc_macro_types",
- "hashbrown 0.17.1",
- "parking_lot",
- "thiserror",
- "web-time",
-]
-
-[[package]]
-name = "cached_proc_macro"
-version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ece0579b43cf6e927b3370c7d44359c7122e7e52b3ea635bc8484da571442edb"
-dependencies = [
- "darling",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "cached_proc_macro_types"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5813789573ae815c8b4be58c4428e0e7ae05f0227678ba9de332ded585b9159"
 
 [[package]]
 name = "cast"
@@ -1377,41 +1331,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "darling"
-version = "0.20.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee"
-dependencies = [
- "darling_core",
- "darling_macro",
-]
-
-[[package]]
-name = "darling_core"
-version = "0.20.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e"
-dependencies = [
- "fnv",
- "ident_case",
- "proc-macro2",
- "quote",
- "strsim",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "darling_macro"
-version = "0.20.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
-dependencies = [
- "darling_core",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "deadpool"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1635,16 +1554,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
 dependencies = [
  "parking",
- "pin-project-lite",
-]
-
-[[package]]
-name = "event-listener-strategy"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
-dependencies = [
- "event-listener",
  "pin-project-lite",
 ]
 
@@ -2523,12 +2432,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ident_case"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
-
-[[package]]
 name = "idna"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2591,15 +2494,6 @@ name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
-
-[[package]]
-name = "iso8601"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ffd3254cf2b0fc53e38414bdba99719f3e269db8a6519731b68a3a90040c41b"
-dependencies = [
- "nom 8.0.0",
-]
 
 [[package]]
 name = "itertools"
@@ -4136,7 +4030,7 @@ dependencies = [
  "base64 0.23.1",
  "blake3",
  "byte-unit",
- "cached",
+ "chrono",
  "clap",
  "clickhouse",
  "confique",
@@ -4150,8 +4044,9 @@ dependencies = [
  "getrandom 0.4.3",
  "hifitime",
  "hybridmap",
+ "hyper",
+ "hyper-util",
  "influxdb-line-protocol",
- "iso8601",
  "jsonwebtoken",
  "nom 8.0.0",
  "once_cell",

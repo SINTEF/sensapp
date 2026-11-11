@@ -1,3 +1,4 @@
+use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::{
     datamodel::{
         Sample, SensAppDateTime, Sensor, SensorType, TypedSamples, batch_builder::BatchBuilder,
@@ -11,9 +12,11 @@ use arrow::array::{
     Array, ArrayRef, BinaryArray, BooleanArray, Decimal128Array, Float64Array, Int64Array,
     StringArray, StructArray, TimestampMicrosecondArray,
 };
+use arrow::compute::{and, cast, filter_record_batch, is_not_null};
 use arrow::datatypes::{DataType, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::{FileReader, StreamReader};
+use arrow_ipc::{Message, root_as_footer, root_as_message};
 use geo::Point;
 use rust_decimal::Decimal;
 use smallvec::SmallVec;
@@ -26,19 +29,30 @@ use uuid::Uuid;
 /// Read an Arrow IPC payload and convert it to sensors and samples.
 ///
 /// Every error returned here is caused by the payload itself.
-pub fn parse_arrow_sensors(buffer: &[u8]) -> Result<Vec<SensorDataMap>> {
-    parse_arrow_file(buffer)?
-        .iter()
-        .map(convert_record_batch_to_sensors)
-        .collect()
+///
+/// The second part of the answer is the number of rows that held no reading (a null or a NaN) and
+/// were skipped.
+pub fn parse_arrow_sensors(
+    buffer: &[u8],
+    max_decompressed_bytes: usize,
+) -> Result<(Vec<SensorDataMap>, usize)> {
+    let mut maps = Vec::new();
+    let mut skipped = 0;
+    for batch in parse_arrow_file(buffer, max_decompressed_bytes)? {
+        let (map, batch_skipped) = convert_record_batch_to_sensors(&batch)?;
+        maps.push(map);
+        skipped += batch_skipped;
+    }
+    Ok((maps, skipped))
 }
 
 /// Publish parsed Arrow sensors to storage
 pub async fn publish_arrow_sensors(
     sensor_data_maps: Vec<SensorDataMap>,
+    skipped: usize,
     storage: Arc<dyn StorageInstance>,
 ) -> Result<IngestionStats> {
-    let mut stats = IngestionStats::default();
+    let mut stats = IngestionStats::default().with_skipped(skipped);
     let mut batch_builder = BatchBuilder::new()?;
 
     for sensor_data_map in sensor_data_maps {
@@ -56,33 +70,24 @@ pub async fn publish_arrow_sensors(
     Ok(stats)
 }
 
-fn parse_arrow_file(buffer: &[u8]) -> Result<Vec<RecordBatch>> {
-    let stream_batches = StreamReader::try_new(Cursor::new(buffer), None)
-        .ok()
-        .map(|reader| {
-            reader
-                .into_iter()
-                .map(|batch| {
-                    batch.map_err(|e| anyhow!("Failed to read Arrow batch from stream: {}", e))
-                })
-                .collect::<Result<Vec<_>>>()
-        })
-        .transpose()?;
+fn parse_arrow_file(buffer: &[u8], max_decompressed_bytes: usize) -> Result<Vec<RecordBatch>> {
+    check_decompressed_size(buffer, max_decompressed_bytes)?;
 
-    let batches = if let Some(batches) = stream_batches {
-        batches
+    // The reader is chosen by the test the size check used: a body that starts with the file magic
+    // is a file, anything else a stream. A reader the check did not walk the messages for would
+    // allocate the lengths a body declares.
+    let batches = if is_file(buffer) {
+        FileReader::try_new(Cursor::new(buffer), None)
+            .map_err(|e| anyhow!("Failed to create Arrow file reader: {}", e))?
+            .map(|batch| batch.map_err(|e| anyhow!("Failed to read Arrow batch from file: {}", e)))
+            .collect::<Result<Vec<_>>>()?
     } else {
-        let cursor = Cursor::new(buffer);
-        let reader = FileReader::try_new(cursor, None)
-            .map_err(|e| anyhow!("Failed to create Arrow file reader: {}", e))?;
-
-        let mut batches = Vec::new();
-        for batch_result in reader {
-            let batch =
-                batch_result.map_err(|e| anyhow!("Failed to read Arrow batch from file: {}", e))?;
-            batches.push(batch);
-        }
-        batches
+        StreamReader::try_new(Cursor::new(buffer), None)
+            .map_err(|e| anyhow!("Failed to create Arrow stream reader: {}", e))?
+            .map(|batch| {
+                batch.map_err(|e| anyhow!("Failed to read Arrow batch from stream: {}", e))
+            })
+            .collect::<Result<Vec<_>>>()?
     };
 
     if batches.is_empty() {
@@ -92,8 +97,152 @@ fn parse_arrow_file(buffer: &[u8]) -> Result<Vec<RecordBatch>> {
     Ok(batches)
 }
 
+fn is_file(buffer: &[u8]) -> bool {
+    buffer.starts_with(ARROW_FILE_MAGIC)
+}
+
+/// The buffers of an Arrow IPC payload may be compressed (the Python SDK sends LZ4), each with
+/// its uncompressed length in front, and `arrow-ipc` allocates that length before it
+/// decompresses. The declared lengths of the whole payload are added up before anything is
+/// decoded, and may not exceed `max_bytes`, the limit of gzip and snappy bodies.
+fn check_decompressed_size(buffer: &[u8], max_bytes: usize) -> Result<()> {
+    let mut total = 0_u64;
+    let mut count = |message: Message<'_>, body: &[u8]| -> Result<()> {
+        total = total.saturating_add(declared_decompressed_size(message, body)?);
+        if total > max_bytes as u64 {
+            return Err(anyhow!(
+                "The Arrow IPC payload exceeds {max_bytes} bytes once decompressed"
+            ));
+        }
+        Ok(())
+    };
+
+    if is_file(buffer) {
+        // A file: its messages are where the footer says, as `FileReader` reads them
+        for (offset, metadata_length, body_length) in file_blocks(buffer)? {
+            let malformed = || anyhow!("Malformed Arrow IPC file block at byte {offset}");
+            let body_start = offset.checked_add(metadata_length).ok_or_else(malformed)?;
+            let body_end = body_start.checked_add(body_length).ok_or_else(malformed)?;
+            let metadata = buffer.get(offset..body_start).ok_or_else(malformed)?;
+            let metadata = if metadata.starts_with(&CONTINUATION_MARKER) {
+                metadata.get(8..)
+            } else {
+                metadata.get(4..)
+            }
+            .ok_or_else(malformed)?;
+            let message = root_as_message(metadata).map_err(|_| malformed())?;
+            count(
+                message,
+                buffer.get(body_start..body_end).ok_or_else(malformed)?,
+            )?;
+        }
+    } else {
+        // A stream: one message after the other, as `StreamReader` reads them. One that ends
+        // before its first message holds no data
+        if stream_message_at(buffer, 0)?.is_none() {
+            return Err(anyhow!("Arrow IPC payload contains no data batches"));
+        }
+        let mut position = 0;
+        while let Some((message, body, next)) = stream_message_at(buffer, position)? {
+            count(message, body)?;
+            position = next;
+        }
+    }
+    Ok(())
+}
+
+const ARROW_FILE_MAGIC: &[u8] = b"ARROW1";
+const CONTINUATION_MARKER: [u8; 4] = [0xff; 4];
+
+fn read_i32(buffer: &[u8], position: usize) -> Option<i32> {
+    let bytes = buffer.get(position..position.checked_add(4)?)?;
+    Some(i32::from_le_bytes(bytes.try_into().ok()?))
+}
+
+/// The message of a stream at `position`, its body, and where the next message starts. `None`
+/// at the end of the stream.
+fn stream_message_at(
+    buffer: &[u8],
+    position: usize,
+) -> Result<Option<(Message<'_>, &[u8], usize)>> {
+    let malformed = || anyhow!("Malformed Arrow IPC message at byte {position}");
+    // A stream may end without its end marker
+    let Some(mut length) = read_i32(buffer, position) else {
+        return Ok(None);
+    };
+    let mut start = position + 4;
+    if length == -1 {
+        length = read_i32(buffer, start).ok_or_else(malformed)?;
+        start += 4;
+    }
+    if length == 0 {
+        return Ok(None);
+    }
+    let length = usize::try_from(length).map_err(|_| malformed())?;
+    let body_start = start.checked_add(length).ok_or_else(malformed)?;
+    let message = root_as_message(buffer.get(start..body_start).ok_or_else(malformed)?)
+        .map_err(|_| malformed())?;
+    let body_length = usize::try_from(message.bodyLength()).map_err(|_| malformed())?;
+    let body_end = body_start.checked_add(body_length).ok_or_else(malformed)?;
+    let body = buffer.get(body_start..body_end).ok_or_else(malformed)?;
+    Ok(Some((message, body, body_end)))
+}
+
+/// The offset, metadata length and body length of the dictionaries and batches of a file.
+fn file_blocks(buffer: &[u8]) -> Result<Vec<(usize, usize, usize)>> {
+    let malformed = || anyhow!("Malformed Arrow IPC file footer");
+    let end = buffer.len().checked_sub(10).ok_or_else(malformed)?;
+    let length = read_i32(buffer, end).ok_or_else(malformed)?;
+    let start = end
+        .checked_sub(usize::try_from(length).map_err(|_| malformed())?)
+        .ok_or_else(malformed)?;
+    let footer = root_as_footer(&buffer[start..end]).map_err(|_| malformed())?;
+    let size = |value: i64| usize::try_from(value).map_err(|_| malformed());
+    footer
+        .dictionaries()
+        .into_iter()
+        .flatten()
+        .chain(footer.recordBatches().into_iter().flatten())
+        .map(|block| {
+            Ok((
+                size(block.offset())?,
+                size(block.metaDataLength().into())?,
+                size(block.bodyLength())?,
+            ))
+        })
+        .collect()
+}
+
+/// The bytes the compressed buffers of a message declare once decompressed.
+fn declared_decompressed_size(message: Message<'_>, body: &[u8]) -> Result<u64> {
+    let batch = message.header_as_record_batch().or_else(|| {
+        message
+            .header_as_dictionary_batch()
+            .and_then(|dictionary| dictionary.data())
+    });
+    let Some(batch) = batch.filter(|batch| batch.compression().is_some()) else {
+        return Ok(0);
+    };
+    let mut total = 0_u64;
+    for buffer in batch.buffers().into_iter().flatten() {
+        // An empty buffer is not decompressed
+        if buffer.length() == 0 {
+            continue;
+        }
+        let prefix = usize::try_from(buffer.offset())
+            .ok()
+            .and_then(|offset| body.get(offset..offset.checked_add(8)?))
+            .ok_or_else(|| anyhow!("Malformed Arrow IPC buffer"))?;
+        // -1 is a buffer left uncompressed, which takes no more than its bytes
+        let declared = i64::from_le_bytes(prefix.try_into()?);
+        total = total.saturating_add(u64::try_from(declared).unwrap_or(0));
+    }
+    Ok(total)
+}
+
 /// Convert Arrow RecordBatch to SensApp sensors and samples
-fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap> {
+/// The series of a batch, and the number of rows skipped for holding no reading.
+fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<(SensorDataMap, usize)> {
     let schema = batch.schema();
 
     if batch.num_rows() == 0 {
@@ -110,22 +259,37 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
     let sensor_id_idx = find_column_index(&schema, "sensor_id");
     let sensor_name_idx = find_column_index(&schema, "sensor_name");
 
-    // Get arrays
-    let timestamp_array = batch.column(timestamp_idx);
-    let value_array = batch.column(value_idx);
-
     // Validate timestamp column
-    let timestamp_data = match timestamp_array.data_type() {
-        DataType::Timestamp(TimeUnit::Microsecond, _) => timestamp_array
-            .as_any()
-            .downcast_ref::<TimestampMicrosecondArray>()
-            .ok_or_else(|| anyhow!("Failed to downcast timestamp array"))?,
-        _ => {
-            return Err(anyhow!(
-                "Timestamp column must be Timestamp(Microsecond, _) type"
-            ));
-        }
-    };
+    if !matches!(
+        batch.column(timestamp_idx).data_type(),
+        DataType::Timestamp(TimeUnit::Microsecond, _)
+    ) {
+        return Err(anyhow!(
+            "Timestamp column must be Timestamp(Microsecond, _) type"
+        ));
+    }
+    let null_timestamps = batch.column(timestamp_idx).null_count();
+    if null_timestamps > 0 {
+        return Err(anyhow!(
+            "Arrow data has {null_timestamps} null timestamp(s): every sample needs a time"
+        ));
+    }
+
+    // The sensor columns are read before the rows without a value are dropped, so that they are
+    // checked on every row
+    let sensor_id = extract_sensor_id(batch, sensor_id_idx)?;
+    let sensor_name = extract_sensor_name(batch, sensor_name_idx)?;
+
+    // A null value or a NaN is no sample
+    let rows = batch.num_rows();
+    let batch = &filter_record_batch(batch, &present_values(batch.column(value_idx))?)?;
+    let skipped = rows - batch.num_rows();
+    let timestamp_data = batch
+        .column(timestamp_idx)
+        .as_any()
+        .downcast_ref::<TimestampMicrosecondArray>()
+        .ok_or_else(|| anyhow!("Failed to downcast timestamp array"))?;
+    let value_array = batch.column(value_idx);
 
     // Convert timestamps
     let timestamps: Result<Vec<SensAppDateTime>> = (0..timestamp_data.len())
@@ -138,13 +302,27 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
     let timestamps = timestamps?;
 
     // Convert values based on data type
-    let (derived_sensor_type, typed_samples) =
+    let (column_type, typed_samples) =
         convert_arrow_array_to_typed_samples(value_array, &timestamps)?;
 
+    // The type of the series is the type of its value column. The metadata may only say the same,
+    // or say JSON for a text column (JSON series are exported as text): otherwise the samples would
+    // be stored in the table of their column while the series is registered with another type.
+    let (sensor_type, typed_samples) = match extract_sensor_type(batch) {
+        None => (column_type, typed_samples),
+        Some(declared) if declared == column_type => (declared, typed_samples),
+        Some(SensorType::Json) if column_type == SensorType::String => {
+            (SensorType::Json, parse_json_samples(typed_samples)?)
+        }
+        Some(declared) => {
+            return Err(anyhow!(
+                "The series is declared as {declared} (sensapp.sensor.type) but its value \
+                 column holds {column_type} values"
+            ));
+        }
+    };
+
     // Extract sensor metadata
-    let sensor_id = extract_sensor_id(batch, sensor_id_idx)?;
-    let sensor_name = extract_sensor_name(batch, sensor_name_idx);
-    let sensor_type = extract_sensor_type(batch).unwrap_or(derived_sensor_type);
     let unit = extract_sensor_unit(batch);
     let labels = extract_sensor_labels(batch)?;
 
@@ -153,7 +331,11 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
     let sensor = match (sensor_id, sensor_name) {
         (Some(uuid), name) => {
             let name = name.unwrap_or_else(|| uuid.to_string());
-            Sensor::new(uuid, name, sensor_type, unit, Some(labels))
+            let sensor = Sensor::new(uuid, name, sensor_type, unit, Some(labels));
+            // `Sensor::new` checks nothing: a NUL in the name, the unit or a label would reach
+            // the database as an error of the database
+            sensor.validate()?;
+            sensor
         }
         (None, Some(name)) => Sensor::new_without_uuid(name, sensor_type, unit, Some(labels))?,
         (None, None) => {
@@ -168,13 +350,11 @@ fn convert_record_batch_to_sensors(batch: &RecordBatch) -> Result<SensorDataMap>
     let sensor = Arc::new(sensor);
 
     let mut result = HashMap::new();
-    let sensor_key = sensor_name;
-
-    // Create a single sample entry with all the data
-    let sample_entry = vec![(timestamps[0], typed_samples)];
-    result.insert(sensor_key, (sensor, sample_entry));
-
-    Ok(result)
+    // Only null values: nothing to store
+    if let Some(&first) = timestamps.first() {
+        result.insert(sensor_name, (sensor, vec![(first, typed_samples)]));
+    }
+    Ok((result, skipped))
 }
 
 /// Convert Arrow array to TypedSamples
@@ -223,12 +403,9 @@ fn convert_arrow_array_to_typed_samples(
 
             let samples: Result<SmallVec<[Sample<Decimal>; 4]>> = (0..decimal_array.len())
                 .map(|i| {
-                    let raw_value = decimal_array.value(i);
-                    // Convert i128 back to Decimal with proper scale
-                    let decimal = Decimal::from_i128_with_scale(raw_value, *scale as u32);
                     Ok(Sample {
                         datetime: timestamps[i],
-                        value: decimal,
+                        value: arrow_decimal(decimal_array.value(i), *scale)?,
                     })
                 })
                 .collect();
@@ -332,6 +509,27 @@ fn convert_arrow_array_to_typed_samples(
 }
 
 /// Helper functions
+/// An Arrow decimal (`raw` × 10^-`scale`) as a `Decimal`. Arrow allows a scale up to 38 and a
+/// negative scale; `Decimal` holds 96 bits and a scale up to 28, so the rest is an error.
+fn arrow_decimal(raw: i128, scale: i8) -> Result<Decimal> {
+    let out_of_range = || anyhow!("The decimal {raw}e{} is outside the Numeric range", -scale);
+    if scale >= 0 {
+        // SensApp writes `Decimal128(38, 18)`: a value of 7.9e10 or more has a raw value over the 96
+        // bits of a `Decimal` although it fits with its trailing zeros removed
+        let (mut raw, mut scale) = (raw, scale as u32);
+        while scale > 0 && raw % 10 == 0 {
+            raw /= 10;
+            scale -= 1;
+        }
+        return Decimal::try_from_i128_with_scale(raw, scale).map_err(|_| out_of_range());
+    }
+    let mut value = Decimal::try_from_i128_with_scale(raw, 0).map_err(|_| out_of_range())?;
+    for _ in 0..scale.unsigned_abs() {
+        value = value.checked_mul(Decimal::TEN).ok_or_else(out_of_range)?;
+    }
+    Ok(value)
+}
+
 fn find_column_index(schema: &arrow::datatypes::Schema, column_name: &str) -> Option<usize> {
     schema
         .fields()
@@ -340,48 +538,110 @@ fn find_column_index(schema: &arrow::datatypes::Schema, column_name: &str) -> Op
 }
 
 fn extract_sensor_id(batch: &RecordBatch, sensor_id_idx: Option<usize>) -> Result<Option<Uuid>> {
-    if let Some(uuid_str) = batch.schema().metadata().get("sensapp.sensor.uuid") {
-        return Uuid::parse_str(uuid_str)
-            .map(Some)
-            .map_err(|e| anyhow!("Invalid UUID in sensapp.sensor.uuid metadata: {}", e));
-    }
-
-    if let Some(idx) = sensor_id_idx {
-        let array = batch
-            .column(idx)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or_else(|| anyhow!("sensor_id column must be string type"))?;
-
-        if array.len() > 0 {
-            let uuid_str = array.value(0);
-            return Uuid::parse_str(uuid_str)
-                .map(Some)
-                .map_err(|e| anyhow!("Invalid UUID in sensor_id: {}", e));
-        }
-    }
-
-    Ok(None)
+    let column = sensor_id_idx
+        .map(|idx| one_sensor(batch, idx, "sensor_id"))
+        .transpose()?;
+    let Some(uuid_str) = batch
+        .schema()
+        .metadata()
+        .get("sensapp.sensor.uuid")
+        .cloned()
+        .or(column)
+    else {
+        return Ok(None);
+    };
+    Uuid::parse_str(&uuid_str)
+        .map(Some)
+        .map_err(|e| anyhow!("Invalid sensor UUID {uuid_str:?}: {e}"))
 }
 
-fn extract_sensor_name(batch: &RecordBatch, sensor_name_idx: Option<usize>) -> Option<String> {
-    if let Some(name) = batch.schema().metadata().get("sensapp.sensor.name") {
-        return Some(name.clone());
-    }
+fn extract_sensor_name(
+    batch: &RecordBatch,
+    sensor_name_idx: Option<usize>,
+) -> Result<Option<String>> {
+    let column = sensor_name_idx
+        .map(|idx| one_sensor(batch, idx, "sensor_name"))
+        .transpose()?;
+    Ok(batch
+        .schema()
+        .metadata()
+        .get("sensapp.sensor.name")
+        .cloned()
+        .or(column))
+}
 
-    sensor_name_idx.and_then(|idx| {
-        batch
-            .column(idx)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .and_then(|array| {
-                if array.len() > 0 {
-                    Some(array.value(0).to_string())
-                } else {
-                    None
-                }
+/// The value of a sensor column, which must be the same on every row: a batch holds the samples
+/// of one sensor. The column is text, or a dictionary of text as the multi-series export writes.
+fn one_sensor(batch: &RecordBatch, idx: usize, name: &str) -> Result<String> {
+    fn is_text(data_type: &DataType) -> bool {
+        match data_type {
+            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => true,
+            DataType::Dictionary(_, values) => is_text(values),
+            _ => false,
+        }
+    }
+    let column = batch.column(idx);
+    if !is_text(column.data_type()) {
+        return Err(anyhow!("The {name} column must be text"));
+    }
+    let column = cast(column, &DataType::Utf8)?;
+    let column = column
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or_else(|| anyhow!("Failed to downcast the {name} column"))?;
+    let first = column.iter().next().flatten();
+    match first {
+        Some(first) if column.iter().all(|value| value == Some(first)) => Ok(first.to_string()),
+        _ => Err(anyhow!(
+            "Every row of the {name} column must name the same sensor: an Arrow batch holds \
+             the samples of one sensor"
+        )),
+    }
+}
+
+/// The rows that hold a value. A null value, a NaN (pandas, polars and numpy write a gap that
+/// way), or a location with a null or NaN coordinate, is no sample.
+fn present_values(array: &ArrayRef) -> Result<BooleanArray> {
+    let mut present = is_not_null(array)?;
+    if let Some(floats) = array.as_any().downcast_ref::<Float64Array>() {
+        present = and(&present, &is_not_nan(floats))?;
+    }
+    if let Some(location) = array.as_any().downcast_ref::<StructArray>() {
+        for coordinate in location.columns() {
+            present = and(&present, &is_not_null(coordinate)?)?;
+            if let Some(floats) = coordinate.as_any().downcast_ref::<Float64Array>() {
+                present = and(&present, &is_not_nan(floats))?;
+            }
+        }
+    }
+    Ok(present)
+}
+
+/// Whether each value is not NaN. A null slot is `true` here: `is_not_null` handles it.
+fn is_not_nan(values: &Float64Array) -> BooleanArray {
+    values
+        .iter()
+        .map(|value| Some(value.is_none_or(|value| !value.is_nan())))
+        .collect()
+}
+
+/// The text samples of a series declared as JSON, parsed.
+fn parse_json_samples(samples: TypedSamples) -> Result<TypedSamples> {
+    let TypedSamples::String(samples) = samples else {
+        return Err(anyhow!("JSON values must be in a text column"));
+    };
+    let samples = samples
+        .into_iter()
+        .map(|sample| {
+            let value = serde_json::from_str(&sample.value)
+                .map_err(|error| anyhow!("Invalid JSON value in a JSON series: {error}"))?;
+            Ok(Sample {
+                datetime: sample.datetime,
+                value,
             })
-    })
+        })
+        .collect::<Result<_>>()?;
+    Ok(TypedSamples::Json(samples))
 }
 
 fn extract_sensor_type(batch: &RecordBatch) -> Option<SensorType> {
@@ -435,10 +695,7 @@ fn extract_sensor_labels(batch: &RecordBatch) -> Result<SmallVec<[(String, Strin
 
 /// Helper function to convert microseconds since epoch to SensAppDateTime
 fn microseconds_to_sensapp_datetime(micros: i64) -> Option<SensAppDateTime> {
-    // Convert microseconds since Unix epoch to SensAppDateTime
-    // Use SensAppDateTime::from_unix_seconds which accepts seconds as f64
-    let seconds = micros as f64 / 1_000_000.0;
-    Some(SensAppDateTime::from_unix_seconds(seconds))
+    Some(SensAppDateTime::from_unix_microseconds_i64(micros))
 }
 
 #[cfg(test)]
@@ -485,7 +742,7 @@ mod tests {
     #[tokio::test]
     async fn test_parse_arrow_file() {
         let arrow_data = create_test_arrow_stream_data();
-        let batches = parse_arrow_file(&arrow_data).unwrap();
+        let batches = parse_arrow_file(&arrow_data, 1024 * 1024).unwrap();
 
         assert!(!batches.is_empty());
         assert_eq!(batches[0].num_rows(), 2);
@@ -495,8 +752,8 @@ mod tests {
     #[tokio::test]
     async fn test_convert_record_batch_to_sensors() {
         let arrow_data = create_test_arrow_stream_data();
-        let batches = parse_arrow_file(&arrow_data).unwrap();
-        let sensor_map = convert_record_batch_to_sensors(&batches[0]).unwrap();
+        let batches = parse_arrow_file(&arrow_data, 1024 * 1024).unwrap();
+        let (sensor_map, _) = convert_record_batch_to_sensors(&batches[0]).unwrap();
 
         assert_eq!(sensor_map.len(), 1);
 
@@ -563,7 +820,7 @@ mod tests {
 
     fn sensor_of(batch: &RecordBatch) -> Result<Arc<Sensor>> {
         _ = crate::config::load_configuration();
-        let map = convert_record_batch_to_sensors(batch)?;
+        let (map, _) = convert_record_batch_to_sensors(batch)?;
         Ok(map.into_values().next().unwrap().0)
     }
 
@@ -632,6 +889,142 @@ mod tests {
         assert_eq!(without_name.name, uuid.to_string());
     }
 
+    /// A type in the metadata that is not the type of the value column is refused: the samples
+    /// would go to the table of their column while the series is registered with another type.
+    #[test]
+    fn test_metadata_type_must_match_the_value_column() {
+        let error = sensor_of(&batch_with_identity(
+            &[("sensapp.sensor.type", "integer")],
+            None,
+            Some("temp"),
+        ))
+        .unwrap_err();
+        assert!(error.to_string().contains("declared as Integer"), "{error}");
+
+        let same = sensor_of(&batch_with_identity(
+            &[("sensapp.sensor.type", "float")],
+            None,
+            Some("temp"),
+        ))
+        .unwrap();
+        assert_eq!(same.sensor_type, SensorType::Float);
+    }
+
+    /// Every type exported as one series comes back with its type and its samples.
+    #[test]
+    fn test_single_series_export_imports_back_with_its_type() {
+        use crate::datamodel::{Sample, SensorData};
+        use crate::exporters::arrow::ArrowConverter;
+        use geo::Point;
+        use rust_decimal::Decimal;
+
+        let datetime = microseconds_to_sensapp_datetime(1_640_995_200_000_000).unwrap();
+        /// A type, and samples of that type at the given time
+        type Case = (SensorType, fn(SensAppDateTime) -> TypedSamples);
+        let all: [Case; 8] = [
+            (SensorType::Integer, |datetime| {
+                TypedSamples::Integer(smallvec::smallvec![Sample {
+                    datetime,
+                    value: 42
+                }])
+            }),
+            (SensorType::Numeric, |datetime| {
+                TypedSamples::Numeric(smallvec::smallvec![Sample {
+                    datetime,
+                    value: Decimal::new(1234, 2)
+                }])
+            }),
+            (SensorType::Float, |datetime| {
+                TypedSamples::Float(smallvec::smallvec![Sample {
+                    datetime,
+                    value: 1.5
+                }])
+            }),
+            (SensorType::String, |datetime| {
+                TypedSamples::String(smallvec::smallvec![Sample {
+                    datetime,
+                    value: "on".to_string()
+                }])
+            }),
+            (SensorType::Boolean, |datetime| {
+                TypedSamples::Boolean(smallvec::smallvec![Sample {
+                    datetime,
+                    value: true
+                }])
+            }),
+            (SensorType::Location, |datetime| {
+                TypedSamples::Location(smallvec::smallvec![Sample {
+                    datetime,
+                    value: Point::new(10.4, 63.4)
+                }])
+            }),
+            (SensorType::Json, |datetime| {
+                TypedSamples::Json(smallvec::smallvec![Sample {
+                    datetime,
+                    value: serde_json::json!({"state": "on"})
+                }])
+            }),
+            (SensorType::Blob, |datetime| {
+                TypedSamples::Blob(smallvec::smallvec![Sample {
+                    datetime,
+                    value: vec![1, 2, 3]
+                }])
+            }),
+        ];
+        for (sensor_type, samples) in all {
+            let sensor = Sensor::new(
+                Uuid::new_v4(),
+                "series".to_string(),
+                sensor_type,
+                None,
+                None,
+            );
+            let exported = SensorData::new(sensor, samples(datetime));
+            let batch = ArrowConverter::to_record_batch(&exported).unwrap();
+
+            let (map, _) = convert_record_batch_to_sensors(&batch)
+                .unwrap_or_else(|error| panic!("{sensor_type:?}: {error}"));
+            let (imported, entries) = map.into_values().next().unwrap();
+            assert_eq!(imported.sensor_type, sensor_type);
+            assert_eq!(entries[0].1, samples(datetime), "{sensor_type:?}");
+        }
+    }
+
+    /// Arrow decimals that `Decimal` cannot hold are refused, and a negative scale is understood.
+    #[test]
+    fn test_arrow_decimals_outside_the_numeric_range_are_refused() {
+        use rust_decimal::Decimal;
+
+        let datetime = microseconds_to_sensapp_datetime(1_640_995_200_000_000).unwrap();
+        let convert = |raw: i128, precision: u8, scale: i8| {
+            let array: ArrayRef = Arc::new(
+                Decimal128Array::from(vec![raw])
+                    .with_precision_and_scale(precision, scale)
+                    .unwrap(),
+            );
+            convert_arrow_array_to_typed_samples(&array, &[datetime]).map(|(_, samples)| {
+                match samples {
+                    TypedSamples::Numeric(samples) => samples[0].value,
+                    other => panic!("expected numeric samples, got {other:?}"),
+                }
+            })
+        };
+
+        assert_eq!(convert(1234, 10, 2).unwrap(), Decimal::new(1234, 2));
+        assert_eq!(convert(12, 10, -2).unwrap(), Decimal::new(1200, 0));
+        // 1.5 with 30 digits after the point is 1.5 once its zeros are removed
+        assert_eq!(
+            convert(15 * 10_i128.pow(29), 38, 30).unwrap(),
+            Decimal::new(15, 1)
+        );
+        // 30 significant digits after the point: more than the 28 `Decimal` keeps
+        assert!(convert(10_i128.pow(30) + 1, 38, 30).is_err());
+        // More than 96 bits
+        assert!(convert(1 << 100, 38, 2).is_err());
+        // 1 × 10^38: more than 96 bits once multiplied
+        assert!(convert(1, 10, -38).is_err());
+    }
+
     #[test]
     fn test_sensor_without_uuid_and_name_is_rejected() {
         let error = sensor_of(&batch_with_identity(&[], None, None)).unwrap_err();
@@ -645,9 +1038,340 @@ mod tests {
         assert!(datetime.is_some());
     }
 
+    /// The import went through `f64` seconds and put about 3 % of today's timestamps one
+    /// microsecond early: an export imported again was not the same series of instants.
     #[test]
-    fn test_find_column_index() {
-        // This would require creating a test schema
-        // Implementation depends on actual Arrow schema setup
+    fn test_imported_microseconds_are_exact() {
+        let mut rng = fastrand::Rng::with_seed(7);
+        let wrong = (0..2000)
+            .map(|_| rng.i64(1_600_000_000_000_000..1_900_000_000_000_000))
+            .filter(|&micros| {
+                microseconds_to_sensapp_datetime(micros)
+                    .unwrap()
+                    .to_unix_microseconds_i64()
+                    != micros
+            })
+            .count();
+        assert_eq!(wrong, 0);
+    }
+
+    const T0: i64 = 1_640_995_200_000_000;
+
+    /// A batch of `timestamp`, `value` and a `sensor_name` column.
+    fn batch_of(timestamps: Vec<Option<i64>>, values: ArrayRef, names: ArrayRef) -> RecordBatch {
+        RecordBatch::try_from_iter(vec![
+            (
+                "timestamp",
+                Arc::new(TimestampMicrosecondArray::from(timestamps)) as ArrayRef,
+            ),
+            ("value", values),
+            ("sensor_name", names),
+        ])
+        .unwrap()
+    }
+
+    fn names(names: Vec<Option<&str>>) -> ArrayRef {
+        Arc::new(StringArray::from(names))
+    }
+
+    /// The samples of the only series of a batch.
+    fn samples_of(batch: &RecordBatch) -> Result<Vec<TypedSamples>> {
+        _ = crate::config::load_configuration();
+        let (map, _) = convert_record_batch_to_sensors(batch)?;
+        Ok(map
+            .into_values()
+            .flat_map(|(_, entries)| entries.into_iter().map(|(_, samples)| samples))
+            .collect())
+    }
+
+    /// A null value is no sample: it was stored as 0 (or "", false), at its timestamp.
+    #[test]
+    fn test_null_values_are_skipped() {
+        let values: ArrayRef = Arc::new(Float64Array::from(vec![Some(1.5), None, Some(3.5)]));
+        let batch = batch_of(
+            vec![Some(T0), Some(T0 + 1), Some(T0 + 2)],
+            values,
+            names(vec![Some("temp"); 3]),
+        );
+        let samples = samples_of(&batch).unwrap();
+        let datetime = |micros| microseconds_to_sensapp_datetime(micros).unwrap();
+        assert_eq!(
+            samples,
+            vec![TypedSamples::Float(smallvec::smallvec![
+                Sample {
+                    datetime: datetime(T0),
+                    value: 1.5
+                },
+                Sample {
+                    datetime: datetime(T0 + 2),
+                    value: 3.5
+                },
+            ])]
+        );
+
+        // A location with a null latitude is no sample either
+        let latitudes = Arc::new(Float64Array::from(vec![Some(63.4), None]));
+        let longitudes = Arc::new(Float64Array::from(vec![Some(10.4), Some(10.5)]));
+        let locations: ArrayRef = Arc::new(StructArray::from(vec![
+            (
+                Arc::new(arrow::datatypes::Field::new(
+                    "latitude",
+                    DataType::Float64,
+                    true,
+                )),
+                latitudes as ArrayRef,
+            ),
+            (
+                Arc::new(arrow::datatypes::Field::new(
+                    "longitude",
+                    DataType::Float64,
+                    true,
+                )),
+                longitudes as ArrayRef,
+            ),
+        ]));
+        let batch = batch_of(
+            vec![Some(T0), Some(T0 + 1)],
+            locations,
+            names(vec![Some("position"); 2]),
+        );
+        let samples = samples_of(&batch).unwrap();
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].len(), 1);
+
+        // Only null values: nothing to store
+        let values: ArrayRef = Arc::new(Int64Array::from(vec![None, None]));
+        let batch = batch_of(
+            vec![Some(T0), Some(T0 + 1)],
+            values,
+            names(vec![Some("count"); 2]),
+        );
+        assert!(samples_of(&batch).unwrap().is_empty());
+    }
+
+    /// A null timestamp became 1970-01-01.
+    /// A NaN is the gap marker of pandas, polars and numpy: it is no sample, like a null, and the
+    /// rows skipped are counted.
+    #[test]
+    fn test_nan_values_are_skipped_and_counted() {
+        _ = crate::config::load_configuration_for_tests();
+        let batch = batch_of(
+            vec![Some(T0), Some(T0 + 1), Some(T0 + 2), Some(T0 + 3)],
+            Arc::new(Float64Array::from(vec![
+                Some(1.5),
+                Some(f64::NAN),
+                None,
+                Some(f64::INFINITY),
+            ])),
+            names(vec![Some("gaps"); 4]),
+        );
+        let (map, skipped) = convert_record_batch_to_sensors(&batch).unwrap();
+        assert_eq!(skipped, 2);
+        let (_, entries) = map.into_values().next().unwrap();
+        let TypedSamples::Float(samples) = &entries[0].1 else {
+            panic!("not Float");
+        };
+        let values: Vec<f64> = samples.iter().map(|sample| sample.value).collect();
+        // The infinity is a value
+        assert_eq!(values, [1.5, f64::INFINITY]);
+    }
+
+    /// The export writes `Decimal128(38, 18)`: 10^11 is a raw value of 10^29, over 2^96.
+    #[test]
+    fn test_a_numeric_of_the_export_over_7_9e10_imports_back() {
+        assert_eq!(
+            arrow_decimal(10_i128.pow(29), 18).unwrap(),
+            Decimal::from(100_000_000_000_i64)
+        );
+        assert_eq!(
+            arrow_decimal(-(1234567890123456789_i128 * 10_i128.pow(18)), 18).unwrap(),
+            Decimal::from(-1234567890123456789_i64)
+        );
+        assert_eq!(arrow_decimal(1234, 2).unwrap(), Decimal::new(1234, 2));
+        // What cannot fit even without its zeros is still refused
+        assert!(arrow_decimal(10_i128.pow(37) + 1, 18).is_err());
+    }
+
+    #[test]
+    fn test_a_null_timestamp_is_refused() {
+        let values: ArrayRef = Arc::new(Float64Array::from(vec![1.5, 2.5]));
+        let batch = batch_of(vec![Some(T0), None], values, names(vec![Some("temp"); 2]));
+        let error = samples_of(&batch).unwrap_err();
+        assert!(error.to_string().contains("null timestamp"), "{error}");
+    }
+
+    /// Row 0 named the series of every row: `a, b` was stored as two samples of `a`.
+    #[test]
+    fn test_a_sensor_column_naming_two_sensors_is_refused() {
+        let values = || Arc::new(Float64Array::from(vec![1.5, 2.5])) as ArrayRef;
+        let timestamps = || vec![Some(T0), Some(T0 + 1)];
+
+        let error = samples_of(&batch_of(
+            timestamps(),
+            values(),
+            names(vec![Some("a"), Some("b")]),
+        ))
+        .unwrap_err();
+        assert!(error.to_string().contains("one sensor"), "{error}");
+
+        let error = samples_of(&batch_of(
+            timestamps(),
+            values(),
+            names(vec![Some("a"), None]),
+        ))
+        .unwrap_err();
+        assert!(error.to_string().contains("one sensor"), "{error}");
+
+        let batch = RecordBatch::try_from_iter(vec![
+            (
+                "timestamp",
+                Arc::new(TimestampMicrosecondArray::from(timestamps())) as ArrayRef,
+            ),
+            ("value", values()),
+            (
+                "sensor_id",
+                Arc::new(StringArray::from(vec![
+                    Uuid::new_v4().to_string(),
+                    Uuid::new_v4().to_string(),
+                ])) as ArrayRef,
+            ),
+        ])
+        .unwrap();
+        let error = samples_of(&batch).unwrap_err();
+        assert!(error.to_string().contains("one sensor"), "{error}");
+    }
+
+    /// The multi-series export writes the sensor columns as dictionaries.
+    #[test]
+    fn test_a_dictionary_sensor_column_names_the_sensor() {
+        use arrow::array::DictionaryArray;
+        use arrow::datatypes::Int32Type;
+
+        let dictionary: DictionaryArray<Int32Type> = vec!["temp", "temp"].into_iter().collect();
+        let batch = batch_of(
+            vec![Some(T0), Some(T0 + 1)],
+            Arc::new(Float64Array::from(vec![1.5, 2.5])),
+            Arc::new(dictionary),
+        );
+        assert_eq!(sensor_of(&batch).unwrap().name, "temp");
+    }
+
+    /// An LZ4 Arrow stream or file of `rows` float zeros, which compress very well.
+    fn compressed_zeros(rows: usize, file: bool) -> Vec<u8> {
+        use arrow_ipc::CompressionType;
+        use arrow_ipc::writer::{FileWriter, IpcWriteOptions, StreamWriter};
+
+        let batch = batch_of(
+            vec![Some(T0); rows],
+            Arc::new(Float64Array::from(vec![0.0; rows])),
+            names(vec![Some("zeros"); rows]),
+        );
+        let options = IpcWriteOptions::default()
+            .try_with_compression(Some(CompressionType::LZ4_FRAME))
+            .unwrap();
+        let mut buffer = Vec::new();
+        if file {
+            let mut writer =
+                FileWriter::try_new_with_options(&mut buffer, &batch.schema(), options).unwrap();
+            writer.write(&batch).unwrap();
+            writer.finish().unwrap();
+        } else {
+            let mut writer =
+                StreamWriter::try_new_with_options(&mut buffer, &batch.schema(), options).unwrap();
+            writer.write(&batch).unwrap();
+            writer.finish().unwrap();
+        }
+        buffer
+    }
+
+    /// Compressed buffers were decompressed whatever their size: a body under the request limit
+    /// could expand without bound, and a forged length aborted on allocation.
+    #[test]
+    fn test_compressed_bodies_are_limited_by_their_declared_size() {
+        for file in [false, true] {
+            // 4,000 rows: 32,000 bytes of timestamps, 32,000 of values, and the names, in a body
+            // of about 17 KB
+            let body = compressed_zeros(4_000, file);
+            assert!(body.len() < 32 * 1024, "{} bytes", body.len());
+
+            assert!(parse_arrow_sensors(&body, 1024 * 1024).is_ok());
+            let error = parse_arrow_sensors(&body, 64 * 1024).unwrap_err();
+            assert!(error.to_string().contains("decompressed"), "{error}");
+        }
+
+        // The declared lengths forged to 2^62 bytes
+        let declared = (4_000 * 8_i64).to_le_bytes();
+        let mut body = compressed_zeros(4_000, false);
+        let mut forged = 0;
+        for start in 0..body.len() - 8 {
+            if body[start..start + 8] == declared {
+                body[start..start + 8].copy_from_slice(&(1_i64 << 62).to_le_bytes());
+                forged += 1;
+            }
+        }
+        assert!(forged > 0);
+        let error = parse_arrow_sensors(&body, 64 * 1024 * 1024).unwrap_err();
+        assert!(error.to_string().contains("decompressed"), "{error}");
+    }
+
+    /// Declared lengths of 4,000 floats forged to 2^62 bytes, wherever they appear in `body`.
+    fn forge_declared_lengths(body: &mut [u8]) {
+        let declared = (4_000 * 8_i64).to_le_bytes();
+        let mut forged = 0;
+        for start in 0..body.len() - 8 {
+            if body[start..start + 8] == declared {
+                body[start..start + 8].copy_from_slice(&(1_i64 << 62).to_le_bytes());
+                forged += 1;
+            }
+        }
+        assert!(forged > 0);
+    }
+
+    /// The size check walked a file as a stream when its leading magic was damaged, found no
+    /// message, and passed; the reader then fell back to `FileReader`, which only looks at the
+    /// trailing magic and allocated the forged length. A body that is not a file is read as a stream
+    /// and nothing else.
+    #[test]
+    fn test_a_file_with_a_damaged_leading_magic_is_refused() {
+        let mut body = compressed_zeros(4_000, true);
+        forge_declared_lengths(&mut body);
+        // Intact magic: the check walks the file
+        let error = parse_arrow_sensors(&body, 64 * 1024 * 1024).unwrap_err();
+        assert!(error.to_string().contains("decompressed"), "{error}");
+        // Leading magic zeroed: no reader may decode the footer blocks unchecked
+        body[..4].fill(0);
+        let error = parse_arrow_sensors(&body, 64 * 1024 * 1024).unwrap_err();
+        assert!(
+            !error.to_string().contains("allocat"),
+            "the reader must not run: {error}"
+        );
+        assert!(parse_arrow_sensors(&body, 64 * 1024 * 1024).is_err());
+    }
+
+    #[test]
+    fn test_an_empty_or_unreadable_stream_is_refused_before_any_reader_runs() {
+        for body in [
+            &[][..],
+            &[0, 0, 0],
+            &[0, 0, 0, 0],
+            &[0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0],
+        ] {
+            let error = parse_arrow_sensors(body, 1024).unwrap_err();
+            assert!(error.to_string().contains("no data"), "{body:?}: {error}");
+        }
+        // A stream that the stream reader refuses returns its message
+        let mut body = compressed_zeros(10, false);
+        body.truncate(body.len() / 2);
+        let error = parse_arrow_sensors(&body, 1024 * 1024).unwrap_err();
+        assert!(!error.to_string().is_empty());
+    }
+
+    /// The streams and files of other writers still import.
+    #[test]
+    fn test_streams_and_files_still_import() {
+        for file in [false, true] {
+            let body = compressed_zeros(100, file);
+            assert!(parse_arrow_sensors(&body, 1024 * 1024).is_ok(), "{file}");
+        }
     }
 }

@@ -2,7 +2,9 @@
 //! differently, and `docs/BIGQUERY.md` for the limits and the setup.
 
 use crate::{
-    datamodel::{Metric, SensAppDateTime, SensorData, SensorType, batch::Batch, unit::Unit},
+    datamodel::{
+        Metric, SensAppDateTime, Sensor, SensorData, SensorType, batch::Batch, unit::Unit,
+    },
     storage::{
         DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, LabelMatcher, ListSeriesResult,
         MAX_LIST_SERIES_LIMIT, SensorDataQueryOptions, StorageError, StorageInstance,
@@ -49,9 +51,11 @@ const LEGACY_TABLES: [&str; 4] = [
     "sensor_labels_view",
 ];
 
-/// Ids with the time they were seen, forgotten after `lifespan` and when there are too many.
+/// Ids with the time they were seen and the identity (name and type) they were stored with,
+/// forgotten after `lifespan` and when there are too many. A write with another identity is not a
+/// hit: it is looked up, and refused when the stored identity differs.
 struct RegisteredIds {
-    seen: HashMap<i64, Instant>,
+    seen: HashMap<i64, (Instant, u64)>,
     lifespan: Duration,
     capacity: usize,
 }
@@ -65,21 +69,21 @@ impl RegisteredIds {
         }
     }
 
-    fn contains(&self, id: i64) -> bool {
+    fn contains(&self, id: i64, identity: u64) -> bool {
         self.seen
             .get(&id)
-            .is_some_and(|seen| seen.elapsed() < self.lifespan)
+            .is_some_and(|(seen, stored)| *stored == identity && seen.elapsed() < self.lifespan)
     }
 
-    fn insert(&mut self, id: i64) {
+    fn insert(&mut self, id: i64, identity: u64) {
         if self.seen.len() >= self.capacity {
             let lifespan = self.lifespan;
-            self.seen.retain(|_, seen| seen.elapsed() < lifespan);
+            self.seen.retain(|_, (seen, _)| seen.elapsed() < lifespan);
             if self.seen.len() >= self.capacity {
                 self.seen.clear();
             }
         }
-        self.seen.insert(id, Instant::now());
+        self.seen.insert(id, (Instant::now(), identity));
     }
 
     fn remove(&mut self, id: i64) {
@@ -90,6 +94,16 @@ impl RegisteredIds {
     fn clear(&mut self) {
         self.seen.clear();
     }
+}
+
+/// The UUID and the type of a sensor, hashed, for `RegisteredIds`.
+fn identity_fingerprint(sensor: &Sensor) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // Another UUID may have the same `sensor_id`
+    sensor.uuid.hash(&mut hasher);
+    sensor.sensor_type.to_string().hash(&mut hasher);
+    hasher.finish()
 }
 
 pub struct BigQueryStorage {
@@ -151,16 +165,44 @@ impl BigQueryStorage {
         self.registered.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn is_registered(&self, sensor_id: i64) -> bool {
-        self.registered().contains(sensor_id)
+    fn is_registered(&self, sensor_id: i64, sensor: &Sensor) -> bool {
+        self.registered()
+            .contains(sensor_id, identity_fingerprint(sensor))
     }
 
-    fn remember_registered(&self, sensor_id: i64) {
-        self.registered().insert(sensor_id);
+    fn remember_registered(&self, sensor_id: i64, sensor: &Sensor) {
+        self.registered()
+            .insert(sensor_id, identity_fingerprint(sensor));
     }
 
     fn forget_registered(&self, sensor_id: i64) {
         self.registered().remove(sensor_id);
+    }
+
+    /// Refuse a dataset whose sensors were keyed another way, see `check_sensor_keys`. The keys are
+    /// stored as signed `INT64`: the same bits.
+    async fn check_stored_sensor_keys(&self) -> Result<()> {
+        let sql = format!(
+            "SELECT uuid, sensor_id FROM `{}.{}.sensors` LIMIT {}",
+            self.dataset.project_id,
+            self.dataset.dataset_id,
+            crate::storage::common::SENSOR_KEY_GUARD_ROWS
+        );
+        let keys = self
+            .query_rows(
+                "read the keys of the stored sensors",
+                sql,
+                Vec::new(),
+                |row| {
+                    let uuid = required(row.get_string(0), "uuid")?;
+                    let uuid = uuid::Uuid::parse_str(&uuid)
+                        .map_err(|e| anyhow::anyhow!("Invalid stored UUID '{uuid}': {e}"))?;
+                    let sensor_id = required(row.get_i64(1), "sensor_id")?;
+                    Ok((uuid, sensor_id as u64))
+                },
+            )
+            .await?;
+        crate::storage::common::check_stored_sensor_keys(&keys)
     }
 
     async fn reject_legacy_schema(&self) -> Result<()> {
@@ -219,6 +261,7 @@ impl StorageInstance for BigQueryStorage {
             &format!("{}.{}", dataset.project_id, dataset.dataset_id),
         );
         self.execute("create the tables", sql, Vec::new()).await?;
+        self.check_stored_sensor_keys().await?;
         Ok(())
     }
 
@@ -322,15 +365,7 @@ impl StorageInstance for BigQueryStorage {
     }
 
     async fn list_metrics(&self) -> Result<Vec<Metric>> {
-        let sql = format!(
-            "SELECT s.name AS metric_name, s.type AS sensor_type, \
-             u.name AS unit_name, u.description AS unit_description, COUNT(*) AS series_count \
-             FROM {} s LEFT JOIN {} u ON s.unit = u.id \
-             GROUP BY s.name, s.type, u.name, u.description \
-             ORDER BY s.name, s.type, u.name",
-            self.dataset.sensors_set(),
-            self.dataset.units_set()
-        );
+        let sql = list_metrics_sql(&self.dataset);
         self.query_rows("list metrics", sql, Vec::new(), |row| {
             let name = required(row.get_string_by_name("metric_name"), "metric_name")?;
             let sensor_type = required(row.get_string_by_name("sensor_type"), "sensor_type")?;
@@ -351,12 +386,20 @@ impl StorageInstance for BigQueryStorage {
                 })
                 .transpose()?;
             let series_count = required(row.get_i64_by_name("series_count"), "series_count")?;
+            let label_keys = required(row.get_string_by_name("label_keys"), "label_keys")?;
+            let label_keys: Vec<String> = serde_json::from_str(&label_keys).map_err(|error| {
+                StorageError::invalid_data_format(
+                    &format!("Failed to read the label keys '{label_keys}': {error}"),
+                    None,
+                    Some(&name),
+                )
+            })?;
             Ok(Metric::new(
                 name,
                 sensor_type,
                 unit,
                 series_count,
-                Vec::new(),
+                label_keys,
             ))
         })
         .await
@@ -469,6 +512,27 @@ impl StorageInstance for BigQueryStorage {
         Ok(Some(SensorData::new(sensor, samples)))
     }
 
+    async fn query_sensor_data_availability(
+        &self,
+        sensor_uuid: &str,
+        start_time: SensAppDateTime,
+        end_time: SensAppDateTime,
+        step_ms: Option<i64>,
+    ) -> Result<Option<crate::storage::SensorAvailabilitySummary>> {
+        let Some((id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(None);
+        };
+        self.query_availability(
+            id,
+            sensor,
+            crate::storage::common::datetime_to_micros(&start_time),
+            crate::storage::common::datetime_to_micros(&end_time),
+            step_ms,
+        )
+        .await
+        .map(Some)
+    }
+
     async fn query_sensors_by_labels(
         &self,
         matchers: &[LabelMatcher],
@@ -575,29 +639,59 @@ impl StorageInstance for BigQueryStorage {
     }
 }
 
+/// The metrics, one per name and type as on the other backends, with their label keys as a JSON
+/// array: a key may hold any character, a comma too.
+fn list_metrics_sql(dataset: &Dataset) -> String {
+    format!(
+        "SELECT s.name AS metric_name, s.type AS sensor_type, \
+         MIN(u.name) AS unit_name, MIN(u.description) AS unit_description, \
+         COUNT(DISTINCT s.sensor_id) AS series_count, \
+         TO_JSON_STRING(IFNULL(ARRAY_AGG(DISTINCT l.name IGNORE NULLS ORDER BY l.name), [])) \
+         AS label_keys \
+         FROM {} s LEFT JOIN {} u ON s.unit = u.id LEFT JOIN {} l ON l.sensor_id = s.sensor_id \
+         GROUP BY s.name, s.type \
+         ORDER BY s.name, s.type",
+        dataset.sensors_set(),
+        dataset.units_set(),
+        dataset.table("labels")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn metrics_list_their_label_keys_as_json() {
+        let sql = list_metrics_sql(&Dataset {
+            project_id: "p".to_string(),
+            dataset_id: "d".to_string(),
+        });
+        assert!(sql.contains("TO_JSON_STRING(IFNULL(ARRAY_AGG(DISTINCT l.name IGNORE NULLS"));
+        assert!(sql.contains("COUNT(DISTINCT s.sensor_id)"));
+        assert!(sql.contains("GROUP BY s.name, s.type "));
+    }
+
+    #[test]
     fn registered_ids_expire_and_are_bounded() {
         let mut ids = RegisteredIds::new(Duration::from_secs(60), 2);
-        ids.insert(1);
-        assert!(ids.contains(1) && !ids.contains(2));
+        ids.insert(1, 10);
+        assert!(ids.contains(1, 10) && !ids.contains(2, 10));
+        assert!(!ids.contains(1, 11), "another identity is not a hit");
         ids.remove(1);
-        assert!(!ids.contains(1));
+        assert!(!ids.contains(1, 10));
 
         // Too many: forgotten all at once, never a growing map
-        ids.insert(1);
-        ids.insert(2);
-        ids.insert(3);
-        assert!(ids.contains(3) && ids.seen.len() <= 2);
+        ids.insert(1, 10);
+        ids.insert(2, 10);
+        ids.insert(3, 10);
+        assert!(ids.contains(3, 10) && ids.seen.len() <= 2);
         ids.clear();
-        assert!(!ids.contains(3));
+        assert!(!ids.contains(3, 10));
 
         let mut short = RegisteredIds::new(Duration::ZERO, 10);
-        short.insert(1);
-        assert!(!short.contains(1), "expired at once");
+        short.insert(1, 10);
+        assert!(!short.contains(1, 10), "expired at once");
     }
 
     #[test]

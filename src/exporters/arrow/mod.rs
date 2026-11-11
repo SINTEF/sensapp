@@ -13,6 +13,9 @@ use arrow_ipc::writer::{IpcWriteOptions, StreamWriter};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// The timezone of the timestamps: they are Unix microseconds, in UTC.
+const UTC: &str = "UTC";
+
 pub struct ArrowConverter;
 
 impl ArrowConverter {
@@ -37,7 +40,8 @@ impl ArrowConverter {
         let present_types = PresentTypes::from_sensor_data_list(sensor_data_list);
         let total_samples: usize = sensor_data_list.iter().map(|sd| sd.samples.len()).sum();
 
-        let mut timestamp_builder = TimestampMicrosecondBuilder::with_capacity(total_samples);
+        let mut timestamp_builder =
+            TimestampMicrosecondBuilder::with_capacity(total_samples).with_timezone(UTC);
         let mut sensor_id_builder = StringDictionaryBuilder::<Int32Type>::new();
         let mut sensor_name_builder = StringDictionaryBuilder::<Int32Type>::new();
         let mut sensor_type_builder = StringDictionaryBuilder::<Int32Type>::new();
@@ -68,7 +72,7 @@ impl ArrowConverter {
         let mut fields = vec![
             Field::new(
                 "timestamp",
-                DataType::Timestamp(TimeUnit::Microsecond, None),
+                DataType::Timestamp(TimeUnit::Microsecond, Some(UTC.into())),
                 false,
             ),
             Field::new("sensor_id", sensor_id_array.data_type().clone(), false),
@@ -131,11 +135,7 @@ impl ArrowConverter {
                     sensor_type_builder.append(sensor_type_name)?;
                     append_unit(unit_builder, sensor_data.sensor.unit.as_ref())?;
                     labels_builder.append(&labels_json)?;
-                    value_builders.append_numeric(
-                        sample.value.mantissa(),
-                        sample.value.scale(),
-                        present_types,
-                    );
+                    value_builders.append_numeric(sample.value, present_types);
                 }
             }
             TypedSamples::Float(samples) => {
@@ -216,7 +216,7 @@ impl ArrowConverter {
     fn convert_sensor_data_to_arrow(
         sensor_data: &SensorData,
     ) -> Result<(Arc<Schema>, Vec<ArrayRef>)> {
-        let mut timestamp_builder = TimestampMicrosecondBuilder::new();
+        let mut timestamp_builder = TimestampMicrosecondBuilder::new().with_timezone(UTC);
         let (value_field, value_column): (Field, ArrayRef) = match &sensor_data.samples {
             TypedSamples::Integer(samples) => {
                 let mut builder = Int64Builder::new();
@@ -230,15 +230,15 @@ impl ArrowConverter {
                 )
             }
             TypedSamples::Numeric(samples) => {
-                let mut builder = Decimal128Builder::new().with_precision_and_scale(38, 18)?;
+                let scale = numeric_scale(samples.iter().map(|sample| &sample.value));
+                let mut builder =
+                    Decimal128Builder::new().with_precision_and_scale(38, scale as i8)?;
                 for sample in samples.iter() {
                     timestamp_builder.append_value(datetime_to_micros(&sample.datetime));
-                    let decimal_i128 = sample.value.mantissa()
-                        * 10_i128.pow(18_u32.saturating_sub(sample.value.scale()));
-                    builder.append_value(decimal_i128);
+                    builder.append_value(decimal_to_i128(sample.value, scale));
                 }
                 (
-                    Field::new("value", DataType::Decimal128(38, 18), false),
+                    Field::new("value", DataType::Decimal128(38, scale as i8), false),
                     Arc::new(builder.finish()),
                 )
             }
@@ -338,7 +338,7 @@ impl ArrowConverter {
             vec![
                 Field::new(
                     "timestamp",
-                    DataType::Timestamp(TimeUnit::Microsecond, None),
+                    DataType::Timestamp(TimeUnit::Microsecond, Some(UTC.into())),
                     false,
                 ),
                 value_field,
@@ -376,10 +376,40 @@ impl ArrowConverter {
     }
 }
 
+/// The scale of a Decimal128 column of Numeric values: 18 digits after the point, or fewer when a
+/// value has more than 20 digits before it, so that every value fits in the 38 digits of a
+/// Decimal128. A `Decimal` has at most 29 digits before the point, so the scale is at least 9.
+fn numeric_scale<'a>(values: impl Iterator<Item = &'a rust_decimal::Decimal>) -> u8 {
+    let integer_digits = values
+        .map(|value| {
+            let integer = value.trunc().abs();
+            if integer.is_zero() {
+                0
+            } else {
+                integer.to_string().len()
+            }
+        })
+        .max()
+        .unwrap_or(0);
+    18.min(38 - integer_digits as u8)
+}
+
+/// A `Decimal` as the integer of a Decimal128 of `scale`, rounded half away from zero when it has
+/// more digits after the point. It fits when `scale` comes from [`numeric_scale`].
+fn decimal_to_i128(value: rust_decimal::Decimal, scale: u8) -> i128 {
+    let rounded = value.round_dp_with_strategy(
+        u32::from(scale),
+        rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+    );
+    rounded.mantissa() * 10_i128.pow(u32::from(scale) - rounded.scale())
+}
+
 #[derive(Default)]
 struct PresentTypes {
     integer: bool,
     numeric: bool,
+    /// The scale of the Numeric column, see [`numeric_scale`]
+    numeric_scale: u8,
     float: bool,
     string: bool,
     boolean: bool,
@@ -390,7 +420,17 @@ struct PresentTypes {
 
 impl PresentTypes {
     fn from_sensor_data_list(sensor_data_list: &[SensorData]) -> Self {
-        let mut present = Self::default();
+        let mut present = Self {
+            numeric_scale: numeric_scale(sensor_data_list.iter().flat_map(|sensor_data| {
+                match &sensor_data.samples {
+                    TypedSamples::Numeric(samples) => samples.as_slice(),
+                    _ => &[],
+                }
+                .iter()
+                .map(|sample| &sample.value)
+            })),
+            ..Self::default()
+        };
 
         for sensor_data in sensor_data_list {
             match &sensor_data.samples {
@@ -426,7 +466,10 @@ impl MultiValueBuilders {
         Ok(Self {
             integer: present.integer.then(Int64Builder::new),
             numeric: if present.numeric {
-                Some(Decimal128Builder::new().with_precision_and_scale(38, 18)?)
+                Some(
+                    Decimal128Builder::new()
+                        .with_precision_and_scale(38, present.numeric_scale as i8)?,
+                )
             } else {
                 None
             },
@@ -445,8 +488,8 @@ impl MultiValueBuilders {
         self.append_other_nulls(present, SensorType::Integer);
     }
 
-    fn append_numeric(&mut self, mantissa: i128, scale: u32, present: &PresentTypes) {
-        let decimal_i128 = mantissa * 10_i128.pow(18_u32.saturating_sub(scale));
+    fn append_numeric(&mut self, value: rust_decimal::Decimal, present: &PresentTypes) {
+        let decimal_i128 = decimal_to_i128(value, present.numeric_scale);
         append_decimal128(&mut self.numeric, Some(decimal_i128));
         self.append_other_nulls(present, SensorType::Numeric);
     }
@@ -526,7 +569,7 @@ impl MultiValueBuilders {
         if present.numeric {
             fields.push(Field::new(
                 "numeric_value",
-                DataType::Decimal128(38, 18),
+                DataType::Decimal128(38, present.numeric_scale as i8),
                 true,
             ));
             columns.push(Arc::new(
@@ -790,6 +833,61 @@ mod tests {
         );
     }
 
+    /// Numerics are exported with 18 digits after the point, rounded, or fewer when a value needs
+    /// more than 20 digits before it: a scale over 18 was written as if it were 18, and a value
+    /// over about 1.7e20 wrapped.
+    #[test]
+    fn numerics_fit_their_decimal128_column() {
+        use arrow::array::Decimal128Array;
+        use rust_decimal::Decimal;
+        let numeric_data = |values: &[Decimal]| {
+            let sensor = Sensor::new(Uuid::new_v4(), "n".into(), SensorType::Numeric, None, None);
+            let samples = values
+                .iter()
+                .enumerate()
+                .map(|(i, &value)| Sample {
+                    datetime: SensAppDateTime::from_unix_seconds(1_700_000_000.0 + i as f64),
+                    value,
+                })
+                .collect::<Vec<_>>();
+            SensorData::new(sensor, TypedSamples::Numeric(samples.into()))
+        };
+        let read = |array: &dyn Array| {
+            let array = array.as_any().downcast_ref::<Decimal128Array>().unwrap();
+            (0..array.len())
+                .map(|i| array.value_as_string(i))
+                .collect::<Vec<_>>()
+        };
+        let scale_22 = Decimal::from_i128_with_scale(12_345_678_901_234_567_890_123, 22);
+
+        let batch =
+            ArrowConverter::to_record_batch(&numeric_data(&[scale_22, Decimal::new(-5, 1)]))
+                .unwrap();
+        assert_eq!(
+            batch.schema().field(1).data_type(),
+            &DataType::Decimal128(38, 18)
+        );
+        assert_eq!(
+            read(batch.column(1)),
+            ["1.234567890123456789", "-0.500000000000000000"]
+        );
+
+        // Decimal::MAX has 29 digits before the point: 9 are left after it
+        let data = numeric_data(&[scale_22, Decimal::MAX]);
+        let batch = ArrowConverter::to_record_batch(&data).unwrap();
+        assert_eq!(
+            batch.schema().field(1).data_type(),
+            &DataType::Decimal128(38, 9)
+        );
+        let expected = ["1.234567890", "79228162514264337593543950335.000000000"];
+        assert_eq!(read(batch.column(1)), expected);
+
+        let batch = ArrowConverter::to_record_batch_multi(std::slice::from_ref(&data)).unwrap();
+        let column = batch.column_by_name("numeric_value").unwrap();
+        assert_eq!(column.data_type(), &DataType::Decimal128(38, 9));
+        assert_eq!(read(column), expected);
+    }
+
     #[test]
     fn test_arrow_stream_format_roundtrip() {
         let sensor_data = test_data_helpers::create_test_sensor_data_integer();
@@ -1014,7 +1112,13 @@ mod tests {
         }
     }
 
+    /// The timestamps of a batch, after checking that they are in UTC.
     fn timestamps_of(batch: &RecordBatch) -> Vec<i64> {
+        let field = batch.schema().field_with_name("timestamp").unwrap().clone();
+        assert_eq!(
+            field.data_type(),
+            &DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
+        );
         let column = batch
             .column_by_name("timestamp")
             .expect("timestamp column")

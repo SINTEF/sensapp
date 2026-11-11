@@ -89,7 +89,8 @@ impl PostgresStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description = ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND md5(ldd.description) = md5(${1}) AND ldd.description = ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -106,7 +107,8 @@ impl PostgresStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description = ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND md5(ldd.description) = md5(${1}) AND ldd.description = ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -122,7 +124,8 @@ impl PostgresStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description ~ ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND ldd.description ~ ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -139,7 +142,8 @@ impl PostgresStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description ~ ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND ldd.description ~ ${1}
                         )"#,
                         param_idx,
                         param_idx + 1

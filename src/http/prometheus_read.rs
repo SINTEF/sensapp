@@ -1,5 +1,5 @@
-use crate::datamodel::SensAppDateTime;
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+use crate::datamodel::{Sample, SensAppDateTime, SensAppVec, SensorData, TypedSamples};
 use crate::parsing::prometheus::chunk_encoder::ChunkEncoder;
 use crate::parsing::prometheus::converter::{build_prometheus_labels, sensor_data_to_timeseries};
 use crate::parsing::prometheus::remote_read_models::{
@@ -8,7 +8,7 @@ use crate::parsing::prometheus::remote_read_models::{
 use crate::parsing::prometheus::remote_read_parser::{
     parse_remote_read_request, serialize_read_response,
 };
-use crate::parsing::prometheus::remote_write_models::Sample as PromSample;
+use crate::parsing::prometheus::remote_write_models::{Label, Sample as PromSample};
 use crate::parsing::prometheus::stream_writer::StreamWriter;
 use crate::storage::query::LabelMatcher;
 use crate::storage::{Aggregation, SelectorLimitExceeded, SensorDataQueryOptions};
@@ -20,9 +20,10 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::Response,
 };
+use std::collections::HashMap;
 use std::time::Instant;
 use tokio_util::bytes::Bytes;
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 /// Prometheus does not trust a remote read to have answered the function of the hint: it
 /// evaluates the query again on the samples it gets back. A hint is therefore only answered with
@@ -69,34 +70,26 @@ fn is_evaluated_at_each_step(func: &str) -> bool {
     )
 }
 
-/// The options to answer a query evaluated at each step on the latest sample of each series, such
-/// as `my_metric` or `sum(my_metric)`: Prometheus looks, at each evaluation time `t`, for the last
-/// sample in `(t - lookback, t]`, and ignores the others. One sample per step is enough, the
-/// last sample of the step, with its own timestamp: Prometheus then keeps it or drops it for being
-/// too old exactly as it does with the raw samples.
-///
-/// The steps must end on the evaluation times, which the hints do not give. The last evaluation
-/// is at the end of the hints when the range of the query is a whole number of steps, which
-/// Grafana makes sure of. Prometheus asks from `t - lookback + 1 ms` for the first evaluation `t`,
-/// so with its default lookback `end - start + 1 - lookback` is then a whole number of steps: when
-/// it is not, the grid is not the one of the end, and the raw samples answer.
-fn latest_options_from_read_hints(
-    hints: &ReadHints,
+/// The options to read the latest sample of each step of a grid that ends at `grid_end_ms`, from
+/// the step that holds `start_ms` to `read_end_ms` at most. The buckets of the storage start 1 ms
+/// after the end of the one before, so each step ends on a point of the grid.
+fn latest_options(
+    start_ms: i64,
+    grid_end_ms: i64,
+    read_end_ms: i64,
+    step_ms: i64,
     max_samples: usize,
 ) -> Option<SensorDataQueryOptions> {
-    let (start_ms, end_ms, step_ms) = (hints.start_ms, hints.end_ms, hints.step_ms);
-    if hints.range_ms != 0
-        || step_ms <= 0
-        || end_ms < start_ms
-        || !is_evaluated_at_each_step(&hints.func)
-        || (end_ms - start_ms + 1 - DEFAULT_LOOKBACK_MS).rem_euclid(step_ms) != 0
-    {
+    let after_end_ms = grid_end_ms.checked_add(1)?;
+    let steps = after_end_ms
+        .checked_sub(start_ms)?
+        .checked_add(step_ms - 1)?
+        .checked_div(step_ms)?;
+    let origin_ms = after_end_ms.checked_sub(steps.checked_mul(step_ms)?)?;
+    let end_ms = grid_end_ms.min(read_end_ms);
+    if steps <= 0 || end_ms < origin_ms {
         return None;
     }
-
-    // The steps start on the grid of the end, the first one at or before the start of the hints
-    let steps = (end_ms + 1 - start_ms + step_ms - 1) / step_ms;
-    let origin_ms = end_ms + 1 - steps * step_ms;
 
     Some(SensorDataQueryOptions {
         start_time: Some(SensAppDateTime::from_unix_milliseconds_i64(origin_ms)),
@@ -108,83 +101,206 @@ fn latest_options_from_read_hints(
     })
 }
 
+/// The options to answer a query evaluated at each step on the latest sample of each series, such
+/// as `my_metric` or `sum(my_metric)`: Prometheus looks, at each evaluation time `t`, for the last
+/// sample in `(t - lookback, t]`, and ignores the others. One sample per step is enough, the
+/// last sample of the step, with its own timestamp: Prometheus then keeps it or drops it for being
+/// too old exactly as it does with the raw samples.
+///
+/// The steps must end on the evaluation times, which the hints do not give, and there are two
+/// cases they cannot tell apart:
+///
+/// - A range query evaluates from its start, every step. Its last evaluation is at the end of the
+///   hints when the range of the query is a whole number of steps, which Grafana makes sure of.
+///   Prometheus asks from `t - lookback + 1 ms` for the first evaluation `t`, so with its default
+///   lookback `end - start + 1 - lookback` is then a whole number of steps: when it is not, the
+///   raw samples answer.
+/// - A subquery, `max_over_time(sum(x)[1h:5m])`, evaluates on the multiples of its step, whatever
+///   the time of the query, and the step of the hints is the one of the subquery.
+///
+/// The two grids are the same when the end is a multiple of the step. Otherwise both are
+/// answered: the latest samples of the steps of both grids are raw samples, and Prometheus finds
+/// among them the latest sample of every evaluation time of either grid.
+fn latest_options_from_read_hints(
+    hints: &ReadHints,
+    read_end_ms: i64,
+    max_samples: usize,
+) -> Vec<SensorDataQueryOptions> {
+    let (start_ms, end_ms, step_ms) = (hints.start_ms, hints.end_ms, hints.step_ms);
+    if hints.range_ms != 0
+        || step_ms <= 0
+        || end_ms < start_ms
+        || !is_evaluated_at_each_step(&hints.func)
+    {
+        return Vec::new();
+    }
+    let evaluated = end_ms
+        .checked_sub(start_ms)
+        .and_then(|span| span.checked_add(1 - DEFAULT_LOOKBACK_MS));
+    if evaluated.is_none_or(|evaluated| evaluated.rem_euclid(step_ms) != 0) {
+        return Vec::new();
+    }
+
+    let Some(grid_of_the_end) = latest_options(start_ms, end_ms, read_end_ms, step_ms, max_samples)
+    else {
+        return Vec::new();
+    };
+    let mut options = vec![grid_of_the_end];
+    let off_the_step = end_ms.rem_euclid(step_ms);
+    if off_the_step != 0 {
+        // No multiple of the step in the hints, no evaluation of a subquery to answer
+        options.extend(latest_options(
+            start_ms,
+            end_ms - off_the_step,
+            read_end_ms,
+            step_ms,
+            max_samples,
+        ));
+    }
+    options
+}
+
 /// `range_ms` is the width of the `[1h]` of the query, `step_ms` the distance between two
 /// evaluations. Prometheus starts the window at the end of the first range, so buckets of one
 /// step that start there fit the windows of the evaluations when the range is a whole number of
 /// steps. A shorter range would be answered with a bucket wider than the window it asks for.
 ///
-/// A query without a range, evaluated at each step, is answered with the latest sample of each
-/// step (`latest_options_from_read_hints`).
-fn query_options_from_read_hints(
-    query: &Query,
+/// The buckets start with the hints of the selector: the query starts with the earliest selector
+/// of the expression (`max_over_time(x[2m]) > y`). The first evaluation must be a multiple of
+/// the step, as the selector of a subquery (`max_over_time(max_over_time(x[1h])[1d:1h])`) is
+/// evaluated on the multiples of the step of the subquery, and the hints do not say which one
+/// they are. Grafana aligns its queries on the step.
+fn bucket_options_from_read_hints(
+    hints: &ReadHints,
+    aggregation: Aggregation,
+    read_end_ms: i64,
     max_samples: usize,
 ) -> Option<SensorDataQueryOptions> {
-    let hints = query.hints.as_ref()?;
-    let Some(aggregation) = aggregation_from_read_hints(hints) else {
-        return latest_options_from_read_hints(hints, max_samples);
-    };
-
-    if hints.step_ms <= 0 || hints.range_ms <= 0 || hints.range_ms % hints.step_ms != 0 {
+    let (start_ms, end_ms, step_ms, range_ms) =
+        (hints.start_ms, hints.end_ms, hints.step_ms, hints.range_ms);
+    if step_ms <= 0 || range_ms <= 0 || range_ms % step_ms != 0 {
+        return None;
+    }
+    let first_evaluation_ms = start_ms.checked_add(range_ms - 1)?;
+    let end_ms = end_ms.min(read_end_ms);
+    if first_evaluation_ms.rem_euclid(step_ms) != 0 || end_ms < start_ms {
         return None;
     }
 
     Some(SensorDataQueryOptions {
-        start_time: Some(SensAppDateTime::from_unix_milliseconds_i64(
-            query.start_timestamp_ms,
-        )),
-        end_time: Some(SensAppDateTime::from_unix_milliseconds_i64(
-            query.end_timestamp_ms,
-        )),
+        start_time: Some(SensAppDateTime::from_unix_milliseconds_i64(start_ms)),
+        end_time: Some(SensAppDateTime::from_unix_milliseconds_i64(end_ms)),
         limit: Some(max_samples.saturating_add(1)),
-        step_ms: Some(hints.step_ms),
+        step_ms: Some(step_ms),
         aggregation: Some(aggregation),
         simplify: None,
     })
 }
 
+/// The reads that answer the hints of a query, and their answers are merged. None: the raw
+/// samples answer. The end of the query, not of the hints, is where Prometheus stops reading
+/// from the remote storage when it has the end in its own.
+fn read_options_from_hints(query: &Query, max_samples: usize) -> Vec<SensorDataQueryOptions> {
+    let Some(hints) = &query.hints else {
+        return Vec::new();
+    };
+    match aggregation_from_read_hints(hints) {
+        Some(aggregation) => {
+            bucket_options_from_read_hints(hints, aggregation, query.end_timestamp_ms, max_samples)
+                .into_iter()
+                .collect()
+        }
+        None => latest_options_from_read_hints(hints, query.end_timestamp_ms, max_samples),
+    }
+}
+
+/// Add the samples of `other` to the series of `series`, in time order and once each.
+/// Prometheus reads numbers only.
+fn merge_series(series: &mut Vec<SensorData>, other: Vec<SensorData>) {
+    fn merge<V>(samples: &mut SensAppVec<Sample<V>>, other: SensAppVec<Sample<V>>) {
+        samples.extend(other);
+        samples.sort_by_key(|sample| sample.datetime);
+        samples.dedup_by(|a, b| a.datetime == b.datetime);
+    }
+
+    let mut index: HashMap<uuid::Uuid, usize> = series
+        .iter()
+        .enumerate()
+        .map(|(i, data)| (data.sensor.uuid, i))
+        .collect();
+    for data in other {
+        let Some(&i) = index.get(&data.sensor.uuid) else {
+            index.insert(data.sensor.uuid, series.len());
+            series.push(data);
+            continue;
+        };
+        match (&mut series[i].samples, data.samples) {
+            (TypedSamples::Integer(samples), TypedSamples::Integer(other)) => merge(samples, other),
+            (TypedSamples::Numeric(samples), TypedSamples::Numeric(other)) => merge(samples, other),
+            (TypedSamples::Float(samples), TypedSamples::Float(other)) => merge(samples, other),
+            _ => {}
+        }
+    }
+}
+
+async fn query_aggregated_for_prometheus(
+    state: &HttpServerState,
+    matchers: &[LabelMatcher],
+    options: &SensorDataQueryOptions,
+) -> Result<Vec<SensorData>, AppError> {
+    let aggregated = state
+        .storage
+        .query_selector_aggregated(
+            matchers,
+            options,
+            crate::http::limits::MAX_SELECTOR_SERIES,
+            state.max_query_samples,
+        )
+        .await?;
+    match aggregated {
+        Ok(aggregated) => Ok(aggregated),
+        Err(SelectorLimitExceeded::Series) => Err(AppError::bad_request(anyhow::anyhow!(
+            "Remote read exceeds {} series; narrow the selector",
+            crate::http::limits::MAX_SELECTOR_SERIES
+        ))),
+        Err(SelectorLimitExceeded::Samples) => Err(AppError::bad_request(anyhow::anyhow!(
+            "Remote read exceeds {} samples in total",
+            state.max_query_samples
+        ))),
+    }
+}
+
 async fn query_sensor_data_for_prometheus(
     state: &HttpServerState,
     query: &Query,
-) -> Result<Vec<crate::datamodel::SensorData>, AppError> {
-    let matchers: Vec<LabelMatcher> = query.matchers.iter().map(LabelMatcher::from).collect();
+) -> Result<Vec<SensorData>, AppError> {
+    let matchers = query
+        .matchers
+        .iter()
+        .map(LabelMatcher::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::bad_request)?;
     let start_time = SensAppDateTime::from_unix_milliseconds_i64(query.start_timestamp_ms);
     let end_time = SensAppDateTime::from_unix_milliseconds_i64(query.end_timestamp_ms);
 
-    if let Some(options) = query_options_from_read_hints(query, state.max_query_samples) {
+    let options = read_options_from_hints(query, state.max_query_samples);
+    if !options.is_empty() {
         if let Some(hints) = &query.hints {
-            info!(
-                "Prometheus remote read: applying hints func='{}' step={}ms",
-                hints.func, hints.step_ms
+            debug!(
+                "Prometheus remote read: applying hints func='{}' step={}ms in {} reads",
+                hints.func,
+                hints.step_ms,
+                options.len()
             );
         }
 
-        let aggregated = state
-            .storage
-            .query_selector_aggregated(
-                &matchers,
-                &options,
-                crate::http::limits::MAX_SELECTOR_SERIES,
-                state.max_query_samples,
-            )
-            .await?;
-        let aggregated = match aggregated {
-            Ok(aggregated) => aggregated,
-            Err(SelectorLimitExceeded::Series) => {
-                return Err(AppError::bad_request(anyhow::anyhow!(
-                    "Remote read exceeds {} series; narrow the selector",
-                    crate::http::limits::MAX_SELECTOR_SERIES
-                )));
-            }
-            Err(SelectorLimitExceeded::Samples) => {
-                return Err(AppError::bad_request(anyhow::anyhow!(
-                    "Remote read exceeds {} samples in total",
-                    state.max_query_samples
-                )));
-            }
-        };
-
-        crate::http::limits::validate_selector_result(&aggregated, state.max_query_samples)?;
-        return Ok(aggregated);
+        let mut answer = Vec::new();
+        for options in &options {
+            let part = query_aggregated_for_prometheus(state, &matchers, options).await?;
+            merge_series(&mut answer, part);
+        }
+        crate::http::limits::validate_selector_result(&answer, state.max_query_samples)?;
+        return Ok(answer);
     }
 
     let raw = crate::http::limits::query_selector_bounded(
@@ -314,41 +430,15 @@ pub async fn prometheus_remote_read(
             AppError::bad_request(anyhow::anyhow!("Failed to parse read request: {}", e))
         })?;
 
-        info!(
-            "Prometheus remote read: Processing {} queries",
+        debug!(
+            "Prometheus remote read: processing {} queries",
             read_request.queries.len()
         );
-
         for (i, query) in read_request.queries.iter().enumerate() {
-            println!(
-                "[DEBUG PROM READ] Query {}: time range {}ms - {}ms ({} matchers)",
-                i,
-                query.start_timestamp_ms,
-                query.end_timestamp_ms,
-                query.matchers.len()
+            debug!(
+                "Query {}: time range {}ms - {}ms, matchers {:?}, hints {:?}",
+                i, query.start_timestamp_ms, query.end_timestamp_ms, query.matchers, query.hints
             );
-            info!(
-                "Query {}: time range {}ms - {}ms ({} matchers)",
-                i,
-                query.start_timestamp_ms,
-                query.end_timestamp_ms,
-                query.matchers.len()
-            );
-
-            for matcher in &query.matchers {
-                println!(
-                    "[DEBUG PROM READ]   Matcher: {}={} (type={})",
-                    matcher.name, matcher.value, matcher.r#type
-                );
-                debug!(
-                    "  Matcher: {}={} (type={})",
-                    matcher.name, matcher.value, matcher.r#type
-                );
-            }
-
-            if let Some(hints) = &query.hints {
-                debug!("  Hints: step={}ms, func='{}'", hints.step_ms, hints.func);
-            }
         }
 
         debug!(
@@ -414,10 +504,11 @@ async fn handle_samples_response(
         debug!("Query returned {} sensors", sensor_data.len());
 
         // Convert to Prometheus TimeSeries
-        let timeseries: Vec<_> = sensor_data
+        let mut timeseries: Vec<_> = sensor_data
             .iter()
             .filter_map(sensor_data_to_timeseries)
             .collect();
+        timeseries.sort_by(|a, b| compare_label_sets(&a.labels, &b.labels));
         series_count += timeseries.len();
 
         results.push(QueryResult { timeseries });
@@ -430,7 +521,7 @@ async fn handle_samples_response(
         AppError::internal_server_error(anyhow::anyhow!("Failed to serialize response: {}", e))
     })?;
 
-    info!(
+    debug!(
         "Prometheus remote read: Returning SAMPLES response with {} bytes",
         response_bytes.len()
     );
@@ -479,99 +570,44 @@ async fn handle_streamed_response(
             )));
         }
 
-        println!(
-            "[DEBUG PROM READ] Query {} returned {} sensors from storage",
-            query_index,
-            sensor_data.len()
-        );
         debug!(
             "Query {} returned {} sensors",
             query_index,
             sensor_data.len()
         );
 
-        // Log each sensor found
-        for sd in &sensor_data {
-            println!(
-                "[DEBUG PROM READ]   Sensor: {} (type={:?}, {} samples)",
-                sd.sensor.name,
-                sd.sensor.sensor_type,
-                sd.samples.len()
-            );
-        }
-
-        // Convert each sensor to a separate ChunkedReadResponse
-        // Prometheus expects ONE series per response message!
-        for sd in &sensor_data {
-            // Extract labels
-            let labels = build_prometheus_labels(&sd.sensor);
-            println!(
-                "[DEBUG PROM READ]   Labels for sensor {}: {:?}",
-                sd.sensor.name,
-                labels
-                    .iter()
-                    .map(|l| format!("{}={}", l.name, l.value))
-                    .collect::<Vec<_>>()
-            );
-
-            // Extract samples as Prometheus format
-            let samples = match extract_prom_samples_for_chunks(sd) {
-                Some(s) => s,
-                None => continue, // Skip non-numeric types
+        // One message per series, in the order of their label sets
+        let mut series: Vec<_> = sensor_data
+            .iter()
+            .map(|sd| (build_prometheus_labels(&sd.sensor), sd))
+            .collect();
+        series.sort_by(|(a, _), (b, _)| compare_label_sets(a, b));
+        for (labels, sd) in series {
+            // Non-numeric types are not read by Prometheus
+            let Some(samples) = extract_prom_samples_for_chunks(sd) else {
+                continue;
             };
             sample_count += samples.len();
 
-            println!(
-                "[DEBUG PROM READ]   Encoding {} samples for sensor {} (first ts: {}, last ts: {})",
-                samples.len(),
-                sd.sensor.name,
-                samples.first().map(|s| s.timestamp).unwrap_or(0),
-                samples.last().map(|s| s.timestamp).unwrap_or(0)
-            );
-
-            // Encode as XOR chunks
-            let chunked_series = match ChunkEncoder::encode_series(labels, samples) {
-                Ok(cs) => cs,
-                Err(error) => {
-                    warn!(
-                        sensor = %sd.sensor.name,
-                        query_index,
-                        error = %error,
-                        "Failed to encode Prometheus remote read chunks"
-                    );
-                    continue;
-                }
-            };
-
-            // Create ONE response per series (this is what Prometheus expects!)
+            let chunked_series = ChunkEncoder::encode_series(labels, samples).map_err(|error| {
+                AppError::internal_server_error(anyhow::anyhow!(
+                    "Failed to encode the remote read chunks of {}: {error}",
+                    sd.sensor.name
+                ))
+            })?;
             let chunked_response =
                 ChunkEncoder::create_response(query_index as i64, vec![chunked_series]);
             chunked_responses.push(chunked_response);
             series_count += 1;
         }
-
-        println!(
-            "[DEBUG PROM READ] Query {} produced {} chunked_responses (one per series)",
-            query_index,
-            chunked_responses.len()
-        );
     }
-
-    println!(
-        "[DEBUG PROM READ] Total {} chunked_responses to write",
-        chunked_responses.len()
-    );
 
     // Create the streaming response body
     let body = StreamWriter::create_stream_body(&chunked_responses).map_err(|e| {
         AppError::internal_server_error(anyhow::anyhow!("Failed to create stream body: {}", e))
     })?;
 
-    println!(
-        "[DEBUG PROM READ] Returning STREAMED_XOR_CHUNKS response with {} bytes",
-        body.len()
-    );
-    info!(
+    debug!(
         "Prometheus remote read: Returning STREAMED_XOR_CHUNKS response with {} bytes",
         body.len()
     );
@@ -591,6 +627,14 @@ async fn handle_streamed_response(
     Ok((response, series_count, sample_count))
 }
 
+/// The order of Prometheus between two label sets sorted by name: label by label, the name then
+/// the value, in byte order.
+fn compare_label_sets(a: &[Label], b: &[Label]) -> std::cmp::Ordering {
+    a.iter()
+        .map(|label| (&label.name, &label.value))
+        .cmp(b.iter().map(|label| (&label.name, &label.value)))
+}
+
 /// Extract Prometheus samples from SensorData for chunk encoding.
 /// Returns None for non-numeric types.
 fn extract_prom_samples_for_chunks(
@@ -604,7 +648,9 @@ fn extract_prom_samples_for_chunks(
                 .iter()
                 .map(|s| PromSample {
                     value: s.value,
-                    timestamp: s.datetime.to_unix_milliseconds().floor() as i64,
+                    timestamp: crate::parsing::prometheus::converter::datetime_to_millis(
+                        &s.datetime,
+                    ),
                 })
                 .collect();
             Some(prom_samples)
@@ -614,7 +660,9 @@ fn extract_prom_samples_for_chunks(
                 .iter()
                 .map(|s| PromSample {
                     value: s.value as f64,
-                    timestamp: s.datetime.to_unix_milliseconds().floor() as i64,
+                    timestamp: crate::parsing::prometheus::converter::datetime_to_millis(
+                        &s.datetime,
+                    ),
                 })
                 .collect();
             Some(prom_samples)
@@ -626,7 +674,9 @@ fn extract_prom_samples_for_chunks(
                 .filter_map(|s| {
                     s.value.to_f64().map(|value| PromSample {
                         value,
-                        timestamp: s.datetime.to_unix_milliseconds().floor() as i64,
+                        timestamp: crate::parsing::prometheus::converter::datetime_to_millis(
+                            &s.datetime,
+                        ),
                     })
                 })
                 .collect();
@@ -698,12 +748,13 @@ mod tests {
         assert!(verify_read_headers(&headers).is_err());
     }
 
+    /// The hints of `func(x[range])` evaluated every `step_ms` from 0 to 4 steps.
     fn hints(func: &str, step_ms: i64, range_ms: i64) -> ReadHints {
         ReadHints {
             step_ms,
             func: func.to_string(),
-            start_ms: 0,
-            end_ms: 0,
+            start_ms: 1i64.saturating_sub(range_ms),
+            end_ms: step_ms.saturating_mul(4),
             grouping: vec![],
             by: false,
             range_ms,
@@ -712,8 +763,8 @@ mod tests {
 
     fn query_with(hints: ReadHints) -> Query {
         Query {
-            start_timestamp_ms: 1_000,
-            end_timestamp_ms: 5_000,
+            start_timestamp_ms: hints.start_ms,
+            end_timestamp_ms: hints.end_ms,
             matchers: vec![],
             hints: Some(hints),
         }
@@ -760,7 +811,13 @@ mod tests {
     }
 
     fn options_of(query: &Query) -> Option<SensorDataQueryOptions> {
-        query_options_from_read_hints(query, 100_000)
+        let mut options = read_options_from_hints(query, 100_000);
+        assert!(options.len() <= 1, "{options:?}");
+        options.pop()
+    }
+
+    fn millis(ms: i64) -> Option<SensAppDateTime> {
+        Some(SensAppDateTime::from_unix_milliseconds_i64(ms))
     }
 
     #[test]
@@ -885,5 +942,98 @@ mod tests {
         let mut hints = instant_hints("", HOUR_MS, 0, 10 * HOUR_MS);
         hints.range_ms = 300_000;
         assert!(options_of(&query_with(hints)).is_none());
+    }
+
+    #[test]
+    fn test_buckets_follow_the_hints_of_their_selector() {
+        // `max_over_time(x[1h]) > y` every hour from T0 to T0 + 5h: the query starts at the
+        // lookback of `y`, before the range of `x`, and the buckets of `x` start with its range
+        let hints = ReadHints {
+            start_ms: T0_MS - HOUR_MS + 1,
+            end_ms: T0_MS + 5 * HOUR_MS,
+            ..hints("max_over_time", HOUR_MS, HOUR_MS)
+        };
+        let query = Query {
+            start_timestamp_ms: T0_MS - 300_000 + 1 - 7 * 60_000,
+            end_timestamp_ms: T0_MS + 5 * HOUR_MS,
+            matchers: vec![],
+            hints: Some(hints),
+        };
+        let options = options_of(&query).unwrap();
+        assert_eq!(options.start_time, millis(T0_MS - HOUR_MS + 1));
+        assert_eq!(options.end_time, millis(T0_MS + 5 * HOUR_MS));
+
+        // Prometheus reads the end from its own storage: the buckets stop where the query does
+        let query = Query {
+            end_timestamp_ms: T0_MS + 3 * HOUR_MS,
+            ..query
+        };
+        let options = options_of(&query).unwrap();
+        assert_eq!(options.start_time, millis(T0_MS - HOUR_MS + 1));
+        assert_eq!(options.end_time, millis(T0_MS + 3 * HOUR_MS));
+    }
+
+    #[test]
+    fn test_buckets_need_evaluations_on_multiples_of_the_step() {
+        // A subquery, `max_over_time(max_over_time(x[1h])[1d:1h])`, evaluates `x` on the
+        // multiples of its step, whatever the time of the query: from evaluations at half past
+        // the hour, the hints cannot tell a range query from a subquery
+        let hints = ReadHints {
+            start_ms: T0_MS + 30 * 60_000 - HOUR_MS + 1,
+            end_ms: T0_MS + 30 * 60_000 + 5 * HOUR_MS,
+            ..hints("max_over_time", HOUR_MS, HOUR_MS)
+        };
+        assert!(options_of(&query_with(hints)).is_none());
+    }
+
+    #[test]
+    fn test_the_latest_samples_follow_the_grid_of_a_subquery_too() {
+        // `max_over_time(sum(x)[1h:5m])` at T0 + 1 min: `sum(x)` is evaluated on the multiples
+        // of 5 minutes, and a range query that ends at T0 + 1 min every 5 minutes from T0 - 59
+        // min gives the same hints. Both grids are answered.
+        let step = 5 * 60_000;
+        let hints = instant_hints("sum", step, 60_000 - HOUR_MS, 60_000);
+        let options = read_options_from_hints(&query_with(hints), 100_000);
+        assert_eq!(options.len(), 2, "{options:?}");
+        assert_eq!(options[0].end_time, millis(T0_MS + 60_000));
+        assert_eq!(
+            options[0].start_time,
+            millis(T0_MS + 60_000 - HOUR_MS - step + 1)
+        );
+        assert_eq!(options[1].end_time, millis(T0_MS));
+        assert_eq!(options[1].start_time, millis(T0_MS - HOUR_MS - step + 1));
+        for options in options {
+            assert_eq!(options.aggregation, Some(Aggregation::Latest));
+            assert_eq!(options.step_ms, Some(step));
+        }
+
+        // On the grid of the step, one answer
+        let hints = instant_hints("sum", step, -HOUR_MS, 0);
+        assert_eq!(
+            read_options_from_hints(&query_with(hints), 100_000).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_hints_out_of_range_get_the_raw_samples() {
+        for (start_ms, end_ms, step_ms, range_ms) in [
+            (i64::MIN, i64::MAX, 1, 0),
+            (i64::MIN, i64::MAX, HOUR_MS, 0),
+            (i64::MAX - 1, i64::MAX, 1, 0),
+            (i64::MIN, i64::MIN + 1, 1, 0),
+            (i64::MAX - 1, i64::MAX, 1, 1),
+            (i64::MIN, i64::MAX, i64::MAX, i64::MAX),
+        ] {
+            for func in ["", "sum", "max_over_time"] {
+                let hints = ReadHints {
+                    start_ms,
+                    end_ms,
+                    ..hints(func, step_ms, range_ms)
+                };
+                // No panic, no overflow: an answer or the raw samples
+                let _ = read_options_from_hints(&query_with(hints), 100_000);
+            }
+        }
     }
 }

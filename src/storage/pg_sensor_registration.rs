@@ -9,12 +9,14 @@
 //! nothing is cached, so there is no stale id after a rollback or a deletion by another instance.
 
 use crate::datamodel::Sensor;
+use crate::storage::common::{check_sensor_identity, unique_sensors};
 use anyhow::Result;
 use sqlx::PgConnection;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use uuid::Uuid;
 
-/// The sensor ids of the given sensors, creating the ones that do not exist.
+/// The sensor ids of the given sensors, creating the ones that do not exist. A sensor that exists
+/// must have the stored type, see `check_sensor_identity`.
 ///
 /// Concurrent writers registering the same new sensor are safe: every insert is
 /// `ON CONFLICT DO NOTHING`, and the ids are read again afterwards. Values are sorted before they
@@ -32,13 +34,11 @@ pub async fn register_sensors(
     sensors: &[&Sensor],
     lock_first: &[&'static str],
 ) -> Result<HashMap<Uuid, i64>> {
-    let mut unique: HashMap<Uuid, &Sensor> = HashMap::with_capacity(sensors.len());
-    for sensor in sensors {
-        unique.entry(sensor.uuid).or_insert(sensor);
-    }
+    let unique = unique_sensors(sensors)?;
 
-    let mut ids = fetch_sensor_ids(connection, unique.keys().copied().collect()).await?;
-    let mut missing: Vec<&Sensor> = unique
+    let mut ids = fetch_sensor_ids(connection, &unique, unique.keys().copied().collect()).await?;
+    // In UUID order, from the BTreeMap
+    let missing: Vec<&Sensor> = unique
         .values()
         .filter(|sensor| !ids.contains_key(&sensor.uuid))
         .copied()
@@ -46,7 +46,6 @@ pub async fn register_sensors(
     if missing.is_empty() {
         return Ok(ids);
     }
-    missing.sort_by_key(|sensor| sensor.uuid);
 
     if !lock_first.is_empty() {
         // `ONLY`: without it the lock is taken on every chunk too. The names are static.
@@ -115,7 +114,12 @@ pub async fn register_sensors(
         .filter(|uuid| !created.contains_key(uuid))
         .collect();
     if !others.is_empty() {
-        ids.extend(fetch_sensor_ids(connection, others).await?);
+        ids.extend(fetch_sensor_ids(connection, &unique, others).await?);
+    }
+    // A sensor another transaction created, then a third one deleted before the read above, has
+    // no id. Trying again creates it.
+    if let Some(uuid) = unique.keys().find(|uuid| !ids.contains_key(*uuid)) {
+        return Err(SensorDeletedDuringWrite(*uuid).into());
     }
 
     // The labels of the sensors this call created
@@ -150,16 +154,30 @@ pub async fn register_sensors(
     Ok(ids)
 }
 
+/// A sensor of the batch was deleted by another transaction while the batch was written. The
+/// transaction is rolled back; the write can be tried again.
+#[derive(Debug, thiserror::Error)]
+#[error("sensor {0} was deleted while it was written to")]
+pub struct SensorDeletedDuringWrite(pub Uuid);
+
+/// The ids of the stored sensors among `uuids`, after checking that each has the type of the
+/// sensor of the batch (`sensors`) with its UUID.
 async fn fetch_sensor_ids(
     connection: &mut PgConnection,
+    sensors: &BTreeMap<Uuid, &Sensor>,
     uuids: Vec<Uuid>,
 ) -> Result<HashMap<Uuid, i64>> {
-    let rows: Vec<(Uuid, i64)> =
-        sqlx::query_as("SELECT uuid, sensor_id FROM sensors WHERE uuid = ANY($1)")
+    let rows: Vec<(Uuid, i64, String)> =
+        sqlx::query_as("SELECT uuid, sensor_id, type FROM sensors WHERE uuid = ANY($1)")
             .bind(&uuids)
             .fetch_all(connection)
             .await?;
-    Ok(rows.into_iter().collect())
+    let mut ids = HashMap::with_capacity(rows.len());
+    for (uuid, sensor_id, sensor_type) in rows {
+        check_sensor_identity(sensors[&uuid], &sensor_type)?;
+        ids.insert(uuid, sensor_id);
+    }
+    Ok(ids)
 }
 
 async fn ensure_units(
@@ -187,19 +205,24 @@ async fn ensure_units(
         r#"
         INSERT INTO units (name, description)
         SELECT * FROM unnest($1::text[], $2::text[])
-        ON CONFLICT (name) DO NOTHING
+        ON CONFLICT ((md5(name))) DO NOTHING
         "#,
     )
     .bind(&names)
     .bind(&descriptions)
     .execute(&mut *connection)
     .await?;
-    let rows: Vec<(i64, String)> =
-        sqlx::query_as("SELECT id, name FROM units WHERE name = ANY($1)")
-            .bind(&names)
-            .fetch_all(connection)
-            .await?;
-    Ok(rows.into_iter().map(|(id, name)| (name, id)).collect())
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        r#"
+        SELECT id, name FROM units
+        WHERE md5(name) = ANY(ARRAY(SELECT md5(v) FROM unnest($1::text[]) AS v))
+          AND name = ANY($1)
+        "#,
+    )
+    .bind(&names)
+    .fetch_all(connection)
+    .await?;
+    crate::storage::pg_strings::all_found(names.len(), rows)
 }
 
 /// One statement pair per dictionary table, written out so that the table and the column are
@@ -223,9 +246,9 @@ macro_rules! dictionary {
                 $table,
                 " (",
                 $column,
-                ") SELECT unnest($1::text[]) ON CONFLICT (",
+                ") SELECT unnest($1::text[]) ON CONFLICT ((md5(",
                 $column,
-                ") DO NOTHING"
+                "))) DO NOTHING"
             ))
             .bind(&values)
             .execute(&mut *connection)
@@ -235,14 +258,16 @@ macro_rules! dictionary {
                 $column,
                 " FROM ",
                 $table,
-                " WHERE ",
+                " WHERE md5(",
+                $column,
+                ") = ANY(ARRAY(SELECT md5(v) FROM unnest($1::text[]) AS v)) AND ",
                 $column,
                 " = ANY($1)"
             ))
             .bind(&values)
             .fetch_all(connection)
             .await?;
-            Ok(rows.into_iter().map(|(id, value)| (value, id)).collect())
+            crate::storage::pg_strings::all_found(values.len(), rows)
         }
     };
 }
@@ -253,3 +278,78 @@ dictionary!(
     "labels_description_dictionary",
     "description"
 );
+
+/// Delete a series, its samples, its labels and its sensor row, in one transaction. False when
+/// it does not exist.
+///
+/// The sensor row is locked first (`FOR UPDATE`). A writer that inserts a sample of the series
+/// holds a `FOR KEY SHARE` lock on that row through the foreign key: either the delete waits for
+/// the writer to commit and deletes its samples too, or the writer waits for the delete, then
+/// fails on the foreign key and registers the sensor again, as `publish` tries again. Without
+/// the lock, a sample written between the delete of the samples and the delete of the sensor made
+/// the delete fail on the foreign key.
+///
+/// On TimescaleDB (`timescaledb`), a writer that creates a chunk can be in a deadlock with the
+/// delete. PostgreSQL aborts one of them, and the delete tries again after a random pause. The
+/// samples of compressed chunks are deleted whatever their number, see
+/// [`unlimited_decompression`].
+pub async fn delete_series(pool: &sqlx::PgPool, uuid: Uuid, timescaledb: bool) -> Result<bool> {
+    const ATTEMPTS: usize = 5;
+    let mut attempt = 1;
+    loop {
+        match delete_series_once(pool, uuid, timescaledb).await {
+            Err(error) if attempt < ATTEMPTS && crate::storage::common::is_deadlock(&error) => {
+                tokio::time::sleep(std::time::Duration::from_millis(fastrand::u64(10..60))).await;
+            }
+            result => return result,
+        }
+        attempt += 1;
+    }
+}
+
+/// TimescaleDB refuses a statement that decompresses more than
+/// `timescaledb.max_tuples_decompressed_per_dml_transaction` rows (100,000 by default), so a
+/// delete over the compressed chunks of a large series failed. A delete is asked for and is
+/// expected to happen: no limit for the transaction.
+pub async fn unlimited_decompression(connection: &mut PgConnection) -> Result<()> {
+    sqlx::query("SET LOCAL timescaledb.max_tuples_decompressed_per_dml_transaction = 0")
+        .execute(connection)
+        .await?;
+    Ok(())
+}
+
+async fn delete_series_once(pool: &sqlx::PgPool, uuid: Uuid, timescaledb: bool) -> Result<bool> {
+    let mut transaction = pool.begin().await?;
+    if timescaledb {
+        unlimited_decompression(&mut transaction).await?;
+    }
+    let sensor_id: Option<i64> =
+        sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = $1 FOR UPDATE")
+            .bind(uuid)
+            .fetch_optional(&mut *transaction)
+            .await?;
+    let Some(sensor_id) = sensor_id else {
+        return Ok(false);
+    };
+
+    for table in crate::storage::common::VALUE_TABLES {
+        // `table` comes from the static VALUE_TABLES list
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE sensor_id = $1"
+        )))
+        .bind(sensor_id)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    sqlx::query("DELETE FROM labels WHERE sensor_id = $1")
+        .bind(sensor_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM sensors WHERE sensor_id = $1")
+        .bind(sensor_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    transaction.commit().await?;
+    Ok(true)
+}

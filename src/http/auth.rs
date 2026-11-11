@@ -129,7 +129,15 @@ impl AuthConfig {
                      {MIN_SECRET_LENGTH} characters long"
                 )
             })?;
-            keys.insert(key_id(secret), DecodingKey::from_secret(secret.as_bytes()));
+            // The key id is 32 bits: a secret under the id of another would replace it
+            let kid = key_id(secret);
+            if keys.contains_key(&kid) {
+                anyhow::bail!(
+                    "SENSAPP_JWT_PREVIOUS_SECRETS: a secret is the current one, is given twice, or \
+                     has the key id of another one ({kid}): remove it, or pick another secret"
+                );
+            }
+            keys.insert(kid, DecodingKey::from_secret(secret.as_bytes()));
         }
         Ok(self)
     }
@@ -258,7 +266,7 @@ pub fn resolve_auth_mode(
 /// - `scope`: Space-separated scopes among `"read"`, `"write"`, `"delete"` and `"admin"`
 ///   (default: `"read write"`). `"delete"` allows removing series and samples and `"admin"`
 ///   allows making tokens; neither is ever part of the default.
-/// - `sensors`: Allow list of sensor names; if absent all sensors are accessible
+/// - `sensors`: Allow list of sensor names and UUIDs (hyphenated); if absent all sensors are accessible
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Claims {
     /// Subject — identifies who/what the token was issued to.
@@ -275,7 +283,7 @@ pub struct Claims {
     /// Defaults to "read write" if absent, which includes neither "delete" nor "admin".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
-    /// Optional list of allowed sensor names.
+    /// Optional list of allowed sensor names and UUIDs (the canonical hyphenated form).
     /// If absent, all sensors are accessible.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sensors: Option<Vec<String>>,
@@ -373,8 +381,14 @@ impl TokenRequest {
         }
 
         let scope = parse_scope(scope)?;
-        if !rules.allow_admin && scope.split(' ').any(|item| item == Scope::Admin.name()) {
+        let admin = scope.split(' ').any(|item| item == Scope::Admin.name());
+        if !rules.allow_admin && admin {
             return Err(TokenRequestError::AdminNotAllowed);
+        }
+        if admin && sensors.is_some() {
+            return Err(invalid(
+                "An admin token is for every sensor: leave the sensors out".into(),
+            ));
         }
 
         if duration_seconds == 0 {
@@ -497,6 +511,40 @@ impl AccessContext {
         }
     }
 
+    /// Whether the token may read, list or delete this sensor: its name or its UUID (the canonical
+    /// hyphenated form) is in the allow list, or there is no allow list.
+    pub fn can_access(&self, sensor: &crate::datamodel::Sensor) -> bool {
+        match &self.sensor_allow_list {
+            Some(allow_list) => {
+                let uuid = sensor.uuid.to_string();
+                allow_list
+                    .iter()
+                    .any(|allowed| *allowed == sensor.name || *allowed == uuid)
+            }
+            None => true,
+        }
+    }
+
+    /// Whether the token may write to this sensor. A write is checked on what it names, with no
+    /// look at the storage: its UUID is in the allow list, or its name is and its UUID is the one
+    /// SensApp derives from its name, type, unit and labels (the UUID of every series that an
+    /// importer names without giving a UUID). The derived UUID is a keyed hash that includes the
+    /// name, so a name cannot be claimed for the UUID of another series, and a client that
+    /// chooses its UUIDs needs them in the list.
+    pub fn can_write(&self, sensor: &crate::datamodel::Sensor) -> bool {
+        let Some(allow_list) = &self.sensor_allow_list else {
+            return true;
+        };
+        let uuid = sensor.uuid.to_string();
+        if allow_list.contains(&uuid) {
+            return true;
+        }
+        allow_list.contains(&sensor.name)
+            && sensor
+                .derived_uuid()
+                .is_ok_and(|derived| derived == sensor.uuid)
+    }
+
     pub fn has_scope(&self, scope: Scope) -> bool {
         match scope {
             Scope::Read => self.can_read,
@@ -555,6 +603,13 @@ pub fn validate_token(headers: &HeaderMap, config: &AuthConfig) -> Result<Access
             .split_whitespace()
             .any(|s| s.eq_ignore_ascii_case(wanted.name()))
     };
+
+    // An admin token acts on every sensor: one that lists sensors was not made by SensApp
+    if has(Scope::Admin) && claims.sensors.is_some() {
+        return Err(AppError::Unauthorized(
+            "Invalid token: an admin token cannot list sensors".into(),
+        ));
+    }
 
     Ok(AccessContext {
         can_read: has(Scope::Read),
@@ -881,6 +936,72 @@ mod tests {
         assert!(access.can_access_sensor("temperature"));
         assert!(access.can_access_sensor("humidity"));
         assert!(!access.can_access_sensor("pressure"));
+    }
+
+    /// A write is authorized by what it names: its UUID is listed, or its name is and the UUID is
+    /// the one derived from it.
+    #[test]
+    fn a_write_needs_a_listed_uuid_or_a_listed_name_with_its_derived_uuid() {
+        use crate::datamodel::{Sensor, SensorType};
+        _ = crate::config::load_configuration_for_tests();
+        let derived =
+            Sensor::new_without_uuid("temperature".to_string(), SensorType::Float, None, None)
+                .unwrap();
+        let other = Sensor::new_without_uuid("pressure".to_string(), SensorType::Float, None, None)
+            .unwrap();
+        let access = |entries: &[String]| AccessContext {
+            subject: "limited".to_string(),
+            token_id: None,
+            can_read: true,
+            can_write: true,
+            can_delete: false,
+            can_admin: false,
+            sensor_allow_list: Some(entries.to_vec()),
+        };
+
+        let by_name = access(&["temperature".to_string()]);
+        assert!(by_name.can_write(&derived), "name and derived UUID");
+        // The name of the token on the UUID of another series
+        let claimed = Sensor::new(
+            other.uuid,
+            "temperature".to_string(),
+            SensorType::Float,
+            None,
+            None,
+        );
+        assert!(!by_name.can_write(&claimed), "a claimed name");
+        // A UUID given with no name that the token lists
+        let unnamed = Sensor::new(
+            derived.uuid,
+            derived.uuid.to_string(),
+            SensorType::Float,
+            None,
+            None,
+        );
+        assert!(!by_name.can_write(&unnamed), "a UUID alone is not listed");
+        // Another type or a unit changes the derived UUID
+        let retyped = Sensor::new(
+            derived.uuid,
+            "temperature".to_string(),
+            SensorType::Integer,
+            None,
+            None,
+        );
+        assert!(
+            !by_name.can_write(&retyped),
+            "the derived UUID includes the type"
+        );
+
+        let by_uuid = access(&[other.uuid.to_string()]);
+        assert!(
+            by_uuid.can_write(&claimed),
+            "a listed UUID, whatever its name"
+        );
+        assert!(!by_uuid.can_write(&derived), "a name alone is not listed");
+        assert!(by_uuid.can_access(&other) && by_uuid.can_access(&claimed));
+        assert!(!by_uuid.can_access(&derived));
+        assert!(by_name.can_access(&derived) && by_name.can_access(&claimed));
+        assert!(!by_name.can_access(&other));
     }
 
     #[test]
@@ -1307,5 +1428,42 @@ mod tests {
     fn the_mode_never_prints_its_secret() {
         let mode = AuthMode::Secret(TEST_SECRET.to_string());
         assert!(!format!("{mode:?}").contains(TEST_SECRET));
+    }
+
+    // -- review of November 2026 --
+
+    #[test]
+    fn an_admin_token_cannot_list_sensors() {
+        let sensors = Some(vec!["temperature".to_string()]);
+        assert!(TokenRequest::new("ops", "admin", sensors.clone(), 3600, &CLI_RULES).is_err());
+
+        // One made by hand is refused when it is used
+        let config = make_config();
+        let token = config
+            .issue_token("ops", "admin", 3600, sensors)
+            .unwrap()
+            .token;
+        assert!(validate_token(&bearer_headers(&token), &config).is_err());
+    }
+
+    #[test]
+    fn a_previous_secret_with_the_key_id_of_another_is_refused() {
+        let other = "previous-secret-0123456789abcdef0123";
+        assert!(
+            make_config()
+                .with_previous_secrets(&[other.to_string()])
+                .is_ok()
+        );
+        assert!(
+            make_config()
+                .with_previous_secrets(&[TEST_SECRET.to_string()])
+                .is_err(),
+            "the current secret, under its own key id"
+        );
+        assert!(
+            make_config()
+                .with_previous_secrets(&[other.to_string(), other.to_string()])
+                .is_err()
+        );
     }
 }

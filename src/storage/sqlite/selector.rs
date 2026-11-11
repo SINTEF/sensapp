@@ -9,7 +9,6 @@ use crate::storage::selector::{AggregatedRead, BulkSelectorBackend, empty_sample
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::str::FromStr;
 
 #[async_trait]
 impl BulkSelectorBackend for SqliteStorage {
@@ -53,14 +52,13 @@ impl BulkSelectorBackend for SqliteStorage {
             SensorType::Float => "float_values",
             other => anyhow::bail!("{other} is not a numeric type"),
         };
-        // Generated placeholders only: the ids, the time bounds and the limit are bound below.
-        // A selector reads at most `max_series` sensors, far below SQLite's variable limit.
-        let placeholders = vec!["?"; sensor_ids.len()].join(", ");
+        // The ids are one JSON array: no limit on the number of bound variables
+        let ids = serde_json::to_string(sensor_ids)?;
         let sql = format!(
             "SELECT sensor_id, timestamp_us, value FROM {table} \
-             WHERE sensor_id IN ({placeholders}) \
+             WHERE sensor_id IN (SELECT value FROM json_each(?)) \
              AND timestamp_us >= COALESCE(?, -9223372036854775807) AND timestamp_us <= COALESCE(?, 9223372036854775807) \
-             ORDER BY sensor_id, timestamp_us LIMIT ?"
+             ORDER BY sensor_id, timestamp_us, rowid LIMIT ?"
         );
 
         macro_rules! read {
@@ -71,11 +69,8 @@ impl BulkSelectorBackend for SqliteStorage {
                     timestamp_us: i64,
                     value: $value,
                 }
-                let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()));
-                for sensor_id in sensor_ids {
-                    query = query.bind(sensor_id);
-                }
-                let rows = query
+                let rows = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()))
+                    .bind(&ids)
                     .bind(start_us)
                     .bind(end_us)
                     .bind(i64::try_from(limit).unwrap_or(i64::MAX))
@@ -122,9 +117,7 @@ impl SqliteStorage {
         read: &AggregatedRead,
         limit: usize,
     ) -> Result<HashMap<i64, TypedSamples>> {
-        use super::storage_query_helpers::{
-            sqlite_float_expression, sqlite_integer_expression, sqlite_numeric_expression,
-        };
+        use super::storage_query_helpers::{sqlite_float_expression, sqlite_integer_expression};
         use crate::storage::Aggregation;
         use crate::storage::selector::{AggregatedKind, aggregated_kind};
 
@@ -142,10 +135,35 @@ impl SqliteStorage {
             .checked_mul(1000)
             .context("step is too large")?;
         let origin_us = read.start_us.unwrap_or(0);
-        let placeholders = (6..6 + sensor_ids.len())
-            .map(|index| format!("?{index}"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        if numeric
+            && matches!(
+                read.aggregation,
+                Aggregation::Min | Aggregation::Max | Aggregation::Sum | Aggregation::Avg
+            )
+        {
+            // Computed from the stored values, one series after the other, as for one series:
+            // the values are text, which MIN and MAX compare as text
+            let mut result = HashMap::new();
+            for &sensor_id in sensor_ids {
+                let samples = self
+                    .query_numeric_samples_aggregated(
+                        sensor_id,
+                        read.start_us,
+                        read.end_us,
+                        step_us,
+                        origin_us,
+                        read.aggregation,
+                        Some(limit),
+                    )
+                    .await?;
+                if !samples.is_empty() {
+                    result.insert(sensor_id, samples);
+                }
+            }
+            return Ok(result);
+        }
+        // The ids are one JSON array: no limit on the number of bound variables
+        let ids = serde_json::to_string(sensor_ids)?;
         let value = if numeric {
             "CAST(value AS TEXT)"
         } else {
@@ -169,15 +187,15 @@ impl SqliteStorage {
                 };
                 format!(
                     "WITH bucketed AS (
-                       SELECT sensor_id, timestamp_us, {value} AS value,
-                              (?4 + ((timestamp_us - ?4) / ?3) * ?3) AS bucket_us
+                       SELECT sensor_id, timestamp_us, rowid AS row_id, {value} AS value,
+                              (timestamp_us - (((timestamp_us - ?4) % ?3) + ?3) % ?3) AS bucket_us
                        FROM {table}
-                       WHERE sensor_id IN ({placeholders})
+                       WHERE sensor_id IN (SELECT value FROM json_each(?6))
                          AND timestamp_us >= COALESCE(?1, -9223372036854775807)
                          AND timestamp_us <= COALESCE(?2, 9223372036854775807)
                      ), ranked AS (
                        SELECT sensor_id, bucket_us, timestamp_us AS sample_us, value,
-                              ROW_NUMBER() OVER (PARTITION BY sensor_id, bucket_us ORDER BY timestamp_us {direction}) AS row_num
+                              ROW_NUMBER() OVER (PARTITION BY sensor_id, bucket_us ORDER BY timestamp_us {direction}, row_id {direction}) AS row_num
                        FROM bucketed
                      )
                      SELECT sensor_id, {stamp} AS timestamp_us, value
@@ -195,16 +213,14 @@ impl SqliteStorage {
                     (SensorType::Float, aggregation) => {
                         sqlite_float_expression(aggregation).to_string()
                     }
-                    (_, aggregation) => {
-                        format!("CAST({} AS TEXT)", sqlite_numeric_expression(aggregation))
-                    }
+                    (_, _) => unreachable!("Numeric buckets are computed in Rust, above"),
                 };
                 format!(
                     "WITH bucketed AS (
                        SELECT sensor_id, timestamp_us, value,
-                              (?4 + ((timestamp_us - ?4) / ?3) * ?3) AS bucket_us
+                              (timestamp_us - (((timestamp_us - ?4) % ?3) + ?3) % ?3) AS bucket_us
                        FROM {table}
-                       WHERE sensor_id IN ({placeholders})
+                       WHERE sensor_id IN (SELECT value FROM json_each(?6))
                          AND timestamp_us >= COALESCE(?1, -9223372036854775807)
                          AND timestamp_us <= COALESCE(?2, 9223372036854775807)
                      )
@@ -224,16 +240,17 @@ impl SqliteStorage {
                     timestamp_us: i64,
                     value: $value,
                 }
-                let mut query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()))
+                let query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str()))
                     .bind(read.start_us)
                     .bind(read.end_us)
                     .bind(step_us)
                     .bind(origin_us)
-                    .bind(limit);
-                for sensor_id in sensor_ids {
-                    query = query.bind(sensor_id);
-                }
-                let rows = query.fetch_all(&self.pool).await?;
+                    .bind(limit)
+                    .bind(&ids);
+                let rows = query
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(crate::storage::common::sql_sum_overflow)?;
                 let mut result: HashMap<i64, TypedSamples> = HashMap::new();
                 for row in rows {
                     if let TypedSamples::$variant(samples) = result
@@ -253,9 +270,12 @@ impl SqliteStorage {
 
         Ok(match kind {
             AggregatedKind::Integer => fetch!(i64, Integer, |value| Ok(value)),
-            AggregatedKind::Float => fetch!(f64, Float, |value| Ok(value)),
+            // A sum or an average of +Inf and -Inf is NaN, which SQLite turns into NULL
+            AggregatedKind::Float => {
+                fetch!(Option<f64>, Float, |value| Ok(value.unwrap_or(f64::NAN)))
+            }
             AggregatedKind::Numeric => fetch!(String, Numeric, |value| {
-                rust_decimal::Decimal::from_str(&value)
+                rust_decimal::Decimal::from_str_exact(&value)
                     .context("Failed to parse aggregated SQLite numeric value")
             }),
         })

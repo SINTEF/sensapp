@@ -40,3 +40,28 @@ shift of one bucket I feared does not happen.
 A plain selector (and the aggregation operators over one) is no longer answered with raw samples: it gets the last
 sample of each step with its own timestamp, see [remote-read-plain-selector-latest.md](remote-read-plain-selector-latest.md).
 The "raw samples" rows of the table above for `sum`, `avg`, `min`, `max` and a plain selector no longer apply.
+
+## Update (11 November 2026): several selectors, subqueries, evaluations off the step
+
+Checked in the Prometheus 3.13.4 source (`promql/engine.go`, `storage/remote/codec.go`):
+
+- `Query.start_timestamp_ms` and `end_timestamp_ms` are the bounds of the whole expression
+  (`FindMinMaxTime`, the minimum and maximum over its selectors), and `preferLocalStorage` can lower the end.
+  The hints are per selector. The buckets anchored on the query were right for a single selector only:
+  `max_over_time(a[15m]) + 0 * max_over_time(b[20m])` at 15 minutes was off by 5 minutes. The buckets now
+  start with the hints and stop at the end of the query.
+- The step of the hints is the step of the innermost subquery (`getLastSubqueryInterval`), and the function
+  is the closest function or aggregation (`extractFuncFromPath`): `max_over_time(sum(x)[1h:15m])` sends
+  `func = "sum"`, `range = 0`, `step = 15m`. A subquery evaluates on the multiples of its step
+  (`runSubquery`), whatever the time of the query. An instant query has a step of 0 (raw samples).
+- The hints cannot tell a range query from a subquery. The `*_over_time` buckets are only used when the
+  first evaluation is a multiple of the step, where both grids agree (Grafana aligns on the step; the
+  graph of the Prometheus UI does not, and gets the raw samples). The latest samples answer both grids
+  when they differ, at most two samples per step, all of them raw samples.
+- Not detected: a selector with an offset that is not a multiple of the step, inside a subquery.
+
+Live, Prometheus v3.13.4, `tests/prometheus_live` with 29 queries (7 new: the two selectors, evaluations at
+7 minutes past a quarter, `max_over_time(sum(x)[1h:15m])`, `min_over_time(sum(x)[1h:15m])`,
+`max_over_time(max_over_time(x[15m])[1h:15m])`). The previous commit fails 3 of them: the two selectors
+(95.6 instead of 92.8), the subquery of `sum` (no point at all) and the subquery of `max_over_time` (99.3
+instead of 99.0). This version passes all of them, and the plain selector over 120,000 samples.

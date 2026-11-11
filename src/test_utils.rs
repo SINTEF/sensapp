@@ -38,7 +38,7 @@ const DEFAULT_CLICKHOUSE_CONNECTION_STRING: &str =
 ///
 /// # Example
 ///
-/// ```
+/// ```no_run,standalone_crate
 /// use sensapp::test_utils::get_test_database_url;
 ///
 /// let connection_string = get_test_database_url();
@@ -171,7 +171,12 @@ async fn ensure_postgres_test_database(connection_string: &str) -> Result<()> {
         .await
     {
         Ok(_) => Ok(()),
-        Err(sqlx::Error::Database(db_err)) if db_err.code().as_deref() == Some("42P04") => Ok(()),
+        // Already there, or made at the same moment by another test (a unique violation then)
+        Err(sqlx::Error::Database(db_err))
+            if matches!(db_err.code().as_deref(), Some("42P04") | Some("23505")) =>
+        {
+            Ok(())
+        }
         Err(e) => Err(anyhow!(
             "Failed to create PostgreSQL test database '{}': {}",
             database_name,

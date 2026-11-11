@@ -6,7 +6,7 @@ use sensapp::http::auth::{
     AuthConfig, AuthMode, TokenRequest, TokenRules, generate_secret, resolve_auth_mode,
 };
 use sensapp::http::metrics::HttpMetrics;
-use sensapp::http::server::run_http_server;
+use sensapp::http::server::{ShutdownSignals, run_http_server};
 use sensapp::http::state::HttpServerState;
 use sensapp::storage::storage_factory::create_storage_from_connection_string;
 use std::net::SocketAddr;
@@ -47,6 +47,9 @@ async fn async_main() -> Result<()> {
         )
         .init();
 
+    // Before anything slow: as PID 1, SensApp ignores a signal that has no handler
+    let signals = ShutdownSignals::install().context("Failed to install the signal handlers")?;
+
     // Load configuration
     load_configuration().context("Failed to load configuration")?;
     let config = config::get().context("Failed to get configuration")?;
@@ -64,38 +67,23 @@ async fn async_main() -> Result<()> {
     let _sentry = config.sentry_dsn.as_ref().map(|dsn| {
         sentry::init((
             dsn.clone(),
-            sentry::ClientOptions::new()
-                .maybe_release(sentry::release_name!())
-                .debug(true),
+            sentry::ClientOptions::new().maybe_release(sentry::release_name!()),
         ))
     });
 
-    // Initialize storage backend
-    println!("🗄️  Connecting to storage...");
-    let storage = create_storage_from_connection_string(&config.storage_connection_string)
-        .await
-        .context("Failed to create storage backend")?;
-    if config.deduplicate_on_ingest {
-        storage.set_deduplicate_on_ingest(true).await.context(
-            "SENSAPP_DEDUPLICATE_ON_INGEST is set, but this storage backend cannot deduplicate \
-             samples at ingestion (PostgreSQL, TimescaleDB, SQLite and DuckDB can)",
-        )?;
-        println!("🧹 Deduplication at ingestion is on");
-    }
+    // Initialize storage backend and schema. A signal during a long migration stops SensApp
+    // instead of waiting for the end of the grace period: the migration is cut like a kill would
+    let storage = tokio::select! {
+        storage = prepare_storage(&config) => storage?,
+        () = signals.received(1) => {
+            println!("Stopped by a signal during startup");
+            return Ok(());
+        }
+    };
 
-    // Initialize database schema
-    storage
-        .create_or_migrate()
-        .await
-        .context("Failed to create or migrate database schema")?;
-    println!("✅ Storage backend initialized successfully");
-
-    // Exit the program if a panic occurs
-    let default_panic = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        default_panic(info);
-        std::process::exit(1);
-    }));
+    // A panic in a request handler is answered with a 500 (`CatchPanicLayer` in `build_router`)
+    // and the instance keeps serving: exiting would let one bad request, retried by its client,
+    // stop every instance in turn. There is no long-lived background task to lose.
 
     let endpoint = config.endpoint;
     let port = config.port;
@@ -114,6 +102,7 @@ async fn async_main() -> Result<()> {
             auth,
         },
         address,
+        signals,
     )
     .await
     {
@@ -127,6 +116,31 @@ async fn async_main() -> Result<()> {
             Err(err)
         }
     }
+}
+
+/// Connect to the storage and create or migrate its schema.
+async fn prepare_storage(
+    config: &config::SensAppConfig,
+) -> Result<Arc<dyn sensapp::storage::StorageInstance>> {
+    println!("🗄️  Connecting to storage...");
+    let storage = create_storage_from_connection_string(&config.storage_connection_string)
+        .await
+        .context("Failed to create storage backend")?;
+    if config.deduplicate_on_ingest {
+        storage.set_deduplicate_on_ingest(true).await.context(
+            "SENSAPP_DEDUPLICATE_ON_INGEST is set, but this storage backend cannot deduplicate \
+             samples at ingestion (PostgreSQL, TimescaleDB, SQLite and DuckDB can)",
+        )?;
+        println!("🧹 Deduplication at ingestion is on");
+    }
+
+    storage
+        .create_or_migrate()
+        .await
+        .context("Failed to create or migrate database schema")?;
+    println!("✅ Storage backend initialized successfully");
+
+    Ok(storage)
 }
 
 /// How long the token printed at the start of a run with a made secret is valid. The secret is

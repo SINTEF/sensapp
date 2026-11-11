@@ -28,6 +28,22 @@ export SENSAPP_JWT_SECRET=$(sensapp generate-secret)
 export SENSAPP_AUTH_DISABLED=true
 ```
 
+### An open server
+
+Without authentication, any web page that a visitor of SensApp opens could act on it in their name: a `text/plain` POST to `/publish`, or a POST without body to the vacuum, needs no preflight. A page whose domain is made to resolve to `127.0.0.1` (DNS rebinding) is even same-origin with a SensApp on the visitor's machine. So an open server answers `403` to:
+
+- a request whose `Origin` is not the `Host` it was sent to. Browsers send `Origin` with every cross-origin request; `curl` and the SDKs send none, and are not affected.
+- on a loopback address, a request whose `Host` is not a loopback name (`localhost`, a name under `.localhost`, `127.x.x.x`, `[::1]`).
+
+**Behind a proxy that authenticates**, name the public host in `SENSAPP_ALLOWED_HOSTS` (comma separated `host` or `host:port`, case does not matter):
+
+```bash
+export SENSAPP_AUTH_DISABLED=true
+export SENSAPP_ALLOWED_HOSTS=sensapp.example.com
+```
+
+With it, a `Host` must be one of the names (or a loopback name), and an `Origin` must be one of the names or the `Host` itself. This serves both kinds of proxy: one that keeps the `Host` of the client (Caddy, Traefik, ingress-nginx), and one that rewrites it (nginx `proxy_pass` without `proxy_set_header Host $host`): the browser's `Origin` is then the public name, which is in the list. And it stops DNS rebinding on any address, the `0.0.0.0` of the Docker image included. Without the setting, a proxy that keeps the `Host` gets a `403` on a loopback address, and DNS rebinding is not prevented on another one (SensApp logs a warning at startup). A request without a `Host` (HTTP/1.0) is refused once the setting is on; HTTP/2 requests are judged by their `:authority`. What the guard refuses is counted in `sensapp_http_requests_total` with its status `403`.
+
 The secret must be at least **32 characters**. `sensapp generate-secret` prints a random one of 48 characters (288 bits). Keep it private: anyone with the secret can make any token. In `settings.toml` it is `jwt_secret`, but an environment variable or a Secret is a better place than a file.
 
 ## Making tokens
@@ -65,8 +81,8 @@ The token is printed to stdout. In a container: `docker exec <container> sensapp
 |------|-------------|---------|
 | `--scope` | Comma-separated `read`, `write`, `delete`, `admin`, or `readwrite` (shorthand for `read,write`) | `read write` |
 | `--duration` | Token validity in seconds, at most ten years | `3600` (1 hour) |
-| `--sensors` | Comma-separated sensor name allow list | all sensors |
-| `--sensor` | One sensor name, as it is (a comma is part of the name); repeat it for several. Can be mixed with `--sensors` | all sensors |
+| `--sensors` | Comma-separated allow list of sensor names and UUIDs | all sensors |
+| `--sensor` | One sensor name or UUID, as it is (a comma is part of the name); repeat it for several. Can be mixed with `--sensors` | all sensors |
 
 ### With an admin token
 
@@ -173,7 +189,7 @@ Tokens use the HS256 (HMAC-SHA256) algorithm with the following claims, and a `k
 | `nbf` | No | Not-before time. If present, the token is rejected before this time |
 | `jti` | No | Unique id of the token, in the logs of its requests. Every token SensApp makes has one |
 | `scope` | No | Space-separated among `"read"`, `"write"`, `"delete"` and `"admin"`. Defaults to `"read write"` |
-| `sensors` | No | Array of allowed sensor names. If absent, all sensors are accessible |
+| `sensors` | No | Array of allowed sensor names and UUIDs. If absent, all sensors are accessible |
 
 A token made by hand (with a JWT library) needs `iss` and `aud` set to `sensapp`; without a `kid` it is checked against the current secret.
 
@@ -190,6 +206,8 @@ SensApp keeps no list of tokens, so a token cannot be revoked one by one: it wor
 1. Generate a new secret (`sensapp generate-secret`).
 2. Put it in `SENSAPP_JWT_SECRET`, and move the old one to `SENSAPP_JWT_PREVIOUS_SECRETS` (comma-separated, several are allowed). Restart the instances. New tokens are signed with the new secret; the tokens of the old one still verify.
 3. Once those tokens have expired or the clients got new ones, remove the old secret from `SENSAPP_JWT_PREVIOUS_SECRETS`.
+
+The `kid` of a token is a hash of the secret that signed it. SensApp refuses to start when two of its secrets have the same `kid`, the same secret given twice for instance, as it could not tell which one verifies a token.
 
 To **revoke at once** (a leaked token, a lost admin token), do step 2 and leave the old secret out: every token it signed is refused. That includes the ones of the clients you trust, which need new tokens. The `kid` of a token tells which secret signed it, and a token whose `kid` is unknown is refused. Short durations are the other defence: prefer a day to a year, and an hour for an admin.
 
@@ -216,8 +234,12 @@ The OpenAPI document (`/docs`) declares the bearer token as a security scheme an
 - Run SensApp behind TLS when it is reachable over a network: a token is a bearer credential.
 - The sensor allow list uses exact string matching on sensor names, spaces and commas included: the names are kept exactly as given. The JSON array of the endpoint and `--sensor` can hold a name with a comma, `--sensors` splits on commas.
 - When present, the sensor allow list applies to all API reads and writes, including Prometheus and InfluxDB compatibility endpoints. Catalog and selector results omit other sensors; direct series requests for another sensor return 404, and writes to another sensor return 403.
+- **The allow list holds names and UUIDs** (the canonical hyphenated form, in lower case: `3f2a…-…`). A series is read, listed and deleted when its name or its UUID is listed. **A write is checked on what it names, without looking at the storage**: a sensor passes when its UUID is listed, or when its name is listed **and** its UUID is the one SensApp derives from its name, type, unit and labels (what every importer gives a series that names no UUID: SenML, Arrow, CSV, InfluxDB and Prometheus without a UUID). That UUID is a keyed hash that includes the name, so a listed name cannot be claimed for the UUID of another series: a write that names another series by its UUID, whatever name it gives, is a `403` unless that UUID is listed. A series that a client created with a UUID of its own (SenML `bn`, Arrow `sensapp.sensor.uuid` or `sensor_id`) is writable by a restricted token only when its UUID is listed, even if its name is. A write to an existing UUID appends to that series, and the stored name stays; its samples are converted to the stored type when every value converts exactly, and the request is refused with `409` when not ([DATAMODEL.md](DATAMODEL.md)).
+- A UUID entry reads its series by `/series/{uuid}`, the lists and the series reads, and `/api/v1/query` of the name. In selector reads (`/series?selector=`, Prometheus remote read, `/prometheus/metrics`) the listed names are matched as the name of the series: a UUID entry only matches a series that is named by its own UUID, as the importers do when they are given no name.
 - With authentication enabled, `/prometheus/metrics?include_latest_samples=true` requires a read token and applies its sensor allow list. Plain `/prometheus/metrics` stays public for service monitoring.
 - Sensor-scoped tokens cannot run the database-wide `/api/v1/admin/vacuum` operation.
+- An admin token is for every sensor. `sensapp generate-token` refuses `--scope admin` with sensors, and a token that has both is refused (`401`): SensApp never makes one.
+- A token with a sensor allow list deletes only the series it can see. A series that SensApp cannot read the name of, to check it against the list, is not deleted.
 - The `delete` and `admin` scopes are never implied by `read write`. `delete` only allows deleting, not reading. With a sensor allow list, series the token cannot access are reported as not found. See [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md).
 
 ## Web UI

@@ -7,7 +7,7 @@ use super::pg_strings::ensure_string_ids;
 use super::{
     Aggregation, DEFAULT_LIST_SERIES_LIMIT, DEFAULT_QUERY_LIMIT, MAX_LIST_SERIES_LIMIT,
     SensorAvailabilitySummary, SensorDataQueryOptions, StorageError, StorageInstance,
-    common::{VALUE_TABLES, datetime_to_micros, is_deadlock, is_foreign_key_violation},
+    common::{VALUE_TABLES, datetime_to_micros},
 };
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
@@ -25,9 +25,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use uuid::Uuid;
 
-/// How many times a batch is written before its error is returned (see `publish`).
-const PUBLISH_ATTEMPTS: usize = 5;
-
 #[derive(Debug)]
 pub struct TimeScaleDBStorage {
     pool: PgPool,
@@ -35,13 +32,21 @@ pub struct TimeScaleDBStorage {
     deduplicate_on_ingest: AtomicBool,
 }
 
+/// A read bound. Clamped to the times that can be stored (years 1 to 9999, inside both
+/// `OffsetDateTime` and PostgreSQL): an open end such as `i64::MAX` milliseconds (a Prometheus
+/// remote read) stays the far future instead of becoming 1970. Written samples do not come here:
+/// `sensapp_datetime_to_offset_datetime` refuses them.
 fn micros_to_offset_datetime(timestamp_us: i64) -> sqlx::types::time::OffsetDateTime {
-    sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((timestamp_us as i128) * 1000)
+    let timestamp_us = crate::datamodel::sensapp_datetime::clamp_to_storable_micros(timestamp_us);
+    sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(timestamp_us) * 1000)
         .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
 }
 
 fn offset_datetime_to_sensapp(datetime: sqlx::types::time::OffsetDateTime) -> SensAppDateTime {
-    SensAppDateTime::from_unix_microseconds_i64((datetime.unix_timestamp_nanos() / 1000) as i64)
+    // Within ±9999 years: the microseconds fit in an `i64`
+    SensAppDateTime::from_unix_microseconds_i64(
+        datetime.unix_timestamp_nanos().div_euclid(1000) as i64
+    )
 }
 
 impl TimeScaleDBStorage {
@@ -78,7 +83,10 @@ impl TimeScaleDBStorage {
                     Ok(())
                 })
             })
-            .connect_with(connect_options)
+            .connect_with(crate::storage::pg_session::with_timeouts(
+                connect_options,
+                connection_string,
+            ))
             .await
             .context("Failed to create timescaledb pool")?;
 
@@ -149,7 +157,8 @@ impl TimeScaleDBStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description = ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND md5(ldd.description) = md5(${1}) AND ldd.description = ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -165,7 +174,8 @@ impl TimeScaleDBStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description = ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND md5(ldd.description) = md5(${1}) AND ldd.description = ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -181,7 +191,8 @@ impl TimeScaleDBStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description ~ ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND ldd.description ~ ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -197,7 +208,8 @@ impl TimeScaleDBStorage {
                             SELECT l.sensor_id FROM labels l
                             JOIN labels_name_dictionary lnd ON l.name = lnd.id
                             JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                            WHERE lnd.name = ${} AND ldd.description ~ ${}
+                            WHERE md5(lnd.name) = md5(${0}) AND lnd.name = ${0}
+                              AND ldd.description ~ ${1}
                         )"#,
                         param_idx,
                         param_idx + 1
@@ -407,6 +419,112 @@ impl TimeScaleDBStorage {
         }
     }
 
+    async fn query_sensor_data_latest_once(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<crate::storage::common::LatestRead> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(crate::storage::common::LatestRead::Nothing);
+        };
+
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+        let table_name = Self::sensor_table_name(sensor.sensor_type);
+
+        let Some(latest_timestamp_us) = self
+            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+            .await?
+        else {
+            return Ok(crate::storage::common::LatestRead::Nothing);
+        };
+
+        let samples = match sensor.sensor_type {
+            SensorType::Integer => {
+                self.query_integer_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Numeric => {
+                self.query_numeric_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Float => {
+                self.query_float_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::String => {
+                self.query_string_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Boolean => {
+                self.query_boolean_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Location => {
+                self.query_location_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Json => {
+                self.query_json_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Blob => {
+                self.query_blob_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+        };
+
+        // The samples of that time were deleted between the two statements
+        if samples.is_empty() {
+            return Ok(crate::storage::common::LatestRead::Raced);
+        }
+
+        Ok(crate::storage::common::LatestRead::Found(Box::new(
+            SensorData::new(sensor, samples),
+        )))
+    }
+
     async fn query_latest_timestamp_us(
         &self,
         table_name: &'static str,
@@ -601,14 +719,18 @@ pub(super) fn timescaledb_float_expression(aggregation: Aggregation) -> &'static
     }
 }
 
+/// The Numeric aggregates as text, read with [`numeric_aggregate_from_text`]: the average as
+/// `sum/count`, divided in Rust, as on PostgreSQL.
+///
+/// [`numeric_aggregate_from_text`]: crate::storage::common::numeric_aggregate_from_text
 pub(super) fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
-        Aggregation::Avg => "AVG(value)",
-        Aggregation::Min => "MIN(value)",
-        Aggregation::Max => "MAX(value)",
-        Aggregation::Sum => "SUM(value)",
-        Aggregation::First => "first(value, time)",
-        Aggregation::Last | Aggregation::Latest => "last(value, time)",
+        Aggregation::Avg => "SUM(value)::text || '/' || COUNT(value)",
+        Aggregation::Min => "MIN(value)::text",
+        Aggregation::Max => "MAX(value)::text",
+        Aggregation::Sum => "SUM(value)::text",
+        Aggregation::First => "first(value, time)::text",
+        Aggregation::Last | Aggregation::Latest => "last(value, time)::text",
         Aggregation::Count => unreachable!("handled separately"),
     }
 }
@@ -616,36 +738,14 @@ pub(super) fn timescaledb_numeric_expression(aggregation: Aggregation) -> &'stat
 #[async_trait]
 impl StorageInstance for TimeScaleDBStorage {
     async fn create_or_migrate(&self) -> Result<()> {
-        sqlx::migrate!("src/storage/timescaledb/migrations")
-            .run(&self.pool)
-            .await
-            .context("Failed to migrate database")?;
-
-        Ok(())
+        crate::storage::pg_session::run_migrations(
+            &self.pool,
+            &sqlx::migrate!("src/storage/timescaledb/migrations"),
+        )
+        .await
     }
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
-        // Each attempt is one transaction that was rolled back whole when it failed, so trying
-        // again leaves nothing behind twice.
-        let mut attempt = 1;
-        loop {
-            match self.publish_once(&batch).await {
-                Err(error) if attempt < PUBLISH_ATTEMPTS && is_foreign_key_violation(&error) => {
-                    // Another SensApp instance deleted a sensor between its registration and the
-                    // insert of its samples: the next attempt registers the sensors again.
-                }
-                Err(error) if attempt < PUBLISH_ATTEMPTS && is_deadlock(&error) => {
-                    // `register_sensors` locks the hypertables in alphabetical order, the inserts
-                    // meet them in the order of the code, so two writers can still wait for each
-                    // other (one holds `string_values` and creates a chunk of `boolean_values`,
-                    // the other the reverse). PostgreSQL aborts one of them, which is what this
-                    // is. A random pause keeps the writers from colliding again in step.
-                    tokio::time::sleep(std::time::Duration::from_millis(fastrand::u64(10..60)))
-                        .await;
-                }
-                result => return result,
-            }
-            attempt += 1;
-        }
+        crate::storage::common::retry_publish(|| self.publish_once(&batch)).await
     }
 
     async fn vacuum(&self) -> Result<()> {
@@ -666,6 +766,7 @@ impl StorageInstance for TimeScaleDBStorage {
         // later one fails, and a chunk is never left in another state than it was found in.
         // Within a group of equal samples the first one written is kept. The table names and the
         // columns come from static lists, and the chunk names from the catalog.
+        let mut connection = crate::storage::pg_session::maintenance_connection(&self.pool).await?;
         let mut removed = 0;
         for table in VALUE_TABLES {
             let columns = crate::storage::common::duplicate_key_columns(table, "time");
@@ -676,12 +777,12 @@ impl StorageInstance for TimeScaleDBStorage {
                    FROM {table}) ranked \
                  WHERE duplicate_rank > 1"
             )))
-            .fetch_all(&self.pool)
+            .fetch_all(&mut connection)
             .await
             .with_context(|| format!("Failed to look for the duplicate samples of {table}"))?;
 
             for chunk in chunks {
-                let mut transaction = self.pool.begin().await?;
+                let mut transaction = sqlx::Connection::begin(&mut connection).await?;
                 // NULL when the chunk was not compressed
                 let was_compressed: bool = sqlx::query_scalar(
                     "SELECT decompress_chunk($1::text::regclass, if_compressed => true) IS NOT NULL",
@@ -720,37 +821,7 @@ impl StorageInstance for TimeScaleDBStorage {
 
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
         let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
-        let mut transaction = self.pool.begin().await?;
-
-        let sensor_id: Option<i64> =
-            sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = $1")
-                .bind(parsed_uuid)
-                .fetch_optional(&mut *transaction)
-                .await?;
-        let Some(sensor_id) = sensor_id else {
-            return Ok(false);
-        };
-
-        for table in VALUE_TABLES {
-            // `table` comes from the static VALUE_TABLES list
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "DELETE FROM {table} WHERE sensor_id = $1"
-            )))
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        sqlx::query("DELETE FROM labels WHERE sensor_id = $1")
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("DELETE FROM sensors WHERE sensor_id = $1")
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-
-        transaction.commit().await?;
-        Ok(true)
+        crate::storage::pg_sensor_registration::delete_series(&self.pool, parsed_uuid, true).await
     }
 
     async fn delete_series_samples(
@@ -773,6 +844,8 @@ impl StorageInstance for TimeScaleDBStorage {
             SensorType::Json => "json_values",
             SensorType::Blob => "blob_values",
         };
+        let mut transaction = self.pool.begin().await?;
+        crate::storage::pg_sensor_registration::unlimited_decompression(&mut transaction).await?;
         // `table` comes from the match above
         let result = sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM {table} WHERE sensor_id = $1 AND time >= $2 AND time <= $3"
@@ -780,8 +853,9 @@ impl StorageInstance for TimeScaleDBStorage {
         .bind(sensor_id)
         .bind(micros_to_offset_datetime(datetime_to_micros(&start_time)))
         .bind(micros_to_offset_datetime(datetime_to_micros(&end_time)))
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
+        transaction.commit().await?;
 
         Ok(Some(result.rows_affected()))
     }
@@ -840,6 +914,39 @@ impl StorageInstance for TimeScaleDBStorage {
         let mut last_sensor_id = None;
         let mut sensors = Vec::with_capacity(sensor_rows.len().min(effective_limit));
 
+        // The labels of the whole page in one query, not one per series
+        #[derive(sqlx::FromRow)]
+        struct LabelRow {
+            sensor_id: i64,
+            label_name: String,
+            label_value: String,
+        }
+        let sensor_ids: Vec<i64> = sensor_rows
+            .iter()
+            .take(effective_limit)
+            .filter_map(|row| row.sensor_id)
+            .collect();
+        let labels_rows: Vec<LabelRow> = sqlx::query_as(
+            r#"
+            SELECT l.sensor_id, lnd.name as label_name, ldd.description as label_value
+            FROM labels l
+            JOIN labels_name_dictionary lnd ON l.name = lnd.id
+            JOIN labels_description_dictionary ldd ON l.description = ldd.id
+            WHERE l.sensor_id = ANY($1)
+            "#,
+        )
+        .bind(&sensor_ids)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to query the labels of the series")?;
+        let mut labels_by_sensor: HashMap<i64, SensAppLabels> = HashMap::new();
+        for label_row in labels_rows {
+            labels_by_sensor
+                .entry(label_row.sensor_id)
+                .or_default()
+                .push((label_row.label_name, label_row.label_value));
+        }
+
         for sensor_row in sensor_rows.into_iter().take(effective_limit) {
             // Parse sensor metadata with improved error handling
             let sensor_uuid = sensor_row
@@ -897,35 +1004,7 @@ impl StorageInstance for TimeScaleDBStorage {
             })?;
             last_sensor_id = Some(sensor_id);
 
-            #[derive(sqlx::FromRow)]
-            struct LabelRow {
-                label_name: String,
-                label_value: String,
-            }
-
-            let labels_rows: Vec<LabelRow> = sqlx::query_as(
-                r#"
-                SELECT lnd.name as label_name, ldd.description as label_value
-                FROM labels l
-                JOIN labels_name_dictionary lnd ON l.name = lnd.id
-                JOIN labels_description_dictionary ldd ON l.description = ldd.id
-                WHERE l.sensor_id = $1
-                "#,
-            )
-            .bind(sensor_id)
-            .fetch_all(&self.pool)
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to query labels for sensor UUID={} name='{}'",
-                    sensor_uuid, sensor_name
-                )
-            })?;
-
-            let mut labels: crate::datamodel::sensapp_vec::SensAppLabels = smallvec::smallvec![];
-            for label_row in labels_rows {
-                labels.push((label_row.label_name, label_row.label_value));
-            }
+            let labels = labels_by_sensor.remove(&sensor_id).unwrap_or_default();
 
             let sensor = crate::datamodel::Sensor::new(
                 sensor_uuid,
@@ -1293,97 +1372,18 @@ impl StorageInstance for TimeScaleDBStorage {
         start_time: Option<SensAppDateTime>,
         end_time: Option<SensAppDateTime>,
     ) -> Result<Option<SensorData>> {
-        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
-            return Ok(None);
-        };
-
-        let start_time_us = start_time.as_ref().map(datetime_to_micros);
-        let end_time_us = end_time.as_ref().map(datetime_to_micros);
-        let table_name = Self::sensor_table_name(sensor.sensor_type);
-
-        let Some(latest_timestamp_us) = self
-            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
-            .await?
-        else {
-            return Ok(None);
-        };
-
-        let samples = match sensor.sensor_type {
-            SensorType::Integer => {
-                self.query_integer_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
+        // A delete between the two statements of a try is not a missing series: try again
+        for _ in 0..crate::storage::common::LATEST_ATTEMPTS {
+            match self
+                .query_sensor_data_latest_once(sensor_uuid, start_time, end_time)
                 .await?
+            {
+                crate::storage::common::LatestRead::Found(data) => return Ok(Some(*data)),
+                crate::storage::common::LatestRead::Nothing => return Ok(None),
+                crate::storage::common::LatestRead::Raced => {}
             }
-            SensorType::Numeric => {
-                self.query_numeric_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Float => {
-                self.query_float_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::String => {
-                self.query_string_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Boolean => {
-                self.query_boolean_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Location => {
-                self.query_location_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Json => {
-                self.query_json_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Blob => {
-                self.query_blob_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-        };
-
-        Ok(Some(SensorData::new(sensor, samples)))
+        }
+        Ok(None)
     }
 
     async fn query_sensor_data_availability(
@@ -1575,9 +1575,9 @@ impl StorageInstance for TimeScaleDBStorage {
             .await?;
 
         // Preserve units and ensure common test units exist
-        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
 
         tx.commit()
@@ -1606,10 +1606,10 @@ impl TimeScaleDBStorage {
 
         let mut guards = Vec::with_capacity(batch.sensors.len());
         for single_sensor_batch in batch.sensors.as_ref() {
-            guards.push((
-                sensor_ids[&single_sensor_batch.sensor.uuid],
-                single_sensor_batch.samples.read().await,
-            ));
+            let sensor_id = *sensor_ids
+                .get(&single_sensor_batch.sensor.uuid)
+                .context("a sensor of the batch was not registered")?;
+            guards.push((sensor_id, single_sensor_batch.samples.read().await));
         }
         let samples: Vec<(i64, &TypedSamples)> = guards
             .iter()
@@ -1679,8 +1679,9 @@ impl TimeScaleDBStorage {
     }
 
     async fn vacuum(&self) -> Result<()> {
+        let mut connection = crate::storage::pg_session::maintenance_connection(&self.pool).await?;
         sqlx::query("VACUUM")
-            .execute(&self.pool)
+            .execute(&mut connection)
             .await
             .context("Failed to vacuum database")?;
 
@@ -1722,7 +1723,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1752,7 +1754,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1784,7 +1787,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1833,7 +1837,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1865,7 +1870,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1914,7 +1920,8 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1929,7 +1936,7 @@ impl TimeScaleDBStorage {
                 #[derive(sqlx::FromRow)]
                 struct Row {
                     bucket_time: sqlx::types::time::OffsetDateTime,
-                    value: rust_decimal::Decimal,
+                    value: String,
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -1946,13 +1953,14 @@ impl TimeScaleDBStorage {
                 .bind(origin_us as f64)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
                     samples.push(Sample {
                         datetime: offset_datetime_to_sensapp(row.bucket_time),
-                        value: row.value,
+                        value: crate::storage::common::numeric_aggregate_from_text(&row.value)?,
                     });
                 }
                 Ok(TypedSamples::Numeric(samples))
@@ -2014,7 +2022,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2024,14 +2032,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<NumericValueRow> = sqlx::query_as(
             r#"
@@ -2052,10 +2054,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value = row.value;
             samples.push(Sample { datetime, value });
         }
@@ -2117,7 +2116,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2127,14 +2126,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<StringValueRow> = sqlx::query_as(
             r#"
@@ -2157,10 +2150,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value = row.string_value;
             samples.push(Sample { datetime, value });
         }
@@ -2175,7 +2165,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2185,14 +2175,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<BooleanValueRow> = sqlx::query_as(
             r#"
@@ -2213,10 +2197,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value = row.value;
             samples.push(Sample { datetime, value });
         }
@@ -2231,7 +2212,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2242,14 +2223,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<LocationValueRow> = sqlx::query_as(
             r#"
@@ -2270,10 +2245,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value = geo::Point::new(row.longitude, row.latitude);
             samples.push(Sample { datetime, value });
         }
@@ -2288,7 +2260,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2298,14 +2270,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<JsonValueRow> = sqlx::query_as(
             r#"
@@ -2326,10 +2292,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value: serde_json::Value = row.value;
             samples.push(Sample { datetime, value });
         }
@@ -2344,7 +2307,7 @@ impl TimeScaleDBStorage {
         end_time: Option<i64>,
         limit: Option<usize>,
     ) -> Result<TypedSamples> {
-        use crate::datamodel::{Sample, SensAppDateTime};
+        use crate::datamodel::Sample;
         use smallvec::smallvec;
 
         #[derive(sqlx::FromRow)]
@@ -2354,14 +2317,8 @@ impl TimeScaleDBStorage {
         }
 
         // Convert microsecond timestamps to OffsetDateTime for TimescaleDB queries
-        let start_time_ts = start_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
-        let end_time_ts = end_time.map(|t| {
-            sqlx::types::time::OffsetDateTime::from_unix_timestamp_nanos((t * 1000) as i128)
-                .unwrap_or(sqlx::types::time::OffsetDateTime::UNIX_EPOCH)
-        });
+        let start_time_ts = start_time.map(micros_to_offset_datetime);
+        let end_time_ts = end_time.map(micros_to_offset_datetime);
 
         let rows: Vec<BlobValueRow> = sqlx::query_as(
             r#"
@@ -2382,10 +2339,7 @@ impl TimeScaleDBStorage {
 
         let mut samples = smallvec![];
         for row in rows {
-            // Convert OffsetDateTime back to SensAppDateTime
-            let unix_timestamp =
-                row.time.unix_timestamp() as f64 + (row.time.nanosecond() as f64 / 1_000_000_000.0);
-            let datetime = SensAppDateTime::from_unix_seconds(unix_timestamp);
+            let datetime = offset_datetime_to_sensapp(row.time);
             let value = row.value;
             samples.push(Sample { datetime, value });
         }

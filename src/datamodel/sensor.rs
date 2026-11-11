@@ -1,8 +1,7 @@
 use crate::config;
 
 use super::{SensorType, sensapp_vec::SensAppLabels, unit::Unit};
-use anyhow::{Error, anyhow};
-use cached::macros::cached;
+use anyhow::Error;
 use once_cell::sync::OnceCell;
 use smallvec::SmallVec;
 use std::fmt;
@@ -64,8 +63,24 @@ fn sort_labels(labels: &mut SensAppLabels) {
 ///
 /// Returns:
 /// * `bool`: `true` if any of the special characters are found, `false` otherwise.
+///
+/// NUL (0x00) is refused too: PostgreSQL cannot store it in a text, so every backend refuses it the
+/// same way, with a 400.
 fn contains_special_chars(s: &str) -> bool {
-    s.bytes().any(|b| matches!(b, 11 | 28 | 29 | 30 | 31))
+    s.bytes().any(|b| matches!(b, 0 | 11 | 28 | 29 | 30 | 31))
+}
+
+/// The error of a name, unit or label that holds a character SensApp cannot store. A payload error
+/// (`InvalidDataFormat` is a 400), which shows the start of the text only.
+fn special_chars_error(what: &str, text: &str, sensor: &str) -> Error {
+    crate::storage::StorageError::InvalidDataFormat {
+        message: format!(
+            "the {what} {:?} holds a NUL, a vertical tab or a separator (0x1C to 0x1F)",
+            text.chars().take(64).collect::<String>()
+        ),
+        sensor_context: sensor.chars().take(64).collect(),
+    }
+    .into()
 }
 
 type NameToUuidKey = [u8; 32];
@@ -86,10 +101,12 @@ fn compute_uuid_buffer(
     sorted_labels: &Option<SensAppLabels>,
 ) -> Result<Vec<u8>, Error> {
     if contains_special_chars(name) {
-        return Err(anyhow!(
-            "The name '{}' contains special characters. Please remove them.",
-            name
-        ));
+        return Err(special_chars_error("name", name, name));
+    }
+    if let Some(unit) = unit
+        && contains_special_chars(&unit.name)
+    {
+        return Err(special_chars_error("unit", &unit.name, name));
     }
     let mut buffer_size = name.len()
         + 1 // Record Separator (RS) - ASCII 30 (0x1E)
@@ -104,16 +121,10 @@ fn compute_uuid_buffer(
     if let Some(sorted_labels) = sorted_labels {
         for (key, value) in sorted_labels.iter() {
             if contains_special_chars(key) {
-                return Err(anyhow!(
-                    "The tag key '{}' contains special characters. Please remove them.",
-                    key
-                ));
+                return Err(special_chars_error("label name", key, name));
             }
             if contains_special_chars(value) {
-                return Err(anyhow!(
-                    "The tag value '{}' contains special characters. Please remove them.",
-                    value
-                ));
+                return Err(special_chars_error("label value", value, name));
             }
             buffer_size += key.len()
             + 1 // Unit Separator (US) - ASCII 31 (0x1F)
@@ -143,12 +154,6 @@ fn compute_uuid_buffer(
     Ok(buffer)
 }
 
-#[cached(
-    sync_writes = "default",
-    max_size = 1024,
-    key = "Vec<u8>",
-    convert = { uuid_buffer.clone() }
-)]
 fn uuid_v8_blake3(name: &str, uuid_buffer: Vec<u8>) -> Result<Uuid, Error> {
     // Using a UUID v5 (SHA1) or v3 (MD5) is too easy to implement.
     // It's friday, let's take terrible decisions and use Blake3 instead.
@@ -176,6 +181,20 @@ fn uuid_v8_blake3(name: &str, uuid_buffer: Vec<u8>) -> Result<Uuid, Error> {
     Ok(uuid::Builder::from_custom_bytes(uuid_bytes).into_uuid())
 }
 
+/// A label name given twice to one series, a client error.
+#[derive(Debug, thiserror::Error)]
+#[error("The label name '{0}' is given more than once")]
+pub struct DuplicateLabelName(pub String);
+
+/// Refuses a label name given twice: the labels are part of the identity of a series, and a
+/// backend would keep either value or fail the write. Expects the labels sorted by name.
+fn check_label_names(sorted_labels: &SensAppLabels) -> Result<(), DuplicateLabelName> {
+    match sorted_labels.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+        Some(pair) => Err(DuplicateLabelName(pair[0].0.clone())),
+        None => Ok(()),
+    }
+}
+
 impl Sensor {
     pub fn new(
         uuid: Uuid,
@@ -201,6 +220,25 @@ impl Sensor {
         }
     }
 
+    /// The UUID that `new_without_uuid` gives to a sensor with this name, type, unit and labels.
+    /// It is a keyed hash that includes the name, so a name cannot be claimed for a UUID that was
+    /// not derived from it. Fails on what `new_without_uuid` refuses: a NUL or a separator byte in
+    /// the name, the unit or a label, and a label name given twice.
+    pub fn derived_uuid(&self) -> Result<Uuid, Error> {
+        let mut labels = self.labels.clone();
+        sort_labels(&mut labels);
+        check_label_names(&labels)?;
+        let labels = (!labels.is_empty()).then_some(labels);
+        let buffer = compute_uuid_buffer(&self.name, &self.sensor_type, &self.unit, &labels)?;
+        uuid_v8_blake3(&self.name, buffer)
+    }
+
+    /// Refuse a sensor that `new_without_uuid` would: `Sensor::new` takes whatever it is given, and
+    /// a name, a unit or a label with a NUL would reach the database.
+    pub fn validate(&self) -> Result<(), Error> {
+        self.derived_uuid().map(|_| ())
+    }
+
     pub fn new_without_uuid(
         name: String,
         sensor_type: SensorType,
@@ -211,6 +249,7 @@ impl Sensor {
             None => None,
             Some(mut labels) => {
                 sort_labels(&mut labels);
+                check_label_names(&labels)?;
                 Some(labels)
             }
         };
@@ -233,6 +272,21 @@ mod tests {
     use crate::config::load_configuration;
 
     use super::*;
+
+    #[test]
+    fn test_a_label_name_given_twice_is_refused() {
+        _ = crate::config::load_configuration_for_tests();
+        let labels: SensAppLabels = smallvec::smallvec![
+            ("host".to_string(), "b".to_string()),
+            ("region".to_string(), "x".to_string()),
+            ("host".to_string(), "a".to_string()),
+        ];
+        let error =
+            Sensor::new_without_uuid("cpu".to_string(), SensorType::Float, None, Some(labels))
+                .unwrap_err();
+        assert!(error.is::<DuplicateLabelName>(), "{error}");
+        assert!(error.to_string().contains("'host'"), "{error}");
+    }
 
     #[test]
     fn test_sort_labels() {

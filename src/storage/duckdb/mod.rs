@@ -1,5 +1,5 @@
 use crate::datamodel::batch::Batch;
-use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+use crate::datamodel::sensapp_datetime::{SensAppDateTimeExt, clamp_to_storable_micros};
 use crate::datamodel::sensapp_vec::SensAppLabels;
 use crate::datamodel::unit::Unit;
 use crate::datamodel::{
@@ -16,7 +16,8 @@ use smallvec::smallvec;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 use tokio::task::spawn_blocking;
 use uuid::Uuid;
 
@@ -29,14 +30,91 @@ mod duckdb_publishers;
 mod duckdb_registration;
 mod selector;
 
+/// DuckDB runs several connections of one database in one process. Every write goes through one
+/// connection, so writes never conflict with each other, and reads use connections of their own,
+/// so they do not wait for a write, a deduplication or a vacuum.
 #[derive(Debug)]
 pub struct DuckDBStorage {
-    connection: Arc<Mutex<Connection>>,
+    writer: Arc<Mutex<Connection>>,
+    readers: Arc<ReaderPool>,
     /// Drop the samples that are stored already when writing, see `duckdb_publishers`
     deduplicate_on_ingest: Arc<AtomicBool>,
 }
 
-const INIT_SQL: &str = include_str!("./migrations/20240223133248_init.sql");
+/// The schema, one step per version. A step runs once per database, in a transaction, and its
+/// version is recorded in `schema_version`. The first step creates the tables with
+/// `IF NOT EXISTS`, so a database made before the tracking takes it without change.
+const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("./migrations/20240223133248_init.sql"))];
+
+/// Idle read connections kept for the next reads; more are opened when needed.
+const MAX_IDLE_READERS: usize = 16;
+
+const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Read connections, cloned from the database's first connection.
+#[derive(Debug)]
+struct ReaderPool {
+    origin: Mutex<Connection>,
+    idle: Mutex<Vec<Connection>>,
+}
+
+impl ReaderPool {
+    /// An idle connection, or a new one. Blocking: call it in `spawn_blocking`.
+    fn get(self: &Arc<Self>) -> Result<ReadConnection> {
+        let idle = lock(&self.idle).pop();
+        let connection = match idle {
+            Some(connection) => connection,
+            None => lock(&self.origin)
+                .try_clone()
+                .context("Failed to open a DuckDB read connection")?,
+        };
+        Ok(ReadConnection {
+            connection: Some(connection),
+            pool: Arc::clone(self),
+        })
+    }
+}
+
+/// A read connection, given back to its pool when dropped.
+struct ReadConnection {
+    connection: Option<Connection>,
+    pool: Arc<ReaderPool>,
+}
+
+impl std::ops::Deref for ReadConnection {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        self.connection
+            .as_ref()
+            .expect("the connection is only taken when dropped")
+    }
+}
+
+impl Drop for ReadConnection {
+    fn drop(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            let mut idle = lock(&self.pool.idle);
+            if idle.len() < MAX_IDLE_READERS {
+                idle.push(connection);
+            }
+        }
+    }
+}
+
+/// Set when the request that waits for a write is dropped (a timeout, a client gone): the write
+/// is then skipped when its turn comes instead of committing after the client got an error and
+/// retried.
+struct AbandonOnDrop(Arc<AtomicBool>);
+
+impl Drop for AbandonOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
 
 impl DuckDBStorage {
     pub async fn connect(connection_string: &str) -> Result<Self> {
@@ -46,11 +124,17 @@ impl DuckDBStorage {
             bail!("Invalid connection string, must start with {}", PREFIX);
         }
 
-        let connection = Connection::open(&connection_string[PREFIX.len()..])
+        let writer = Connection::open(&connection_string[PREFIX.len()..])
             .context("Failed to open DuckDB connection")?;
-        let connection = Arc::new(Mutex::new(connection));
+        let origin = writer
+            .try_clone()
+            .context("Failed to open a DuckDB read connection")?;
         Ok(Self {
-            connection,
+            writer: Arc::new(Mutex::new(writer)),
+            readers: Arc::new(ReaderPool {
+                origin: Mutex::new(origin),
+                idle: Mutex::new(Vec::new()),
+            }),
             deduplicate_on_ingest: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -59,18 +143,24 @@ impl DuckDBStorage {
 #[async_trait]
 impl StorageInstance for DuckDBStorage {
     async fn create_or_migrate(&self) -> Result<()> {
-        let connection = self.connection.lock().await;
-        connection
-            .execute_batch(INIT_SQL)
-            .context("Failed to initialise database")?;
-        Ok(())
+        let writer = Arc::clone(&self.writer);
+        spawn_blocking(move || -> Result<()> {
+            let mut connection = lock(&writer);
+            migrate(&mut connection)
+        })
+        .await?
     }
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
-        let connection = Arc::clone(&self.connection);
+        let writer = Arc::clone(&self.writer);
         let bbatch = batch.clone();
         let deduplicate = self.deduplicate_on_ingest.load(Ordering::Relaxed);
+        let abandoned = Arc::new(AtomicBool::new(false));
+        let _abandon_on_drop = AbandonOnDrop(Arc::clone(&abandoned));
         spawn_blocking(move || -> Result<()> {
-            let mut connection = connection.blocking_lock();
+            let mut connection = lock(&writer);
+            if abandoned.load(Ordering::Relaxed) {
+                bail!("The write was abandoned while it waited for the previous writes");
+            }
             let transaction = connection.transaction()?;
             publish_batch(&transaction, bbatch.sensors.as_ref(), deduplicate)?;
             transaction.commit()?;
@@ -81,9 +171,12 @@ impl StorageInstance for DuckDBStorage {
     }
 
     async fn vacuum(&self) -> Result<()> {
-        let connection = self.connection.lock().await;
-        connection.execute("VACUUM ANALYZE", [])?;
-        Ok(())
+        let writer = Arc::clone(&self.writer);
+        spawn_blocking(move || -> Result<()> {
+            lock(&writer).execute("VACUUM ANALYZE", [])?;
+            Ok(())
+        })
+        .await?
     }
 
     async fn set_deduplicate_on_ingest(&self, enabled: bool) -> Result<()> {
@@ -92,9 +185,9 @@ impl StorageInstance for DuckDBStorage {
     }
 
     async fn deduplicate_samples(&self) -> Result<u64> {
-        let connection = Arc::clone(&self.connection);
+        let writer = Arc::clone(&self.writer);
         spawn_blocking(move || -> Result<u64> {
-            let connection = connection.blocking_lock();
+            let connection = lock(&writer);
             // One statement per table. The first row written (the smallest rowid) of each group of
             // equal samples is kept. The table names and the columns come from static lists.
             let mut removed = 0;
@@ -115,15 +208,15 @@ impl StorageInstance for DuckDBStorage {
     }
 
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
-        let connection = Arc::clone(&self.connection);
+        let writer = Arc::clone(&self.writer);
         let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
         let sensor_uuid = parsed_uuid.to_string();
 
         spawn_blocking(move || -> Result<bool> {
-            let mut connection = connection.blocking_lock();
+            let mut connection = lock(&writer);
 
             let sensor_id: Option<i64> = connection
-                .prepare("SELECT sensor_id FROM sensors WHERE CAST(uuid AS TEXT) = ?")?
+                .prepare("SELECT sensor_id FROM sensors WHERE uuid = CAST(? AS UUID)")?
                 .query_row([sensor_uuid.as_str()], |row| row.get(0))
                 .optional()?;
             let Some(sensor_id) = sensor_id else {
@@ -154,19 +247,19 @@ impl StorageInstance for DuckDBStorage {
         start_time: SensAppDateTime,
         end_time: SensAppDateTime,
     ) -> Result<Option<u64>> {
-        let connection = Arc::clone(&self.connection);
+        let writer = Arc::clone(&self.writer);
         let sensor_uuid = Uuid::from_str(sensor_uuid)
             .context("Failed to parse sensor UUID")?
             .to_string();
         // DuckDB stores microsecond timestamps
-        let start_time_us = start_time.to_unix(hifitime::Unit::Microsecond).floor() as i64;
-        let end_time_us = end_time.to_unix(hifitime::Unit::Microsecond).floor() as i64;
+        let start_time_us = clamp_to_storable_micros(start_time.to_unix_microseconds_i64());
+        let end_time_us = clamp_to_storable_micros(end_time.to_unix_microseconds_i64());
 
         spawn_blocking(move || -> Result<Option<u64>> {
-            let connection = connection.blocking_lock();
+            let connection = lock(&writer);
 
             let sensor: Option<(i64, String)> = connection
-                .prepare("SELECT sensor_id, type FROM sensors WHERE CAST(uuid AS TEXT) = ?")?
+                .prepare("SELECT sensor_id, type FROM sensors WHERE uuid = CAST(? AS UUID)")?
                 .query_row([sensor_uuid.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
                 .optional()?;
             let Some((sensor_id, sensor_type_str)) = sensor else {
@@ -207,7 +300,7 @@ impl StorageInstance for DuckDBStorage {
         limit: Option<usize>,
         bookmark: Option<&str>,
     ) -> Result<crate::storage::ListSeriesResult> {
-        let connection = Arc::clone(&self.connection);
+        let connection = Arc::clone(&self.readers);
         let metric_filter = metric_filter.map(str::to_string);
         let bookmark_id = if let Some(bookmark) = bookmark {
             Some(bookmark.parse::<i64>().map_err(|e| {
@@ -226,7 +319,7 @@ impl StorageInstance for DuckDBStorage {
         let fetch_limit = effective_limit.saturating_add(1) as i64;
 
         spawn_blocking(move || -> Result<crate::storage::ListSeriesResult> {
-            let connection = connection.blocking_lock();
+            let connection = connection.get()?;
             let (sql, use_filter, use_bookmark) = match (metric_filter.is_some(), bookmark_id.is_some()) {
                 (true, true) => (
                     r#"
@@ -360,16 +453,20 @@ impl StorageInstance for DuckDBStorage {
     }
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {
-        let connection = Arc::clone(&self.connection);
+        let connection = Arc::clone(&self.readers);
 
         spawn_blocking(move || -> Result<Vec<Metric>> {
-            let connection = connection.blocking_lock();
+            let connection = connection.get()?;
             let mut statement = connection.prepare(
                 r#"
-                SELECT s.name, s.type, u.name, u.description, COUNT(*)
+                SELECT s.name, s.type, MIN(u.name), MIN(u.description),
+                       COUNT(DISTINCT s.sensor_id),
+                       list(DISTINCT lnd.name ORDER BY lnd.name) FILTER (WHERE lnd.name IS NOT NULL)
                 FROM sensors s
                 LEFT JOIN units u ON s.unit = u.id
-                GROUP BY s.name, s.type, u.name, u.description
+                LEFT JOIN labels l ON l.sensor_id = s.sensor_id
+                LEFT JOIN labels_name_dictionary lnd ON l.name = lnd.id
+                GROUP BY s.name, s.type
                 ORDER BY s.name ASC
                 "#,
             )?;
@@ -383,6 +480,16 @@ impl StorageInstance for DuckDBStorage {
                 let unit_name: Option<String> = row.get(2)?;
                 let unit_description: Option<String> = row.get(3)?;
                 let series_count: i64 = row.get(4)?;
+                let label_keys: Vec<String> = match row.get::<_, duckdb::types::Value>(5)? {
+                    duckdb::types::Value::List(keys) => keys
+                        .into_iter()
+                        .filter_map(|key| match key {
+                            duckdb::types::Value::Text(key) => Some(key),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
 
                 let sensor_type = SensorType::from_str(&sensor_type_str).map_err(|e| {
                     anyhow::Error::from(StorageError::invalid_data_format(
@@ -400,7 +507,7 @@ impl StorageInstance for DuckDBStorage {
                     sensor_type,
                     unit,
                     series_count,
-                    Vec::new(),
+                    label_keys,
                 ));
             }
 
@@ -416,22 +523,25 @@ impl StorageInstance for DuckDBStorage {
         end_time: Option<crate::datamodel::SensAppDateTime>,
         limit: Option<usize>,
     ) -> Result<Option<crate::datamodel::SensorData>> {
-        let connection = Arc::clone(&self.connection);
+        let connection = Arc::clone(&self.readers);
+        let Ok(sensor_uuid) = Uuid::from_str(sensor_uuid) else {
+            return Ok(None);
+        };
         let sensor_uuid = sensor_uuid.to_string();
         let start_time_us =
-            start_time.map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
+            start_time.map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
         let end_time_us =
-            end_time.map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
+            end_time.map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
 
         spawn_blocking(move || -> Result<Option<SensorData>> {
-            let connection = connection.blocking_lock();
+            let connection = connection.get()?;
 
             let mut sensor_statement = connection.prepare(
                 r#"
                 SELECT s.sensor_id, CAST(s.uuid AS TEXT) AS uuid, s.name, s.type, u.name, u.description
                 FROM sensors s
                 LEFT JOIN units u ON s.unit = u.id
-                WHERE CAST(s.uuid AS TEXT) = ?
+                WHERE s.uuid = CAST(? AS UUID)
                 "#,
             )?;
 
@@ -486,7 +596,7 @@ impl StorageInstance for DuckDBStorage {
 
             // The window and the limit are applied by the query: a narrow window of a long series
             // does not read the whole series
-            let limit_value = limit.map_or(i64::MAX, |limit| i64::try_from(limit).unwrap_or(i64::MAX));
+            let limit_value = i64::try_from(limit.unwrap_or(super::DEFAULT_QUERY_LIMIT)).unwrap_or(i64::MAX);
 
             let samples = match sensor.sensor_type {
                 SensorType::Integer => {
@@ -497,7 +607,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -521,7 +631,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -546,7 +656,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -600,7 +710,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -624,7 +734,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -649,7 +759,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -674,7 +784,7 @@ impl StorageInstance for DuckDBStorage {
                         WHERE sensor_id = ?1
                         AND (?2 IS NULL OR timestamp_us >= make_timestamp(?2))
                         AND (?3 IS NULL OR timestamp_us <= make_timestamp(?3))
-                        ORDER BY timestamp_us ASC
+                        ORDER BY timestamp_us ASC, rowid ASC
                         LIMIT ?4
                         "#,
                     )?;
@@ -705,12 +815,12 @@ impl StorageInstance for DuckDBStorage {
         options.validate()?;
 
         if let (Some(step_ms), Some(aggregation)) = (options.step_ms, options.aggregation) {
-            let connection = Arc::clone(&self.connection);
+            let connection = Arc::clone(&self.readers);
             let sensor_uuid = sensor_uuid.to_string();
             let options = options.clone();
 
             let aggregated = spawn_blocking(move || -> Result<Option<SensorData>> {
-                let connection = connection.blocking_lock();
+                let connection = connection.get()?;
 
                 let Some((sensor_id, mut sensor)) =
                     duckdb_get_sensor_metadata(&connection, &sensor_uuid)?
@@ -720,10 +830,10 @@ impl StorageInstance for DuckDBStorage {
 
                 let start_time_us = options
                     .start_time
-                    .map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
+                    .map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
                 let end_time_us = options
                     .end_time
-                    .map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
+                    .map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
                 let origin_us = start_time_us.unwrap_or(0);
 
                 let samples = match sensor.sensor_type {
@@ -812,15 +922,15 @@ impl StorageInstance for DuckDBStorage {
         start_time: Option<SensAppDateTime>,
         end_time: Option<SensAppDateTime>,
     ) -> Result<Option<SensorData>> {
-        let connection = Arc::clone(&self.connection);
+        let connection = Arc::clone(&self.readers);
         let sensor_uuid_owned = sensor_uuid.to_string();
         let start_time_us =
-            start_time.map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
+            start_time.map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
         let end_time_us =
-            end_time.map(|time| time.to_unix(hifitime::Unit::Microsecond).floor() as i64);
+            end_time.map(|time| clamp_to_storable_micros(time.to_unix_microseconds_i64()));
 
         let latest_timestamp_us = spawn_blocking(move || -> Result<Option<i64>> {
-            let connection = connection.blocking_lock();
+            let connection = connection.get()?;
             let Some((sensor_id, sensor)) =
                 duckdb_get_sensor_metadata(&connection, &sensor_uuid_owned)?
             else {
@@ -861,13 +971,13 @@ impl StorageInstance for DuckDBStorage {
         end_time: SensAppDateTime,
         step_ms: Option<i64>,
     ) -> Result<Option<SensorAvailabilitySummary>> {
-        let connection = Arc::clone(&self.connection);
+        let connection = Arc::clone(&self.readers);
         let sensor_uuid_owned = sensor_uuid.to_string();
-        let start_time_us = start_time.to_unix(hifitime::Unit::Microsecond).floor() as i64;
-        let end_time_us = end_time.to_unix(hifitime::Unit::Microsecond).floor() as i64;
+        let start_time_us = clamp_to_storable_micros(start_time.to_unix_microseconds_i64());
+        let end_time_us = clamp_to_storable_micros(end_time.to_unix_microseconds_i64());
 
         spawn_blocking(move || -> Result<Option<SensorAvailabilitySummary>> {
-            let connection = connection.blocking_lock();
+            let connection = connection.get()?;
             let Some((sensor_id, sensor)) =
                 duckdb_get_sensor_metadata(&connection, &sensor_uuid_owned)?
             else {
@@ -950,61 +1060,98 @@ impl StorageInstance for DuckDBStorage {
     }
 
     async fn health_check(&self) -> Result<()> {
-        let connection = self.connection.lock().await;
-        connection
-            .execute("SELECT 1", [])
-            .context("DuckDB health check failed")?;
-        Ok(())
+        let readers = Arc::clone(&self.readers);
+        let check = spawn_blocking(move || -> Result<()> {
+            readers
+                .get()?
+                .execute("SELECT 1", [])
+                .context("DuckDB health check failed")?;
+            Ok(())
+        });
+        tokio::time::timeout(HEALTH_CHECK_TIMEOUT, check)
+            .await
+            .context("DuckDB health check timed out")??
     }
 
     /// Clean up all test data from the database (DuckDB implementation)
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {
         // DuckDB implementation - delete all data from tables
-        let connection = self.connection.lock().await;
+        let writer = Arc::clone(&self.writer);
+        spawn_blocking(move || -> Result<()> {
+            let connection = lock(&writer);
 
-        // Delete all value tables
-        connection.execute("DELETE FROM blob_values", []).ok();
-        connection.execute("DELETE FROM json_values", []).ok();
-        connection.execute("DELETE FROM location_values", []).ok();
-        connection.execute("DELETE FROM boolean_values", []).ok();
-        connection.execute("DELETE FROM string_values", []).ok();
-        connection.execute("DELETE FROM float_values", []).ok();
-        connection.execute("DELETE FROM numeric_values", []).ok();
-        connection.execute("DELETE FROM integer_values", []).ok();
+            // Delete all value tables
+            connection.execute("DELETE FROM blob_values", []).ok();
+            connection.execute("DELETE FROM json_values", []).ok();
+            connection.execute("DELETE FROM location_values", []).ok();
+            connection.execute("DELETE FROM boolean_values", []).ok();
+            connection.execute("DELETE FROM string_values", []).ok();
+            connection.execute("DELETE FROM float_values", []).ok();
+            connection.execute("DELETE FROM numeric_values", []).ok();
+            connection.execute("DELETE FROM integer_values", []).ok();
 
-        // Delete metadata tables
-        connection.execute("DELETE FROM labels", []).ok();
-        connection.execute("DELETE FROM sensors", []).ok();
-        connection
-            .execute("DELETE FROM strings_values_dictionary", [])
-            .ok();
-        connection
-            .execute("DELETE FROM labels_description_dictionary", [])
-            .ok();
-        connection
-            .execute("DELETE FROM labels_name_dictionary", [])
-            .ok();
-        connection.execute("DELETE FROM units", []).ok();
+            // Delete metadata tables
+            connection.execute("DELETE FROM labels", []).ok();
+            connection.execute("DELETE FROM sensors", []).ok();
+            connection
+                .execute("DELETE FROM strings_values_dictionary", [])
+                .ok();
+            connection
+                .execute("DELETE FROM labels_description_dictionary", [])
+                .ok();
+            connection
+                .execute("DELETE FROM labels_name_dictionary", [])
+                .ok();
+            connection.execute("DELETE FROM units", []).ok();
 
-        Ok(())
+            Ok(())
+        })
+        .await?
     }
+}
+
+/// Runs the steps of `MIGRATIONS` that the database has not run yet.
+fn migrate(connection: &mut Connection) -> Result<()> {
+    connection
+        .execute_batch("CREATE TABLE IF NOT EXISTS schema_version (version BIGINT NOT NULL)")
+        .context("Failed to create the schema_version table")?;
+    let current: i64 = connection
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )
+        .context("Failed to read the schema version")?;
+    for (version, sql) in MIGRATIONS.iter().filter(|(version, _)| *version > current) {
+        let transaction = connection.transaction()?;
+        transaction
+            .execute_batch(sql)
+            .with_context(|| format!("Failed to migrate the database to version {version}"))?;
+        transaction.execute("INSERT INTO schema_version (version) VALUES (?)", [version])?;
+        transaction.commit()?;
+    }
+    Ok(())
 }
 
 fn duckdb_get_sensor_metadata(
     connection: &Connection,
     sensor_uuid: &str,
 ) -> Result<Option<(i64, Sensor)>> {
+    let Ok(sensor_uuid) = Uuid::from_str(sensor_uuid) else {
+        return Ok(None);
+    };
+    let sensor_uuid = sensor_uuid.to_string();
     let mut sensor_statement = connection.prepare(
         r#"
         SELECT s.sensor_id, CAST(s.uuid AS TEXT) AS uuid, s.name, s.type, u.name, u.description
         FROM sensors s
         LEFT JOIN units u ON s.unit = u.id
-        WHERE CAST(s.uuid AS TEXT) = ?
+        WHERE s.uuid = CAST(? AS UUID)
         "#,
     )?;
 
-    let mut sensor_rows = sensor_statement.query([sensor_uuid])?;
+    let mut sensor_rows = sensor_statement.query([sensor_uuid.as_str()])?;
     let Some(sensor_row) = sensor_rows.next()? else {
         return Ok(None);
     };
@@ -1130,7 +1277,7 @@ fn duckdb_query_availability_summary(
                     COUNT(*) AS sample_count,
                     epoch_us(MIN(timestamp_us)) AS first_sample_at,
                     epoch_us(MAX(timestamp_us)) AS last_sample_at,
-                    NULL AS covered_buckets
+                    CAST(NULL AS BIGINT) AS covered_buckets
                 FROM {table_name}
                 WHERE sensor_id = ?1
                   AND timestamp_us >= make_timestamp(?2)
@@ -1201,6 +1348,7 @@ fn duckdb_first_last_query(
             SELECT
                 time_bucket(INTERVAL '{step_ms} milliseconds', timestamp_us, make_timestamp(?4)) AS bucket_ts,
                 timestamp_us,
+                rowid AS row_id,
                 {value_expression} AS value
             FROM {table_name}
             WHERE sensor_id = ?1
@@ -1212,7 +1360,7 @@ fn duckdb_first_last_query(
                 bucket_ts,
                 timestamp_us AS sample_ts,
                 value,
-                ROW_NUMBER() OVER (PARTITION BY bucket_ts ORDER BY timestamp_us {direction}) AS row_num
+                ROW_NUMBER() OVER (PARTITION BY bucket_ts ORDER BY timestamp_us {direction}, row_id {direction}) AS row_num
             FROM bucketed
         )
         SELECT epoch_us({stamp}) AS timestamp_us, value
@@ -1339,7 +1487,10 @@ fn duckdb_query_integer_samples_aggregated(
             let mut samples = smallvec![];
             while let Some(row) = rows.next()? {
                 let timestamp_us: i64 = row.get(0)?;
-                let value: i64 = row.get(1)?;
+                // The sum of BIGINTs is a HUGEINT
+                let value: i128 = row.get(1)?;
+                let value = i64::try_from(value)
+                    .map_err(|_| crate::storage::common::aggregation_overflow())?;
                 samples.push(Sample {
                     datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
                         timestamp_us,
@@ -1525,8 +1676,11 @@ fn duckdb_query_numeric_samples_aggregated(
             Ok(TypedSamples::Numeric(samples))
         }
         _ => {
+            // As text, the average as `sum/count`: AVG of a DECIMAL is a DOUBLE in DuckDB
             let expression = match aggregation {
-                Aggregation::Avg => "CAST(AVG(value) AS VARCHAR)",
+                Aggregation::Avg => {
+                    "CAST(SUM(value) AS VARCHAR) || '/' || CAST(COUNT(*) AS VARCHAR)"
+                }
                 Aggregation::Min => "CAST(MIN(value) AS VARCHAR)",
                 Aggregation::Max => "CAST(MAX(value) AS VARCHAR)",
                 Aggregation::Sum => "CAST(SUM(value) AS VARCHAR)",
@@ -1539,26 +1693,130 @@ fn duckdb_query_numeric_samples_aggregated(
                 duckdb_group_by_clause()
             );
             let mut statement = connection.prepare(&sql)?;
-            let mut rows = statement.query(duckdb::params![
-                sensor_id,
-                start_time_us,
-                end_time_us,
-                origin_us,
-                limit
-            ])?;
+            let mut rows = statement
+                .query(duckdb::params![
+                    sensor_id,
+                    start_time_us,
+                    end_time_us,
+                    origin_us,
+                    limit
+                ])
+                .map_err(sum_overflow)?;
             let mut samples = smallvec![];
-            while let Some(row) = rows.next()? {
+            while let Some(row) = rows.next().map_err(sum_overflow)? {
                 let timestamp_us: i64 = row.get(0)?;
                 let value: String = row.get(1)?;
                 samples.push(Sample {
                     datetime: crate::datamodel::SensAppDateTime::from_unix_microseconds_i64(
                         timestamp_us,
                     ),
-                    value: Decimal::from_str(&value)
-                        .context("Failed to parse DuckDB aggregated numeric value")?,
+                    value: crate::storage::common::numeric_aggregate_from_text(&value)?,
                 });
             }
             Ok(TypedSamples::Numeric(samples))
         }
+    }
+}
+
+/// DuckDB fails with "Overflow in SUM" when the sum of DECIMALs leaves DECIMAL(38): an error of
+/// the request, as on the other backends.
+fn sum_overflow(error: duckdb::Error) -> anyhow::Error {
+    if error.to_string().contains("Overflow in SUM") {
+        crate::storage::common::aggregation_overflow()
+    } else {
+        error.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::datamodel::batch::SingleSensorBatch;
+    use crate::datamodel::sensapp_vec::SensAppVec;
+
+    async fn storage() -> DuckDBStorage {
+        _ = crate::config::load_configuration_for_tests();
+        let storage = DuckDBStorage::connect("duckdb://:memory:").await.unwrap();
+        storage.create_or_migrate().await.unwrap();
+        storage
+    }
+
+    fn batch(name: &str) -> (Arc<Batch>, String) {
+        let sensor = Arc::new(
+            Sensor::new_without_uuid(name.to_string(), SensorType::Integer, None, None).unwrap(),
+        );
+        let mut sensors = SensAppVec::new();
+        sensors.push(SingleSensorBatch::new(
+            sensor.clone(),
+            TypedSamples::Integer(smallvec![Sample {
+                datetime: SensAppDateTime::from_unix_seconds(1.0),
+                value: 1,
+            }]),
+        ));
+        (Arc::new(Batch::new(sensors)), sensor.uuid.to_string())
+    }
+
+    #[tokio::test]
+    // The writer is held on purpose, as a long write would
+    #[allow(clippy::await_holding_lock)]
+    async fn reads_and_the_health_check_do_not_wait_for_the_writer() {
+        let storage = storage().await;
+        let (batch, uuid) = batch("read_while_writing");
+        storage.publish(batch).await.unwrap();
+
+        let _writing = lock(&storage.writer);
+        let read = tokio::time::timeout(
+            Duration::from_secs(2),
+            storage.query_sensor_data(&uuid, None, None, None),
+        )
+        .await
+        .expect("the read waited for the writer");
+        assert!(read.unwrap().is_some());
+        tokio::time::timeout(Duration::from_secs(2), storage.health_check())
+            .await
+            .expect("the health check waited for the writer")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    // The writer is held on purpose, as a long write would
+    #[allow(clippy::await_holding_lock)]
+    async fn a_write_abandoned_while_it_waits_is_not_committed() {
+        let storage = storage().await;
+        let (batch, uuid) = batch("abandoned");
+
+        let writing = lock(&storage.writer);
+        let publish = tokio::time::timeout(Duration::from_millis(100), storage.publish(batch));
+        assert!(publish.await.is_err(), "the publish should time out");
+        drop(writing);
+
+        // The abandoned write gets the writer now, and must not commit
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            storage
+                .query_sensor_data(&uuid, None, None, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn each_migration_runs_once() {
+        let storage = storage().await;
+        storage.create_or_migrate().await.unwrap();
+        let versions: Vec<i64> = {
+            let connection = lock(&storage.writer);
+            let mut statement = connection
+                .prepare("SELECT version FROM schema_version ORDER BY version")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let expected: Vec<i64> = MIGRATIONS.iter().map(|(version, _)| *version).collect();
+        assert_eq!(versions, expected);
     }
 }

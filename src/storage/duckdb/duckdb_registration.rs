@@ -12,15 +12,17 @@
 //! so no other writer of this process runs at the same time.
 
 use crate::datamodel::Sensor;
+use crate::storage::common::{check_sensor_identity, unique_sensors};
 use anyhow::{Result, bail};
 use duckdb::{Connection, params, params_from_iter};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use uuid::Uuid;
 
 /// How many keys one `IN (...)` lookup carries.
 const LOOKUP_CHUNK: usize = 500;
 
-/// The sensor ids of the given sensors, creating the ones that do not exist.
+/// The sensor ids of the given sensors, creating the ones that do not exist. A sensor that exists
+/// must have the stored type, see `check_sensor_identity`.
 ///
 /// The labels of an existing sensor are left as they are: they are written when the sensor is
 /// created.
@@ -28,19 +30,11 @@ pub fn register_sensors(
     connection: &Connection,
     sensors: &[&Sensor],
 ) -> Result<HashMap<Uuid, i64>> {
-    let mut unique: HashMap<Uuid, &Sensor> = HashMap::with_capacity(sensors.len());
-    for sensor in sensors {
-        unique.entry(sensor.uuid).or_insert(sensor);
-    }
+    let unique = unique_sensors(sensors)?;
+    let mut ids = existing_sensor_ids(connection, &unique)?;
 
-    let uuids: Vec<String> = unique.keys().map(Uuid::to_string).collect();
-    let mut ids: HashMap<Uuid, i64> =
-        fetch_ids(connection, "sensors", "uuid", "sensor_id", &uuids)?
-            .into_iter()
-            .map(|(uuid, id)| Ok((Uuid::parse_str(&uuid)?, id)))
-            .collect::<Result<_>>()?;
-
-    let mut missing: Vec<&Sensor> = unique
+    // In UUID order, from the BTreeMap
+    let missing: Vec<&Sensor> = unique
         .values()
         .filter(|sensor| !ids.contains_key(&sensor.uuid))
         .copied()
@@ -48,7 +42,6 @@ pub fn register_sensors(
     if missing.is_empty() {
         return Ok(ids);
     }
-    missing.sort_by_key(|sensor| sensor.uuid);
 
     let unit_ids = ensure_units(connection, &missing)?;
     let label_names = ensure_dictionary(
@@ -81,10 +74,17 @@ pub fn register_sensors(
             appender.add_column(column)?;
         }
         for sensor in &missing {
-            let unit_id: Option<i64> = sensor
-                .unit
-                .as_ref()
-                .and_then(|unit| unit_ids.get(&unit.name).copied());
+            let unit_id: Option<i64> = match &sensor.unit {
+                None => None,
+                Some(unit) => match unit_ids.get(&unit.name) {
+                    Some(id) => Some(*id),
+                    None => bail!(
+                        "the unit {} of sensor {} was not registered",
+                        unit.name,
+                        sensor.uuid
+                    ),
+                },
+            };
             appender.append_row(params![
                 sensor.uuid.to_string(),
                 sensor.name,
@@ -110,16 +110,53 @@ pub fn register_sensors(
                 bail!("sensor {} was not created", sensor.uuid);
             };
             for (name, description) in sensor.labels.iter() {
-                appender.append_row(params![
-                    sensor_id,
-                    label_names[name.as_str()],
-                    label_descriptions[description.as_str()]
-                ])?;
+                let (Some(name_id), Some(description_id)) = (
+                    label_names.get(name.as_str()),
+                    label_descriptions.get(description.as_str()),
+                ) else {
+                    bail!(
+                        "the label {name} of sensor {} was not registered",
+                        sensor.uuid
+                    );
+                };
+                appender.append_row(params![sensor_id, name_id, description_id])?;
             }
         }
         appender.flush()?;
     }
 
+    Ok(ids)
+}
+
+/// The ids of the stored sensors among `sensors`, after checking that each has the stored name and
+/// type.
+fn existing_sensor_ids(
+    connection: &Connection,
+    sensors: &BTreeMap<Uuid, &Sensor>,
+) -> Result<HashMap<Uuid, i64>> {
+    let uuids: Vec<String> = sensors.keys().map(Uuid::to_string).collect();
+    let mut ids = HashMap::with_capacity(uuids.len());
+    for chunk in uuids.chunks(LOOKUP_CHUNK) {
+        let placeholders = vec!["?"; chunk.len()].join(", ");
+        let sql = format!(
+            "SELECT CAST(uuid AS VARCHAR), sensor_id, type FROM sensors \
+             WHERE uuid IN ({placeholders})"
+        );
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(chunk.iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (uuid, sensor_id, sensor_type) = row?;
+            let uuid = Uuid::parse_str(&uuid)?;
+            check_sensor_identity(sensors[&uuid], &sensor_type)?;
+            ids.insert(uuid, sensor_id);
+        }
+    }
     Ok(ids)
 }
 
@@ -242,7 +279,9 @@ mod tests {
 
     fn connection() -> Connection {
         let connection = Connection::open_in_memory().unwrap();
-        connection.execute_batch(super::super::INIT_SQL).unwrap();
+        connection
+            .execute_batch(super::super::MIGRATIONS[0].1)
+            .unwrap();
         connection
     }
 

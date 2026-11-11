@@ -25,7 +25,11 @@ pub fn sensor_data_to_timeseries(sensor_data: &SensorData) -> Option<TimeSeries>
     // Build labels from sensor name and labels
     let labels = build_prometheus_labels(&sensor_data.sensor);
 
-    Some(TimeSeries { labels, samples })
+    Some(TimeSeries {
+        labels,
+        samples,
+        ..Default::default()
+    })
 }
 
 /// Builds Prometheus labels from a SensApp Sensor.
@@ -37,7 +41,7 @@ pub fn sensor_data_to_timeseries(sensor_data: &SensorData) -> Option<TimeSeries>
 /// * `sensor` - The SensApp sensor to extract labels from
 ///
 /// # Returns
-/// A vector of Prometheus Label structs, sorted by name with `__name__` first.
+/// A vector of Prometheus Label structs, sorted by name in byte order.
 pub fn build_prometheus_labels(sensor: &crate::datamodel::Sensor) -> Vec<Label> {
     let mut labels = Vec::with_capacity(1 + sensor.labels.len());
 
@@ -47,15 +51,17 @@ pub fn build_prometheus_labels(sensor: &crate::datamodel::Sensor) -> Vec<Label> 
         value: sensor.name.clone(),
     });
 
-    // Add all other labels
-    for (key, value) in sensor.labels.iter() {
+    // Add all other labels. Remote write stored `__name__` among the labels before 0.5: the name
+    // of the sensor is the one that counts
+    for (key, value) in sensor.labels.iter().filter(|(key, _)| key != "__name__") {
         labels.push(Label {
             name: key.clone(),
             value: value.clone(),
         });
     }
 
-    // Sort labels by name (Prometheus convention, __name__ will sort first due to underscore)
+    // Sort labels by name, byte order like Prometheus: `__name__` is not always first, as
+    // uppercase letters sort before `_`
     labels.sort_by(|a, b| a.name.cmp(&b.name));
 
     labels
@@ -126,7 +132,8 @@ fn typed_samples_to_prom_samples(typed_samples: &TypedSamples) -> Option<Vec<Pro
 /// Unix timestamp in milliseconds (i64)
 #[inline]
 pub(crate) fn datetime_to_millis(datetime: &crate::datamodel::SensAppDateTime) -> i64 {
-    (datetime.to_unix_milliseconds()).floor() as i64
+    use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
+    datetime.to_unix_milliseconds_i64()
 }
 
 #[cfg(test)]

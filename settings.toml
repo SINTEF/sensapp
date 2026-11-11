@@ -26,10 +26,13 @@ storage_connection_string = "postgres://postgres:postgres@localhost:5432/sensapp
 # Sentry DSN for error tracking (leave commented to disable)
 # sentry_dsn = "https://your-dsn@your-sentry-instance/project-id"
 
-# JWT Authentication (optional)
-# Set to a random string of at least 32 characters to enable JWT auth.
-# When unset, all endpoints are open (default — like Prometheus).
+# JWT Authentication
+# A random string of at least 32 characters (`sensapp generate-secret` makes one) that signs the tokens.
+# When unset, SensApp is not open: on a loopback address it makes a secret for the run and prints an
+# admin token, on any other address it refuses to start, unless auth_disabled is true.
+# See docs/JWT_AUTH.md.
 # jwt_secret = "change-me-to-a-real-secret-at-least-32-chars"
+# auth_disabled = false
 
 # InfluxDB Configuration
 # Use Numeric/Decimal (high precision) for InfluxDB numeric values instead of Float (default: false)

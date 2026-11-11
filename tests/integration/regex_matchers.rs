@@ -300,3 +300,126 @@ fn collect_cores(value: &serde_json::Value, found: &mut BTreeSet<String>) {
         _ => {}
     }
 }
+
+/// A regex means the same on every backend, and the same as in Prometheus, which anchors it as
+/// `^(?s:pattern)$`: `.` matches a newline too. PostgreSQL did, the RE2 and Rust backends did not.
+#[tokio::test]
+#[serial]
+async fn regexes_mean_the_same_on_every_backend() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let storage = test_db.storage();
+    let run = Uuid::new_v4().to_string();
+    let mut batch_builder = BatchBuilder::new()?;
+    for (index, core) in ["a\nb", "a b", "ab", "42"].into_iter().enumerate() {
+        let labels: SensAppLabels = [
+            ("run".to_string(), run.clone()),
+            ("core".to_string(), core.to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let sensor =
+            Sensor::new_without_uuid(format!("rx_{index}"), SensorType::Float, None, Some(labels))?;
+        let samples = TypedSamples::Float(
+            vec![Sample {
+                datetime: hifitime::Epoch::from_unix_seconds(1_704_067_200.0),
+                value: 1.0,
+            }]
+            .into(),
+        );
+        batch_builder.add(Arc::new(sensor), samples).await?;
+    }
+    batch_builder.send_what_is_left(storage.clone()).await?;
+
+    let select = |pattern: &str| {
+        let matchers = vec![
+            LabelMatcher::eq("run", run.clone()),
+            LabelMatcher::try_new(
+                "core",
+                pattern,
+                sensapp::storage::query::MatcherType::RegexMatch,
+            )
+            .expect("a supported regex"),
+        ];
+        let storage = storage.clone();
+        let pattern = pattern.to_string();
+        async move {
+            let by_labels: BTreeSet<String> = storage
+                .query_sensors_by_labels(&matchers, None, None, Some(1), false)
+                .await?
+                .iter()
+                .flat_map(|data| data.sensor.labels.iter())
+                .filter(|(name, _)| name == "core")
+                .map(|(_, value)| value.clone())
+                .collect();
+            let by_selector: BTreeSet<String> = storage
+                .query_selector(&matchers, None, None, false, 1000, 1_000_000)
+                .await?
+                .expect("within limits")
+                .iter()
+                .flat_map(|data| data.sensor.labels.iter())
+                .filter(|(name, _)| name == "core")
+                .map(|(_, value)| value.clone())
+                .collect();
+            assert_eq!(by_labels, by_selector, "{pattern}");
+            anyhow::Ok(by_labels)
+        }
+    };
+    let set = |values: &[&str]| {
+        values
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<BTreeSet<_>>()
+    };
+
+    assert_eq!(select("a.b").await?, set(&["a\nb", "a b"]));
+    assert_eq!(select("(?i)A.B").await?, set(&["a\nb", "a b"]));
+    assert_eq!(select(r"\d+").await?, set(&["42"]));
+    assert_eq!(select("[[:digit:]]{2}").await?, set(&["42"]));
+    assert_eq!(select(r"a\sb").await?, set(&["a\nb", "a b"]));
+    assert_eq!(select("(?:a|4)(?:b|2)").await?, set(&["ab", "42"]));
+    Ok(())
+}
+
+/// A regex that Prometheus refuses, or that PostgreSQL would read otherwise than RE2 does, is a
+/// 400 on every read that takes a selector. It reached the database before: a 500, or another
+/// answer than the one asked for.
+#[tokio::test]
+#[serial]
+async fn unsupported_regexes_are_refused() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    let app = TestApp::new(test_db.storage()).await;
+    for pattern in [
+        // Unbalanced: anchored as `^(?:a)|(b)$`, which is not anchored
+        "a)|(b",
+        // A back-reference and a lookahead: not RE2
+        r"(a)\1",
+        "(?=a)a",
+        // A word boundary in RE2, a backspace in PostgreSQL
+        r"\bc7",
+        // Unicode classes and inline flags PostgreSQL does not have, or reads otherwise
+        r"\p{L}+",
+        "(?-i)c7",
+        "(?m)c7",
+        "(?x)c7 # comment",
+        "c(?i)7",
+        "(?P<core>c7)",
+        // Exactly two hex digits in RE2, as many as there are in PostgreSQL
+        r"\x41B",
+    ] {
+        let selector = format!(r#"{{core=~"{}"}}"#, pattern.replace('\\', r"\\"));
+        for path in ["/series?selector=", "/api/v1/query?query="] {
+            let response = app
+                .get(&format!("{path}{}", urlencoding::encode(&selector)))
+                .await?;
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::BAD_REQUEST,
+                "{path} {pattern}: {}",
+                response.body()
+            );
+        }
+    }
+    Ok(())
+}

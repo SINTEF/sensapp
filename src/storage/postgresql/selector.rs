@@ -146,7 +146,7 @@ impl PostgresStorage {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
 
         macro_rules! fetch {
-            ($value:ty, $variant:ident) => {{
+            ($value:ty, $variant:ident, $convert:expr) => {{
                 #[derive(sqlx::FromRow)]
                 struct Row {
                     sensor_id: i64,
@@ -161,16 +161,18 @@ impl PostgresStorage {
                     .bind(origin_us)
                     .bind(limit)
                     .fetch_all(&self.pool)
-                    .await?;
+                    .await
+                    .map_err(crate::storage::common::sql_sum_overflow)?;
                 let mut result: HashMap<i64, TypedSamples> = HashMap::new();
                 for row in rows {
                     if let TypedSamples::$variant(samples) = result
                         .entry(row.sensor_id)
                         .or_insert_with(|| empty_samples(SensorType::$variant))
                     {
+                        let convert: fn($value) -> Result<_> = $convert;
                         samples.push(Sample {
                             datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
-                            value: row.value,
+                            value: convert(row.value)?,
                         });
                     }
                 }
@@ -179,9 +181,11 @@ impl PostgresStorage {
         }
 
         Ok(match aggregated_kind(sensor_type, read.aggregation) {
-            AggregatedKind::Integer => fetch!(i64, Integer),
-            AggregatedKind::Float => fetch!(f64, Float),
-            AggregatedKind::Numeric => fetch!(rust_decimal::Decimal, Numeric),
+            AggregatedKind::Integer => fetch!(i64, Integer, Ok),
+            AggregatedKind::Float => fetch!(f64, Float, Ok),
+            AggregatedKind::Numeric => fetch!(String, Numeric, |value| {
+                crate::storage::common::numeric_aggregate_from_text(&value)
+            }),
         })
     }
 }

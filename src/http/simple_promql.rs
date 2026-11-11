@@ -55,19 +55,22 @@ fn convert_label_match_op(op: rusty_promql_parser::LabelMatchOp) -> MatcherType 
     }
 }
 
-/// Convert PromQL LabelMatcher to SensApp LabelMatcher
-fn convert_label_matcher(m: &rusty_promql_parser::parser::selector::LabelMatcher) -> LabelMatcher {
-    LabelMatcher::new(
+/// Convert PromQL LabelMatcher to SensApp LabelMatcher. An unsupported regex is a 400.
+fn convert_label_matcher(
+    m: &rusty_promql_parser::parser::selector::LabelMatcher,
+) -> Result<LabelMatcher, AppError> {
+    LabelMatcher::try_new(
         m.name.clone(),
         m.value.clone(),
         convert_label_match_op(m.op),
     )
+    .map_err(AppError::bad_request)
 }
 
 /// Extract label matchers from a VectorSelector, including the metric name as __name__
 fn extract_matchers_from_vector_selector(
     selector: &rusty_promql_parser::VectorSelector,
-) -> Vec<LabelMatcher> {
+) -> Result<Vec<LabelMatcher>, AppError> {
     let mut matchers = Vec::new();
 
     // Add metric name as __name__ matcher if present
@@ -77,15 +80,15 @@ fn extract_matchers_from_vector_selector(
 
     // Add all explicit label matchers
     for m in &selector.matchers {
-        matchers.push(convert_label_matcher(m));
+        matchers.push(convert_label_matcher(m)?);
     }
 
-    matchers
+    Ok(matchers)
 }
 
 /// Information extracted from a parsed PromQL query
 #[derive(Debug)]
-struct ParsedQuery {
+pub(crate) struct ParsedQuery {
     matchers: Vec<LabelMatcher>,
     start_time: Option<SensAppDateTime>,
     end_time: Option<SensAppDateTime>,
@@ -121,7 +124,12 @@ fn selector_query(
     selector: &rusty_promql_parser::VectorSelector,
     window_ms: i64,
 ) -> Result<ParsedQuery, AppError> {
-    let matchers = extract_matchers_from_vector_selector(selector);
+    if selector.offset.is_some() || selector.at.is_some() {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "offset and @ are not supported. {SIMPLE_QUERY_HINT}"
+        )));
+    }
+    let matchers = extract_matchers_from_vector_selector(selector)?;
 
     if matchers.is_empty() {
         return Err(AppError::bad_request(anyhow::anyhow!(
@@ -212,20 +220,23 @@ fn parse_expr(ast: Expr, query: &str) -> Result<ParsedQuery, AppError> {
 }
 
 /// Parse and validate a PromQL query, returning the extracted information
-fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
-    let (rest, ast) = expr(query).map_err(|e| {
-        AppError::bad_request(anyhow::anyhow!("Failed to parse PromQL query: {:?}", e))
-    })?;
+pub(crate) fn parse_promql_query(query: &str) -> Result<ParsedQuery, AppError> {
+    super::limits::check_promql_length(query)?;
+    super::limits::on_promql_parser_stack(|| {
+        let (rest, ast) = expr(query).map_err(|e| {
+            AppError::bad_request(anyhow::anyhow!("Failed to parse PromQL query: {:?}", e))
+        })?;
 
-    // Ensure the entire query was consumed
-    if !rest.trim().is_empty() {
-        return Err(AppError::bad_request(anyhow::anyhow!(
-            "Unexpected trailing content in query: '{}'",
-            rest
-        )));
-    }
+        // Ensure the entire query was consumed
+        if !rest.trim().is_empty() {
+            return Err(AppError::bad_request(anyhow::anyhow!(
+                "Unexpected trailing content in query: '{}'",
+                rest
+            )));
+        }
 
-    parse_expr(ast, query)
+        parse_expr(ast, query)
+    })
 }
 
 /// Simple PromQL query endpoint.

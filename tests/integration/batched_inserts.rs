@@ -97,7 +97,6 @@ async fn assert_round_trip(
     storage: &Arc<dyn StorageInstance>,
     sensor_type: SensorType,
     expected: TypedSamples,
-    stored_expected: Option<&TypedSamples>,
 ) -> Result<()> {
     let sensor = Arc::new(Sensor::new_without_uuid(
         format!("batched_inserts_{sensor_type}_{}", Uuid::new_v4()),
@@ -105,7 +104,7 @@ async fn assert_round_trip(
         None,
         None,
     )?);
-    let expected_rows = canonical(stored_expected.unwrap_or(&expected));
+    let expected_rows = canonical(&expected);
 
     let mut batch_builder = BatchBuilder::new()?;
     batch_builder.add(sensor.clone(), expected).await?;
@@ -136,21 +135,18 @@ async fn assert_every_type_round_trips_for_backend(db_type: DatabaseType) -> Res
         &storage,
         SensorType::Integer,
         TypedSamples::Integer(samples_of(n, |i| i as i64 * 3 - 1_000).into()),
-        None,
     )
     .await?;
     assert_round_trip(
         &storage,
         SensorType::Numeric,
         TypedSamples::Numeric(samples_of(n, |i| rust_decimal::Decimal::new(i as i64, 3)).into()),
-        None,
     )
     .await?;
     assert_round_trip(
         &storage,
         SensorType::Float,
         TypedSamples::Float(samples_of(n, |i| i as f64 * 0.5 - 17.25).into()),
-        None,
     )
     .await?;
     // Few distinct strings, repeated many times
@@ -158,14 +154,12 @@ async fn assert_every_type_round_trips_for_backend(db_type: DatabaseType) -> Res
         &storage,
         SensorType::String,
         TypedSamples::String(samples_of(n, |i| format!("state-{}", i % 7)).into()),
-        None,
     )
     .await?;
     assert_round_trip(
         &storage,
         SensorType::Boolean,
         TypedSamples::Boolean(samples_of(n, |i| i % 3 == 0).into()),
-        None,
     )
     .await?;
     // Four columns per row: the widest table, the first one to hit SQLite's variable limit
@@ -178,7 +172,6 @@ async fn assert_every_type_round_trips_for_backend(db_type: DatabaseType) -> Res
             })
             .into(),
         ),
-        None,
     )
     .await?;
     assert_round_trip(
@@ -187,7 +180,6 @@ async fn assert_every_type_round_trips_for_backend(db_type: DatabaseType) -> Res
         TypedSamples::Blob(
             samples_of(n, |i| vec![(i % 256) as u8, (i / 256 % 256) as u8, 0, 255]).into(),
         ),
-        None,
     )
     .await?;
     assert_round_trip(
@@ -200,7 +192,6 @@ async fn assert_every_type_round_trips_for_backend(db_type: DatabaseType) -> Res
             )
             .into(),
         ),
-        None,
     )
     .await?;
 
@@ -219,69 +210,16 @@ async fn assert_small_batches_for_backend(db_type: DatabaseType) -> Result<()> {
             &storage,
             SensorType::Float,
             TypedSamples::Float(samples_of(count, |i| i as f64 + 0.5).into()),
-            None,
         )
         .await?;
         assert_round_trip(
             &storage,
             SensorType::Location,
             TypedSamples::Location(samples_of(count, |i| geo::Point::new(i as f64, 1.0)).into()),
-            None,
         )
         .await?;
     }
     Ok(())
-}
-
-/// SQLite cannot store NaN and Infinity in a REAL column: they are skipped.
-#[cfg(feature = "sqlite")]
-#[tokio::test]
-#[serial]
-async fn sqlite_skips_non_finite_floats() -> Result<()> {
-    let Some(test_db) = open(&DatabaseType::SQLite).await? else {
-        return Ok(());
-    };
-    let storage = test_db.storage();
-
-    let samples = TypedSamples::Float(
-        vec![
-            Sample {
-                datetime: at(0),
-                value: 1.0,
-            },
-            Sample {
-                datetime: at(1),
-                value: f64::NAN,
-            },
-            Sample {
-                datetime: at(2),
-                value: f64::INFINITY,
-            },
-            Sample {
-                datetime: at(3),
-                value: f64::NEG_INFINITY,
-            },
-            Sample {
-                datetime: at(4),
-                value: 2.0,
-            },
-        ]
-        .into(),
-    );
-    let finite = TypedSamples::Float(
-        vec![
-            Sample {
-                datetime: at(0),
-                value: 1.0,
-            },
-            Sample {
-                datetime: at(4),
-                value: 2.0,
-            },
-        ]
-        .into(),
-    );
-    assert_round_trip(&storage, SensorType::Float, samples, Some(&finite)).await
 }
 
 macro_rules! backend_tests {

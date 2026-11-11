@@ -1,8 +1,8 @@
 use super::sqlite_publishers::*;
-use super::sqlite_utilities::{forget_sensor_id, get_sensor_id_or_create_sensor};
+use super::sqlite_utilities::{ensure_string_values, register_sensors};
 use super::storage_query_helpers::{
     sqlite_bucketed_cte, sqlite_first_last_query, sqlite_float_expression, sqlite_group_by_clause,
-    sqlite_integer_expression, sqlite_numeric_expression,
+    sqlite_integer_expression,
 };
 use crate::datamodel::batch::{Batch, SingleSensorBatch};
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
@@ -24,6 +24,7 @@ use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 use sqlx::{Sqlite, Transaction};
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,7 +34,13 @@ use uuid::Uuid;
 // SQLite implementation
 #[derive(Debug)]
 pub struct SqliteStorage {
+    /// The reads
     pub(super) pool: SqlitePool,
+    /// The writes, one connection: SQLite has one writer at a time, so the writers of this
+    /// process wait for their turn in the pool, in order, instead of holding a connection of the
+    /// readers while they wait for the lock (`busy_timeout`). Under 16 writers, a read took 43 ms
+    /// instead of under 1 ms. An in-memory database is one connection's, so it shares `pool`.
+    write_pool: SqlitePool,
     /// Drop the samples that are stored already when writing, see `sqlite_publishers`
     deduplicate_on_ingest: AtomicBool,
 }
@@ -56,12 +63,24 @@ impl SqliteStorage {
             // This registers a regexp() function so we can use `col REGEXP 'pattern'` in SQL
             .with_regexp();
 
-        let pool = sqlx::SqlitePool::connect_with(connect_options)
+        let in_memory =
+            connection_string.contains(":memory:") || connection_string.contains("mode=memory");
+        let pool = sqlx::SqlitePool::connect_with(connect_options.clone())
             .await
             .context("Failed to create sqlite pool")?;
+        let write_pool = if in_memory {
+            pool.clone()
+        } else {
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(connect_options)
+                .await
+                .context("Failed to create the sqlite write pool")?
+        };
 
         Ok(Self {
             pool,
+            write_pool,
             deduplicate_on_ingest: AtomicBool::new(false),
         })
     }
@@ -72,7 +91,7 @@ impl StorageInstance for SqliteStorage {
     async fn create_or_migrate(&self) -> Result<()> {
         // Implement schema creation or migration logic here
         sqlx::migrate!("src/storage/sqlite/migrations")
-            .run(&self.pool)
+            .run(&self.write_pool)
             .await
             .context("Failed to migrate database")?;
 
@@ -83,10 +102,37 @@ impl StorageInstance for SqliteStorage {
         // for each other (the busy timeout). A deferred transaction reads first, and when another
         // writer commits in between, its first write fails at once with "database is locked",
         // whatever the busy timeout.
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.write_pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        // The sensors and the strings of the whole batch are registered first, with a few
+        // statements, see `sqlite_utilities`.
+        let sensors: Vec<&Sensor> = batch
+            .sensors
+            .iter()
+            .map(|single_sensor_batch| single_sensor_batch.sensor.as_ref())
+            .collect();
+        let sensor_ids = register_sensors(&mut transaction, &sensors).await?;
+        let mut strings: BTreeSet<String> = BTreeSet::new();
         for single_sensor_batch in batch.sensors.as_ref() {
-            self.publish_single_sensor_batch(&mut transaction, single_sensor_batch)
-                .await?;
+            if let TypedSamples::String(samples) = &*single_sensor_batch.samples.read().await {
+                strings.extend(samples.iter().map(|sample| sample.value.clone()));
+            }
+        }
+        let string_ids = ensure_string_values(
+            &mut transaction,
+            strings.iter().map(String::as_str).collect(),
+        )
+        .await?;
+
+        for single_sensor_batch in batch.sensors.as_ref() {
+            let sensor_id = sensor_ids[&single_sensor_batch.sensor.uuid];
+            self.publish_single_sensor_batch(
+                &mut transaction,
+                single_sensor_batch,
+                sensor_id,
+                &string_ids,
+            )
+            .await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -95,7 +141,7 @@ impl StorageInstance for SqliteStorage {
     async fn vacuum(&self) -> Result<()> {
         // Vacuum the SQLite database to reclaim space and optimize performance
         sqlx::query("VACUUM")
-            .execute(&self.pool)
+            .execute(&self.write_pool)
             .await
             .context("Failed to vacuum database")?;
         Ok(())
@@ -107,20 +153,30 @@ impl StorageInstance for SqliteStorage {
     }
 
     async fn deduplicate_samples(&self) -> Result<u64> {
-        // One statement per table. The first row written (the smallest rowid) of each group of
-        // equal samples is kept. The table names and the columns come from static lists.
+        // One statement per series, each its own transaction: one statement per table held the
+        // write lock for 0.9 s per million rows, and the writes of other processes fail after
+        // the 5 s of `busy_timeout`. The first row written (the smallest rowid) of each group
+        // of equal samples is kept. The table names and the columns come from static lists.
         let mut removed = 0;
         for table in VALUE_TABLES {
             let columns = crate::storage::common::duplicate_key_columns(table, "timestamp_us");
+            let sensor_ids: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT DISTINCT sensor_id FROM {table}"
+            )))
+            .fetch_all(&self.pool)
+            .await?;
             let sql = format!(
-                "DELETE FROM {table} WHERE rowid NOT IN \
-                   (SELECT MIN(rowid) FROM {table} GROUP BY {columns})"
+                "DELETE FROM {table} WHERE sensor_id = ?1 AND rowid NOT IN \
+                   (SELECT MIN(rowid) FROM {table} WHERE sensor_id = ?1 GROUP BY {columns})"
             );
-            removed += sqlx::query(sqlx::AssertSqlSafe(sql))
-                .execute(&self.pool)
-                .await
-                .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
-                .rows_affected();
+            for sensor_id in sensor_ids {
+                removed += sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                    .bind(sensor_id)
+                    .execute(&self.write_pool)
+                    .await
+                    .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
+                    .rows_affected();
+            }
         }
         Ok(removed)
     }
@@ -131,7 +187,7 @@ impl StorageInstance for SqliteStorage {
         // BEGIN IMMEDIATE takes the write lock up front, so that a concurrent delete waits
         // (up to busy_timeout) instead of failing at once with SQLITE_BUSY_SNAPSHOT: a deferred
         // transaction that reads first cannot be upgraded to a write after another commit.
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.write_pool.begin_with("BEGIN IMMEDIATE").await?;
 
         let sensor_id: Option<i64> =
             sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = ?")
@@ -161,7 +217,6 @@ impl StorageInstance for SqliteStorage {
             .await?;
 
         transaction.commit().await?;
-        forget_sensor_id(&parsed_uuid).await;
         Ok(true)
     }
 
@@ -192,7 +247,7 @@ impl StorageInstance for SqliteStorage {
         .bind(sensor_id)
         .bind(datetime_to_micros(&start_time))
         .bind(datetime_to_micros(&end_time))
-        .execute(&self.pool)
+        .execute(&self.write_pool)
         .await?;
 
         Ok(Some(result.rows_affected()))
@@ -399,16 +454,12 @@ impl StorageInstance for SqliteStorage {
             // Handle series_count - it's already an i64
             let series_count = metrics_row.series_count;
 
-            // Handle label_keys - SQLite uses GROUP_CONCAT which returns a string
-            let label_keys = metrics_row
-                .label_keys
-                .map(|keys| {
-                    keys.as_str()
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .collect()
-                })
-                .unwrap_or_default();
+            // A JSON array, as a label name may hold a comma
+            let label_keys = match metrics_row.label_keys {
+                Some(keys) => serde_json::from_str(&keys)
+                    .context("Failed to parse the label keys of a metric")?,
+                None => Vec::new(),
+            };
 
             let metric = Metric::new(metric_name, sensor_type, unit, series_count, label_keys);
 
@@ -583,7 +634,7 @@ impl StorageInstance for SqliteStorage {
             if let Some((sensor_id, mut sensor)) = self.get_sensor_metadata(sensor_uuid).await? {
                 let start_time_us = options.start_time.as_ref().map(datetime_to_micros);
                 let end_time_us = options.end_time.as_ref().map(datetime_to_micros);
-                let step_us = step_ms * 1000;
+                let step_us = step_ms.checked_mul(1000).context("step is too large")?;
                 let origin_us = start_time_us.unwrap_or(0);
 
                 let samples = match sensor.sensor_type {
@@ -688,97 +739,18 @@ impl StorageInstance for SqliteStorage {
         start_time: Option<SensAppDateTime>,
         end_time: Option<SensAppDateTime>,
     ) -> Result<Option<SensorData>> {
-        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
-            return Ok(None);
-        };
-
-        let start_time_us = start_time.as_ref().map(datetime_to_micros);
-        let end_time_us = end_time.as_ref().map(datetime_to_micros);
-        let table_name = Self::sensor_table_name(sensor.sensor_type);
-
-        let Some(latest_timestamp_us) = self
-            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
-            .await?
-        else {
-            return Ok(None);
-        };
-
-        let samples = match sensor.sensor_type {
-            SensorType::Integer => {
-                self.query_integer_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
+        // A delete between the two statements of a try is not a missing series: try again
+        for _ in 0..crate::storage::common::LATEST_ATTEMPTS {
+            match self
+                .query_sensor_data_latest_once(sensor_uuid, start_time, end_time)
                 .await?
+            {
+                crate::storage::common::LatestRead::Found(data) => return Ok(Some(*data)),
+                crate::storage::common::LatestRead::Nothing => return Ok(None),
+                crate::storage::common::LatestRead::Raced => {}
             }
-            SensorType::Numeric => {
-                self.query_numeric_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Float => {
-                self.query_float_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::String => {
-                self.query_string_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Boolean => {
-                self.query_boolean_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Location => {
-                self.query_location_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Json => {
-                self.query_json_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Blob => {
-                self.query_blob_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-        };
-
-        Ok(Some(SensorData::new(sensor, samples)))
+        }
+        Ok(None)
     }
 
     async fn query_sensor_data_availability(
@@ -909,7 +881,7 @@ impl StorageInstance for SqliteStorage {
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {
         // Use a transaction to ensure atomicity
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.write_pool.begin().await?;
 
         // Step 1: Delete all value tables (they reference sensors but nothing references them)
         sqlx::query("DELETE FROM blob_values")
@@ -978,30 +950,6 @@ impl StorageInstance for SqliteStorage {
         tx.commit()
             .await
             .context("Failed to commit test data cleanup transaction")?;
-
-        // Step 5: Clear all cached function caches
-        // The cached macro generates cache variables named after the function in uppercase
-        use cached::Cached;
-        super::sqlite_utilities::GET_LABEL_NAME_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        super::sqlite_utilities::GET_LABEL_DESCRIPTION_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        super::sqlite_utilities::GET_UNIT_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
-        super::sqlite_utilities::GET_SENSOR_ID_OR_CREATE_SENSOR
-            .write()
-            .await
-            .cache_clear();
-        super::sqlite_utilities::GET_STRING_VALUE_ID_OR_CREATE
-            .write()
-            .await
-            .cache_clear();
 
         Ok(())
     }
@@ -1122,6 +1070,112 @@ impl SqliteStorage {
         }
     }
 
+    async fn query_sensor_data_latest_once(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<crate::storage::common::LatestRead> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(crate::storage::common::LatestRead::Nothing);
+        };
+
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+        let table_name = Self::sensor_table_name(sensor.sensor_type);
+
+        let Some(latest_timestamp_us) = self
+            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+            .await?
+        else {
+            return Ok(crate::storage::common::LatestRead::Nothing);
+        };
+
+        let samples = match sensor.sensor_type {
+            SensorType::Integer => {
+                self.query_integer_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Numeric => {
+                self.query_numeric_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Float => {
+                self.query_float_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::String => {
+                self.query_string_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Boolean => {
+                self.query_boolean_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Location => {
+                self.query_location_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Json => {
+                self.query_json_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Blob => {
+                self.query_blob_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+        };
+
+        // The samples of that time were deleted between the two statements
+        if samples.is_empty() {
+            return Ok(crate::storage::common::LatestRead::Raced);
+        }
+
+        Ok(crate::storage::common::LatestRead::Found(Box::new(
+            SensorData::new(sensor, samples),
+        )))
+    }
+
     async fn query_latest_timestamp_us(
         &self,
         table_name: &'static str,
@@ -1230,9 +1284,9 @@ impl SqliteStorage {
         &self,
         transaction: &mut Transaction<'_, Sqlite>,
         single_sensor_batch: &SingleSensorBatch,
+        sensor_id: i64,
+        string_ids: &HashMap<&str, i64>,
     ) -> Result<()> {
-        let sensor_id =
-            get_sensor_id_or_create_sensor(transaction, &single_sensor_batch.sensor).await?;
         let deduplicate = self.deduplicate_on_ingest.load(Ordering::Relaxed);
         {
             let samples_guard = single_sensor_batch.samples.read().await;
@@ -1247,7 +1301,8 @@ impl SqliteStorage {
                     publish_float_values(transaction, sensor_id, samples, deduplicate).await?;
                 }
                 TypedSamples::String(samples) => {
-                    publish_string_values(transaction, sensor_id, samples, deduplicate).await?;
+                    publish_string_values(transaction, sensor_id, samples, string_ids, deduplicate)
+                        .await?;
                 }
                 TypedSamples::Boolean(samples) => {
                     publish_boolean_values(transaction, sensor_id, samples, deduplicate).await?;
@@ -1286,7 +1341,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1431,7 +1486,8 @@ impl SqliteStorage {
                 .bind(origin_us)
                 .bind(limit)
                 .fetch_all(&self.pool)
-                .await?;
+                .await
+                .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -1523,7 +1579,8 @@ impl SqliteStorage {
                 #[derive(sqlx::FromRow)]
                 struct Row {
                     timestamp_us: i64,
-                    value: f64,
+                    // NULL when the sum or the average of +Inf and -Inf is NaN, which SQLite cannot hold
+                    value: Option<f64>,
                 }
 
                 let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -1545,7 +1602,7 @@ impl SqliteStorage {
                 for row in rows {
                     samples.push(Sample {
                         datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
-                        value: row.value,
+                        value: row.value.unwrap_or(f64::NAN),
                     });
                 }
                 Ok(TypedSamples::Float(samples))
@@ -1554,7 +1611,7 @@ impl SqliteStorage {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn query_numeric_samples_aggregated(
+    pub(super) async fn query_numeric_samples_aggregated(
         &self,
         sensor_id: i64,
         start_time: Option<i64>,
@@ -1622,43 +1679,32 @@ impl SqliteStorage {
                 for row in rows {
                     samples.push(Sample {
                         datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
-                        value: Decimal::from_str(&row.value)
+                        value: Decimal::from_str_exact(&row.value)
                             .context("Failed to parse aggregated SQLite numeric value")?,
                     });
                 }
                 Ok(TypedSamples::Numeric(samples))
             }
-            _ => {
-                #[derive(sqlx::FromRow)]
-                struct Row {
-                    timestamp_us: i64,
-                    value: String,
+            // SQLite stores the values as text, and its MIN and MAX compare text, its SUM and AVG
+            // go through a float: the buckets are computed here, exactly, from the stored values
+            Aggregation::Min | Aggregation::Max | Aggregation::Sum | Aggregation::Avg => {
+                // `usize::MAX` is a limit of -1 for SQLite: no limit
+                let TypedSamples::Numeric(samples) = self
+                    .query_numeric_samples(sensor_id, start_time, end_time, Some(usize::MAX))
+                    .await?
+                else {
+                    unreachable!("numeric samples")
+                };
+                let mut buckets = crate::storage::common::aggregate_numeric_samples(
+                    &samples,
+                    origin_us,
+                    step_us,
+                    aggregation,
+                )?;
+                if let TypedSamples::Numeric(buckets) = &mut buckets {
+                    buckets.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
                 }
-
-                let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                    "{} SELECT bucket_us AS timestamp_us, CAST({} AS TEXT) AS value {}",
-                    sqlite_bucketed_cte("numeric_values"),
-                    sqlite_numeric_expression(aggregation),
-                    sqlite_group_by_clause()
-                )))
-                .bind(sensor_id)
-                .bind(start_time)
-                .bind(end_time)
-                .bind(step_us)
-                .bind(origin_us)
-                .bind(limit)
-                .fetch_all(&self.pool)
-                .await?;
-
-                let mut samples = smallvec![];
-                for row in rows {
-                    samples.push(Sample {
-                        datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
-                        value: Decimal::from_str(&row.value)
-                            .context("Failed to parse aggregated SQLite numeric value")?,
-                    });
-                }
-                Ok(TypedSamples::Numeric(samples))
+                Ok(buckets)
             }
         }
     }
@@ -1683,7 +1729,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1697,7 +1743,8 @@ impl SqliteStorage {
         let mut samples = smallvec![];
         for row in rows {
             let datetime = SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us);
-            let value = Decimal::from_str(&row.value).context("Failed to parse decimal value")?;
+            let value =
+                Decimal::from_str_exact(&row.value).context("Failed to parse decimal value")?;
             samples.push(Sample { datetime, value });
         }
 
@@ -1724,7 +1771,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1808,7 +1855,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1850,7 +1897,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1891,7 +1938,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )
@@ -1933,7 +1980,7 @@ impl SqliteStorage {
             WHERE sensor_id = ?
             AND timestamp_us >= COALESCE(?, -9223372036854775807)
             AND timestamp_us <= COALESCE(?, 9223372036854775807)
-            ORDER BY timestamp_us ASC
+            ORDER BY timestamp_us ASC, rowid ASC
             LIMIT ?
             "#,
         )

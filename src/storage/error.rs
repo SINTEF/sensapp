@@ -33,6 +33,38 @@ pub enum StorageError {
     #[error("Metric not found: {metric_name}")]
     MetricNotFound { metric_name: String },
 
+    /// A write names a sensor UUID that is stored, or given in the same batch, with another type.
+    /// The message does not tell the stored type. `SensorTypeConversion` does: a restricted token
+    /// is checked before the storage, so a writer that gets here may write to the series.
+    #[error("Sensor {uuid} exists with another type than {sensor_type}")]
+    SensorIdentityMismatch {
+        uuid: Uuid,
+        /// The type of the write
+        sensor_type: String,
+        /// The type the sensor is stored with, when a storage read it: the writer then converts
+        /// the samples to it if every value converts exactly (`BatchBuilder`)
+        stored_type: Option<String>,
+    },
+
+    /// The samples of a write are not of the type of the stored sensor, and one value does not
+    /// convert to it exactly.
+    #[error(
+        "Sensor {uuid} is stored as {stored_type} and cannot take {sensor_type} samples: {reason}"
+    )]
+    SensorTypeConversion {
+        uuid: Uuid,
+        sensor_type: String,
+        stored_type: String,
+        reason: String,
+    },
+
+    /// A new sensor UUID whose 64-bit storage key (ClickHouse, BigQuery) is the key of another
+    /// stored sensor, or of another sensor of the same batch. Such a sensor cannot be stored.
+    #[error(
+        "Sensor {uuid} has the same storage key as another sensor of this database: use another UUID"
+    )]
+    SensorKeyCollision { uuid: Uuid },
+
     /// Configuration error
     #[error("Configuration error: {0}")]
     Configuration(String),

@@ -1,5 +1,5 @@
 use super::app_error::AppError;
-use super::crud::{parse_selector_to_matchers, sensor_matches_matchers};
+use super::crud::{SensorFilter, parse_selector_to_matchers};
 use super::state::HttpServerState;
 use axum::body::Body;
 use axum::extract::{MatchedPath, Query, Request, State};
@@ -64,6 +64,11 @@ struct DataVolumeLabels {
     operation: String,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct DroppedPartLabels {
+    part: String,
+}
+
 pub struct HttpMetrics {
     registry: Registry,
     http_requests_total: Family<HttpRequestLabels, Counter>,
@@ -72,6 +77,7 @@ pub struct HttpMetrics {
     operation_duration_seconds: Family<OperationDurationLabels, Histogram>,
     samples_processed_total: Family<DataVolumeLabels, Counter>,
     series_processed_total: Family<DataVolumeLabels, Counter>,
+    remote_write_dropped_total: Family<DroppedPartLabels, Counter>,
     http_requests_in_flight: Gauge,
     writes_shed_total: Counter,
     uptime_seconds: Gauge,
@@ -145,6 +151,13 @@ impl HttpMetrics {
             series_processed_total.clone(),
         );
 
+        let remote_write_dropped_total = Family::<DroppedPartLabels, Counter>::default();
+        registry.register(
+            "sensapp_prometheus_remote_write_dropped",
+            "Exemplars, native histograms and metadata received by the Prometheus remote write, which SensApp does not store",
+            remote_write_dropped_total.clone(),
+        );
+
         let http_requests_in_flight = Gauge::default();
         registry.register(
             "sensapp_http_requests_in_flight",
@@ -181,6 +194,7 @@ impl HttpMetrics {
             operation_duration_seconds,
             samples_processed_total,
             series_processed_total,
+            remote_write_dropped_total,
             http_requests_in_flight,
             writes_shed_total,
             uptime_seconds,
@@ -270,6 +284,22 @@ impl HttpMetrics {
             .inc_by(series);
     }
 
+    /// Counts the parts of a Prometheus remote write that are not stored: `exemplar`,
+    /// `histogram`, `metadata` or `nan` (a NaN sample).
+    pub fn observe_remote_write_dropped(&self, part: &str, count: usize) {
+        let Ok(count) = u64::try_from(count) else {
+            return;
+        };
+        if count == 0 {
+            return;
+        }
+        self.remote_write_dropped_total
+            .get_or_create(&DroppedPartLabels {
+                part: part.to_string(),
+            })
+            .inc_by(count);
+    }
+
     pub fn increment_in_flight(&self) {
         self.http_requests_in_flight.inc();
     }
@@ -355,8 +385,8 @@ async fn render_latest_sample_metrics(
         return Ok(String::new());
     }
 
-    let label_matchers = match &query.selector {
-        Some(selector) => Some(parse_selector_to_matchers(selector)?),
+    let filter = match &query.selector {
+        Some(selector) => Some(SensorFilter::new(parse_selector_to_matchers(selector)?)?),
         None => None,
     };
 
@@ -379,8 +409,8 @@ async fn render_latest_sample_metrics(
                 continue;
             }
 
-            if let Some(matchers) = &label_matchers
-                && !sensor_matches_matchers(&sensor, matchers)
+            if let Some(filter) = &filter
+                && !filter.matches(&sensor)
             {
                 continue;
             }
@@ -535,26 +565,72 @@ fn format_prometheus_sample_value(value: f64) -> String {
     }
 }
 
+/// The `path` label of a request: its route, or a constant. The UI files and the requests without a
+/// route are not told apart by path, or anyone could add label values that stay in the metrics
+/// forever.
+fn path_label(request: &Request) -> String {
+    if let Some(matched_path) = request.extensions().get::<MatchedPath>() {
+        return matched_path.as_str().to_string();
+    }
+    let path = request.uri().path();
+    let ui = super::ui::UI_PATH;
+    if path
+        .strip_prefix(ui)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    {
+        format!("{ui}/*")
+    } else {
+        "unmatched".to_string()
+    }
+}
+
+/// The `method` label of a request: the standard methods, and `OTHER` for the extension methods.
+fn method_label(method: &Method) -> Method {
+    match *method {
+        Method::GET
+        | Method::POST
+        | Method::PUT
+        | Method::DELETE
+        | Method::HEAD
+        | Method::OPTIONS
+        | Method::PATCH => method.clone(),
+        _ => Method::from_bytes(b"OTHER").expect("a valid method"),
+    }
+}
+
+/// Counts a request in flight until it is dropped: when its response is built, or when the client
+/// goes away and the request future is dropped with it.
+struct InFlight<'a>(&'a HttpMetrics);
+
+impl<'a> InFlight<'a> {
+    fn new(metrics: &'a HttpMetrics) -> Self {
+        metrics.increment_in_flight();
+        Self(metrics)
+    }
+}
+
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        self.0.decrement_in_flight();
+    }
+}
+
 pub async fn track_http_metrics(
     State(metrics): State<Arc<HttpMetrics>>,
     request: Request,
     next: Next,
 ) -> Response {
-    let method = request.method().clone();
-    let path = request
-        .extensions()
-        .get::<MatchedPath>()
-        .map(|matched_path| matched_path.as_str().to_string())
-        .unwrap_or_else(|| request.uri().path().to_string());
+    let method = method_label(request.method());
+    let path = path_label(&request);
 
     if path == "/prometheus/metrics" {
         return next.run(request).await;
     }
 
-    metrics.increment_in_flight();
+    let in_flight = InFlight::new(&metrics);
     let start = Instant::now();
     let response = next.run(request).await;
-    metrics.decrement_in_flight();
+    drop(in_flight);
     metrics.observe_http_request(&method, &path, response.status(), start.elapsed());
     response
 }

@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn test_parse_protobuf() {
-        let input_data = WriteRequest { timeseries: vec![] };
+        let input_data = WriteRequest::default();
         let input_bytes = input_data.encode_to_vec();
 
         let _ = parse_protobuf(&input_bytes).unwrap();
@@ -53,7 +53,9 @@ mod tests {
                     value: 1.0,
                     timestamp: 1,
                 }],
+                ..Default::default()
             }],
+            ..Default::default()
         };
         let input_bytes = input_data.encode_to_vec();
 

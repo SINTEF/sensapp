@@ -55,19 +55,30 @@ pub struct RrdCachedStorage {
     known_files: RwLock<HashSet<Uuid>>,
     preset: Preset,
     heartbeat_seconds: i64,
+    future_seconds: i64,
 }
 
-/// Settings of a connection string: `rrdcached://host:port?preset=hoarder&heartbeat=3600`.
+/// Settings of a connection string:
+/// `rrdcached://host:port?preset=hoarder&heartbeat=3600&future=600`.
 #[derive(Debug, PartialEq)]
 struct Settings {
     preset: Preset,
     heartbeat_seconds: i64,
+    /// How far after now a sample may be. An RRD only takes samples after its last update, so a
+    /// sample far in the future would make every real sample until then refused.
+    future_seconds: i64,
 }
+
+const DEFAULT_FUTURE_SECONDS: i64 = 600;
+
+/// The health check does not wait for a request that holds the connection.
+const HEALTH_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl Settings {
     fn from_url(url: &Url) -> Result<Self> {
         let mut preset = Preset::Hoarder;
         let mut heartbeat_seconds = DEFAULT_HEARTBEAT_SECONDS;
+        let mut future_seconds = DEFAULT_FUTURE_SECONDS;
         for (key, value) in url.query_pairs() {
             match key.as_ref() {
                 "preset" => preset = value.parse()?,
@@ -81,14 +92,23 @@ impl Settings {
                         );
                     }
                 }
+                "future" => {
+                    future_seconds = value.parse().with_context(|| {
+                        format!("RRDCached future must be a number of seconds, got '{value}'")
+                    })?;
+                    if future_seconds < 0 {
+                        bail!("RRDCached future must not be negative, got {future_seconds}");
+                    }
+                }
                 other => bail!(
-                    "Unknown RRDCached connection parameter '{other}', expected 'preset' or 'heartbeat'"
+                    "Unknown RRDCached connection parameter '{other}', expected 'preset', 'heartbeat' or 'future'"
                 ),
             }
         }
         Ok(Self {
             preset,
             heartbeat_seconds,
+            future_seconds,
         })
     }
 }
@@ -118,7 +138,7 @@ fn is_existing_file(error: &RRDCachedClientError) -> bool {
 }
 
 fn unix_seconds(datetime: &SensAppDateTime) -> i64 {
-    datetime.to_unix_seconds().floor() as i64
+    datetime.to_unix_seconds_i64()
 }
 
 fn now_seconds() -> i64 {
@@ -200,6 +220,7 @@ impl RrdCachedStorage {
             known_files: RwLock::new(HashSet::new()),
             preset: settings.preset,
             heartbeat_seconds: settings.heartbeat_seconds,
+            future_seconds: settings.future_seconds,
         }
     }
 
@@ -213,6 +234,7 @@ impl RrdCachedStorage {
             Settings {
                 preset: Preset::Hoarder,
                 heartbeat_seconds: DEFAULT_HEARTBEAT_SECONDS,
+                future_seconds: DEFAULT_FUTURE_SECONDS,
             },
         )
     }
@@ -385,7 +407,12 @@ impl RrdCachedStorage {
         start: Option<i64>,
         end: Option<i64>,
     ) -> Result<Option<Vec<(i64, f64)>>> {
-        let end = end.unwrap_or_else(now_seconds);
+        // Nothing is stored after now, give or take a clock that is ahead: a far-future end
+        // would read millions of empty rows
+        let latest = now_seconds()
+            .saturating_add(self.future_seconds)
+            .saturating_add(self.preset.finest_step_seconds());
+        let end = end.map_or_else(now_seconds, |end| end.min(latest));
         let start = start.unwrap_or_else(|| end.saturating_sub(self.preset.retention_seconds()));
         // No RRD holds a time before 1970, and a negative time would be read as a relative one
         let (start, end) = (start.max(0), end.max(0));
@@ -620,6 +647,27 @@ impl StorageInstance for RrdCachedStorage {
             series.push((single_sensor_batch.sensor.uuid, points));
         }
 
+        let latest = now_seconds().saturating_add(self.future_seconds);
+        if let Some((uuid, time)) = series.iter().find_map(|(uuid, points)| {
+            points
+                .iter()
+                .map(|(time, _)| *time)
+                .find(|time| *time > latest)
+                .map(|time| (*uuid, time))
+        }) {
+            return Err(StorageError::invalid_data_format(
+                &format!(
+                    "a sample at {time} is {} s in the future, more than the {} s RRDCached accepts: \
+                     the series could not take a sample before it any more",
+                    time - now_seconds(),
+                    self.future_seconds
+                ),
+                Some(uuid),
+                None,
+            )
+            .into());
+        }
+
         let (series, skipped) = prepare_series(series);
         if skipped.before_epoch > 0 {
             warn!(
@@ -681,7 +729,7 @@ impl StorageInstance for RrdCachedStorage {
             .into_iter()
             .filter(|uuid| {
                 let name = uuid.to_string();
-                metric_filter.is_none_or(|filter| name.contains(filter))
+                metric_filter.is_none_or(|filter| name == filter)
                     && bookmark.is_none_or(|bookmark| name.as_str() > bookmark)
             })
             .take(limit + 1)
@@ -701,8 +749,10 @@ impl StorageInstance for RrdCachedStorage {
     }
 
     async fn list_metrics(&self) -> Result<Vec<crate::datamodel::Metric>> {
-        // No names are stored, so there are no metrics
-        Ok(vec![])
+        Err(StorageError::Unsupported(
+            "RRDcached stores no names, so it lists no metrics".to_string(),
+        )
+        .into())
     }
 
     async fn query_sensor_data(
@@ -857,11 +907,16 @@ impl StorageInstance for RrdCachedStorage {
 
     /// `PING`: the check is on the connection, it does not make the daemon write anything.
     async fn health_check(&self) -> Result<()> {
-        self.connection
-            .run("health check", |client| {
-                async move { client.ping().await }.boxed()
-            })
+        let ping = self.connection.run("health check", |client| {
+            async move { client.ping().await }.boxed()
+        });
+        tokio::time::timeout(HEALTH_CHECK_TIMEOUT, ping)
             .await
+            .map_err(|_| {
+                anyhow::Error::from(StorageError::Unavailable(
+                    "RRDCached did not answer the health check in time".to_string(),
+                ))
+            })?
             .map_err(|error| storage_error("health check", error))
             .context("RRDCached health check failed")
     }

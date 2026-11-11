@@ -52,7 +52,7 @@ or writes series one by one still works, it costs more round trips with many ser
   returned wrong rows after a chunk changed state, and the aggregated `count` is written `COUNT(value)`,
   because `COUNT(*)` failed to plan over many chunks. Details: `done/timescaledb-compressed-chunks.md`.
 - **SQLite**: one writer at a time; units keep their name but not their description.
-- **DuckDB**: timestamps are stored with a microsecond precision, like the other backends. One process owns the database file; a batch is one transaction, registered and written with a few statements whatever the number of series.
+- **DuckDB**: timestamps are stored with a microsecond precision, like the other backends. One process owns the database file. Writes go through one connection, one after the other, and reads use connections of their own, so they do not wait for a write, a deduplication or a vacuum. A batch is one transaction, registered and written with a few statements whatever the number of series. A write whose request timed out while it waited for the previous writes is not committed. The schema version is recorded in `schema_version`.
 - **RRDCached**: numbers only, in fixed-size RRDtool files, one per series, named after its UUID. The name, the
   labels, the unit and the type are not stored (everything is read back as a float named after the UUID), a read
   returns the consolidated rows of the archive that fits the window, not the samples, and a sample that is not after

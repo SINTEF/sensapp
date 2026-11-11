@@ -49,7 +49,8 @@ impl PostgresStorage {
                     .bind(origin_us)
                     .bind(limit)
                     .fetch_all(&self.pool)
-                    .await?;
+                    .await
+                    .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -82,7 +83,8 @@ impl PostgresStorage {
                     .bind(origin_us)
                     .bind(limit)
                     .fetch_all(&self.pool)
-                    .await?;
+                    .await
+                    .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -117,7 +119,8 @@ impl PostgresStorage {
                     .bind(origin_us)
                     .bind(limit)
                     .fetch_all(&self.pool)
-                    .await?;
+                    .await
+                    .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -167,7 +170,8 @@ impl PostgresStorage {
                     .bind(origin_us)
                     .bind(limit)
                     .fetch_all(&self.pool)
-                    .await?;
+                    .await
+                    .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -202,7 +206,8 @@ impl PostgresStorage {
                     .bind(origin_us)
                     .bind(limit)
                     .fetch_all(&self.pool)
-                    .await?;
+                    .await
+                    .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -252,7 +257,8 @@ impl PostgresStorage {
                     .bind(origin_us)
                     .bind(limit)
                     .fetch_all(&self.pool)
-                    .await?;
+                    .await
+                    .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
@@ -267,7 +273,7 @@ impl PostgresStorage {
                 #[derive(sqlx::FromRow)]
                 struct Row {
                     timestamp_us: i64,
-                    value: rust_decimal::Decimal,
+                    value: String,
                 }
 
                 let expression = numeric_aggregate_expression(aggregation);
@@ -287,13 +293,14 @@ impl PostgresStorage {
                     .bind(origin_us)
                     .bind(limit)
                     .fetch_all(&self.pool)
-                    .await?;
+                    .await
+                    .map_err(crate::storage::common::sql_sum_overflow)?;
 
                 let mut samples = smallvec![];
                 for row in rows {
                     samples.push(Sample {
                         datetime: SensAppDateTime::from_unix_microseconds_i64(row.timestamp_us),
-                        value: row.value,
+                        value: crate::storage::common::numeric_aggregate_from_text(&row.value)?,
                     });
                 }
                 Ok(TypedSamples::Numeric(samples))
@@ -717,15 +724,20 @@ pub(super) fn float_aggregate_expression(aggregation: Aggregation) -> &'static s
     }
 }
 
+/// The Numeric aggregates as text, read with [`numeric_aggregate_from_text`]: the average as
+/// `sum/count`, divided in Rust. PostgreSQL divides with 16 significant digits for large values,
+/// and a result with more digits than a `Decimal` holds fails to decode.
+///
+/// [`numeric_aggregate_from_text`]: crate::storage::common::numeric_aggregate_from_text
 pub(super) fn numeric_aggregate_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
-        Aggregation::Avg => "AVG(value)",
-        Aggregation::Min => "MIN(value)",
-        Aggregation::Max => "MAX(value)",
-        Aggregation::Sum => "SUM(value)",
-        Aggregation::First => "(array_agg(value ORDER BY timestamp_us ASC))[1]",
+        Aggregation::Avg => "SUM(value)::text || '/' || COUNT(*)",
+        Aggregation::Min => "MIN(value)::text",
+        Aggregation::Max => "MAX(value)::text",
+        Aggregation::Sum => "SUM(value)::text",
+        Aggregation::First => "((array_agg(value ORDER BY timestamp_us ASC))[1])::text",
         Aggregation::Last | Aggregation::Latest => {
-            "(array_agg(value ORDER BY timestamp_us DESC))[1]"
+            "((array_agg(value ORDER BY timestamp_us DESC))[1])::text"
         }
         Aggregation::Count => unreachable!("handled separately"),
     }

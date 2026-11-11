@@ -57,10 +57,15 @@ mod parsing_edge_cases {
         assert_eq!(infer_type("1.5e10"), Ok(("", InferedValue::Float(1.5e10))));
         assert_eq!(infer_type("2.5E-3"), Ok(("", InferedValue::Float(2.5e-3))));
 
-        // Infinity and NaN (handled by Rust's float parsing)
+        // The infinities are values. NaN is text for the inference: the CSV importer reads it as a
+        // missing value before it gets here
         assert_eq!(
             infer_type("inf"),
-            Ok(("", InferedValue::String("inf".to_string())))
+            Ok(("", InferedValue::Float(f64::INFINITY)))
+        );
+        assert_eq!(
+            infer_type("-Infinity"),
+            Ok(("", InferedValue::Float(f64::NEG_INFINITY)))
         );
         assert_eq!(
             infer_type("NaN"),
@@ -115,10 +120,11 @@ mod parsing_edge_cases {
             infer_type("01/01/2024"),
             Ok(("", InferedValue::String("01/01/2024".to_string())))
         );
-        assert_eq!(
+        // A calendar date alone is a time, midnight UTC: a `date` column of dates is a time axis
+        assert!(matches!(
             infer_type("2024-01-01"),
-            Ok(("", InferedValue::String("2024-01-01".to_string())))
-        );
+            Ok(("", InferedValue::DateTime(_)))
+        ));
     }
 
     #[test]

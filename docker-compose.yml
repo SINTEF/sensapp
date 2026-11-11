@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: sensapp,sensapp-test
+      POSTGRES_DB: sensapp
     ports:
       - "5432:5432"
     healthcheck:
@@ -15,5 +15,7 @@ services:
       retries: 20
     volumes:
       - postgres-data:/var/lib/postgresql
+      # Run once, on an empty volume: creates sensapp-test for the integration tests
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
 volumes:
   postgres-data: {}

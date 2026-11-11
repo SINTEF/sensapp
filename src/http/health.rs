@@ -51,8 +51,12 @@ pub async fn liveness() -> impl IntoResponse {
     )
 )]
 pub async fn readiness(State(state): State<HttpServerState>) -> impl IntoResponse {
-    // Check database health
-    match state.storage.health_check().await {
+    readiness_response(state.storage.health_check().await)
+}
+
+/// The answer is public: a database error can name hosts, users or files, so it is only logged.
+fn readiness_response(health: anyhow::Result<()>) -> (StatusCode, Json<ReadinessResponse>) {
+    match health {
         Ok(()) => (
             StatusCode::OK,
             Json(ReadinessResponse {
@@ -61,20 +65,35 @@ pub async fn readiness(State(state): State<HttpServerState>) -> impl IntoRespons
                 error: None,
             }),
         ),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ReadinessResponse {
-                status: "not_ready".to_string(),
-                database: "error".to_string(),
-                error: Some(e.to_string()),
-            }),
-        ),
+        Err(error) => {
+            tracing::warn!("Readiness check failed: {error:#}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ReadinessResponse {
+                    status: "not_ready".to_string(),
+                    database: "error".to_string(),
+                    error: Some("the database does not answer, see the logs".to_string()),
+                }),
+            )
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readiness_does_not_tell_the_database_error() {
+        let error = anyhow::anyhow!("connection to postgres://sensapp:hunter2@db.internal failed");
+        let (status, Json(response)) = readiness_response(Err(error));
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        let body = serde_json::to_string(&response).unwrap();
+        assert!(
+            !body.contains("hunter2") && !body.contains("db.internal"),
+            "{body}"
+        );
+    }
 
     #[tokio::test]
     async fn test_liveness() {

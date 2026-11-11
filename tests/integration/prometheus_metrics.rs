@@ -202,8 +202,11 @@ async fn test_prometheus_metrics_exposes_write_and_read_operation_metrics() -> R
     let response = app
         .post_influxdb(
             "/api/v2/write?bucket=sensapp&org=test",
+            // Two series, two samples each: the series are counted once
             &format!(
-                "cpu,host=web1 usage_system=64.2,usage_user=12.3 {}",
+                "cpu,host=web1 usage_system=64.2,usage_user=12.3 {}\n\
+                 cpu,host=web1 usage_system=64.5,usage_user=12.1 {}",
+                now.to_unix(Unit::Nanosecond).floor() as i64 - 1_000_000_000,
                 now.to_unix(Unit::Nanosecond).floor() as i64
             ),
         )
@@ -246,7 +249,7 @@ async fn test_prometheus_metrics_exposes_write_and_read_operation_metrics() -> R
         "sensapp_series_processed_total{kind=\"write\",operation=\"influxdb_write\"} 2",
     );
     metrics.assert_body_contains(
-        "sensapp_samples_processed_total{kind=\"write\",operation=\"influxdb_write\"} 2",
+        "sensapp_samples_processed_total{kind=\"write\",operation=\"influxdb_write\"} 4",
     );
     metrics.assert_body_contains(
         "sensapp_operations_total{kind=\"read\",operation=\"simple_promql_query\",status=\"success\"} 1",

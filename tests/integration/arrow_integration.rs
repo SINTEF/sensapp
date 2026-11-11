@@ -419,6 +419,15 @@ mod import_tests {
 
     /// An Arrow stream with two float samples that only carries the given sensor name column.
     fn arrow_stream_without_uuid(sensor_name: Option<&str>, first_micros: i64) -> Result<Vec<u8>> {
+        arrow_stream_of_values(sensor_name, first_micros, [Some(1.0), Some(2.0)])
+    }
+
+    /// Two samples a minute apart; a `None` value is a null.
+    fn arrow_stream_of_values(
+        sensor_name: Option<&str>,
+        first_micros: i64,
+        values: [Option<f64>; 2],
+    ) -> Result<Vec<u8>> {
         use arrow::array::{ArrayRef, Float64Array, StringArray, TimestampMicrosecondArray};
         use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
         use arrow_ipc::writer::StreamWriter;
@@ -429,14 +438,14 @@ mod import_tests {
                 DataType::Timestamp(TimeUnit::Microsecond, None),
                 false,
             ),
-            Field::new("value", DataType::Float64, false),
+            Field::new("value", DataType::Float64, true),
         ];
         let mut columns: Vec<ArrayRef> = vec![
             Arc::new(TimestampMicrosecondArray::from(vec![
                 first_micros,
                 first_micros + 60_000_000,
             ])),
-            Arc::new(Float64Array::from(vec![1.0, 2.0])),
+            Arc::new(Float64Array::from(values.to_vec())),
         ];
         if let Some(name) = sensor_name {
             fields.push(Field::new("sensor_name", DataType::Utf8, false));
@@ -476,6 +485,33 @@ mod import_tests {
 
         storage.expect_sensor_count(1).await?;
         DbHelpers::verify_sensor_data(&storage, &sensor_name, 4).await?;
+
+        Ok(())
+    }
+
+    /// A null value was stored as 0.
+    #[tokio::test]
+    #[serial]
+    async fn test_import_arrow_skips_null_values() -> Result<()> {
+        ensure_config();
+        let test_db = TestDb::new().await?;
+        let storage = test_db.storage();
+        let app = TestApp::new(storage.clone()).await;
+
+        let bytes = arrow_stream_of_values(
+            Some("arrow_with_a_null"),
+            1_704_067_200_000_000,
+            [Some(1.0), None],
+        )?;
+        let response = app
+            .post_binary(
+                "/sensors/publish",
+                "application/vnd.apache.arrow.stream",
+                &bytes,
+            )
+            .await?;
+        assert_eq!(response.status(), 200);
+        DbHelpers::verify_sensor_data(&storage, "arrow_with_a_null", 1).await?;
 
         Ok(())
     }

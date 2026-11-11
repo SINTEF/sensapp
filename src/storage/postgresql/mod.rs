@@ -13,7 +13,7 @@
 
 use super::{
     DEFAULT_QUERY_LIMIT, SensorAvailabilitySummary, StorageError, StorageInstance,
-    common::{VALUE_TABLES, datetime_to_micros, is_foreign_key_violation},
+    common::{VALUE_TABLES, datetime_to_micros},
 };
 use crate::datamodel::sensapp_datetime::SensAppDateTimeExt;
 use crate::datamodel::{
@@ -79,7 +79,10 @@ impl PostgresStorage {
                     Ok(())
                 })
             })
-            .connect_with(connect_options)
+            .connect_with(crate::storage::pg_session::with_timeouts(
+                connect_options,
+                connection_string,
+            ))
             .await
             .context("Failed to create postgres pool")?;
 
@@ -201,6 +204,111 @@ impl PostgresStorage {
         }
     }
 
+    async fn query_sensor_data_latest_once(
+        &self,
+        sensor_uuid: &str,
+        start_time: Option<SensAppDateTime>,
+        end_time: Option<SensAppDateTime>,
+    ) -> Result<crate::storage::common::LatestRead> {
+        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
+            return Ok(crate::storage::common::LatestRead::Nothing);
+        };
+
+        let start_time_us = start_time.as_ref().map(datetime_to_micros);
+        let end_time_us = end_time.as_ref().map(datetime_to_micros);
+        let table_name = Self::sensor_table_name(sensor.sensor_type);
+
+        let Some(latest_timestamp_us) = self
+            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
+            .await?
+        else {
+            return Ok(crate::storage::common::LatestRead::Nothing);
+        };
+
+        let samples = match sensor.sensor_type {
+            SensorType::Integer => {
+                self.query_integer_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Numeric => {
+                self.query_numeric_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Float => {
+                self.query_float_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::String => {
+                self.query_string_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Boolean => {
+                self.query_boolean_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Location => {
+                self.query_location_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Json => {
+                self.query_json_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+            SensorType::Blob => {
+                self.query_blob_samples(
+                    sensor_id,
+                    Some(latest_timestamp_us),
+                    Some(latest_timestamp_us),
+                    Some(1),
+                )
+                .await?
+            }
+        };
+        // The samples of that time were deleted between the two statements
+        if samples.is_empty() {
+            return Ok(crate::storage::common::LatestRead::Raced);
+        }
+
+        Ok(crate::storage::common::LatestRead::Found(Box::new(
+            SensorData::new(sensor, samples),
+        )))
+    }
+
     async fn query_latest_timestamp_us(
         &self,
         table_name: &'static str,
@@ -309,28 +417,20 @@ impl PostgresStorage {
 #[async_trait]
 impl StorageInstance for PostgresStorage {
     async fn create_or_migrate(&self) -> Result<()> {
-        sqlx::migrate!("src/storage/postgresql/migrations")
-            .run(&self.pool)
-            .await
-            .context("Failed to migrate database")?;
-
-        Ok(())
+        crate::storage::pg_session::run_migrations(
+            &self.pool,
+            &sqlx::migrate!("src/storage/postgresql/migrations"),
+        )
+        .await
     }
     async fn publish(&self, batch: Arc<Batch>) -> Result<()> {
-        match self.publish_once(&batch).await {
-            Err(error) if is_foreign_key_violation(&error) => {
-                // Another SensApp instance deleted a sensor between its registration and the
-                // insert of its samples. The transaction was rolled back: try again, which
-                // registers the sensors again.
-                self.publish_once(&batch).await
-            }
-            result => result,
-        }
+        crate::storage::common::retry_publish(|| self.publish_once(&batch)).await
     }
 
     async fn vacuum(&self) -> Result<()> {
+        let mut connection = crate::storage::pg_session::maintenance_connection(&self.pool).await?;
         sqlx::query("VACUUM")
-            .execute(&self.pool)
+            .execute(&mut connection)
             .await
             .context("Failed to vacuum database")?;
 
@@ -347,6 +447,7 @@ impl StorageInstance for PostgresStorage {
         // fails. Within a group of equal samples the first one written is kept. `(tableoid, ctid)`
         // identifies a row of a partitioned table; the table names and the columns come from
         // static lists.
+        let mut connection = crate::storage::pg_session::maintenance_connection(&self.pool).await?;
         let mut removed = 0;
         for table in VALUE_TABLES {
             let columns = crate::storage::common::duplicate_key_columns(table, "timestamp_us");
@@ -359,7 +460,7 @@ impl StorageInstance for PostgresStorage {
                    WHERE duplicate_rank > 1)"
             );
             removed += sqlx::query(sqlx::AssertSqlSafe(sql))
-                .execute(&self.pool)
+                .execute(&mut connection)
                 .await
                 .with_context(|| format!("Failed to remove the duplicate samples of {table}"))?
                 .rows_affected();
@@ -369,37 +470,7 @@ impl StorageInstance for PostgresStorage {
 
     async fn delete_series(&self, sensor_uuid: &str) -> Result<bool> {
         let parsed_uuid = Uuid::from_str(sensor_uuid).context("Failed to parse sensor UUID")?;
-        let mut transaction = self.pool.begin().await?;
-
-        let sensor_id: Option<i64> =
-            sqlx::query_scalar("SELECT sensor_id FROM sensors WHERE uuid = $1")
-                .bind(parsed_uuid)
-                .fetch_optional(&mut *transaction)
-                .await?;
-        let Some(sensor_id) = sensor_id else {
-            return Ok(false);
-        };
-
-        for table in VALUE_TABLES {
-            // `table` comes from the static VALUE_TABLES list
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "DELETE FROM {table} WHERE sensor_id = $1"
-            )))
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        sqlx::query("DELETE FROM labels WHERE sensor_id = $1")
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("DELETE FROM sensors WHERE sensor_id = $1")
-            .bind(sensor_id)
-            .execute(&mut *transaction)
-            .await?;
-
-        transaction.commit().await?;
-        Ok(true)
+        crate::storage::pg_sensor_registration::delete_series(&self.pool, parsed_uuid, false).await
     }
 
     async fn delete_series_samples(
@@ -794,97 +865,18 @@ impl StorageInstance for PostgresStorage {
         start_time: Option<SensAppDateTime>,
         end_time: Option<SensAppDateTime>,
     ) -> Result<Option<SensorData>> {
-        let Some((sensor_id, sensor)) = self.get_sensor_metadata(sensor_uuid).await? else {
-            return Ok(None);
-        };
-
-        let start_time_us = start_time.as_ref().map(datetime_to_micros);
-        let end_time_us = end_time.as_ref().map(datetime_to_micros);
-        let table_name = Self::sensor_table_name(sensor.sensor_type);
-
-        let Some(latest_timestamp_us) = self
-            .query_latest_timestamp_us(table_name, sensor_id, start_time_us, end_time_us)
-            .await?
-        else {
-            return Ok(None);
-        };
-
-        let samples = match sensor.sensor_type {
-            SensorType::Integer => {
-                self.query_integer_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
+        // A delete between the two statements of a try is not a missing series: try again
+        for _ in 0..crate::storage::common::LATEST_ATTEMPTS {
+            match self
+                .query_sensor_data_latest_once(sensor_uuid, start_time, end_time)
                 .await?
+            {
+                crate::storage::common::LatestRead::Found(data) => return Ok(Some(*data)),
+                crate::storage::common::LatestRead::Nothing => return Ok(None),
+                crate::storage::common::LatestRead::Raced => {}
             }
-            SensorType::Numeric => {
-                self.query_numeric_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Float => {
-                self.query_float_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::String => {
-                self.query_string_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Boolean => {
-                self.query_boolean_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Location => {
-                self.query_location_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Json => {
-                self.query_json_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-            SensorType::Blob => {
-                self.query_blob_samples(
-                    sensor_id,
-                    Some(latest_timestamp_us),
-                    Some(latest_timestamp_us),
-                    Some(1),
-                )
-                .await?
-            }
-        };
-
-        Ok(Some(SensorData::new(sensor, samples)))
+        }
+        Ok(None)
     }
 
     async fn query_sensor_data_availability(
@@ -1064,13 +1056,13 @@ impl StorageInstance for PostgresStorage {
         // But we need to ensure common test units exist
 
         // Insert common test units if they don't exist (using ON CONFLICT DO NOTHING for idempotency)
-        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('°C', 'Celsius') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('%', 'Percentage') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('m', 'Meters') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('m', 'Meters') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO units (name, description) VALUES ('kg', 'Kilograms') ON CONFLICT (name) DO NOTHING")
+        sqlx::query("INSERT INTO units (name, description) VALUES ('kg', 'Kilograms') ON CONFLICT ((md5(name))) DO NOTHING")
             .execute(&mut *tx).await?;
 
         // Reset sequences for clean test data
@@ -1114,10 +1106,10 @@ impl PostgresStorage {
 
         let mut guards = Vec::with_capacity(batch.sensors.len());
         for single_sensor_batch in batch.sensors.as_ref() {
-            guards.push((
-                sensor_ids[&single_sensor_batch.sensor.uuid],
-                single_sensor_batch.samples.read().await,
-            ));
+            let sensor_id = *sensor_ids
+                .get(&single_sensor_batch.sensor.uuid)
+                .context("a sensor of the batch was not registered")?;
+            guards.push((sensor_id, single_sensor_batch.samples.read().await));
         }
         let samples: Vec<(i64, &TypedSamples)> = guards
             .iter()

@@ -6,11 +6,13 @@ use super::client::{grpc_code_is_transient, int_array_param, map_error};
 use super::rows::{self, *};
 use crate::datamodel::{Sensor, TypedSamples, batch::Batch};
 use crate::storage::StorageError;
-use crate::storage::common::{datetime_to_micros, unit_name_to_id, uuid_to_sensor_id};
+use crate::storage::common::{
+    check_sensor_identity, datetime_to_micros, unique_sensors, unit_name_to_id, uuid_to_sensor_id,
+};
 use anyhow::Result;
 use futures::future::try_join_all;
 use gcp_bigquery_client::google::cloud::bigquery::storage::v1::append_rows_response::Response;
-use gcp_bigquery_client::storage::{StreamName, TableBatch, TableDescriptor};
+use gcp_bigquery_client::storage::{BatchAppendResult, StreamName, TableBatch, TableDescriptor};
 use prost::Message;
 use rust_decimal::{Decimal, RoundingStrategy};
 use std::collections::HashMap;
@@ -20,11 +22,11 @@ use std::sync::Arc;
 const NUMERIC_SCALE: u32 = 9;
 
 /// The id of a series in the tables: the bits of the 64-bit key shared with ClickHouse.
-pub fn uuid_id(uuid: &uuid::Uuid) -> i64 {
-    uuid_to_sensor_id(uuid) as i64
+pub fn uuid_id(uuid: &uuid::Uuid) -> Result<i64> {
+    Ok(uuid_to_sensor_id(uuid)? as i64)
 }
 
-pub fn sensor_id(sensor: &Sensor) -> i64 {
+pub fn sensor_id(sensor: &Sensor) -> Result<i64> {
     uuid_id(&sensor.uuid)
 }
 
@@ -52,10 +54,10 @@ struct SampleRows {
     blob: Vec<BlobValueRow>,
 }
 
-async fn sample_rows(batch: &Batch) -> SampleRows {
+async fn sample_rows(batch: &Batch) -> Result<SampleRows> {
     let mut rows = SampleRows::default();
     for single in batch.sensors.iter() {
-        let id = sensor_id(&single.sensor);
+        let id = sensor_id(&single.sensor)?;
         let samples = single.samples.read().await;
         match &*samples {
             TypedSamples::Integer(samples) => {
@@ -114,7 +116,7 @@ async fn sample_rows(batch: &Batch) -> SampleRows {
             })),
         }
     }
-    rows
+    Ok(rows)
 }
 
 impl BigQueryStorage {
@@ -148,52 +150,28 @@ impl BigQueryStorage {
             .await
             .map_err(|error| map_error(&operation, error))?;
 
-        for result in results {
-            for response in result.responses {
-                let response = response.map_err(|status| {
-                    map_error(
-                        &operation,
-                        gcp_bigquery_client::error::BQError::from(status),
-                    )
-                })?;
-                if let Some(Response::Error(status)) = response.response {
-                    return Err(append_failure(&operation, status.code, &status.message));
-                }
-                if let Some(row_error) = response.row_errors.first() {
-                    return Err(StorageError::OperationFailed {
-                        operation: format!("BigQuery {operation}"),
-                        details: format!(
-                            "row {} rejected: {} ({} rows rejected in this append)",
-                            row_error.index,
-                            row_error.message,
-                            response.row_errors.len()
-                        ),
-                    }
-                    .into());
-                }
-            }
-        }
-        Ok(())
+        check_append_results(&operation, results)
     }
 
     /// Write the series that are not stored yet: their units, their labels, and last the sensors
     /// themselves, so a series is never listed with a part of its labels missing. Two writers can
     /// register the same series at the same time; the rows are identical and the reads collapse them.
     pub(super) async fn register_sensors(&self, sensors: &[&Sensor]) -> Result<()> {
-        let mut by_id: HashMap<i64, &Sensor> = HashMap::with_capacity(sensors.len());
-        for sensor in sensors {
-            by_id.entry(sensor_id(sensor)).or_insert(sensor);
+        let mut by_id: HashMap<i64, &Sensor> = HashMap::new();
+        for sensor in unique_sensors(sensors)?.into_values() {
+            if by_id.insert(sensor_id(sensor)?, sensor).is_some() {
+                return Err(StorageError::SensorKeyCollision { uuid: sensor.uuid }.into());
+            }
         }
-        by_id.retain(|id, _| !self.is_registered(*id));
+        by_id.retain(|id, sensor| !self.is_registered(*id, sensor));
         if by_id.is_empty() {
             return Ok(());
         }
 
-        let ids: Vec<i64> = by_id.keys().copied().collect();
-        let stored = self.existing_ids("sensors", "sensor_id", &ids).await?;
-        for id in &stored {
-            self.remember_registered(*id);
-            by_id.remove(id);
+        for id in self.existing_sensors(&by_id).await? {
+            if let Some(sensor) = by_id.remove(&id) {
+                self.remember_registered(id, sensor);
+            }
         }
         if by_id.is_empty() {
             return Ok(());
@@ -242,10 +220,46 @@ impl BigQueryStorage {
             })
             .collect();
         self.append("sensors", &rows::SENSORS, sensor_rows).await?;
-        for id in by_id.keys() {
-            self.remember_registered(*id);
+        for (id, sensor) in &by_id {
+            self.remember_registered(*id, sensor);
         }
         Ok(())
+    }
+
+    /// Which of the sensors are stored, after checking that each stored sensor is the sensor of the
+    /// batch (and not another UUID with the same `sensor_id`) and has its name and type. Without a transaction, two writers that register one
+    /// new UUID with two identities at the same moment are not caught here.
+    async fn existing_sensors(&self, sensors: &HashMap<i64, &Sensor>) -> Result<Vec<i64>> {
+        let ids: Vec<i64> = sensors.keys().copied().collect();
+        let sql = format!(
+            "SELECT DISTINCT sensor_id, uuid, name, type FROM {} WHERE sensor_id IN UNNEST(@ids)",
+            self.table("sensors")
+        );
+        let stored = self
+            .query_rows(
+                "look up sensors",
+                sql,
+                vec![int_array_param("ids", &ids)],
+                |row| {
+                    Ok((
+                        super::client::required(row.get_i64(0), "sensor_id")?,
+                        super::client::required(row.get_string(1), "uuid")?,
+                        super::client::required(row.get_string(2), "type")?,
+                    ))
+                },
+            )
+            .await?;
+        let mut existing = Vec::with_capacity(stored.len());
+        for (id, uuid, sensor_type) in stored {
+            if let Some(sensor) = sensors.get(&id) {
+                if uuid != sensor.uuid.to_string() {
+                    return Err(StorageError::SensorKeyCollision { uuid: sensor.uuid }.into());
+                }
+                check_sensor_identity(sensor, &sensor_type)?;
+                existing.push(id);
+            }
+        }
+        Ok(existing)
     }
 
     /// Which of the `ids` are in the column `column` of `table`.
@@ -270,7 +284,7 @@ impl BigQueryStorage {
         let sensors: Vec<&Sensor> = batch.sensors.iter().map(|s| s.sensor.as_ref()).collect();
         self.register_sensors(&sensors).await?;
 
-        let rows = sample_rows(batch).await;
+        let rows = sample_rows(batch).await?;
         try_join_all([
             Box::pin(self.append("integer_values", &rows::INTEGER_VALUES, rows.integer))
                 as std::pin::Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>,
@@ -288,6 +302,62 @@ impl BigQueryStorage {
 }
 
 /// An append rejected by the service: `code` is a `google.rpc.Code`.
+/// A write is a success when BigQuery confirmed every request it was cut into: one append result
+/// per request, and no error. An empty or short answer is not a confirmation. The bytes sent tell
+/// the least number of requests.
+fn check_append_results(operation: &str, results: Vec<BatchAppendResult>) -> Result<()> {
+    if results.is_empty() {
+        return Err(unconfirmed(operation, "no answer"));
+    }
+    for result in results {
+        let least_requests = result.bytes_sent.div_ceil(REQUEST_BYTES_BOUND).max(1);
+        let mut confirmed = 0;
+        for response in result.responses {
+            let response = response.map_err(|status| {
+                map_error(operation, gcp_bigquery_client::error::BQError::from(status))
+            })?;
+            if let Some(row_error) = response.row_errors.first() {
+                return Err(StorageError::OperationFailed {
+                    operation: format!("BigQuery {operation}"),
+                    details: format!(
+                        "row {} rejected: {} ({} rows rejected in this append)",
+                        row_error.index,
+                        row_error.message,
+                        response.row_errors.len()
+                    ),
+                }
+                .into());
+            }
+            match response.response {
+                Some(Response::AppendResult(_)) => confirmed += 1,
+                Some(Response::Error(status)) => {
+                    return Err(append_failure(operation, status.code, &status.message));
+                }
+                None => return Err(unconfirmed(operation, "an answer without a result")),
+            }
+        }
+        if confirmed < least_requests {
+            return Err(unconfirmed(
+                operation,
+                &format!("{confirmed} results for at least {least_requests} requests"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// More than one request holds: the client cuts the rows into requests of at most 9 MiB, and
+/// counts the stream name and the schema of each request too, which are far below 1 MiB.
+const REQUEST_BYTES_BOUND: usize = 10 * 1024 * 1024;
+
+fn unconfirmed(operation: &str, what: &str) -> anyhow::Error {
+    StorageError::OperationFailed {
+        operation: format!("BigQuery {operation}"),
+        details: format!("the write was not confirmed: {what}"),
+    }
+    .into()
+}
+
 fn append_failure(operation: &str, code: i32, message: &str) -> anyhow::Error {
     if grpc_code_is_transient(code) {
         StorageError::Unavailable(format!("{operation}: {message}")).into()
@@ -304,6 +374,55 @@ fn append_failure(operation: &str, code: i32, message: &str) -> anyhow::Error {
 mod tests {
     use super::*;
     use crate::datamodel::{Sample, SensAppDateTime, SensorType, batch::SingleSensorBatch};
+
+    // ---- confirmation of an append
+
+    use gcp_bigquery_client::google::cloud::bigquery::storage::v1::{
+        AppendRowsResponse, append_rows_response::AppendResult,
+    };
+
+    fn confirmed() -> AppendRowsResponse {
+        AppendRowsResponse {
+            response: Some(Response::AppendResult(AppendResult::default())),
+            ..AppendRowsResponse::default()
+        }
+    }
+
+    fn answer(responses: Vec<AppendRowsResponse>, bytes_sent: usize) -> Vec<BatchAppendResult> {
+        vec![BatchAppendResult::new(
+            0,
+            responses.into_iter().map(Ok).collect(),
+            bytes_sent,
+        )]
+    }
+
+    #[test]
+    fn an_append_is_a_success_only_when_every_request_is_confirmed() {
+        assert!(check_append_results("write", answer(vec![confirmed()], 100)).is_ok());
+        let two_requests = REQUEST_BYTES_BOUND + 1;
+        assert!(
+            check_append_results(
+                "write",
+                answer(vec![confirmed(), confirmed()], two_requests)
+            )
+            .is_ok()
+        );
+
+        let unconfirmed = [
+            Vec::new(),
+            answer(Vec::new(), 100),
+            answer(vec![AppendRowsResponse::default()], 100),
+            answer(vec![confirmed()], two_requests),
+        ];
+        for results in unconfirmed {
+            let error = check_append_results("write", results).unwrap_err();
+            assert!(
+                error.to_string().contains("not confirmed")
+                    || format!("{error:#}").contains("not confirmed"),
+                "{error:#}"
+            );
+        }
+    }
     use hifitime::Epoch;
     use smallvec::smallvec;
     use std::str::FromStr;
@@ -342,29 +461,26 @@ mod tests {
 
     #[test]
     fn sensor_ids_are_the_clickhouse_ids_as_signed_integers() {
-        let sensor = Sensor::new(
-            Uuid::parse_str("9d87123d-9b47-466d-9eda-001c2ecf9c54").unwrap(),
-            "s".to_string(),
-            SensorType::Float,
-            None,
-            None,
-        );
+        let sensor = |uuid: &str| {
+            Sensor::new(
+                Uuid::parse_str(uuid).unwrap(),
+                "s".to_string(),
+                SensorType::Float,
+                None,
+                None,
+            )
+        };
+        // The keys of the default salt: the value of `storage::common`'s pinned test, as signed
+        crate::config::load_configuration_for_tests().unwrap();
+        let positive = sensor("00000000-0000-4000-8000-000000000001");
+        let negative = sensor("0123456789abcdeffedcba9876543210");
         assert_eq!(
-            sensor_id(&sensor) as u64,
-            0x9d87_123d_9b47_466d ^ 0x9eda_001c_2ecf_9c54
+            sensor_id(&positive).unwrap(),
+            0x6715_e15c_8225_7fd2,
+            "with the default SENSAPP_SENSOR_SALT"
         );
-        let negative = Sensor::new(
-            Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
-            "s".to_string(),
-            SensorType::Float,
-            None,
-            None,
-        );
-        assert_eq!(
-            sensor_id(&negative),
-            i64::MIN + 0x4001,
-            "the top bit is the sign"
-        );
+        assert_eq!(sensor_id(&negative).unwrap() as u64, 0xc4c6_aeff_8813_eaa2);
+        assert!(sensor_id(&negative).unwrap() < 0, "the top bit is the sign");
     }
 
     #[tokio::test]
@@ -409,7 +525,8 @@ mod tests {
                 ),
             ],
         };
-        let rows = sample_rows(&batch).await;
+        crate::config::load_configuration_for_tests().unwrap();
+        let rows = sample_rows(&batch).await.unwrap();
         assert_eq!(rows.float[0].value, precise);
         assert_eq!(rows.float[0].timestamp, 1_700_000_000_500_000);
         assert_eq!(rows.location[0].latitude, 59.987_654_321_098);

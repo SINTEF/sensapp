@@ -84,7 +84,12 @@ impl SingleSensorBatch {
                 old_samples.append(new_samples);
             }
             _ => {
-                anyhow::bail!("Cannot append {:?} to {:?}", new_samples, self.samples);
+                // The samples are not in the message: there can be millions of them
+                return Err(crate::storage::StorageError::InvalidDataFormat {
+                    message: "samples of another type than the series".to_string(),
+                    sensor_context: self.sensor.name.clone(),
+                }
+                .into());
             }
         }
         Ok(())
@@ -158,7 +163,7 @@ mod tests {
             },]))
             .await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Cannot append"));
+        assert!(result.unwrap_err().to_string().contains("another type"));
 
         // Append numeric to numeric
         let mut batch = SingleSensorBatch::new(

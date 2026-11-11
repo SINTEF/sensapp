@@ -22,14 +22,9 @@ const LABEL_LOOKUP_CHUNK: usize = 2000;
 /// `LIMIT` takes an INT64
 pub(super) const MAX_LIMIT: usize = i64::MAX as usize;
 
-/// BigQuery's TIMESTAMP goes from year 1 to year 9999
-const MIN_MICROS: i64 = -62_135_596_800_000_000;
-const MAX_MICROS: i64 = 253_402_300_799_999_999;
-
-/// A bound of a time window, that `TIMESTAMP_MICROS` accepts.
-pub fn clamp_micros(micros: i64) -> i64 {
-    micros.clamp(MIN_MICROS, MAX_MICROS)
-}
+/// A bound of a time window, that `TIMESTAMP_MICROS` accepts: BigQuery's TIMESTAMP goes from year
+/// 1 to year 9999, the times SensApp stores.
+pub use crate::datamodel::sensapp_datetime::clamp_to_storable_micros as clamp_micros;
 
 pub fn parse_uuid(sensor_uuid: &str) -> Result<Uuid> {
     Uuid::from_str(sensor_uuid).map_err(|error| {
@@ -144,6 +139,22 @@ pub(super) fn window(
         params.push(int_param("end", clamp_micros(end_us)));
     }
     conditions
+}
+
+/// The availability of a series in one statement. The window starts at `@start`, so the bucket
+/// index `DIV(t - @start, @step)` is never negative.
+pub(super) fn availability_sql(table: &str, with_step: bool) -> String {
+    let buckets = if with_step {
+        "COUNT(DISTINCT DIV(UNIX_MICROS(timestamp) - @start, @step))"
+    } else {
+        "CAST(NULL AS INT64)"
+    };
+    format!(
+        "SELECT COUNT(*) AS sample_count, UNIX_MICROS(MIN(timestamp)) AS first_us, \
+         UNIX_MICROS(MAX(timestamp)) AS last_us, {buckets} AS covered_buckets FROM {table} \
+         WHERE sensor_id = @id AND timestamp >= TIMESTAMP_MICROS(@start) \
+         AND timestamp <= TIMESTAMP_MICROS(@end)"
+    )
 }
 
 /// Where the tables are, and the statements that name them.
@@ -292,13 +303,58 @@ impl BigQueryStorage {
         Ok(labels)
     }
 
+    /// The count, first and last samples of a series in `[start, end]`, and with a step the number of
+    /// buckets from `start` that hold a sample: one query instead of reading every sample.
+    pub(super) async fn query_availability(
+        &self,
+        id: i64,
+        sensor: Sensor,
+        start_us: i64,
+        end_us: i64,
+        step_ms: Option<i64>,
+    ) -> Result<crate::storage::SensorAvailabilitySummary> {
+        let mut params = vec![
+            int_param("id", id),
+            int_param("start", clamp_micros(start_us)),
+            int_param("end", clamp_micros(end_us)),
+        ];
+        if let Some(step_ms) = step_ms {
+            let step_us = step_ms
+                .checked_mul(1000)
+                .ok_or_else(|| anyhow::anyhow!("step is too large"))?;
+            params.push(int_param("step", step_us));
+        }
+        let sql = availability_sql(
+            &self.table(sample_table(sensor.sensor_type)),
+            step_ms.is_some(),
+        );
+        let rows = self
+            .query_rows("read availability", sql, params, |row| {
+                Ok((
+                    required(row.get_i64_by_name("sample_count"), "sample_count")?,
+                    row.get_i64_by_name("first_us")?,
+                    row.get_i64_by_name("last_us")?,
+                    row.get_i64_by_name("covered_buckets")?,
+                ))
+            })
+            .await?;
+        let (count, first_us, last_us, covered) = rows.into_iter().next().unwrap_or_default();
+        Ok(crate::storage::SensorAvailabilitySummary {
+            sensor,
+            sample_count: count.max(0) as usize,
+            first_sample_at: first_us.map(SensAppDateTime::from_unix_microseconds_i64),
+            last_sample_at: last_us.map(SensAppDateTime::from_unix_microseconds_i64),
+            covered_buckets: covered.map(|covered| covered.max(0) as usize),
+        })
+    }
+
     /// A series by its UUID, with its id in the tables.
     pub(super) async fn get_sensor_metadata(
         &self,
         sensor_uuid: &str,
     ) -> Result<Option<(i64, Sensor)>> {
         let uuid = parse_uuid(sensor_uuid)?;
-        let id = uuid_id(&uuid);
+        let id = uuid_id(&uuid)?;
         let sql = self.dataset.sensors_sql(
             &[
                 "s.sensor_id = @id".to_string(),
@@ -414,11 +470,23 @@ mod tests {
     #[test]
     fn window_bounds_stay_inside_the_timestamp_range() {
         assert_eq!(clamp_micros(0), 0);
-        assert_eq!(clamp_micros(i64::MIN), MIN_MICROS);
-        assert_eq!(clamp_micros(i64::MAX), MAX_MICROS);
+        assert_eq!(
+            clamp_micros(i64::MIN),
+            crate::datamodel::sensapp_datetime::EARLIEST_UNIX_US
+        );
+        assert_eq!(
+            clamp_micros(i64::MAX),
+            crate::datamodel::sensapp_datetime::LATEST_UNIX_US
+        );
         // 0001-01-01 and 9999-12-31 23:59:59.999999 UTC
-        assert_eq!(MIN_MICROS / 1_000_000, -62_135_596_800);
-        assert_eq!(MAX_MICROS, 253_402_300_800 * 1_000_000 - 1);
+        assert_eq!(
+            crate::datamodel::sensapp_datetime::EARLIEST_UNIX_US / 1_000_000,
+            -62_135_596_800
+        );
+        assert_eq!(
+            crate::datamodel::sensapp_datetime::LATEST_UNIX_US,
+            253_402_300_800 * 1_000_000 - 1
+        );
     }
 
     #[test]
@@ -466,6 +534,15 @@ mod tests {
         let sql = window(Some(10), Some(20), &mut Vec::new());
         assert!(sql.contains("@start") && sql.contains("@end"));
         assert_eq!(window(None, None, &mut Vec::new()), "");
+    }
+
+    #[test]
+    fn availability_is_one_statement_with_parameters() {
+        let sql = availability_sql("`p.d.float_values`", true);
+        assert!(sql.contains("COUNT(DISTINCT DIV(UNIX_MICROS(timestamp) - @start, @step))"));
+        assert!(sql.contains("FROM `p.d.float_values`") && sql.contains("@end"));
+        let sql = availability_sql("`p.d.float_values`", false);
+        assert!(!sql.contains("@step") && sql.contains("CAST(NULL AS INT64) AS covered_buckets"));
     }
 
     #[test]

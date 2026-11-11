@@ -2,6 +2,20 @@ use crate::datamodel::SensAppDateTime;
 use anyhow::{Result, anyhow};
 use std::str::FromStr;
 
+/// The longest step, in milliseconds: the years 1 to 9999 that can be stored. A step multiplied into
+/// microseconds by the SQL of the buckets then still fits in an `i64`, with room for the
+/// arithmetic around it.
+pub const MAX_STEP_MS: i64 = (crate::datamodel::sensapp_datetime::LATEST_UNIX_US
+    - crate::datamodel::sensapp_datetime::EARLIEST_UNIX_US)
+    / 1000
+    + 1;
+
+/// How the samples of a bucket are reduced to one value.
+///
+/// `First`, `Last` and `Latest` among samples of a series at the same timestamp (written twice,
+/// without deduplication): SQLite and DuckDB keep the order of the writes, the first one written
+/// for `First` and the last one for `Last` and `Latest`. The other backends keep either of them.
+/// Deduplicating at ingestion or with the vacuum leaves one sample per timestamp and value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Aggregation {
     Avg,
@@ -85,6 +99,13 @@ impl SensorDataQueryOptions {
             && step_ms <= 0
         {
             return Err(anyhow!("'step' must be greater than zero"));
+        }
+        if let Some(step_ms) = self.step_ms
+            && step_ms > MAX_STEP_MS
+        {
+            return Err(anyhow!(
+                "'step' must not be longer than the years 1 to 9999 that can be stored"
+            ));
         }
 
         if let Some(simplify) = self.simplify

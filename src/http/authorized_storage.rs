@@ -26,14 +26,38 @@ impl AuthorizedStorage {
         Self { inner, access }
     }
 
+    /// Whether the token sees the metric with this name. A UUID entry of the allow list names one
+    /// series and does not show in the list of metrics, which has names only.
     fn allows(&self, name: &str) -> bool {
         self.access.can_access_sensor(name)
+    }
+
+    /// The matchers of a selector, restricted to the sensors the token sees by one more
+    /// `__name__` matcher, so the backend's own read and its limits apply. `None` when the token
+    /// sees no sensor at all.
+    fn restrict(&self, matchers: &[LabelMatcher]) -> Option<Vec<LabelMatcher>> {
+        let Some(allow_list) = &self.access.sensor_allow_list else {
+            return Some(matchers.to_vec());
+        };
+        if allow_list.is_empty() {
+            return None;
+        }
+        // The names are literals: `regex::escape` only escapes punctuation, which every backend
+        // reads as the character itself
+        let names = allow_list
+            .iter()
+            .map(|name| regex::escape(name))
+            .collect::<Vec<_>>()
+            .join("|");
+        let mut restricted = matchers.to_vec();
+        restricted.push(LabelMatcher::regex("__name__", names));
+        Some(restricted)
     }
 
     /// Whether the token may act on the sensor with this UUID.
     ///
     /// Sensors the token cannot access are reported like missing ones, as the read
-    /// paths do. Unknown UUIDs pass through so the inner storage reports them.
+    /// paths do. A series that the read does not find is not seen either: the check fails closed.
     async fn can_see_sensor(&self, sensor_uuid: &str) -> Result<bool> {
         if self.access.sensor_allow_list.is_none() {
             return Ok(true);
@@ -44,7 +68,7 @@ impl AuthorizedStorage {
             .inner
             .query_sensor_data(sensor_uuid, Some(instant), Some(instant), Some(1))
             .await?;
-        Ok(sensor_data.is_none_or(|data| self.allows(&data.sensor.name)))
+        Ok(sensor_data.is_some_and(|data| self.access.can_access(&data.sensor)))
     }
 }
 
@@ -58,7 +82,7 @@ impl StorageInstance for AuthorizedStorage {
         if let Some(sensor) = batch
             .sensors
             .iter()
-            .find(|item| !self.allows(&item.sensor.name))
+            .find(|item| !self.access.can_write(&item.sensor))
         {
             return Err(SensorAccessDenied(sensor.sensor.name.clone()).into());
         }
@@ -100,7 +124,9 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .list_series(metric_filter, limit, bookmark)
             .await?;
-        result.series.retain(|sensor| self.allows(&sensor.name));
+        result
+            .series
+            .retain(|sensor| self.access.can_access(sensor));
         Ok(result)
     }
 
@@ -121,7 +147,7 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .query_sensor_data(sensor_uuid, start_time, end_time, limit)
             .await?
-            .filter(|data| self.allows(&data.sensor.name)))
+            .filter(|data| self.access.can_access(&data.sensor)))
     }
 
     async fn query_sensor_data_advanced(
@@ -133,7 +159,7 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .query_sensor_data_advanced(sensor_uuid, options)
             .await?
-            .filter(|data| self.allows(&data.sensor.name)))
+            .filter(|data| self.access.can_access(&data.sensor)))
     }
 
     async fn query_sensor_data_latest(
@@ -146,7 +172,7 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .query_sensor_data_latest(sensor_uuid, start_time, end_time)
             .await?
-            .filter(|data| self.allows(&data.sensor.name)))
+            .filter(|data| self.access.can_access(&data.sensor)))
     }
 
     async fn query_sensor_data_availability(
@@ -160,7 +186,7 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .query_sensor_data_availability(sensor_uuid, start_time, end_time, step_ms)
             .await?
-            .filter(|summary| self.allows(&summary.sensor.name)))
+            .filter(|summary| self.access.can_access(&summary.sensor)))
     }
 
     async fn query_sensors_by_labels(
@@ -175,7 +201,7 @@ impl StorageInstance for AuthorizedStorage {
             .inner
             .query_sensors_by_labels(matchers, start_time, end_time, limit, numeric_only)
             .await?;
-        result.retain(|data| self.allows(&data.sensor.name));
+        result.retain(|data| self.access.can_access(&data.sensor));
         Ok(result)
     }
 
@@ -188,32 +214,19 @@ impl StorageInstance for AuthorizedStorage {
         max_series: usize,
         max_samples: usize,
     ) -> Result<SelectorRead> {
-        if self.access.sensor_allow_list.is_none() {
-            // The token sees every sensor: the backend's own read applies as is
-            return self
-                .inner
-                .query_selector(
-                    matchers,
-                    start_time,
-                    end_time,
-                    numeric_only,
-                    max_series,
-                    max_samples,
-                )
-                .await;
-        }
-        // Otherwise the limits only count the sensors the token sees: read through the
-        // filtered methods of this wrapper
-        crate::storage::selector::query_selector_sequential(
-            self,
-            matchers,
-            start_time,
-            end_time,
-            numeric_only,
-            max_series,
-            max_samples,
-        )
-        .await
+        let Some(matchers) = self.restrict(matchers) else {
+            return Ok(Ok(Vec::new()));
+        };
+        self.inner
+            .query_selector(
+                &matchers,
+                start_time,
+                end_time,
+                numeric_only,
+                max_series,
+                max_samples,
+            )
+            .await
     }
 
     async fn query_selector_aggregated(
@@ -223,21 +236,12 @@ impl StorageInstance for AuthorizedStorage {
         max_series: usize,
         max_samples: usize,
     ) -> Result<SelectorRead> {
-        if self.access.sensor_allow_list.is_none() {
-            return self
-                .inner
-                .query_selector_aggregated(matchers, options, max_series, max_samples)
-                .await;
-        }
-        // Only the sensors the token sees count for the limits: read through the filtered methods
-        crate::storage::selector::query_selector_aggregated_sequential(
-            self,
-            matchers,
-            options,
-            max_series,
-            max_samples,
-        )
-        .await
+        let Some(matchers) = self.restrict(matchers) else {
+            return Ok(Ok(Vec::new()));
+        };
+        self.inner
+            .query_selector_aggregated(&matchers, options, max_series, max_samples)
+            .await
     }
 
     async fn health_check(&self) -> Result<()> {
@@ -247,5 +251,102 @@ impl StorageInstance for AuthorizedStorage {
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {
         self.inner.cleanup_test_data().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::LabelMatcher;
+
+    /// A storage where every series exists for a delete and none for a read: what a backend that
+    /// answers `None` to an empty window would look like.
+    #[derive(Debug)]
+    struct UnreadableSeries;
+
+    #[async_trait]
+    impl StorageInstance for UnreadableSeries {
+        async fn create_or_migrate(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn publish(&self, _batch: Arc<crate::datamodel::batch::Batch>) -> Result<()> {
+            Ok(())
+        }
+        async fn vacuum(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn delete_series(&self, _sensor_uuid: &str) -> Result<bool> {
+            Ok(true)
+        }
+        async fn delete_series_samples(
+            &self,
+            _sensor_uuid: &str,
+            _start_time: SensAppDateTime,
+            _end_time: SensAppDateTime,
+        ) -> Result<Option<u64>> {
+            Ok(Some(1))
+        }
+        async fn list_series(
+            &self,
+            _metric_filter: Option<&str>,
+            _limit: Option<usize>,
+            _bookmark: Option<&str>,
+        ) -> Result<ListSeriesResult> {
+            unimplemented!()
+        }
+        async fn list_metrics(&self) -> Result<Vec<Metric>> {
+            unimplemented!()
+        }
+        async fn query_sensor_data(
+            &self,
+            _sensor_uuid: &str,
+            _start_time: Option<SensAppDateTime>,
+            _end_time: Option<SensAppDateTime>,
+            _limit: Option<usize>,
+        ) -> Result<Option<SensorData>> {
+            Ok(None)
+        }
+        async fn query_sensors_by_labels(
+            &self,
+            _matchers: &[LabelMatcher],
+            _start_time: Option<SensAppDateTime>,
+            _end_time: Option<SensAppDateTime>,
+            _limit: Option<usize>,
+            _numeric_only: bool,
+        ) -> Result<Vec<SensorData>> {
+            unimplemented!()
+        }
+        async fn health_check(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn cleanup_test_data(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_restricted_token_deletes_nothing_it_cannot_see() {
+        let storage = AuthorizedStorage::new(
+            Arc::new(UnreadableSeries),
+            AccessContext {
+                subject: "test".to_string(),
+                token_id: None,
+                can_read: true,
+                can_write: true,
+                can_delete: true,
+                can_admin: false,
+                sensor_allow_list: Some(vec!["allowed".to_string()]),
+            },
+        );
+        let uuid = uuid::Uuid::new_v4().to_string();
+        assert!(!storage.delete_series(&uuid).await.unwrap());
+        let instant = SensAppDateTime::from_unix_microseconds_i64(0);
+        assert_eq!(
+            storage
+                .delete_series_samples(&uuid, instant, instant)
+                .await
+                .unwrap(),
+            None
+        );
     }
 }

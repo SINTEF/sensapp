@@ -1,5 +1,8 @@
 use crate::storage::Aggregation;
 
+/// The start of the bucket of a sample is at or before it: SQLite's `/` truncates towards zero,
+/// so `origin + (t - origin) / step * step` put a sample before the origin (before 1970 without a
+/// start) in the next bucket. The remainder is made positive instead, as on PostgreSQL.
 pub(super) fn sqlite_bucketed_cte(table_name: &'static str) -> String {
     // Callers select table_name from fixed sensor-type tables, never request text.
     format!(
@@ -8,7 +11,7 @@ pub(super) fn sqlite_bucketed_cte(table_name: &'static str) -> String {
             SELECT
                 timestamp_us,
                 value,
-                (?5 + ((timestamp_us - ?5) / ?4) * ?4) AS bucket_us
+                (timestamp_us - (((timestamp_us - ?5) % ?4) + ?4) % ?4) AS bucket_us
             FROM {table_name}
             WHERE sensor_id = ?1
               AND timestamp_us >= COALESCE(?2, -9223372036854775807)
@@ -40,8 +43,9 @@ pub(super) fn sqlite_first_last_query(
         WITH bucketed AS (
             SELECT
                 timestamp_us,
+                rowid AS row_id,
                 {value_expression} AS value,
-                (?5 + ((timestamp_us - ?5) / ?4) * ?4) AS bucket_us
+                (timestamp_us - (((timestamp_us - ?5) % ?4) + ?4) % ?4) AS bucket_us
             FROM {table_name}
             WHERE sensor_id = ?1
               AND timestamp_us >= COALESCE(?2, -9223372036854775807)
@@ -52,7 +56,7 @@ pub(super) fn sqlite_first_last_query(
                 bucket_us,
                 timestamp_us AS sample_us,
                 value,
-                ROW_NUMBER() OVER (PARTITION BY bucket_us ORDER BY timestamp_us {direction}) AS row_num
+                ROW_NUMBER() OVER (PARTITION BY bucket_us ORDER BY timestamp_us {direction}, row_id {direction}) AS row_num
             FROM bucketed
         )
         SELECT {stamp} AS timestamp_us, value
@@ -80,18 +84,6 @@ pub(super) fn sqlite_integer_expression(aggregation: Aggregation) -> &'static st
 }
 
 pub(super) fn sqlite_float_expression(aggregation: Aggregation) -> &'static str {
-    match aggregation {
-        Aggregation::Avg => "AVG(value)",
-        Aggregation::Min => "MIN(value)",
-        Aggregation::Max => "MAX(value)",
-        Aggregation::Sum => "SUM(value)",
-        Aggregation::First | Aggregation::Last | Aggregation::Latest | Aggregation::Count => {
-            unreachable!("handled separately")
-        }
-    }
-}
-
-pub(super) fn sqlite_numeric_expression(aggregation: Aggregation) -> &'static str {
     match aggregation {
         Aggregation::Avg => "AVG(value)",
         Aggregation::Min => "MIN(value)",
