@@ -94,6 +94,7 @@ impl IntoResponse for AppError {
                     (StatusCode::NOT_FOUND, storage_error.to_string())
                 }
                 StorageError::SensorIdentityMismatch { .. }
+                | StorageError::SensorTypeConversion { .. }
                 | StorageError::SensorKeyCollision { .. } => {
                     (StatusCode::CONFLICT, storage_error.to_string())
                 }

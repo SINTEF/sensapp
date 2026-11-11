@@ -7,6 +7,11 @@ Releases are published from a `vX.Y.Z` tag, see [docs/RELEASING.md](docs/RELEASI
 
 ### Breaking
 
+- **A write to an existing series of another type is converted when exact**, instead of a `409`: Float to
+  Integer (whole numbers), Integer to Float (within 2^53), Integer or Float to Numeric, Numeric to Integer or Float
+  when exact. SenML floats and pandas `float64` columns now write to Integer series. Anything else, or one value
+  that does not convert, is a `409` that names the stored type.
+
 - **NaN is a gap in Arrow and CSV, not a `400`.** A NaN or a null in an Arrow value column, and in a numeric CSV
   column an empty cell, `NaN`, `null`, `NA` or `N/A`, is skipped instead of refusing the request or turning the
   CSV column into text. `POST /publish` answers with `X-SensApp-Skipped-Samples` and counts them in

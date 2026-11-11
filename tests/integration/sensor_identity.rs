@@ -401,3 +401,178 @@ async fn two_writers_registering_one_uuid_with_two_types_cannot_both_succeed() -
     }
     Ok(())
 }
+
+async fn write(
+    storage: &Arc<dyn StorageInstance>,
+    sensor: &Arc<Sensor>,
+    samples: TypedSamples,
+) -> Result<()> {
+    let mut builder = sensapp::datamodel::batch_builder::BatchBuilder::new()?;
+    builder.add(sensor.clone(), samples).await?;
+    builder.send_what_is_left(storage.clone()).await?;
+    Ok(())
+}
+
+fn float_samples(values: &[f64], from: i64) -> TypedSamples {
+    TypedSamples::Float(
+        values
+            .iter()
+            .enumerate()
+            .map(|(i, &value)| Sample {
+                datetime: at(from + i as i64),
+                value,
+            })
+            .collect(),
+    )
+}
+
+fn integer_samples(values: &[i64], from: i64) -> TypedSamples {
+    TypedSamples::Integer(
+        values
+            .iter()
+            .enumerate()
+            .map(|(i, &value)| Sample {
+                datetime: at(from + i as i64),
+                value,
+            })
+            .collect(),
+    )
+}
+
+/// SenML only has floating point numbers, and pandas turns an integer column with gaps into
+/// `float64`: a write whose type is not the stored one is converted when every value converts
+/// exactly, in the shared writer, so every backend does the same. The series stays what it was.
+#[tokio::test]
+#[serial]
+async fn a_write_of_another_type_is_converted_when_exact_and_refused_otherwise() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if !applies_to(&test_db) {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let sensor = |sensor_type, uuid: Uuid| {
+        Arc::new(Sensor::new(
+            uuid,
+            format!("conversion_{uuid}"),
+            sensor_type,
+            None,
+            None,
+        ))
+    };
+    let read = |uuid: Uuid| {
+        let storage = storage.clone();
+        async move {
+            storage
+                .query_sensor_data(&uuid.to_string(), None, None, None)
+                .await
+                .unwrap()
+                .expect("the series")
+        }
+    };
+
+    // An Integer series takes whole floats, as integers
+    let counter = Uuid::new_v4();
+    write(
+        &storage,
+        &sensor(SensorType::Integer, counter),
+        integer_samples(&[1], 0),
+    )
+    .await?;
+    write(
+        &storage,
+        &sensor(SensorType::Float, counter),
+        float_samples(&[2.0, 3.0], 1),
+    )
+    .await?;
+    let data = read(counter).await;
+    assert_eq!(data.sensor.sensor_type, SensorType::Integer);
+    let TypedSamples::Integer(samples) = &data.samples else {
+        panic!("not Integer: {:?}", data.samples);
+    };
+    assert_eq!(
+        samples.iter().map(|s| s.value).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+
+    // One value that is not whole refuses the whole write, with a 409 and the stored type
+    let error = write(
+        &storage,
+        &sensor(SensorType::Float, counter),
+        float_samples(&[4.0, 4.5], 3),
+    )
+    .await
+    .expect_err("4.5 is not an integer");
+    let Some(StorageError::SensorTypeConversion { stored_type, .. }) =
+        error.downcast_ref::<StorageError>()
+    else {
+        panic!("not a conversion error: {error:#}");
+    };
+    assert_eq!(stored_type, "Integer");
+    assert_eq!(read(counter).await.samples.len(), 3, "nothing was stored");
+
+    // A Float series takes integers; a Numeric one takes both
+    let level = Uuid::new_v4();
+    write(
+        &storage,
+        &sensor(SensorType::Float, level),
+        float_samples(&[0.5], 0),
+    )
+    .await?;
+    write(
+        &storage,
+        &sensor(SensorType::Integer, level),
+        integer_samples(&[7], 1),
+    )
+    .await?;
+    assert_eq!(read(level).await.samples.len(), 2);
+
+    let price = Uuid::new_v4();
+    write(
+        &storage,
+        &sensor(SensorType::Numeric, price),
+        TypedSamples::Numeric(
+            vec![Sample {
+                datetime: at(0),
+                value: rust_decimal::Decimal::new(125, 2),
+            }]
+            .into(),
+        ),
+    )
+    .await?;
+    write(
+        &storage,
+        &sensor(SensorType::Integer, price),
+        integer_samples(&[3], 1),
+    )
+    .await?;
+    write(
+        &storage,
+        &sensor(SensorType::Float, price),
+        float_samples(&[0.1], 2),
+    )
+    .await?;
+    let data = read(price).await;
+    assert_eq!(data.sensor.sensor_type, SensorType::Numeric);
+    assert_eq!(data.samples.len(), 3);
+
+    // Other types are never converted
+    let text = TypedSamples::String(
+        vec![Sample {
+            datetime: at(9),
+            value: "3".to_string(),
+        }]
+        .into(),
+    );
+    let error = write(&storage, &sensor(SensorType::String, counter), text)
+        .await
+        .expect_err("a String is not an Integer");
+    assert!(
+        matches!(
+            error.downcast_ref::<StorageError>(),
+            Some(StorageError::SensorTypeConversion { .. })
+        ),
+        "{error:#}"
+    );
+    Ok(())
+}

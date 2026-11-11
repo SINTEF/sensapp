@@ -1,5 +1,5 @@
 use super::{
-    Sensor, TypedSamples,
+    Sensor, SensorType, TypedSamples,
     batch::{Batch, SingleSensorBatch},
 };
 use crate::datamodel::sensapp_datetime::{EARLIEST_UNIX_US, LATEST_UNIX_US, SensAppDateTimeExt};
@@ -59,6 +59,9 @@ fn holds_an_infinite_coordinate(samples: &TypedSamples) -> bool {
 pub struct BatchBuilder {
     batch_size: usize,
     single_sensor_batches: RwLock<HybridMap<Uuid, SingleSensorBatch>>,
+    /// The stored type of the sensors that a write found stored with another type than its
+    /// samples: the next batches are converted before they are sent
+    stored_types: std::collections::HashMap<Uuid, SensorType>,
 }
 
 impl BatchBuilder {
@@ -72,6 +75,7 @@ impl BatchBuilder {
         Ok(Self {
             batch_size,
             single_sensor_batches: RwLock::new(HybridMap::new()),
+            stored_types: std::collections::HashMap::new(),
         })
     }
 
@@ -236,10 +240,92 @@ impl BatchBuilder {
         let batches_iter = self.build_batches().await;
 
         for batch in batches_iter {
-            storage.publish(Arc::new(batch)).await?;
+            self.publish_converting(&storage, batch).await?;
         }
 
         Ok(())
+    }
+
+    /// Publish a batch. A sensor that is stored with another type than its samples (SenML only has
+    /// floating point numbers, and pandas turns an integer column with gaps into `float64`) takes
+    /// them converted to the stored type when every value converts exactly, and the write is
+    /// refused when one does not. The storage checks the type where it registers the sensor, in
+    /// the transaction of the write, so this holds across instances: the write is tried again with
+    /// the stored type it reported. Batches are stored one after the other, so a request that
+    /// holds a value that does not convert may have stored the batches before it.
+    async fn publish_converting(
+        &mut self,
+        storage: &Arc<dyn StorageInstance>,
+        batch: Batch,
+    ) -> Result<(), Error> {
+        let mut batch = self.convert_known(batch).await?;
+        // One conversion per sensor of the batch at most
+        for _ in 0..=batch.sensors.len() {
+            let shared = Arc::new(batch);
+            let error = match storage.publish(shared.clone()).await {
+                Ok(()) => return Ok(()),
+                Err(error) => error,
+            };
+            let Some(StorageError::SensorIdentityMismatch {
+                uuid,
+                stored_type: Some(stored_type),
+                ..
+            }) = error.downcast_ref::<StorageError>()
+            else {
+                return Err(error);
+            };
+            let (uuid, Ok(stored_type)) = (*uuid, stored_type.parse::<SensorType>()) else {
+                return Err(error);
+            };
+            // The storage let go of the batch when it failed
+            let Ok(owned) = Arc::try_unwrap(shared) else {
+                return Err(error);
+            };
+            self.stored_types.insert(uuid, stored_type);
+            batch = self.convert_known(owned).await?;
+        }
+        Err(anyhow::anyhow!(
+            "The types of the sensors of a batch kept changing"
+        ))
+    }
+
+    /// The batch with the samples of the sensors of `stored_types` converted to their stored type.
+    async fn convert_known(&self, batch: Batch) -> Result<Batch, Error> {
+        if self.stored_types.is_empty() {
+            return Ok(batch);
+        }
+        let mut converted = SensAppVec::new();
+        for single in batch.sensors {
+            let stored = self
+                .stored_types
+                .get(&single.sensor.uuid)
+                .copied()
+                .filter(|stored| *stored != single.sensor.sensor_type);
+            let Some(stored) = stored else {
+                converted.push(single);
+                continue;
+            };
+            let sensor = single.sensor;
+            let samples = single.samples.into_inner();
+            let samples =
+                samples
+                    .convert_to(stored)
+                    .map_err(|error| StorageError::SensorTypeConversion {
+                        uuid: sensor.uuid,
+                        sensor_type: sensor.sensor_type.to_string(),
+                        stored_type: stored.to_string(),
+                        reason: error.0,
+                    })?;
+            let sensor = Sensor {
+                uuid: sensor.uuid,
+                name: sensor.name.clone(),
+                sensor_type: stored,
+                unit: sensor.unit.clone(),
+                labels: sensor.labels.clone(),
+            };
+            converted.push(SingleSensorBatch::new(Arc::new(sensor), samples));
+        }
+        Ok(Batch::new(converted))
     }
 
     async fn send(&mut self, storage: Arc<dyn StorageInstance>, len: usize) -> Result<(), Error> {
@@ -252,7 +338,7 @@ impl BatchBuilder {
         }
 
         let batch = self.build_batch().await;
-        storage.publish(Arc::new(batch)).await?;
+        self.publish_converting(&storage, batch).await?;
 
         Ok(())
     }

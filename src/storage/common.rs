@@ -46,14 +46,20 @@ pub fn check_sensor_identity(
     if stored_type.parse::<SensorType>() == Ok(sensor.sensor_type) {
         Ok(())
     } else {
-        Err(identity_mismatch(sensor))
+        Err(StorageError::SensorIdentityMismatch {
+            uuid: sensor.uuid,
+            sensor_type: sensor.sensor_type.to_string(),
+            stored_type: Some(stored_type.to_string()),
+        })
     }
 }
 
+/// Two types for one UUID within a batch: no stored type to convert to.
 fn identity_mismatch(sensor: &Sensor) -> StorageError {
     StorageError::SensorIdentityMismatch {
         uuid: sensor.uuid,
         sensor_type: sensor.sensor_type.to_string(),
+        stored_type: None,
     }
 }
 

@@ -205,8 +205,8 @@ async fn an_export_imported_again_goes_to_its_series() -> Result<()> {
     Ok(())
 }
 
-/// SenML numbers came back as Float, and a Float write under the UUID of an Integer series is
-/// refused (409): an Integer export could not be imported again.
+/// SenML numbers are Float, and a Float write under the UUID of an Integer series is converted when
+/// every value is whole: an Integer export is imported again whatever it says of its type.
 #[tokio::test]
 #[serial]
 async fn an_integer_senml_export_imported_again_goes_to_its_series() -> Result<()> {
@@ -308,5 +308,51 @@ async fn a_series_answers_to_every_spelling_of_its_uuid() -> Result<()> {
         send(&app, "GET", &format!("/series/{simple}")).await,
         StatusCode::NOT_FOUND
     );
+    Ok(())
+}
+
+/// A plain SenML record (a float, no `_type`) to an Integer series: converted when whole, a 409 that
+/// names the stored type when not.
+#[tokio::test]
+#[serial]
+async fn plain_senml_numbers_go_to_an_integer_series_when_whole() -> Result<()> {
+    ensure_config();
+    let test_db = TestDb::new().await?;
+    if !applies_to(&test_db) {
+        return Ok(());
+    }
+    let storage = test_db.storage();
+    let app = app(storage.clone());
+    let sensor = Arc::new(Sensor::new_without_uuid(
+        format!("whole_{}", Uuid::new_v4()),
+        SensorType::Integer,
+        None,
+        None,
+    )?);
+    let mut sensors = SensAppVec::new();
+    sensors.push(SingleSensorBatch::new(
+        sensor.clone(),
+        TypedSamples::Integer(
+            vec![Sample {
+                datetime: hifitime::Epoch::from_unix_seconds(1_700_000_000.0),
+                value: 1,
+            }]
+            .into(),
+        ),
+    ));
+    storage.publish(Arc::new(Batch::new(sensors))).await?;
+
+    let record = |value: &str| {
+        format!(r#"[{{"n":"{}","v":{value},"t":1700000100}}]"#, sensor.uuid).into_bytes()
+    };
+    let token = token(None);
+    let (status, message) = post(&app, &token, SENML, record("2")).await;
+    assert!(status.is_success(), "{status} {message}");
+    assert_eq!(sample_count(&storage, sensor.uuid).await?, 2);
+
+    let (status, message) = post(&app, &token, SENML, record("2.5")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{message}");
+    assert!(message.contains("Integer"), "{message}");
+    assert_eq!(sample_count(&storage, sensor.uuid).await?, 2);
     Ok(())
 }
