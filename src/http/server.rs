@@ -319,7 +319,13 @@ pub fn build_router(state: HttpServerState, settings: &RouterSettings) -> Router
 
 pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Result<()> {
     let settings = RouterSettings::from_config(&*config::get()?)?;
+    let open = state.auth.is_none();
     let app = build_router(state, &settings);
+    let app = if open {
+        super::open_server::guard_open_server(app, address.ip().is_loopback())
+    } else {
+        app
+    };
 
     // Bind to the address with improved error handling
     let listener = match tokio::net::TcpListener::bind(address).await {
@@ -334,9 +340,13 @@ pub async fn run_http_server(state: HttpServerState, address: SocketAddr) -> Res
         }
     };
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    super::serve::serve(
+        listener,
+        app,
+        super::serve::ServeLimits::default(),
+        shutdown_signal(),
+    )
+    .await;
 
     Ok(())
 }

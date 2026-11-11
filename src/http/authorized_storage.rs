@@ -55,7 +55,7 @@ impl AuthorizedStorage {
     /// Whether the token may act on the sensor with this UUID.
     ///
     /// Sensors the token cannot access are reported like missing ones, as the read
-    /// paths do. Unknown UUIDs pass through so the inner storage reports them.
+    /// paths do. A series that the read does not find is not seen either: the check fails closed.
     async fn can_see_sensor(&self, sensor_uuid: &str) -> Result<bool> {
         if self.access.sensor_allow_list.is_none() {
             return Ok(true);
@@ -66,7 +66,7 @@ impl AuthorizedStorage {
             .inner
             .query_sensor_data(sensor_uuid, Some(instant), Some(instant), Some(1))
             .await?;
-        Ok(sensor_data.is_none_or(|data| self.allows(&data.sensor.name)))
+        Ok(sensor_data.is_some_and(|data| self.allows(&data.sensor.name)))
     }
 }
 
@@ -247,5 +247,102 @@ impl StorageInstance for AuthorizedStorage {
     #[cfg(any(test, feature = "test-utils"))]
     async fn cleanup_test_data(&self) -> Result<()> {
         self.inner.cleanup_test_data().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::LabelMatcher;
+
+    /// A storage where every series exists for a delete and none for a read: what a backend that
+    /// answers `None` to an empty window would look like.
+    #[derive(Debug)]
+    struct UnreadableSeries;
+
+    #[async_trait]
+    impl StorageInstance for UnreadableSeries {
+        async fn create_or_migrate(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn publish(&self, _batch: Arc<crate::datamodel::batch::Batch>) -> Result<()> {
+            Ok(())
+        }
+        async fn vacuum(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn delete_series(&self, _sensor_uuid: &str) -> Result<bool> {
+            Ok(true)
+        }
+        async fn delete_series_samples(
+            &self,
+            _sensor_uuid: &str,
+            _start_time: SensAppDateTime,
+            _end_time: SensAppDateTime,
+        ) -> Result<Option<u64>> {
+            Ok(Some(1))
+        }
+        async fn list_series(
+            &self,
+            _metric_filter: Option<&str>,
+            _limit: Option<usize>,
+            _bookmark: Option<&str>,
+        ) -> Result<ListSeriesResult> {
+            unimplemented!()
+        }
+        async fn list_metrics(&self) -> Result<Vec<Metric>> {
+            unimplemented!()
+        }
+        async fn query_sensor_data(
+            &self,
+            _sensor_uuid: &str,
+            _start_time: Option<SensAppDateTime>,
+            _end_time: Option<SensAppDateTime>,
+            _limit: Option<usize>,
+        ) -> Result<Option<SensorData>> {
+            Ok(None)
+        }
+        async fn query_sensors_by_labels(
+            &self,
+            _matchers: &[LabelMatcher],
+            _start_time: Option<SensAppDateTime>,
+            _end_time: Option<SensAppDateTime>,
+            _limit: Option<usize>,
+            _numeric_only: bool,
+        ) -> Result<Vec<SensorData>> {
+            unimplemented!()
+        }
+        async fn health_check(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn cleanup_test_data(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_restricted_token_deletes_nothing_it_cannot_see() {
+        let storage = AuthorizedStorage::new(
+            Arc::new(UnreadableSeries),
+            AccessContext {
+                subject: "test".to_string(),
+                token_id: None,
+                can_read: true,
+                can_write: true,
+                can_delete: true,
+                can_admin: false,
+                sensor_allow_list: Some(vec!["allowed".to_string()]),
+            },
+        );
+        let uuid = uuid::Uuid::new_v4().to_string();
+        assert!(!storage.delete_series(&uuid).await.unwrap());
+        let instant = SensAppDateTime::from_unix_microseconds_i64(0);
+        assert_eq!(
+            storage
+                .delete_series_samples(&uuid, instant, instant)
+                .await
+                .unwrap(),
+            None
+        );
     }
 }

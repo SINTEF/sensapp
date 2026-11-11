@@ -129,7 +129,15 @@ impl AuthConfig {
                      {MIN_SECRET_LENGTH} characters long"
                 )
             })?;
-            keys.insert(key_id(secret), DecodingKey::from_secret(secret.as_bytes()));
+            // The key id is 32 bits: a secret under the id of another would replace it
+            let kid = key_id(secret);
+            if keys.contains_key(&kid) {
+                anyhow::bail!(
+                    "SENSAPP_JWT_PREVIOUS_SECRETS: a secret is the current one, is given twice, or \
+                     has the key id of another one ({kid}): remove it, or pick another secret"
+                );
+            }
+            keys.insert(kid, DecodingKey::from_secret(secret.as_bytes()));
         }
         Ok(self)
     }
@@ -373,8 +381,14 @@ impl TokenRequest {
         }
 
         let scope = parse_scope(scope)?;
-        if !rules.allow_admin && scope.split(' ').any(|item| item == Scope::Admin.name()) {
+        let admin = scope.split(' ').any(|item| item == Scope::Admin.name());
+        if !rules.allow_admin && admin {
             return Err(TokenRequestError::AdminNotAllowed);
+        }
+        if admin && sensors.is_some() {
+            return Err(invalid(
+                "An admin token is for every sensor: leave the sensors out".into(),
+            ));
         }
 
         if duration_seconds == 0 {
@@ -555,6 +569,13 @@ pub fn validate_token(headers: &HeaderMap, config: &AuthConfig) -> Result<Access
             .split_whitespace()
             .any(|s| s.eq_ignore_ascii_case(wanted.name()))
     };
+
+    // An admin token acts on every sensor: one that lists sensors was not made by SensApp
+    if has(Scope::Admin) && claims.sensors.is_some() {
+        return Err(AppError::Unauthorized(
+            "Invalid token: an admin token cannot list sensors".into(),
+        ));
+    }
 
     Ok(AccessContext {
         can_read: has(Scope::Read),
@@ -1307,5 +1328,42 @@ mod tests {
     fn the_mode_never_prints_its_secret() {
         let mode = AuthMode::Secret(TEST_SECRET.to_string());
         assert!(!format!("{mode:?}").contains(TEST_SECRET));
+    }
+
+    // -- review of November 2026 --
+
+    #[test]
+    fn an_admin_token_cannot_list_sensors() {
+        let sensors = Some(vec!["temperature".to_string()]);
+        assert!(TokenRequest::new("ops", "admin", sensors.clone(), 3600, &CLI_RULES).is_err());
+
+        // One made by hand is refused when it is used
+        let config = make_config();
+        let token = config
+            .issue_token("ops", "admin", 3600, sensors)
+            .unwrap()
+            .token;
+        assert!(validate_token(&bearer_headers(&token), &config).is_err());
+    }
+
+    #[test]
+    fn a_previous_secret_with_the_key_id_of_another_is_refused() {
+        let other = "previous-secret-0123456789abcdef0123";
+        assert!(
+            make_config()
+                .with_previous_secrets(&[other.to_string()])
+                .is_ok()
+        );
+        assert!(
+            make_config()
+                .with_previous_secrets(&[TEST_SECRET.to_string()])
+                .is_err(),
+            "the current secret, under its own key id"
+        );
+        assert!(
+            make_config()
+                .with_previous_secrets(&[other.to_string(), other.to_string()])
+                .is_err()
+        );
     }
 }
