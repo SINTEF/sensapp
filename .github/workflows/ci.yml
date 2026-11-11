@@ -342,6 +342,10 @@ jobs:
           --set storage.connectionString=postgres://postgres:postgres@postgres:5432/sensapp
           --set persistence.enabled=false
 
+      - name: Refuse SQLite with several replicas
+        run: >-
+          ! helm template sensapp charts/sensapp --set replicaCount=2
+
   docker-smoke:
     name: Docker Smoke Build (${{ matrix.name }})
     runs-on: ubuntu-latest

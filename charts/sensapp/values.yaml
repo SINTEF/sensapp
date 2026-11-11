@@ -69,7 +69,6 @@ env:
   SENSAPP_ENDPOINT: 0.0.0.0
   SENSAPP_PORT: "3000"
   SENSAPP_HTTP_BODY_LIMIT: 64MiB
-  SENSAPP_HTTP_SERVER_TIMEOUT_SECONDS: "30"
   SENSAPP_HTTP_MAX_CONCURRENT_WRITES: "16"
   SENSAPP_BATCH_SIZE: "8192"
   # Do not write samples that are stored already; PostgreSQL, TimescaleDB, SQLite and DuckDB only,
