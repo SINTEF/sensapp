@@ -353,30 +353,19 @@ mod tests {
             assert_eq!(config.parse_http_body_limit().unwrap(), 12345);
         });
 
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("64m"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 64000000);
-        });
-
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("64mb"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 64000000);
-        });
-
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("64MiB"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 67108864);
-        });
-
-        temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some("1.5gb"), || {
-            let config = SensAppConfig::load().unwrap();
-            assert_eq!(config.parse_http_body_limit().unwrap(), 1500000000);
-        });
-
+        // The other sizes are set on a loaded configuration and not in the environment: a refused
+        // one would make the other tests that load the configuration fail while it is set
+        let limit = |value: &str| {
+            let mut config = SensAppConfig::load().unwrap();
+            config.http_body_limit = value.to_string();
+            config.parse_http_body_limit()
+        };
+        assert_eq!(limit("64m").unwrap(), 64000000);
+        assert_eq!(limit("64mb").unwrap(), 64000000);
+        assert_eq!(limit("64MiB").unwrap(), 67108864);
+        assert_eq!(limit("1.5gb").unwrap(), 1500000000);
         for refused in ["1tb", "3GiB", "0", "-5mb"] {
-            temp_env::with_var("SENSAPP_HTTP_BODY_LIMIT", Some(refused), || {
-                assert!(SensAppConfig::load().is_err(), "{refused}");
-            });
+            assert!(limit(refused).is_err(), "{refused}");
         }
     }
 
