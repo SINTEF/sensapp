@@ -52,7 +52,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Runnable examples live in `examples/quickstart.py` and `examples/catalog_overview.py`.
+Runnable examples live in `examples/quickstart.py`, `examples/catalog_overview.py` and `examples/maintenance.py`.
 
 ## Publish with explicit timestamps
 
@@ -130,9 +130,34 @@ async with SensAppClient() as client:
         print(data.frame)
 ```
 
+## Last sample and availability
+
+```python
+last = await client.last_sample(series_uuid)
+day = await client.availability(series_uuid, start=start, end=end, step="1h")
+print(last.value, day.coverage_ratio)
+```
+
+## Admin operations
+
+Deletes, the vacuum and tokens are in the `client.admin` namespace and need a token with the `delete` or `admin` scope:
+
+```python
+async with SensAppClient(token=os.environ["SENSAPP_ADMIN_TOKEN"]) as client:
+    result = await client.admin.vacuum()  # removes duplicate samples, never retried
+    await client.admin.delete_samples(series_uuid, start=start, end=end)
+    await client.admin.delete_series(series_uuid)
+    created = await client.admin.create_token(
+        "edge-device-7", ["write"], duration_seconds=86400
+    )
+```
+
+See `examples/maintenance.py` and [docs/PYTHON_SDK.md](../../docs/PYTHON_SDK.md#admin-operations).
+
 ## Public API
 
-- `SensAppClient`
+- `SensAppClient`, and `client.admin` (`AdminClient`)
+- `LastSample`, `Availability`, `VacuumResult`, `DeletedSamples`, `CreatedToken`
 - `SamplePoint`
 - `TimeSeries`
 - `build_upload_table()`

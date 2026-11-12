@@ -151,8 +151,8 @@ SensApp runs as several instances, so a series can be deleted while another inst
 | TimescaleDB | yes | yes | yes | Works on compressed chunks. `DELETE` on a compressed chunk decompresses what it touches first, which is slower, and has no limit of rows (`timescaledb.max_tuples_decompressed_per_dml_transaction` is lifted for the delete). The vacuum decompresses only the chunks that hold duplicates, removes them and compresses those chunks again |
 | DuckDB | yes | yes | yes | Exact duplicates are found with `rowid` |
 | ClickHouse | yes | yes | yes | Lightweight `DELETE`: rows disappear from queries at once and are physically removed by later merges. The sample count is taken just before the delete. ClickHouse 24.8 can lose a delete while background merges run, so SensApp checks that the rows are gone and deletes again if not. A series being written to: see above |
-| BigQuery | yes | yes | no | `DELETE` statements, which bill the bytes they scan. BigQuery runs 2 mutating statements at a time per table and queues 20: deleting many series at once fails. Duplicates cannot be removed: `501 Not Implemented` |
-| RRDCached | no | no | no | Returns `501 Not Implemented` |
+| BigQuery | yes | yes | no | `DELETE` statements, which bill the bytes they scan. BigQuery runs 2 mutating statements at a time per table and queues 20: deleting many series at once fails. Duplicates cannot be removed: the vacuum answers `"duplicates_removed": null` |
+| RRDCached | no | no | no | The deletes return `501 Not Implemented`, the vacuum answers `"duplicates_removed": null` |
 
 ## How other systems do it
 

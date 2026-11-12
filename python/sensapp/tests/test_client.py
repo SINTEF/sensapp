@@ -446,6 +446,21 @@ async def test_get_series_serializes_bools_for_the_server() -> None:
     assert "step" not in params
 
 
+async def test_get_series_accepts_datetimes() -> None:
+    client, session = _mock_client()
+    session.get.return_value = MockResponse.bytes_ok(
+        serialize_arrow_table(_single_series_response_table())
+    )
+
+    await client.get_series(
+        SERIES_UUID, start=datetime(2026, 3, 16, tzinfo=UTC), end="2026-03-17T00:00Z"
+    )
+
+    params = session.get.call_args[1]["params"]
+    assert params["start"] == "2026-03-16T00:00:00+00:00"
+    assert params["end"] == "2026-03-17T00:00Z"
+
+
 # ── errors ──────────────────────────────────────────────────────
 
 
