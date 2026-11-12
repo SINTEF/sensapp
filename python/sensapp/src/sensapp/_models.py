@@ -279,16 +279,30 @@ class CreatedToken:
 def format_time(value: datetime | str) -> str:
     """The text the server expects for a time bound: ISO 8601 with its offset.
 
-    A naive `datetime` is refused: guessing a time zone would delete or read the wrong
-    window.
+    A time without a time zone is refused, a naive `datetime` or an ISO 8601 string
+    without an offset (``"2026-03-16T12:00:00"``, ``"2026-03-16"``): the server would
+    read it as UTC, and guessing would delete or read the wrong window. Other strings
+    go to the server as they are.
     """
     if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return value  # Not ISO 8601: the server parses it, or refuses it
+        if _is_naive(parsed):
+            raise SensAppValidationError(
+                f"time {value!r} has no time zone, e.g. '2026-03-16T12:00:00Z'"
+            )
         return value
-    if value.tzinfo is None or value.utcoffset() is None:
+    if _is_naive(value):
         raise SensAppValidationError(
             "datetime must be timezone-aware, e.g. datetime(..., tzinfo=UTC)"
         )
     return value.isoformat()
+
+
+def _is_naive(value: datetime) -> bool:
+    return value.tzinfo is None or value.utcoffset() is None
 
 
 def _parse_time(value: str) -> datetime:

@@ -160,6 +160,21 @@ async def test_delete_samples_refuses_a_naive_datetime() -> None:
     session.delete.assert_not_called()
 
 
+@pytest.mark.parametrize("naive", ["2026-03-16T12:00:00", "2026-03-16"])
+async def test_delete_samples_refuses_a_time_string_without_a_time_zone(
+    naive: str,
+) -> None:
+    # The server would read it as UTC
+    client, session = _client()
+
+    with pytest.raises(SensAppValidationError):
+        await client.admin.delete_samples(
+            SERIES_UUID, start=naive, end="2026-03-17T00:00:00Z"
+        )
+
+    session.delete.assert_not_called()
+
+
 async def test_delete_samples_keeps_the_offset_of_the_datetime() -> None:
     client, session = _client()
     session.delete.return_value = MockResponse.json_ok(

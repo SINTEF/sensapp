@@ -453,12 +453,12 @@ async def test_get_series_accepts_datetimes() -> None:
     )
 
     await client.get_series(
-        SERIES_UUID, start=datetime(2026, 3, 16, tzinfo=UTC), end="2026-03-17"
+        SERIES_UUID, start=datetime(2026, 3, 16, tzinfo=UTC), end="2026-03-17T00:00Z"
     )
 
     params = session.get.call_args[1]["params"]
     assert params["start"] == "2026-03-16T00:00:00+00:00"
-    assert params["end"] == "2026-03-17"
+    assert params["end"] == "2026-03-17T00:00Z"
 
 
 # ── errors ──────────────────────────────────────────────────────
