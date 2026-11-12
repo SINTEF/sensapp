@@ -9,6 +9,8 @@ from urllib.parse import parse_qs, urlparse
 import polars as pl
 import pyarrow as pa
 
+from ._exceptions import SensAppValidationError
+
 if TYPE_CHECKING:
     import pandas as pd
 
@@ -202,3 +204,160 @@ def _extract_bookmark(url: str) -> str | None:
     params = parse_qs(parsed.query)
     bookmarks = params.get("bookmark", [])
     return bookmarks[0] if bookmarks else None
+
+
+@dataclass(slots=True, frozen=True)
+class LastSample:
+    """The most recent sample of a series.
+
+    ``value`` is what the server sent, except for a float (the server writes ``NaN``
+    and the infinities as text, here they are floats) and a numeric (a `Decimal`).
+    A location is ``{"longitude": ..., "latitude": ...}``.
+    """
+
+    series_uuid: str
+    sensor_name: str
+    sensor_type: SensorType
+    timestamp: datetime
+    value: Any
+    unit: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class Availability:
+    """Whether a series has samples in a time window, and how well it is covered.
+
+    The bucket fields are ``None`` unless a ``step`` was asked for: the window is cut
+    in buckets of that width, and ``coverage_ratio`` is the share of them that hold a
+    sample.
+    """
+
+    series_uuid: str
+    sensor_name: str
+    start: datetime
+    end: datetime
+    present: bool
+    sample_count: int
+    first_sample_at: datetime | None = None
+    last_sample_at: datetime | None = None
+    step: str | None = None
+    covered_buckets: int | None = None
+    total_buckets: int | None = None
+    coverage_ratio: float | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class VacuumResult:
+    """What a vacuum did.
+
+    ``duplicates_removed`` is ``None`` on a backend that cannot remove duplicates.
+    """
+
+    status: str
+    duplicates_removed: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class DeletedSamples:
+    series_uuid: str
+    deleted_samples: int
+
+
+@dataclass(slots=True, frozen=True)
+class CreatedToken:
+    """A token the server just made. It is shown once: the server keeps nothing."""
+
+    # Out of the repr, so that a token does not end up in a log or a notebook
+    token: str = field(repr=False)
+    subject: str
+    scope: list[str]
+    expires_at: int
+    jti: str
+    sensors: list[str] | None = None
+
+
+def format_time(value: datetime | str) -> str:
+    """The text the server expects for a time bound: ISO 8601 with its offset.
+
+    A naive `datetime` is refused: guessing a time zone would delete or read the wrong
+    window.
+    """
+    if isinstance(value, str):
+        return value
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise SensAppValidationError(
+            "datetime must be timezone-aware, e.g. datetime(..., tzinfo=UTC)"
+        )
+    return value.isoformat()
+
+
+def _parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+def _parse_optional_time(value: str | None) -> datetime | None:
+    return None if value is None else _parse_time(value)
+
+
+def _parse_sample_value(sensor_type: str, value: Any) -> Any:
+    if isinstance(value, str):
+        if sensor_type == "float":
+            # "NaN", "+Inf" and "-Inf" are texts in the JSON of the server
+            return float(value)
+        if sensor_type == "numeric":
+            return Decimal(value)
+    return value
+
+
+def parse_last_sample(data: dict[str, Any]) -> LastSample:
+    sensor_type = data["sensor_type"]
+    return LastSample(
+        series_uuid=data["series_uuid"],
+        sensor_name=data["sensor_name"],
+        sensor_type=sensor_type,
+        unit=data.get("unit"),
+        timestamp=_parse_time(data["timestamp"]),
+        value=_parse_sample_value(sensor_type, data["value"]),
+    )
+
+
+def parse_availability(data: dict[str, Any]) -> Availability:
+    return Availability(
+        series_uuid=data["series_uuid"],
+        sensor_name=data["sensor_name"],
+        start=_parse_time(data["start"]),
+        end=_parse_time(data["end"]),
+        present=bool(data["present"]),
+        sample_count=int(data["sample_count"]),
+        first_sample_at=_parse_optional_time(data.get("first_sample_at")),
+        last_sample_at=_parse_optional_time(data.get("last_sample_at")),
+        step=data.get("step"),
+        covered_buckets=data.get("covered_buckets"),
+        total_buckets=data.get("total_buckets"),
+        coverage_ratio=data.get("coverage_ratio"),
+    )
+
+
+def parse_vacuum_result(data: dict[str, Any]) -> VacuumResult:
+    return VacuumResult(
+        status=str(data["status"]),
+        duplicates_removed=data.get("duplicates_removed"),
+    )
+
+
+def parse_deleted_samples(data: dict[str, Any]) -> DeletedSamples:
+    return DeletedSamples(
+        series_uuid=str(data["series_uuid"]),
+        deleted_samples=int(data["deleted_samples"]),
+    )
+
+
+def parse_created_token(data: dict[str, Any]) -> CreatedToken:
+    return CreatedToken(
+        token=data["token"],
+        subject=data["subject"],
+        scope=list(data["scope"]),
+        sensors=data.get("sensors"),
+        expires_at=int(data["expires_at"]),
+        jti=data["jti"],
+    )

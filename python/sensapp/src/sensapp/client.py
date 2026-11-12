@@ -9,6 +9,7 @@ from uuid import UUID
 import niquests
 import polars as pl
 
+from ._admin import AdminClient
 from ._arrow import (
     build_upload_table,
     build_upload_table_from_polars,
@@ -18,7 +19,9 @@ from ._arrow import (
 )
 from ._exceptions import SensAppHTTPError
 from ._models import (
+    Availability,
     HealthStatus,
+    LastSample,
     MetricsCatalog,
     ReadinessStatus,
     SamplePoint,
@@ -26,6 +29,9 @@ from ._models import (
     TimeSeries,
     UploadSensorType,
     UploadValue,
+    format_time,
+    parse_availability,
+    parse_last_sample,
     parse_metrics_catalog,
     parse_series_catalog,
 )
@@ -70,6 +76,9 @@ class SensAppClient:
         self._retry = retry or NO_RETRY
         self._write_timeout = write_timeout
         self._session = niquests.AsyncSession(timeout=timeout)
+        #: Maintenance and deletes: `AdminClient`. They need the `delete` scope, and
+        #: tokens need `admin`.
+        self.admin = AdminClient(self)
 
     @classmethod
     def from_env(
@@ -207,8 +216,8 @@ class SensAppClient:
         self,
         series_uuid: str | UUID,
         *,
-        start: str | None = None,
-        end: str | None = None,
+        start: datetime | str | None = None,
+        end: datetime | str | None = None,
         limit: int | None = None,
         step: str | None = None,
         aggregation: str | None = None,
@@ -219,8 +228,8 @@ class SensAppClient:
         """Fetch one series by UUID and decode it into a compact TimeSeries."""
         params: dict[str, Any] = {
             "format": "arrow",
-            "start": start,
-            "end": end,
+            "start": None if start is None else format_time(start),
+            "end": None if end is None else format_time(end),
             "limit": limit,
             "step": step,
             "aggregation": aggregation,
@@ -230,6 +239,53 @@ class SensAppClient:
         }
         response = await self._get(f"/series/{series_uuid}", params=params)
         return decode_single_time_series(response.content)
+
+    async def last_sample(
+        self,
+        series_uuid: str | UUID,
+        *,
+        start: datetime | str | None = None,
+        end: datetime | str | None = None,
+    ) -> LastSample:
+        """Fetch the most recent sample of a series, optionally inside a window.
+
+        Raises `SensAppHTTPError` with status 404 when the series does not exist or has
+        no sample in the window: the server gives one answer for both. Needs the
+        ``read`` scope.
+        """
+        data = await self._get_json(
+            f"/series/{series_uuid}/last",
+            params={
+                "start": None if start is None else format_time(start),
+                "end": None if end is None else format_time(end),
+            },
+        )
+        return parse_last_sample(data)
+
+    async def availability(
+        self,
+        series_uuid: str | UUID,
+        *,
+        start: datetime | str,
+        end: datetime | str,
+        step: str | None = None,
+    ) -> Availability:
+        """Tell whether a series has samples between ``start`` and ``end`` (inclusive).
+
+        With ``step`` (a Prometheus duration such as ``"5m"``) the window is cut in
+        buckets of that width and the answer also says how many of them hold a sample.
+        Raises `SensAppHTTPError` with status 404 when the series does not exist.
+        Needs the ``read`` scope.
+        """
+        data = await self._get_json(
+            f"/series/{series_uuid}/availability",
+            params={
+                "start": format_time(start),
+                "end": format_time(end),
+                "step": step,
+            },
+        )
+        return parse_availability(data)
 
     async def _get_json(
         self,
@@ -275,7 +331,13 @@ class SensAppClient:
         data: bytes | str | None = None,
         json_body: Any = None,
         headers: dict[str, str] | None = None,
+        timeout: float | None = None,
+        retry: RetryPolicy | None = None,
     ) -> niquests.Response:
+        """POST with the write timeout and the retry policy of the client.
+
+        ``timeout`` and ``retry`` override them for one request.
+        """
         url = f"{self._base_url}{path}"
         merged_headers = {**self._auth_headers(), **(headers or {})}
         response = await send_with_retry(
@@ -284,6 +346,30 @@ class SensAppClient:
                 data=data,
                 json=json_body,
                 headers=merged_headers,
+                timeout=self._write_timeout if timeout is None else timeout,
+            ),
+            self._retry if retry is None else retry,
+        )
+        _check_response(response)
+        return response  # type: ignore[return-value]
+
+    async def _delete(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> niquests.Response:
+        url = f"{self._base_url}{path}"
+        clean_params = (
+            {key: value for key, value in params.items() if value is not None}
+            if params
+            else None
+        )
+        response = await send_with_retry(
+            lambda: self._session.delete(
+                url,
+                params=clean_params,
+                headers=self._auth_headers(),
                 timeout=self._write_timeout,
             ),
             self._retry,
