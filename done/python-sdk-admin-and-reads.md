@@ -43,6 +43,19 @@ of the server: the SDK could not.
   tokens or delete (403), a `delete` token runs the vacuum and deletes the series.
 - Not run here: CI's ClickHouse runtime job (the live tests there are backend-neutral).
 
+## Review fixes
+
+- Deletes are retried when the server is overloaded (`503`, `429`) or the connection fails, **not after a `504`
+  or a timeout**: the server may still be deleting (`send_with_retry(..., retry_unfinished=False)`).
+- `create_token` is never retried: a retry after a lost answer could make a second token that cannot be revoked.
+- A time string without a time zone (`"2026-03-16T12:00:00"`, `"2026-03-16"`) is refused like a naive datetime:
+  the server reads it as UTC. Non-ISO strings still go to the server.
+- `last_sample` returns a blob as `bytes`, like `TimeSeries`.
+- Docs: BigQuery and RRDCached answer the vacuum with `duplicates_removed: null`, not `501`
+  (`DATA_LIFECYCLE.md` said `501`).
+- Cleanups: `_clean_params` shared by GET and DELETE, `format_time(None)` is `None`, `_post(retry=False)`.
+- 108 mocked tests, ruff clean. Live tests left to CI.
+
 ## Not done
 
 - Listing and revoking tokens: no endpoint (`ideas/token-registry-and-revocation.md`).
