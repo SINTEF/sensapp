@@ -211,8 +211,9 @@ class LastSample:
     """The most recent sample of a series.
 
     ``value`` is what the server sent, except for a float (the server writes ``NaN``
-    and the infinities as text, here they are floats) and a numeric (a `Decimal`).
-    A location is ``{"longitude": ..., "latitude": ...}``.
+    and the infinities as text, here they are floats), a numeric (a `Decimal`) and a
+    blob (`bytes`), the types `TimeSeries` has. A location is
+    ``{"longitude": ..., "latitude": ...}``.
     """
 
     series_uuid: str
@@ -314,6 +315,9 @@ def _parse_optional_time(value: str | None) -> datetime | None:
 
 
 def _parse_sample_value(sensor_type: str, value: Any) -> Any:
+    if sensor_type == "blob" and isinstance(value, list):
+        # The server writes the bytes as a list of numbers, `TimeSeries` has `bytes`
+        return bytes(value)
     if isinstance(value, str):
         if sensor_type == "float":
             # "NaN", "+Inf" and "-Inf" are texts in the JSON of the server

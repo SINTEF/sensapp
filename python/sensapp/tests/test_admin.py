@@ -398,6 +398,7 @@ async def test_last_sample_sends_its_window() -> None:
         ("numeric", "12.345678901234567890", Decimal("12.345678901234567890")),
         ("string", "NaN", "NaN"),
         ("boolean", True, True),
+        ("blob", [104, 105], b"hi"),
         ("location", {"longitude": 10.4, "latitude": 63.4}, None),
     ],
 )
