@@ -31,13 +31,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: actions/checkout@v7.0.1
         with:
-          toolchain: stable
-          components: rustfmt
+          persist-credentials: false
+
+      # rustup is on the runner image: no action, so no unpinned branch in the lockfile
+      - name: Setup Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt --no-self-update && rustup default stable
 
       - name: Format check
         run: cargo fmt -- --check
@@ -64,15 +64,15 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
 
       - name: Install cargo-make and cargo-audit (prebuilt)
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.90.3
         with:
           tool: cargo-make,cargo-audit
 
@@ -88,13 +88,17 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        # The cache is off on tag and release runs; zizmor does not read the condition
+        uses: actions/setup-node@v7.1.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: '24'
-          cache: 'npm'
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') && 'npm' || '' }}
+          package-manager-cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
@@ -123,13 +127,16 @@ jobs:
       run:
         working-directory: python/sensapp
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.14'
-      - uses: astral-sh/setup-uv@v10.3.3
+      # The cache is off on tag and release runs; zizmor does not read the condition
+      - uses: astral-sh/setup-uv@v10.3.3 # zizmor: ignore[cache-poisoning]
         with:
-          enable-cache: true
+          enable-cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
       - name: Install SDK dependencies
         run: uv pip install --system -e '.[dev]'
       - name: Check, test, and package SDK
@@ -167,10 +174,12 @@ jobs:
           - feature: rrdcached
             test-env: "TEST_DATABASE_URL_RRDCACHED=rrdcached://127.0.0.1:42217?preset=hoarder"
 
-    # Only the database of the feature under test is started: an empty image skips a service
+    # Only the database of the feature under test is started: an empty image skips a service.
+    # Images are pinned by digest (the lockfile only covers actions): keep them in sync with the
+    # other jobs, and refresh with `docker buildx imagetools inspect IMAGE:TAG`.
     services:
       postgres:
-        image: ${{ matrix.feature == 'postgres' && 'postgres:18' || '' }}
+        image: ${{ matrix.feature == 'postgres' && 'postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42' || '' }}
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -183,7 +192,7 @@ jobs:
         ports:
           - 5432:5432
       clickhouse:
-        image: ${{ matrix.feature == 'clickhouse' && 'clickhouse/clickhouse-server:26.8' || '' }}
+        image: ${{ matrix.feature == 'clickhouse' && 'clickhouse/clickhouse-server:26.8@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7' || '' }}
         env:
           CLICKHOUSE_DB: sensapp_test
           CLICKHOUSE_USER: default
@@ -197,7 +206,7 @@ jobs:
           - 8123:8123
           - 9000:9000
       timescaledb:
-        image: ${{ matrix.feature == 'timescaledb' && 'timescale/timescaledb:2.31.0-pg18' || '' }}
+        image: ${{ matrix.feature == 'timescaledb' && 'timescale/timescaledb:2.31.0-pg18@sha256:0fcff5761363809d1242f2261a3482197b5a5337407f8b97a976fb174206d579' || '' }}
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -211,21 +220,22 @@ jobs:
           - 5433:5432
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-          components: clippy
+        run: rustup toolchain install stable --profile minimal --component clippy --no-self-update && rustup default stable
 
       # Caches dependencies only (workspace crates are pruned), keyed per
       # feature. Only main/develop save, PRs restore from main. Saving on
       # failure lets a retry start warm.
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           key: ${{ matrix.feature }}-v2
+          # Release and tag runs do not restore caches: they gate the published image
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
           cache-on-failure: true
 
@@ -238,18 +248,18 @@ jobs:
         run: cargo clean -p libduckdb-sys
 
       - name: Install cargo-make (prebuilt)
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.90.3
         with:
           tool: cargo-make
 
       - name: Set up Docker Buildx
         if: matrix.feature == 'rrdcached'
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v4.4.1
 
       # The image compiles rrdcached from source: the layers are cached
       - name: Build the RRDCached test image
         if: matrix.feature == 'rrdcached'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.4.0
         with:
           context: docker/rrdcached
           load: true
@@ -274,13 +284,15 @@ jobs:
           exit 1
 
       - name: Set up test environment
-        run: |
-          ${{ matrix.test-env }}
-          echo "${{ matrix.test-env }}" >> $GITHUB_ENV
+        env:
+          TEST_ENV: ${{ matrix.test-env }}
+        run: echo "$TEST_ENV" >> "$GITHUB_ENV"
 
       - name: Run tests
         if: matrix.feature != 'rrdcached'
-        run: cargo make check-${{ matrix.feature }}
+        env:
+          FEATURE: ${{ matrix.feature }}
+        run: cargo make "check-$FEATURE"
 
       - name: Run RRDCached checks
         if: matrix.feature == 'rrdcached'
@@ -299,7 +311,7 @@ jobs:
     needs: quality-checks
     services:
       postgres:
-        image: postgres:18
+        image: postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -312,12 +324,14 @@ jobs:
         ports:
           - 5432:5432
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@v7.0.1
         with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@v2
+          persist-credentials: false
+      - name: Setup Rust toolchain
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
           cache-on-failure: true
       - name: Run live Prometheus integration checks
@@ -333,10 +347,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@v5.1.0
 
       - name: Lint chart
         run: helm lint charts/sensapp
@@ -371,7 +387,7 @@ jobs:
 
     services:
       clickhouse:
-        image: clickhouse/clickhouse-server:26.8
+        image: clickhouse/clickhouse-server:26.8@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
         env:
           CLICKHOUSE_DB: sensapp_test
           CLICKHOUSE_USER: default
@@ -386,13 +402,15 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v4.4.1
 
       - name: Build image variant
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           push: false
@@ -431,15 +449,16 @@ jobs:
 
       - name: Set up Python for live SDK checks
         if: matrix.name == 'runtime'
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.14'
 
       - name: Install uv for live SDK checks
         if: matrix.name == 'runtime'
-        uses: astral-sh/setup-uv@v10.3.3
+        # The cache is off on tag and release runs; zizmor does not read the condition
+        uses: astral-sh/setup-uv@v10.3.3 # zizmor: ignore[cache-poisoning]
         with:
-          enable-cache: true
+          enable-cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
       - name: Test Python SDK against runtime image
         if: matrix.name == 'runtime'
@@ -452,10 +471,12 @@ jobs:
 
       - name: Verify readiness during ClickHouse outage and recovery
         if: matrix.name == 'runtime'
+        env:
+          CLICKHOUSE_CONTAINER: ${{ job.services.clickhouse.id }}
         run: |
-          docker stop '${{ job.services.clickhouse.id }}'
+          docker stop "$CLICKHOUSE_CONTAINER"
           python3 tests/clickhouse_container_smoke.py --mode unready
-          docker start '${{ job.services.clickhouse.id }}'
+          docker start "$CLICKHOUSE_CONTAINER"
           python3 tests/clickhouse_container_smoke.py --mode ready
 
       - name: Show runtime logs on failure
@@ -476,23 +497,23 @@ jobs:
     needs: quality-checks
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-          components: clippy
+        run: rustup toolchain install stable --profile minimal --component clippy --no-self-update && rustup default stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           key: bigquery-v1
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
           cache-on-failure: true
 
       - name: Install cargo-make (prebuilt)
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.90.3
         with:
           tool: cargo-make
 
@@ -516,11 +537,12 @@ jobs:
     if: >-
       !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') &&
       ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')) || github.event_name == 'release')
-    uses: docker/github-builder/.github/workflows/build.yml@v1
+    # Reusable workflows are not in actions.lock: pinned by commit here
+    uses: docker/github-builder/.github/workflows/build.yml@a31d2311da4d55e21b978c1c52bab82ba97d51ee # v1.19.0
     permissions:
-      contents: read
-      id-token: write
-      packages: write
+      contents: read # checkout
+      id-token: write # signed build provenance and attestations
+      packages: write # push the image to GHCR
     with:
       output: image
       push: true
@@ -554,15 +576,17 @@ jobs:
     needs: [helm-validation, prometheus-live]
     if: github.event_name != 'pull_request'
     permissions:
-      contents: read
-      packages: write
+      contents: read # checkout
+      packages: write # push the chart to GHCR on releases
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@v5.1.0
 
       - name: Package chart
         run: |
@@ -570,7 +594,7 @@ jobs:
           helm package charts/sensapp --destination dist
 
       - name: Upload chart artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v6.0.0
         with:
           name: sensapp-helm-chart
           path: dist/*.tgz
