@@ -191,6 +191,42 @@ async def test_deletes_retry_an_overloaded_server() -> None:
     assert session.delete.await_count == 2
 
 
+async def test_deletes_are_not_retried_after_a_504() -> None:
+    # The server may still be deleting: a second delete would compete with it
+    client, session = _client()
+    session.delete.return_value = MockResponse.error(504, "timeout")
+
+    with pytest.raises(SensAppHTTPError) as raised:
+        await client.admin.delete_series(SERIES_UUID)
+
+    assert raised.value.status_code == 504
+    assert session.delete.await_count == 1
+
+
+async def test_deletes_are_not_retried_after_a_timeout() -> None:
+    client, session = _client()
+    session.delete.side_effect = http_errors.ReadTimeout("slow")
+
+    with pytest.raises(http_errors.ReadTimeout):
+        await client.admin.delete_samples(
+            SERIES_UUID, start="2026-03-16T12:00:00Z", end="2026-03-16T13:00:00Z"
+        )
+
+    assert session.delete.await_count == 1
+
+
+async def test_deletes_retry_a_connection_that_could_not_open() -> None:
+    client, session = _client()
+    session.delete.side_effect = [
+        http_errors.ConnectTimeout("no route"),
+        MockResponse(status_code=204),
+    ]
+
+    await client.admin.delete_series(SERIES_UUID)
+
+    assert session.delete.await_count == 2
+
+
 async def test_deletes_follow_the_retry_policy_of_the_client() -> None:
     client = SensAppClient("http://sensapp.test", retry=RetryPolicy(max_attempts=1))
     session = AsyncMock()
@@ -267,6 +303,17 @@ async def test_created_token_is_not_in_its_repr() -> None:
 
     assert "secret" not in repr(created)
     assert "edge-device-7" in repr(created)
+
+
+async def test_create_token_is_not_retried() -> None:
+    # A retry after a lost answer would make a second token, valid until it expires
+    client, session = _client()
+    session.post.side_effect = http_errors.ConnectionError("reset")
+
+    with pytest.raises(http_errors.ConnectionError):
+        await client.admin.create_token("me", ["read"], duration_seconds=60)
+
+    assert session.post.await_count == 1
 
 
 @pytest.mark.parametrize("status", [403, 404])

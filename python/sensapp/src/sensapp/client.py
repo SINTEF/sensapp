@@ -332,11 +332,12 @@ class SensAppClient:
         json_body: Any = None,
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
-        retry: RetryPolicy | None = None,
+        retry: bool = True,
     ) -> niquests.Response:
         """POST with the write timeout and the retry policy of the client.
 
-        ``timeout`` and ``retry`` override them for one request.
+        ``timeout`` overrides the write timeout for one request. ``retry=False`` sends
+        it once, for a request that must not run twice.
         """
         url = f"{self._base_url}{path}"
         merged_headers = {**self._auth_headers(), **(headers or {})}
@@ -348,7 +349,7 @@ class SensAppClient:
                 headers=merged_headers,
                 timeout=self._write_timeout if timeout is None else timeout,
             ),
-            self._retry if retry is None else retry,
+            self._retry if retry else NO_RETRY,
         )
         _check_response(response)
         return response  # type: ignore[return-value]
@@ -359,6 +360,11 @@ class SensAppClient:
         *,
         params: dict[str, Any] | None = None,
     ) -> niquests.Response:
+        """DELETE with the retry policy of the client, except after a 504 or a timeout.
+
+        The server may still be deleting then, and a second delete would compete with
+        it for the same rows.
+        """
         url = f"{self._base_url}{path}"
         clean_params = (
             {key: value for key, value in params.items() if value is not None}
@@ -373,6 +379,7 @@ class SensAppClient:
                 timeout=self._write_timeout,
             ),
             self._retry,
+            retry_unfinished=False,
         )
         _check_response(response)
         return response  # type: ignore[return-value]

@@ -77,13 +77,29 @@ def retry_after_seconds(response: Any) -> float | None:
     return seconds if seconds >= 0 else None
 
 
-def is_retryable_status(response: Any) -> bool:
-    """Whether the answer means "not now, try again"."""
+def is_retryable_status(response: Any, *, retry_unfinished: bool = True) -> bool:
+    """Whether the answer means "not now, try again".
+
+    A ``504`` says the server gave up waiting, not that the work stopped: it is only
+    retried with ``retry_unfinished``.
+    """
+    if response.status_code == 504:
+        return retry_unfinished
     return response.status_code in _RETRYABLE_STATUSES
 
 
-def is_retryable_error(error: BaseException) -> bool:
-    """Whether the connection failed in a way that may not happen again."""
+def is_retryable_error(error: BaseException, *, retry_unfinished: bool = True) -> bool:
+    """Whether the connection failed in a way that may not happen again.
+
+    A timeout after the request was sent leaves the server working on it: it is only
+    retried with ``retry_unfinished``. A connection that could not be opened is.
+    """
+    if (
+        not retry_unfinished
+        and isinstance(error, http_errors.Timeout)
+        and not isinstance(error, http_errors.ConnectTimeout)
+    ):
+        return False
     return isinstance(error, _RETRYABLE_ERRORS) and not isinstance(
         error, _PERMANENT_ERRORS
     )
@@ -99,11 +115,16 @@ def _give_up(error: BaseException | None, response: Any) -> Any:
 async def send_with_retry(
     send: Callable[[], Awaitable[Any]],
     policy: RetryPolicy,
+    *,
+    retry_unfinished: bool = True,
 ) -> Any:
     """Call `send` until it succeeds, fails for good, or the policy gives up.
 
     Giving up returns the last response, so that the caller reports the server's own
     error, or raises the last exception of the connection.
+
+    ``retry_unfinished=False`` does not retry a ``504`` or a timeout: the server may
+    still be working on the request, and a second one would run beside it.
     """
     started = _monotonic()
     attempt = 0
@@ -114,11 +135,11 @@ async def send_with_retry(
         try:
             response = await send()
         except Exception as caught:
-            if not is_retryable_error(caught):
+            if not is_retryable_error(caught, retry_unfinished=retry_unfinished):
                 raise
             error = caught
         else:
-            if not is_retryable_status(response):
+            if not is_retryable_status(response, retry_unfinished=retry_unfinished):
                 return response
 
         if attempt >= policy.max_attempts:

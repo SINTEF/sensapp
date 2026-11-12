@@ -72,7 +72,7 @@ A request that took longer than `RetryPolicy.total_timeout` (60 s) is not retrie
 
 ## Retries
 
-When SensApp is overloaded or unreachable the client retries, within limits (`RetryPolicy`, three attempts by default). It retries the answers `503`, `429` and `504`, and the connection errors and timeouts (`ConnectionError`, connect and read timeouts, a connection cut while the response is read), for reads and writes:
+When SensApp is overloaded or unreachable the client retries, within limits (`RetryPolicy`, three attempts by default). It retries the answers `503`, `429` and `504`, and the connection errors and timeouts (`ConnectionError`, connect and read timeouts, a connection cut while the response is read), for reads and writes (the admin calls retry less, see [Admin operations](#admin-operations)):
 
 - It waits for the server's `Retry-After`, or backs off exponentially with full jitter when there is none (`random(0, min(30 s, 0.1 s * 2^n))`).
 - It drops the request after `max_attempts`, when the next wait would pass `total_timeout` (60 s), or when `Retry-After` is above `max_delay` (30 s). It then raises the last error: `SensAppHTTPError` for an answer of the server, the exception of `niquests` for a connection error or a timeout.
@@ -126,7 +126,8 @@ async with SensAppClient(token=os.environ["SENSAPP_ADMIN_TOKEN"]) as client:
 ```
 
 - **The vacuum is never retried**, whatever the retry policy: after a `504` or a lost connection the server carries on, and two vacuums running together compete for the same rows. Its timeout is `timeout=3630` seconds by default, a little above the server's maintenance timeout (one hour, `SENSAPP_HTTP_MAINTENANCE_TIMEOUT_SECONDS`, see [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md#duplicate-samples)). Pass another `timeout` if you changed the server's. `examples/maintenance.py` is a job for a scheduler.
-- The deletes follow the retry policy, since retrying a `503` is what you want. If a lost answer hid a delete that had worked, the retry of `delete_samples` reports `0` deleted samples and the retry of `delete_series` raises a `404`.
+- The deletes are retried when the server is overloaded (`503`, `429`) or the connection fails, within the retry policy, but **not after a `504` or a timeout**: the server may still be deleting, and a second delete would compete with it for the same rows. If a lost answer hid a delete that had worked, the retry of `delete_samples` reports `0` deleted samples and the retry of `delete_series` raises a `404`.
+- **`create_token` is never retried**: after a lost answer the server may have made the token, and a retry would make a second one. Neither can be revoked.
 - Backends that cannot delete (RRDCached) answer `501`, and BigQuery and RRDCached cannot remove duplicates (`duplicates_removed` is `None`, or `501` for deletes). See [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md#backend-support).
 - `create_token` never makes an `admin` token (`403`, those come from `sensapp generate-token`) and answers `404` when authentication is disabled. The server keeps no list of tokens: there is nothing to list or revoke, see [JWT_AUTH.md](JWT_AUTH.md).
 - Errors are `SensAppHTTPError` like everywhere else: `403` for a missing scope, `404` for an unknown series.
