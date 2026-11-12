@@ -192,9 +192,9 @@ async def test_live_vacuum_removes_a_duplicated_sample(live_server_url: str) -> 
         count = await _count(client, name)
 
     assert result.status == "ok"
-    # An int, or None on a backend that cannot remove duplicates (not the case of the
-    # SQL backends and ClickHouse that run in CI)
-    assert result.duplicates_removed is None or result.duplicates_removed >= 0
+    # The backends of CI remove duplicates. ClickHouse only estimates how many when
+    # something else writes during the vacuum, so the count of samples is the check.
+    assert isinstance(result.duplicates_removed, int)
     assert count == 1
 
 
