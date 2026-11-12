@@ -228,8 +228,8 @@ class SensAppClient:
         """Fetch one series by UUID and decode it into a compact TimeSeries."""
         params: dict[str, Any] = {
             "format": "arrow",
-            "start": None if start is None else format_time(start),
-            "end": None if end is None else format_time(end),
+            "start": format_time(start),
+            "end": format_time(end),
             "limit": limit,
             "step": step,
             "aggregation": aggregation,
@@ -255,10 +255,7 @@ class SensAppClient:
         """
         data = await self._get_json(
             f"/series/{series_uuid}/last",
-            params={
-                "start": None if start is None else format_time(start),
-                "end": None if end is None else format_time(end),
-            },
+            params={"start": format_time(start), "end": format_time(end)},
         )
         return parse_last_sample(data)
 
@@ -303,16 +300,7 @@ class SensAppClient:
         params: dict[str, Any] | None = None,
     ) -> niquests.Response:
         url = f"{self._base_url}{path}"
-        # The server only accepts lowercase `true` / `false`, not Python's `True`.
-        clean_params = (
-            {
-                key: str(value).lower() if isinstance(value, bool) else value
-                for key, value in params.items()
-                if value is not None
-            }
-            if params
-            else None
-        )
+        clean_params = _clean_params(params)
         response = await send_with_retry(
             lambda: self._session.get(
                 url,
@@ -366,11 +354,7 @@ class SensAppClient:
         it for the same rows.
         """
         url = f"{self._base_url}{path}"
-        clean_params = (
-            {key: value for key, value in params.items() if value is not None}
-            if params
-            else None
-        )
+        clean_params = _clean_params(params)
         response = await send_with_retry(
             lambda: self._session.delete(
                 url,
@@ -393,6 +377,20 @@ class SensAppClient:
     def base_url(self) -> str:
         """Return the normalized SensApp base URL for this client."""
         return self._base_url
+
+
+def _clean_params(params: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Leave out the parameters that are not set, and write booleans in lowercase.
+
+    The server only accepts ``true`` / ``false``, not Python's ``True``.
+    """
+    if not params:
+        return None
+    return {
+        key: str(value).lower() if isinstance(value, bool) else value
+        for key, value in params.items()
+        if value is not None
+    }
 
 
 def _check_response(resp: niquests.Response) -> None:

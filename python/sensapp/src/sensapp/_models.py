@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, overload
 from urllib.parse import parse_qs, urlparse
 
 import polars as pl
@@ -277,14 +277,22 @@ class CreatedToken:
     sensors: list[str] | None = None
 
 
-def format_time(value: datetime | str) -> str:
+@overload
+def format_time(value: datetime | str) -> str: ...
+@overload
+def format_time(value: None) -> None: ...
+def format_time(value: datetime | str | None) -> str | None:
     """The text the server expects for a time bound: ISO 8601 with its offset.
+
+    ``None`` stays ``None``, a bound left out.
 
     A time without a time zone is refused, a naive `datetime` or an ISO 8601 string
     without an offset (``"2026-03-16T12:00:00"``, ``"2026-03-16"``): the server would
     read it as UTC, and guessing would delete or read the wrong window. Other strings
     go to the server as they are.
     """
+    if value is None:
+        return None
     if isinstance(value, str):
         try:
             parsed = datetime.fromisoformat(value)
